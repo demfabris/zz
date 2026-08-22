@@ -296,6 +296,7 @@ impl Renderer {
                 },
                 " command output ",
                 true,
+                None,
                 model,
             );
             self.paint_terminal(*pane, viewport, rect, force, None);
@@ -348,11 +349,17 @@ impl Renderer {
     fn paint_workspace(&mut self, model: &Model, force: bool) {
         if force {
             for divider in &model.layout.dividers {
-                let color = if divider.highlighted {
+                let fallback = if divider.highlighted {
                     model.appearance.link_color
                 } else {
                     model.appearance.foreground
                 };
+                let color = divider
+                    .style_pane
+                    .and_then(|pane| model.pane_border_colour(pane, divider.highlighted))
+                    .map_or(fallback, |colour| {
+                        resolve_tmux_colour(colour, fallback, &model.appearance)
+                    });
                 match divider.axis {
                     Axis::Horizontal => {
                         for row in
@@ -392,7 +399,13 @@ impl Renderer {
             let header = pane_header(model, entry.pane, &pane.title);
             let header_changed = self.headers.get(&entry.pane) != Some(&header);
             if force || header_changed {
-                self.paint_header_segment(entry.rect, &header, active, model);
+                self.paint_header_segment(
+                    entry.rect,
+                    &header,
+                    active,
+                    model.pane_border_colour(entry.pane, active),
+                    model,
+                );
                 self.headers.insert(entry.pane, header);
             }
             let content = entry.rect.content();
@@ -453,16 +466,39 @@ impl Renderer {
         if let Some(display) = &model.display_panes {
             for indicator in &display.indicators {
                 if let Some(entry) = model.pane_rect(indicator.pane) {
-                    let label = indicator
+                    let key = indicator
                         .selection_key()
                         .map_or_else(|| indicator.index.to_string(), |key| key.to_string());
                     write_colored_text(
                         &mut self.output,
                         entry.rect.x.saturating_add(1),
                         entry.rect.y,
-                        &format!(" {label} "),
+                        &format!(" {key} "),
                         model.appearance.background,
                         model.appearance.link_color,
+                    );
+                    if indicator.label.is_empty() {
+                        continue;
+                    }
+                    let start = entry.rect.x.saturating_add(4);
+                    let width = entry
+                        .rect
+                        .x
+                        .saturating_add(entry.rect.width)
+                        .saturating_sub(start);
+                    if width == 0 {
+                        continue;
+                    }
+                    let composed = zz_client::compose_status_row(&indicator.label, width, "");
+                    let line = StyledLine::from_segments(composed.segments);
+                    write_styled_text(
+                        &mut self.output,
+                        start,
+                        entry.rect.y,
+                        &line,
+                        model.appearance.foreground,
+                        model.appearance.background,
+                        &model.appearance,
                     );
                 }
             }
@@ -639,15 +675,25 @@ impl Renderer {
         self.output.extend_from_slice(b"\x1b[0m");
     }
 
-    fn paint_header_segment(&mut self, rect: Rect, title: &str, active: bool, model: &Model) {
+    fn paint_header_segment(
+        &mut self,
+        rect: Rect,
+        title: &str,
+        active: bool,
+        border: Option<TmuxColour>,
+        model: &Model,
+    ) {
         if rect.height == 0 || rect.width == 0 {
             return;
         }
-        let color = if active {
+        let fallback = if active {
             model.appearance.link_color
         } else {
             model.appearance.foreground
         };
+        let color = border.map_or(fallback, |colour| {
+            resolve_tmux_colour(colour, fallback, &model.appearance)
+        });
         let line = padded_segment(title, rect.width, '─');
         write_colored_text(
             &mut self.output,

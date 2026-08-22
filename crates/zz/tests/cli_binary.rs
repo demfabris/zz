@@ -678,7 +678,8 @@ mod daemon_autostart {
             ["set", "-t", "styled", "status-right", "#[bg=blue]RIGHT"].as_slice(),
             [
                 "setw",
-                "-g",
+                "-t",
+                "styled:0",
                 "window-status-current-format",
                 "#[underscore]CUSTOM",
             ]

@@ -392,6 +392,7 @@ fn pane_split_fixture(gaps: bool, cx: &App) -> gpui::Div {
             gaps,
             px(margin),
             None,
+            None,
             first,
             second,
             pane_split_hit_target(hit_id, PaneSplitAxis::Horizontal, 0.5, px(margin)),

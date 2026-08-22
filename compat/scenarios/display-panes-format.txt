@@ -1,0 +1,12 @@
+# display-panes-format stores at session scope, serves the pin default, and
+# resolves as an option-name format without re-expansion.
+out: show-options -gv display-panes-format
+fmt: #{display-panes-format}
+set-option -g display-panes-format '#[align=left]#{pane_index}'
+out: show-options -gv display-panes-format
+fmt: #{display-panes-format}
+set-option -t w display-panes-format '#{pane_title}'
+out: show-options -v -t w display-panes-format
+fmt: #{display-panes-format}
+set-option -u -t w display-panes-format
+fmt: #{display-panes-format}

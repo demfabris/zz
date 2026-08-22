@@ -435,6 +435,7 @@ pub fn pane_split_surface(
     resizing: bool,
     gaps: bool,
     gap: Pixels,
+    hairline: Option<Hsla>,
     highlight: Option<PaneSplitHighlight>,
     first_content: impl IntoElement,
     second_content: impl IntoElement,
@@ -469,7 +470,7 @@ pub fn pane_split_surface(
                 .bg(if resizing {
                     cx.theme().foreground.wash()
                 } else {
-                    cx.theme().border
+                    hairline.unwrap_or_else(|| cx.theme().border)
                 })
                 .when(axis == PaneSplitAxis::Horizontal, |line| {
                     line.left(relative(0.5))

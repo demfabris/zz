@@ -20,11 +20,11 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
-    CellLayout, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision,
-    KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, TmuxColour, TmuxSort,
-    TmuxSortOrder, WindowSize, canonical_command, command_block_body, display_width,
-    expand_format_values, expand_status, format_true, hook_format_variables, if_shell_truthy,
-    parse_tmux_colour,
+    CellLayout, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution,
+    ExecutionContext, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
+    PaneRuntimeFacts, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
+    canonical_command, command_block_body, display_width, expand_format_values, expand_status,
+    format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -34,20 +34,20 @@ use zz_protocol::{
     CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
     CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, DisplayPanesAction,
     DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES,
-    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
-    MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
-    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
-    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupState,
-    ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
-    SessionViewer, SplitId, StatusLine, WindowId, encode_protocol_message_into,
-    encode_terminal_viewport_event_into, read_protocol_message_into,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
+    MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource,
+    MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
+    PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
+    PopupBorderLines, PopupState, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SplitId, StatusLine, WindowId,
+    encode_protocol_message_into, encode_terminal_viewport_event_into, read_protocol_message_into,
 };
 use zz_terminal::{
-    AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance, CaptureBoundary,
-    CaptureOptions, ClipboardTarget, Color, CursorBlinkPolicy, CursorStyle, LastCommandCapture,
-    PasteBufferAction, RawOutputTapError, TerminalAppearance, TerminalCaptureError,
-    TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalMode, TerminalSession,
-    TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
+    AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
+    CaptureBoundary, CaptureOptions, ClipboardTarget, Color, CursorBlinkPolicy, CursorStyle,
+    LastCommandCapture, PasteBufferAction, RawOutputTapError, TerminalAppearance,
+    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalMode,
+    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
     apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
 };
 
@@ -546,28 +546,75 @@ fn terminal_worker_options(
     pane: PaneId,
 ) -> Result<ResolvedTerminalWorkerOptions, ServerError> {
     let options = engine.terminal_worker_options_for_pane(pane)?;
+    let window_colours = window_style_colours(engine, &options, pane);
     Ok(ResolvedTerminalWorkerOptions {
         appearance: pane_terminal_appearance(
             base_appearance,
             options.cursor_style,
             &options.cursor_colour,
+            window_colours,
         ),
         allow_passthrough: options.allow_passthrough,
         wrap_search: options.wrap_search,
     })
 }
 
+fn window_style_colours(
+    engine: &MuxEngine,
+    options: &zz_mux::TerminalWorkerOptions,
+    pane: PaneId,
+) -> (Option<TmuxColour>, Option<TmuxColour>) {
+    if options.window_style.is_none() && options.window_active_style.is_none() {
+        return (None, None);
+    }
+    let window = engine.state.window_for_pane(pane);
+    let session = window
+        .and_then(|window| engine.state.windows.get(&window))
+        .map(|window| window.session);
+    let resolve = |value: &Option<String>| {
+        value.as_deref().and_then(|value| {
+            let expanded = expanded_style_value(engine, value, session, window, Some(pane));
+            zz_protocol::parse_style(&expanded)
+        })
+    };
+    let base = resolve(&options.window_style);
+    let active = if options.active_pane {
+        resolve(&options.window_active_style)
+    } else {
+        None
+    };
+    let fg = active
+        .as_ref()
+        .and_then(|style| style.fg)
+        .or_else(|| base.as_ref().and_then(|style| style.fg));
+    let bg = active
+        .and_then(|style| style.bg)
+        .or_else(|| base.and_then(|style| style.bg));
+    (fg, bg)
+}
+
 fn pane_terminal_appearance(
     base: &Arc<TerminalAppearance>,
     cursor_style: &str,
     cursor_colour: &str,
+    window_colours: (Option<TmuxColour>, Option<TmuxColour>),
 ) -> Arc<TerminalAppearance> {
     let cursor_style = CURSOR_STYLE_OVERRIDES
         .iter()
         .find_map(|(candidate, mapped)| (*candidate == cursor_style).then_some(*mapped))
         .flatten();
     let resolved_color = pane_cursor_color(base, cursor_colour);
-    if cursor_style.is_none() && resolved_color.is_none() {
+    let foreground = window_colours
+        .0
+        .and_then(|colour| appearance_tmux_colour(base, colour));
+    let background = window_colours
+        .1
+        .and_then(|colour| appearance_tmux_colour(base, colour));
+    if cursor_style.is_none()
+        && resolved_color.is_none()
+        && foreground.is_none()
+        && background.is_none()
+    {
         return Arc::clone(base);
     }
     let mut appearance = (**base).clone();
@@ -578,6 +625,12 @@ fn pane_terminal_appearance(
     if let Some(color) = resolved_color {
         appearance.cursor_color = color;
     }
+    if let Some(color) = foreground {
+        appearance.foreground = color;
+    }
+    if let Some(color) = background {
+        appearance.background = color;
+    }
     Arc::new(appearance)
 }
 
@@ -587,7 +640,10 @@ fn pane_cursor_color(appearance: &TerminalAppearance, value: &str) -> Option<Col
     {
         return Some(color);
     }
-    let colour = parse_tmux_colour(value)?;
+    appearance_tmux_colour(appearance, parse_tmux_colour(value)?)
+}
+
+fn appearance_tmux_colour(appearance: &TerminalAppearance, colour: TmuxColour) -> Option<Color> {
     match colour {
         TmuxColour::Basic(index) | TmuxColour::Indexed(index) => appearance
             .palette
@@ -605,6 +661,70 @@ fn pane_cursor_color(appearance: &TerminalAppearance, value: &str) -> Option<Col
             .copied(),
         TmuxColour::Default | TmuxColour::Terminal => None,
     }
+}
+
+struct InertFormatHooks;
+
+impl StatusHooks for InertFormatHooks {
+    fn strftime(&mut self, literal: &str) -> String {
+        literal.to_owned()
+    }
+
+    fn shell(&mut self, _command: &str) -> String {
+        String::new()
+    }
+}
+
+fn expanded_style_value(
+    engine: &MuxEngine,
+    value: &str,
+    session: Option<SessionId>,
+    window: Option<WindowId>,
+    pane: Option<PaneId>,
+) -> String {
+    if !value.contains("#{") {
+        return value.to_owned();
+    }
+    let context = engine.format_status_context(session, window, pane);
+    let mut hooks = InertFormatHooks;
+    expand_format_values(value, &context, &mut hooks)
+}
+
+fn published_appearance(inner: &ServerState) -> Arc<TerminalAppearance> {
+    let styles = inner.engine.copy_mode_style_values();
+    if styles == CopyModeStyleValues::default() {
+        return Arc::clone(&inner.appearance);
+    }
+    let base = Arc::clone(&inner.appearance);
+    let mut appearance = (*base).clone();
+    let resolve = |value: &str| {
+        let expanded = expanded_style_value(&inner.engine, value, None, None, None);
+        zz_protocol::parse_style(&expanded).map(|style| {
+            (
+                style.fg.and_then(|fg| appearance_tmux_colour(&base, fg)),
+                style.bg.and_then(|bg| appearance_tmux_colour(&base, bg)),
+            )
+        })
+    };
+    if let Some((fg, bg)) = styles.mode.as_deref().and_then(resolve) {
+        if let Some(color) = fg {
+            appearance.selection_foreground = color;
+        }
+        if let Some(color) = bg {
+            appearance.selection_background = AppearanceColor::rgba(color.r, color.g, color.b, 255);
+        }
+    }
+    if let Some((fg, bg)) = styles.search_match.as_deref().and_then(resolve)
+        && let Some(color) = bg.or(fg)
+    {
+        appearance.search_match_color = AppearanceColor::rgba(color.r, color.g, color.b, 255);
+    }
+    if let Some((fg, bg)) = styles.search_current_match.as_deref().and_then(resolve)
+        && let Some(color) = bg.or(fg)
+    {
+        appearance.search_current_color = AppearanceColor::rgba(color.r, color.g, color.b, 255);
+    }
+    Arc::new(appearance)
 }
 
 fn terminal_appearance_updates(
@@ -3450,7 +3570,7 @@ impl Shared {
             client_id: client,
             client_instance_id,
             capabilities,
-            appearance: (*inner.appearance).clone(),
+            appearance: (*published_appearance(&inner)).clone(),
             appearance_provenance: inner.appearance_provenance.clone(),
             mux_options: hello_mux_options,
             status: StatusLine::default(),
@@ -4093,6 +4213,7 @@ impl Shared {
         let mut agent_options_changed = false;
         let mut status_formats_changed = false;
         let mut status_refresh_sessions = BTreeSet::new();
+        let mut mode_styles_changed = false;
         let mut shutdown_requested = false;
         let mut immediate_hooks = Vec::new();
         let mut pending_hook_events = Vec::new();
@@ -4143,10 +4264,12 @@ impl Shared {
                 }
             }
             let facts = format_hook_facts(&inner);
+            let status_options = inner.engine.status_row_variables_for_session(None);
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 (!format_variables.is_empty()).then_some(&format_variables),
-            );
+            )
+            .with_status_options(&status_options);
             inner.engine.set_format_now(unix_timestamp());
             if command_name == "attach-session"
                 && let Some(refusal) = nested_attach_refusal(&inner, client)
@@ -4938,8 +5061,13 @@ impl Shared {
                             )
                             .into());
                         }
-                        let (source_session, source_window, state) =
-                            build_display_panes_state(&inner.engine, *pane, *duration_ms)?;
+                        let display_panes_facts = format_hook_facts(&inner);
+                        let (source_session, source_window, state) = build_display_panes_state(
+                            &inner.engine,
+                            &display_panes_facts,
+                            *pane,
+                            *duration_ms,
+                        )?;
                         if client_attached_session(&inner, client) != Some(source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -5170,6 +5298,7 @@ impl Shared {
                     MuxEffect::ReloadConfig => reload_config = true,
                     MuxEffect::KillServer => shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
+                    MuxEffect::ModeStylesChanged => mode_styles_changed = true,
                 }
             }
             if let Some((pane, format, active_session)) = pane_format_output {
@@ -5200,10 +5329,14 @@ impl Shared {
                 let target = ExecutionContext::for_pane(&inner.engine.state, pane)
                     .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
                 let facts = format_hook_facts(&inner);
+                let status_options = inner
+                    .engine
+                    .status_row_variables_for_session(active_session);
                 let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                     &facts,
                     (!format_variables.is_empty()).then_some(&format_variables),
-                );
+                )
+                .with_status_options(&status_options);
                 let mut output =
                     inner
                         .engine
@@ -5423,6 +5556,9 @@ impl Shared {
             self.publish_effective_mux_options(None);
         } else if !mux_option_refresh_sessions.is_empty() {
             self.publish_effective_mux_options(Some(&mux_option_refresh_sessions));
+        }
+        if mode_styles_changed {
+            self.refresh_published_appearance();
         }
         if snapshot_changed {
             self.publish_snapshot();
@@ -12769,12 +12905,12 @@ impl Shared {
 
     fn publish_snapshot(&self) {
         self.detach_removed_sessions();
-        let snapshots = {
+        let (snapshots, appearance_updates) = {
             let mut inner = self.inner.lock();
             let snapshot = inner.engine.state.snapshot();
             inner.last_published_mux_generation = snapshot.generation;
             let presence = snapshot_presence(&inner);
-            inner
+            let snapshots = inner
                 .subscribers
                 .iter()
                 .map(|(client, subscriber)| {
@@ -12782,8 +12918,17 @@ impl Shared {
                     stamp_snapshot_for_client(&inner, *client, &mut client_snapshot, &presence);
                     (*client, Arc::clone(subscriber), client_snapshot)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let appearance_updates = if inner.engine.has_window_style_settings() {
+                terminal_appearance_updates(&inner)
+            } else {
+                Vec::new()
+            };
+            (snapshots, appearance_updates)
         };
+        for (terminal, appearance) in appearance_updates {
+            terminal.set_appearance(appearance);
+        }
         for (_, subscriber, snapshot) in snapshots {
             Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
         }
@@ -12884,6 +13029,7 @@ impl Shared {
             let mut inner = self.inner.lock();
             let clients = inner.display_panes.keys().copied().collect::<Vec<_>>();
             let mut updates = Vec::with_capacity(clients.len());
+            let facts = (!clients.is_empty()).then(|| format_hook_facts(&inner));
             for client in clients {
                 let Some(mut overlay) = inner.display_panes.remove(&client) else {
                     continue;
@@ -12892,6 +13038,7 @@ impl Shared {
                 let active_window = client_focused_window_for_attachment(&inner, client);
                 let rebuilt = build_display_panes_state(
                     &inner.engine,
+                    facts.as_ref().expect("facts exist while clients do"),
                     overlay.source_pane,
                     overlay.state.duration_ms,
                 );
@@ -13082,6 +13229,30 @@ impl Shared {
             options
         };
         self.publish_to_client(client, EventPayload::MuxOptionsChanged { options });
+    }
+
+    fn refresh_published_appearance(&self) {
+        let update = {
+            let mut inner = self.inner.lock();
+            let merged = published_appearance(&inner);
+            let previous = inner
+                .published_style_appearance
+                .clone()
+                .unwrap_or_else(|| Arc::clone(&inner.appearance));
+            if *previous == *merged {
+                inner.published_style_appearance = Some(merged);
+                None
+            } else {
+                inner.published_style_appearance = Some(Arc::clone(&merged));
+                Some((merged, inner.appearance_provenance.clone()))
+            }
+        };
+        if let Some((appearance, provenance)) = update {
+            self.publish(EventPayload::AppearanceChanged {
+                appearance: Box::new((*appearance).clone()),
+                provenance,
+            });
+        }
     }
 
     fn next_gui_request_id() -> u64 {
@@ -13761,7 +13932,7 @@ impl Shared {
         {
             let appearance = Arc::new(load.appearance);
             let provenance = load.provenance;
-            let (terminals, changed) = {
+            let (terminals, changed, published) = {
                 let mut inner = self.inner.lock();
                 if inner.appearance_config_overrides != appearance_entries {
                     return;
@@ -13776,7 +13947,9 @@ impl Shared {
                 } else {
                     Vec::new()
                 };
-                (terminals, changed)
+                let published = published_appearance(&inner);
+                inner.published_style_appearance = Some(Arc::clone(&published));
+                (terminals, changed, published)
             };
             log::info!(
                 target: "zz_daemon::diagnostics::appearance",
@@ -13788,7 +13961,7 @@ impl Shared {
                     terminal.set_appearance(pane_appearance);
                 }
                 self.publish(EventPayload::AppearanceChanged {
-                    appearance: Box::new((*appearance).clone()),
+                    appearance: Box::new((*published).clone()),
                     provenance,
                 });
             }
@@ -13909,7 +14082,7 @@ impl Shared {
         log_appearance_load("system-color-scheme", &load);
         let appearance = Arc::new(load.appearance);
         let provenance = load.provenance;
-        let terminals = {
+        let (terminals, published) = {
             let mut inner = self.inner.lock();
             if inner.active_color_scheme != color_scheme
                 || !inner.subscribers.contains_key(&client)
@@ -13919,13 +14092,15 @@ impl Shared {
             }
             inner.appearance = Arc::clone(&appearance);
             inner.appearance_provenance.clone_from(&provenance);
-            terminal_appearance_updates(&inner)
+            let published = published_appearance(&inner);
+            inner.published_style_appearance = Some(Arc::clone(&published));
+            (terminal_appearance_updates(&inner), published)
         };
         for (terminal, pane_appearance) in terminals {
             terminal.set_appearance(pane_appearance);
         }
         self.publish(EventPayload::AppearanceChanged {
-            appearance: Box::new((*appearance).clone()),
+            appearance: Box::new((*published).clone()),
             provenance,
         });
     }
@@ -13983,7 +14158,7 @@ impl Shared {
 
         let appearance = Arc::new(load.appearance);
         let provenance = load.provenance;
-        let terminals = {
+        let (terminals, published) = {
             let mut inner = self.inner.lock();
             if inner.appearance_config_overrides != appearance_config_overrides {
                 return Ok(());
@@ -13991,13 +14166,15 @@ impl Shared {
             inner.active_color_scheme = color_scheme;
             inner.appearance = Arc::clone(&appearance);
             inner.appearance_provenance.clone_from(&provenance);
-            terminal_appearance_updates(&inner)
+            let published = published_appearance(&inner);
+            inner.published_style_appearance = Some(Arc::clone(&published));
+            (terminal_appearance_updates(&inner), published)
         };
         for (terminal, pane_appearance) in terminals {
             terminal.set_appearance(pane_appearance);
         }
         self.publish(EventPayload::AppearanceChanged {
-            appearance: Box::new((*appearance).clone()),
+            appearance: Box::new((*published).clone()),
             provenance,
         });
         let (kind, text) = match report.summary() {
@@ -14948,6 +15125,7 @@ struct ServerState {
     engine: MuxEngine,
     last_published_mux_generation: u64,
     appearance: Arc<TerminalAppearance>,
+    published_style_appearance: Option<Arc<TerminalAppearance>>,
     appearance_provenance: AppearanceProvenance,
     appearance_config_overrides: Vec<ConfigOverrideEntry>,
     mux_config_overrides: Vec<ConfigOverrideEntry>,
@@ -15224,6 +15402,7 @@ fn take_display_panes(inner: &mut ServerState, client: ClientId) -> Option<Displ
 
 fn build_display_panes_state(
     engine: &MuxEngine,
+    facts: &FormatHookFacts,
     source_pane: PaneId,
     duration_ms: u32,
 ) -> Result<(SessionId, WindowId, DisplayPanesState), ServerError> {
@@ -15241,6 +15420,7 @@ fn build_display_panes_state(
             "window {window_id} exceeds the pane indicator limit"
         )));
     }
+    let format = engine.display_panes_format_for_session(Some(window.session));
     let indicators = panes
         .into_iter()
         .filter(|pane| window.zoomed_pane.is_none_or(|zoomed| *pane == zoomed))
@@ -15253,6 +15433,14 @@ fn build_display_panes_state(
                 10..=35 => b'a' + u8::try_from(index - 10).expect("letter pane index"),
                 _ => 0,
             };
+            let label = if format.is_empty() {
+                String::new()
+            } else {
+                let context =
+                    engine.format_status_context(Some(window.session), Some(window_id), Some(pane));
+                let mut hooks = DaemonFormatHooks::command(facts);
+                truncate_pane_indicator_label(expand_format_values(&format, &context, &mut hooks))
+            };
             PaneIndicator {
                 pane,
                 index,
@@ -15262,7 +15450,7 @@ fn build_display_panes_state(
                 } else {
                     0
                 },
-                label: String::new(),
+                label,
             }
         })
         .collect();
@@ -17569,6 +17757,38 @@ fn stamp_snapshot_for_client(
     }
     let facts = format_hook_facts(inner);
     expand_window_status_labels(&inner.engine, &facts, snapshot);
+    stamp_pane_border_colours(&inner.engine, &facts, snapshot);
+}
+
+fn stamp_pane_border_colours(
+    engine: &MuxEngine,
+    facts: &FormatHookFacts,
+    snapshot: &mut MuxSnapshot,
+) {
+    if !engine.has_pane_border_style_settings() {
+        return;
+    }
+    let resolve = |value: Option<String>, session, window, pane| {
+        let value = value?;
+        let context = engine.format_status_context(Some(session), Some(window), Some(pane));
+        let mut hooks = DaemonFormatHooks::command(facts);
+        let expanded = if value.contains("#{") {
+            expand_format_values(&value, &context, &mut hooks)
+        } else {
+            value
+        };
+        zz_protocol::parse_style(&expanded)?.fg
+    };
+    for session in &mut snapshot.sessions {
+        for window in &mut session.windows {
+            for (pane, pane_snapshot) in &mut window.panes {
+                let styles = engine.pane_border_style_values(*pane);
+                pane_snapshot.border_colour = resolve(styles.border, session.id, window.id, *pane);
+                pane_snapshot.active_border_colour =
+                    resolve(styles.active_border, session.id, window.id, *pane);
+            }
+        }
+    }
 }
 
 fn expand_window_status_labels(
@@ -17647,6 +17867,18 @@ fn truncate_window_status_label(mut label: String) -> String {
         return label;
     }
     let boundary = (0..=MAX_WINDOW_STATUS_LABEL_BYTES)
+        .rev()
+        .find(|index| label.is_char_boundary(*index))
+        .unwrap_or_default();
+    label.truncate(boundary);
+    label
+}
+
+fn truncate_pane_indicator_label(mut label: String) -> String {
+    if label.len() <= MAX_PANE_INDICATOR_LABEL_BYTES {
+        return label;
+    }
+    let boundary = (0..=MAX_PANE_INDICATOR_LABEL_BYTES)
         .rev()
         .find(|index| label.is_char_boundary(*index))
         .unwrap_or_default();
@@ -22993,7 +23225,7 @@ mod tests {
     fn pane_cursor_options_clone_only_for_concrete_overrides() {
         let base = Arc::new(TerminalAppearance::default());
         assert!(Arc::ptr_eq(
-            &pane_terminal_appearance(&base, "default", ""),
+            &pane_terminal_appearance(&base, "default", "", (None, None)),
             &base
         ));
 
@@ -23009,15 +23241,374 @@ mod tests {
             ("blinking-bar", CursorStyle::Bar, CursorBlinkPolicy::On),
             ("bar", CursorStyle::Bar, CursorBlinkPolicy::Off),
         ] {
-            let appearance = pane_terminal_appearance(&base, cursor_style, "");
+            let appearance = pane_terminal_appearance(&base, cursor_style, "", (None, None));
             assert_eq!(appearance.cursor_style, expected_style);
             assert_eq!(appearance.cursor_blink_policy, expected_blink);
         }
 
-        let indexed = pane_terminal_appearance(&base, "default", "colour42");
+        let indexed = pane_terminal_appearance(&base, "default", "colour42", (None, None));
         assert_eq!(indexed.cursor_color, base.palette.as_array()[42]);
-        let x11 = pane_terminal_appearance(&base, "default", "sky blue");
+        let x11 = pane_terminal_appearance(&base, "default", "sky blue", (None, None));
         assert_eq!(x11.cursor_color, Color::rgb(135, 206, 235));
+
+        let tinted = pane_terminal_appearance(
+            &base,
+            "default",
+            "",
+            (
+                Some(TmuxColour::Rgb(0x0000_ff00)),
+                Some(TmuxColour::Indexed(17)),
+            ),
+        );
+        assert_eq!(tinted.foreground, Color::rgb(0, 255, 0));
+        assert_eq!(tinted.background, base.palette.as_array()[17]);
+        assert_eq!(tinted.cursor_style, base.cursor_style);
+        let defaulted = pane_terminal_appearance(
+            &base,
+            "default",
+            "",
+            (Some(TmuxColour::Default), Some(TmuxColour::Terminal)),
+        );
+        assert!(Arc::ptr_eq(&defaulted, &base));
+    }
+
+    #[test]
+    fn window_styles_tint_the_pane_appearance_through_worker_options() {
+        let shared = Shared::new(1);
+        let mut context = ExecutionContext::default();
+        let mut inner = shared.inner.lock();
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "tint", "-n", "main"]),
+            )
+            .expect("create session");
+        let window = context.window.expect("window id");
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d"]),
+            )
+            .expect("split window");
+        let order = inner.engine.state.windows[&window].pane_order().to_vec();
+        let (active, inactive) = (order[0], order[1]);
+
+        let untouched = terminal_worker_options(&inner.engine, &inner.appearance, active)
+            .expect("worker options");
+        assert!(Arc::ptr_eq(&untouched.appearance, &inner.appearance));
+
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "window-style", "bg=#101010"]),
+            )
+            .expect("set window-style");
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-g", "window-active-style", "bg=#202020,fg=#f0f0f0"],
+                ),
+            )
+            .expect("set window-active-style");
+
+        let active_options = terminal_worker_options(&inner.engine, &inner.appearance, active)
+            .expect("worker options");
+        assert_eq!(
+            active_options.appearance.background,
+            Color::rgb(0x20, 0x20, 0x20)
+        );
+        assert_eq!(
+            active_options.appearance.foreground,
+            Color::rgb(0xf0, 0xf0, 0xf0)
+        );
+        let inactive_options = terminal_worker_options(&inner.engine, &inner.appearance, inactive)
+            .expect("worker options");
+        assert_eq!(
+            inactive_options.appearance.background,
+            Color::rgb(0x10, 0x10, 0x10)
+        );
+        assert_eq!(
+            inactive_options.appearance.foreground,
+            inner.appearance.foreground
+        );
+
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-g", "window-style", "bg=#{?pane_active,#303030,#404040}"],
+                ),
+            )
+            .expect("set conditional window-style");
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-option", ["-gu", "window-active-style"]),
+            )
+            .expect("unset window-active-style");
+        let conditional_active = terminal_worker_options(&inner.engine, &inner.appearance, active)
+            .expect("worker options");
+        assert_eq!(
+            conditional_active.appearance.background,
+            Color::rgb(0x30, 0x30, 0x30)
+        );
+        let conditional_inactive =
+            terminal_worker_options(&inner.engine, &inner.appearance, inactive)
+                .expect("worker options");
+        assert_eq!(
+            conditional_inactive.appearance.background,
+            Color::rgb(0x40, 0x40, 0x40)
+        );
+    }
+
+    #[test]
+    fn copy_mode_styles_patch_the_published_appearance_only_when_set() {
+        let shared = Shared::new(1);
+        let mut context = ExecutionContext::default();
+        let mut inner = shared.inner.lock();
+        let base = published_appearance(&inner);
+        assert!(Arc::ptr_eq(&base, &inner.appearance));
+
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "copy-mode-match-style", "bg=#ff0000"],
+                ),
+            )
+            .expect("set match style");
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "copy-mode-current-match-style", "fg=#00ff00"],
+                ),
+            )
+            .expect("set current match style");
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "mode-style", "bg=#0000ff,fg=#111111"],
+                ),
+            )
+            .expect("set mode style");
+
+        let patched = published_appearance(&inner);
+        assert_eq!(
+            patched.search_match_color,
+            AppearanceColor::rgba(255, 0, 0, 255)
+        );
+        assert_eq!(
+            patched.search_current_color,
+            AppearanceColor::rgba(0, 255, 0, 255)
+        );
+        assert_eq!(
+            patched.selection_background,
+            AppearanceColor::rgba(0, 0, 255, 255)
+        );
+        assert_eq!(patched.selection_foreground, Color::rgb(0x11, 0x11, 0x11));
+
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "copy-mode-mark-style", "bg=#123456"],
+                ),
+            )
+            .expect("set mark style");
+        let with_mark = published_appearance(&inner);
+        assert_eq!(with_mark.search_match_color, patched.search_match_color);
+        assert_eq!(with_mark.selection_background, patched.selection_background);
+
+        for name in [
+            "copy-mode-match-style",
+            "copy-mode-current-match-style",
+            "mode-style",
+            "copy-mode-mark-style",
+        ] {
+            inner
+                .engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("set-window-option", ["-gu", name]),
+                )
+                .expect("unset style");
+        }
+        assert!(Arc::ptr_eq(
+            &published_appearance(&inner),
+            &inner.appearance
+        ));
+    }
+
+    #[test]
+    fn pane_border_style_colours_stamp_only_when_explicitly_set() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "borders", "-n", "main"]),
+            )
+            .expect("create session");
+        let window = context.window.expect("window id");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d"]),
+            )
+            .expect("split window");
+        let order = engine.state.windows[&window].pane_order().to_vec();
+        let (active, inactive) = (order[0], order[1]);
+        let facts = FormatHookFacts::default();
+
+        let mut snapshot = engine.state.snapshot();
+        stamp_pane_border_colours(&engine, &facts, &mut snapshot);
+        for session in &snapshot.sessions {
+            for window in &session.windows {
+                for pane in window.panes.values() {
+                    assert_eq!(pane.border_colour, None);
+                    assert_eq!(pane.active_border_colour, None);
+                }
+            }
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "pane-border-style", "fg=colour100"]),
+            )
+            .expect("set border style");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-p",
+                        "-t",
+                        &inactive.to_string(),
+                        "pane-active-border-style",
+                        "fg=#{?pane_active,#ff0000,#00ff00}",
+                    ],
+                ),
+            )
+            .expect("set active border style");
+
+        let mut snapshot = engine.state.snapshot();
+        stamp_pane_border_colours(&engine, &facts, &mut snapshot);
+        let panes = &snapshot.sessions[0].windows[0].panes;
+        assert_eq!(panes[&active].border_colour, Some(TmuxColour::Indexed(100)));
+        assert_eq!(panes[&active].active_border_colour, None);
+        assert_eq!(
+            panes[&inactive].border_colour,
+            Some(TmuxColour::Indexed(100))
+        );
+        assert_eq!(
+            panes[&inactive].active_border_colour,
+            Some(TmuxColour::Rgb(0x0000_ff00))
+        );
+    }
+
+    #[test]
+    fn display_panes_labels_expand_the_format_per_pane() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "labels", "-n", "main"]),
+            )
+            .expect("create session");
+        let window = context.window.expect("window id");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d"]),
+            )
+            .expect("split window");
+        let facts = FormatHookFacts::default();
+
+        let (_, _, state) = build_display_panes_state(
+            &engine,
+            &facts,
+            engine.state.windows[&window].active_pane,
+            1_000,
+        )
+        .expect("display panes state");
+        assert_eq!(state.indicators.len(), 2);
+        for indicator in &state.indicators {
+            let expected = {
+                let context = engine.format_status_context(
+                    Some(engine.state.windows[&window].session),
+                    Some(window),
+                    Some(indicator.pane),
+                );
+                format!(
+                    "#[align=right]{}x{}",
+                    context.pane_width.expect("pane width"),
+                    context.pane_height.expect("pane height")
+                )
+            };
+            assert_eq!(indicator.label, expected);
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-g", "display-panes-format", "pane #{pane_index}"],
+                ),
+            )
+            .expect("set format");
+        let (_, _, state) = build_display_panes_state(
+            &engine,
+            &facts,
+            engine.state.windows[&window].active_pane,
+            1_000,
+        )
+        .expect("display panes state");
+        assert_eq!(state.indicators[0].label, "pane 0");
+        assert_eq!(state.indicators[1].label, "pane 1");
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-g", "display-panes-format", &"x".repeat(2 * 1024)],
+                ),
+            )
+            .expect("set oversized format");
+        let (_, _, state) = build_display_panes_state(
+            &engine,
+            &facts,
+            engine.state.windows[&window].active_pane,
+            1_000,
+        )
+        .expect("display panes state");
+        assert_eq!(
+            state.indicators[0].label.len(),
+            zz_protocol::MAX_PANE_INDICATOR_LABEL_BYTES
+        );
     }
 
     #[test]
@@ -25367,6 +25958,64 @@ mod tests {
                     payload: EventPayload::AppearanceChanged { appearance, .. },
                     ..
                 })) if *appearance == expected
+            )
+        }));
+    }
+
+    #[test]
+    fn copy_mode_style_writes_broadcast_the_patched_appearance() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, hello) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        assert_eq!(
+            hello.appearance.search_match_color,
+            TerminalAppearance::default().search_match_color
+        );
+
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "copy-mode-match-style", "bg=#ff0000"],
+                ),
+            )
+            .expect("set copy-mode-match-style");
+
+        let expected = AppearanceColor::rgba(255, 0, 0, 255);
+        let state = mailbox.state.lock();
+        assert!(state.reliable.iter().any(|frame| {
+            matches!(
+                decode_protocol_frame(frame),
+                Ok(ProtocolMessage::Event(Event {
+                    payload: EventPayload::AppearanceChanged { appearance, .. },
+                    ..
+                })) if appearance.search_match_color == expected
+            )
+        }));
+        drop(state);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-gu", "copy-mode-match-style"]),
+            )
+            .expect("unset copy-mode-match-style");
+        let state = mailbox.state.lock();
+        assert!(state.reliable.iter().any(|frame| {
+            matches!(
+                decode_protocol_frame(frame),
+                Ok(ProtocolMessage::Event(Event {
+                    payload: EventPayload::AppearanceChanged { appearance, .. },
+                    ..
+                })) if appearance.search_match_color
+                    == TerminalAppearance::default().search_match_color
             )
         }));
     }
@@ -32762,7 +33411,8 @@ bind - split-window -v -c "#{pane_current_path}"
         engine.state.select_pane(active).expect("select last pane");
 
         let (_, actual_window, overlay) =
-            build_display_panes_state(&engine, active, 1_000).expect("pane indicators");
+            build_display_panes_state(&engine, &FormatHookFacts::default(), active, 1_000)
+                .expect("pane indicators");
         assert_eq!(actual_window, window);
         assert_eq!(overlay.indicators.len(), 37);
         assert_eq!(overlay.indicators[0].select_key, b'0');
@@ -32779,7 +33429,8 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("one-based pane indicators");
         let (_, _, overlay) =
-            build_display_panes_state(&engine, active, 1_000).expect("one-based indicators");
+            build_display_panes_state(&engine, &FormatHookFacts::default(), active, 1_000)
+                .expect("one-based indicators");
         assert_eq!(overlay.indicators[0].index, 1);
         assert_eq!(overlay.indicators[0].select_key, b'1');
         assert_eq!(overlay.indicators[8].index, 9);
@@ -39974,9 +40625,13 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("rezoom browser after layout selection");
         assert!(shared.inner.lock().visible_terminals[&client].is_empty());
 
-        let (_, _, display) =
-            build_display_panes_state(&shared.inner.lock().engine, browser, 1_000)
-                .expect("zoomed display panes");
+        let (_, _, display) = build_display_panes_state(
+            &shared.inner.lock().engine,
+            &FormatHookFacts::default(),
+            browser,
+            1_000,
+        )
+        .expect("zoomed display panes");
         assert_eq!(display.indicators.len(), 1);
         assert_eq!(display.indicators[0].pane, browser);
         assert_eq!(display.indicators[0].select_key, b'2');

@@ -56,9 +56,11 @@ mirrored keystrokes; `bell` is latched until the pane is read after a BEL. A ret
 sets `dead`; `dead_status` contains only a normal exit code and is empty for signals and worker
 failures. Respawn clears both without changing the pane id or layout leaf. `border_colour` and
 `active_border_colour` (appended at v71) are the pane's `pane-border-style` /
-`pane-active-border-style` colour overrides; `None` means theme fallback, `TmuxColour::Rgb` values
-above `0xFFFFFF` are rejected on decode, and the daemon stamps both `None` until Wave C9 expands the
-styles. `BrowserDescriptor.tabs`
+`pane-active-border-style` colour overrides; `None` means theme fallback and `TmuxColour::Rgb` values
+above `0xFFFFFF` are rejected on decode. Since Wave C run 3 (2026-08-22) the daemon resolves the
+explicit values pane → window → global during personalized snapshot stamping (formats expanded in the
+pane's context) and publishes the style's fg colour; with the options unset both fields stay `None`
+and clients keep their theme chrome. `BrowserDescriptor.tabs`
 is the strip in order (never empty in the type's contract; `url()` returns the active tab or
 `about:blank`). `WindowSnapshot.name` is the user's stable, explicit window name;
 `PaneSnapshot.title` is live presentation metadata. Terminal OSC title changes are synchronized by

@@ -37,6 +37,7 @@ pub(crate) struct Divider {
     pub rect: Rect,
     pub axis: Axis,
     pub highlighted: bool,
+    pub style_pane: Option<PaneId>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -112,14 +113,27 @@ fn collect(node: &LayoutNode, rect: Rect, active: PaneId, output: &mut ResolvedL
                     },
                 ),
             };
+            let highlighted = first.contains(active) || second.contains(active);
             output.dividers.push(Divider {
                 rect: divider_rect,
                 axis: *axis,
-                highlighted: first.contains(active) || second.contains(active),
+                highlighted,
+                style_pane: if highlighted {
+                    Some(active)
+                } else {
+                    first_pane(first).or_else(|| first_pane(second))
+                },
             });
             collect(first, first_rect, active, output);
             collect(second, second_rect, active, output);
         }
+    }
+}
+
+fn first_pane(node: &LayoutNode) -> Option<PaneId> {
+    match node {
+        LayoutNode::Pane(pane) => Some(*pane),
+        LayoutNode::Split { first, second, .. } => first_pane(first).or_else(|| first_pane(second)),
     }
 }
 
@@ -230,6 +244,23 @@ mod tests {
         );
         assert_eq!(positive.dividers[0].rect.width, 1);
         assert_eq!(negative.dividers[0].rect.width, 1);
+    }
+
+    #[test]
+    fn divider_style_pane_prefers_an_active_pane_in_either_subtree() {
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 4,
+        };
+        let adjacent = resolve(&split(Axis::Horizontal, 0.5), rect, PaneId(2));
+        assert!(adjacent.dividers[0].highlighted);
+        assert_eq!(adjacent.dividers[0].style_pane, Some(PaneId(2)));
+
+        let elsewhere = resolve(&split(Axis::Horizontal, 0.5), rect, PaneId(9));
+        assert!(!elsewhere.dividers[0].highlighted);
+        assert_eq!(elsewhere.dividers[0].style_pane, Some(PaneId(1)));
     }
 
     #[test]

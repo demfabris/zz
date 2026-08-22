@@ -854,6 +854,15 @@ pub const BEHAVES: &[&str] = &[
     "visual-silence",
     "window-status-activity-style",
     "prefix2",
+    "display-panes-format",
+    "window-style",
+    "window-active-style",
+    "mode-style",
+    "pane-border-style",
+    "pane-active-border-style",
+    "copy-mode-match-style",
+    "copy-mode-current-match-style",
+    "copy-mode-mark-style",
 ];
 
 const OPTION_TABLE_ORDER: &[&str] = &[
@@ -1345,8 +1354,8 @@ mod tests {
 
     #[test]
     fn behaving_option_roster_is_complete_unique_and_catalogued() {
-        assert_eq!(BEHAVES.len(), 95);
-        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 95);
+        assert_eq!(BEHAVES.len(), 104);
+        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 104);
         let catalog = tmux_options()
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();

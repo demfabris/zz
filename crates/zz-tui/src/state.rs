@@ -5,7 +5,7 @@ use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandPromptState, DisplayPanesState, MuxSnapshot, PaneId,
     PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine, StatusPosition,
-    TmuxRange, WindowSnapshot,
+    TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{TerminalAppearance, TerminalViewport};
 
@@ -415,6 +415,15 @@ impl Model {
 
     pub fn pane_snapshot(&self, pane: PaneId) -> Option<&PaneSnapshot> {
         self.window()?.panes.get(&pane)
+    }
+
+    pub fn pane_border_colour(&self, pane: PaneId, active: bool) -> Option<TmuxColour> {
+        let snapshot = self.pane_snapshot(pane)?;
+        if active {
+            snapshot.active_border_colour
+        } else {
+            snapshot.border_colour
+        }
     }
 
     pub fn pane_rect(&self, pane: PaneId) -> Option<PaneRect> {

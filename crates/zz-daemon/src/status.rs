@@ -14,7 +14,10 @@ use std::{
 use chrono::Local;
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
-use zz_mux::{MuxEngine, StatusContext, StatusFormats, StatusHooks, display_width, expand_status};
+use zz_mux::{
+    MuxEngine, StatusContext, StatusFormats, StatusHooks, StatusRowVariables, display_width,
+    expand_status,
+};
 use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
     WindowId,
@@ -39,7 +42,7 @@ pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
     pub(crate) formats: StatusFormats,
     pub(crate) row_formats: BTreeMap<u32, String>,
-    pub(crate) variables: BTreeMap<String, String>,
+    pub(crate) variables: StatusRowVariables,
     pub(crate) message_line: u8,
     pub(crate) customized: bool,
     pub(crate) title_format: Option<String>,
@@ -481,6 +484,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     facts: &'a FormatHookFacts,
     status_context: Option<&'a StatusContext>,
     variables: Option<&'a BTreeMap<String, String>>,
+    options: Option<&'a StatusRowVariables>,
     cache: Option<&'a mut BTreeMap<String, String>>,
     touched: Option<&'a mut BTreeSet<String>>,
     refresh: bool,
@@ -502,6 +506,7 @@ impl<'a> DaemonFormatHooks<'a> {
             facts,
             status_context: None,
             variables,
+            options: None,
             cache: None,
             touched: None,
             refresh: false,
@@ -518,10 +523,15 @@ impl<'a> DaemonFormatHooks<'a> {
         Self::command_with_optional_variables(facts, Some(variables))
     }
 
+    pub(crate) fn with_status_options(mut self, options: &'a StatusRowVariables) -> Self {
+        self.options = Some(options);
+        self
+    }
+
     fn status(
         facts: &'a FormatHookFacts,
         context: &'a StatusContext,
-        variables: Option<&'a BTreeMap<String, String>>,
+        options: Option<&'a StatusRowVariables>,
         cache: &'a mut BTreeMap<String, String>,
         touched: &'a mut BTreeSet<String>,
         refresh: bool,
@@ -532,7 +542,8 @@ impl<'a> DaemonFormatHooks<'a> {
         Self {
             facts,
             status_context: Some(context),
-            variables,
+            variables: None,
+            options,
             cache: Some(cache),
             touched: Some(touched),
             refresh,
@@ -615,6 +626,12 @@ impl StatusHooks for DaemonFormatHooks<'_> {
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         if let Some(value) = self.variables.and_then(|variables| variables.get(name)) {
+            return Some(value.clone());
+        }
+        if let Some(value) = self
+            .options
+            .and_then(|options| options.lookup(&context.session_id, &context.window_id, name))
+        {
             return Some(value.clone());
         }
         match name {
@@ -956,7 +973,7 @@ mod tests {
                 ..StatusFormats::default()
             },
             row_formats: BTreeMap::new(),
-            variables: BTreeMap::new(),
+            variables: StatusRowVariables::default(),
             message_line: 0,
             customized: false,
             title_format: None,
@@ -1163,6 +1180,46 @@ mod tests {
             "message-line clamps below the row count"
         );
         assert_eq!(two.validate(), Ok(()));
+    }
+
+    #[test]
+    fn per_window_status_overrides_style_the_rendered_row() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-session", "-s", "work", "-n", "main"],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-window", "-d", "-n", "other"],
+        );
+        let session = context.session.expect("session id");
+        execute(
+            &mut engine,
+            &mut context,
+            &[
+                "set-window-option",
+                "-t",
+                "work:0",
+                "window-status-current-format",
+                "OVERRIDE",
+            ],
+        );
+        let status =
+            StatusRenderer::default().render_initial(&engine_request(1, &engine, Some(session)));
+        let row = status.rows.first().expect("status row");
+        assert!(row.contains("OVERRIDE"), "row: {row}");
+        assert!(
+            !row.contains("0:main"),
+            "the current window's default label must be replaced: {row}"
+        );
+        assert!(
+            row.contains("1:other"),
+            "windows without overrides keep the global format: {row}"
+        );
     }
 
     #[test]

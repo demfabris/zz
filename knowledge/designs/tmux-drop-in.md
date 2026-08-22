@@ -151,11 +151,11 @@ corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugin
    (same day) shipped the full alert set (`monitor-*`, `*-action`, `visual-*`, the
    `#`/`~` window flags, `window-status-activity-style`) and `prefix2` with
    `send-prefix -2` (Oh My Tmux's smoke is zero-warning). The `set-titles` pair shipped
-   with the B2/B3/title slice. Still open from this batch: `display-panes-format`,
-   `remain-on-exit-format` (parked on the terminal injection seam), and the renderer
-   styles fabrico already decided (`pane-*border-style` colors, `window-style`/
-   `window-active-style` dimming, `mode-style`). The `BEHAVES` drift test tracks each
-   slice.
+   with the B2/B3/title slice. Run 3 (2026-08-22) shipped `display-panes-format` and
+   the renderer styles (`pane-*border-style` colors, `window-style`/
+   `window-active-style` tinting, `mode-style` and the copy-mode match styles). Still
+   open from this batch: `remain-on-exit-format` (parked on the terminal injection
+   seam). The `BEHAVES` drift test tracks each slice.
 5. **`source-file` diagnostics on the CLI** — exit 1 with the pin's `path:line: message`
    where today the plain CLI exits 0 silent. Revalidation found that parse and glob failures
    fit the current response types, but the zz-only unsupported summary cannot reach stderr
@@ -439,6 +439,18 @@ content contains no literal `#[`, top status occupies row zero, `mouse off` emit
 
 ## Wave C - C3 knob batch
 
+**Closed 2026-08-22 in three reviewed runs** (lifecycle trio + `command-alias` +
+`update-environment`; alerts + `prefix2`; `display-panes-format` + renderer styles + the
+status-row scoping closure), each with an independent adversarial review and a
+MERGE-READY verdict. `BEHAVES` moved 81 to **104** — the recomputed C target, 105 minus
+the parked `remain-on-exit-format` — and the flag ledger fell 128 to 127
+(`send-prefix -2`). The B1-era status-row window-option scoping divergence is closed and
+proven end-to-end by the restored per-window PTY smoke. Two divergences opened with the
+new surfaces and are ledgered: border-style owner granularity (one colour per divider
+where the pin resolves per cell span) and the one-appearance channel bounding per-window
+copy-mode styles. The attach-clear bell asymmetry from run 2 stays scheduled for the next
+slice that owns bell behavior.
+
 1. Alerts: **shipped 2026-08-21 (run 2).** The bell path generalized into the pin's
    alerts.c model: `monitor-bell` gates `raise_pane_bell`, PTY output (the coalesced
    `output_activity` seam) raises the per-window activity flag, and `monitor-silence`
@@ -467,9 +479,15 @@ content contains no literal `#[`, top status occupies row zero, `mouse off` emit
    Tmux's smoke baseline is zero warnings.
 3. `set-titles` and `set-titles-string`: execute this source half before B4's client sinks.
    Expand the title per client and publish it independently of status visibility.
-4. `display-panes-format`: expand the format per pane into `PaneIndicator.label`. Both
-   clients parse styled segments before painting, including the default `#[align=right]`;
-   honor overlay alignment and clip the resulting row to the pane indicator width.
+4. `display-panes-format`: **shipped 2026-08-22 (run 3).** `build_display_panes_state`
+   expands the session-effective format separately in each pane's context
+   (`expand_format_values`, no strftime — the pin's `format_single`) into
+   `PaneIndicator.label`, char-boundary-capped at the 1 KiB wire bound and rebuilt live
+   by `refresh_display_panes`. The TUI composes the label across the pane header row
+   through `compose_status_row` (alignment honored, exact-width clipped); the GUI parses
+   the styled segments into alignment buckets on a top strip of the indicator overlay,
+   clipped at the pane edge. `display-panes-colour`/`-active-colour` stay store-only;
+   the label's base colours are theme chrome (ledgered).
 5. `remain-on-exit-format`: park until the terminal actor has an approved post-worker VT
    injection or frozen-view reconstruction seam. The current retained-pane path marks the
    pane dead after the live PTY/VT actor exits, so the proposed feed path does not exist.
@@ -494,15 +512,26 @@ content contains no literal `#[`, top status occupies row zero, `mouse off` emit
    policies are dormant inside the startup bracket. `keep-last`/`keep-group` follow their
    ungrouped-session reading while linked session groups remain the permanent skip. All of
    it is covered by in-process daemon tests, never compat scenarios.
-9. Renderer styles:
-   - Feed `window-style`, `window-active-style`, `mode-style`, and the three copy-mode styles
-     through the existing per-pane appearance bridge.
-   - Carry typed `pane-border-style` and `pane-active-border-style` colors on each v71
-     `PaneSnapshot`. Clients fall back to theme colors when the fields are `None`. Keep
-     non-color attributes as a documented divergence.
-   - Resolve border colors per pane during personalized daemon snapshot stamping. Refresh
-     active and inactive appearance after pane/window selection and relocation as well as
-     option writes.
+9. Renderer styles: **shipped 2026-08-22 (run 3).**
+   - `window-style`/`window-active-style` colour halves feed the per-pane appearance
+     bridge: `terminal_worker_options` resolves the explicit pane → window → global
+     values, expands conditionals in the pane's context, and patches the pane's terminal
+     fg/bg with the pin's per-channel active-over-base fallback (`tty_default_colours`).
+     Option writes ride `TerminalKnobsChanged`; selection and relocation refresh through
+     `publish_snapshot`, gated on `has_window_style_settings` and deduplicated by an
+     appearance-hash guard in `TerminalSession::set_appearance`, so defaults stay
+     zero-cost. `mode-style` and the copy-mode match styles patch the published
+     appearance (selection and search-overlay colours); the mark style resolves but zz
+     renders no mark. Attributes, `dim`, and per-window copy-mode granularity are
+     ledgered.
+   - `pane-border-style`/`pane-active-border-style` explicit COLOURS resolve per pane
+     during personalized snapshot stamping (`stamp_pane_border_colours`, formats expanded
+     in pane context) onto the v71 `PaneSnapshot` fields; `None` = theme fallback, so
+     unset options render exactly today's chrome (decision 6). The TUI colours dividers
+     (style-owner: active-adjacent pane first) and pane headers; the GUI its pane frame
+     border, split hairline, and active-split highlight through
+     `theme::resolve_tmux_colour`. Non-colour attributes stay ledgered; the GUI visual
+     smoke is hardware-pending.
 
 The full B and C target moves `BEHAVES` from 67 to 105: 12 Wave B consumers and 26 Wave C
 consumers. The C tranche, if approved without `remain-on-exit-format`, stops at 104. Wave C
@@ -674,8 +703,9 @@ Each wave closes with:
 - `git diff --check`
 - OKF validation
 - `compat/run.sh --strict-geometry`, followed by a hard postcondition of at least the
-  current 52 scenario rows (48 before Wave C run 1 added `command-alias` and
-  `update-environment`, 50 before run 2 added `alerts` and `prefix2`), zero SKIPs, and no
+  current 54 scenario rows (48 before Wave C run 1 added `command-alias` and
+  `update-environment`, 50 before run 2 added `alerts` and `prefix2`, 52 before run 3
+  added `display-panes-format` and `renderer-styles`), zero SKIPs, and no
   divergences outside the two documented geometry fixtures
 - the `BEHAVES` assertion and option ledger updated
 - the exact unsupported-pair roster and expected tranche delta updated

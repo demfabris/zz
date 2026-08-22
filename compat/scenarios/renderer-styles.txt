@@ -1,0 +1,15 @@
+# The renderer styles store at their pin scopes, read back their pin defaults,
+# and resolve as option-name formats; a per-window override wins inside the
+# current window's context.
+out: show-options -gwv mode-style
+out: show-options -gwv copy-mode-match-style
+out: show-options -gwv pane-border-style
+set-option -g window-style bg=colour236
+fmt: #{window-style}
+setw -g mode-style bg=red,fg=white
+fmt: #{mode-style}
+setw -t w mode-style bg=blue
+fmt: #{mode-style}
+out: show-options -wv -t w mode-style
+set-option -g pane-active-border-style fg=green
+out: show-options -gwv pane-active-border-style

@@ -656,6 +656,7 @@ pub struct TerminalSession {
     latest: Arc<RwLock<PublishedViewports>>,
     max_scrollback: usize,
     word_separators: RwLock<WordSeparators>,
+    applied_appearance: AtomicU64,
     terminating: AtomicBool,
 }
 
@@ -767,6 +768,7 @@ impl TerminalSession {
         };
 
         let worker_publisher = publisher.clone();
+        let appearance_hash = appearance.stable_hash();
         if let Err(error) = thread::Builder::new()
             .name("zz-terminal".into())
             .spawn(move || {
@@ -791,6 +793,7 @@ impl TerminalSession {
             latest,
             max_scrollback,
             word_separators: RwLock::new(WordSeparators::default()),
+            applied_appearance: AtomicU64::new(appearance_hash),
             terminating: AtomicBool::new(false),
         }
     }
@@ -869,6 +872,7 @@ impl TerminalSession {
         };
 
         let worker_publisher = publisher.clone();
+        let appearance_hash = appearance.stable_hash();
         if let Err(error) = thread::Builder::new()
             .name(if frozen {
                 "zz-output-view".into()
@@ -896,6 +900,7 @@ impl TerminalSession {
             latest,
             max_scrollback,
             word_separators: RwLock::new(WordSeparators::default()),
+            applied_appearance: AtomicU64::new(appearance_hash),
             terminating: AtomicBool::new(false),
         }
     }
@@ -956,7 +961,13 @@ impl TerminalSession {
     }
 
     /// Apply new renderer defaults without replacing PTY or viewport state.
+    /// Re-sends of a byte-identical appearance are dropped so callers can
+    /// refresh eagerly without forcing terminal re-renders.
     pub fn set_appearance(&self, appearance: Arc<TerminalAppearance>) {
+        let hash = appearance.stable_hash();
+        if self.applied_appearance.swap(hash, Ordering::AcqRel) == hash {
+            return;
+        }
         self.send_command(Command::SetAppearance(appearance));
     }
 
@@ -11748,7 +11759,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Publisher>(), 3 * word);
         assert_eq!(std::mem::size_of::<TerminalEvents>(), 3 * word);
         assert!(
-            std::mem::size_of::<TerminalSession>() <= 15 * word,
+            std::mem::size_of::<TerminalSession>() <= 16 * word,
             "{}",
             std::mem::size_of::<TerminalSession>()
         );

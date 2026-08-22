@@ -413,6 +413,9 @@ pub enum MuxEffect {
     KillServer,
     SuppressAfterHook,
     SnapshotChanged,
+    /// `mode-style` or a `copy-mode-*-style` changed; the daemon refreshes the
+    /// published appearance so client copy-mode chrome picks the styles up.
+    ModeStylesChanged,
 }
 
 /// Which clients `detach-client` hangs up on.
@@ -863,7 +866,105 @@ pub struct TerminalWorkerOptions {
     pub wrap_search: bool,
     pub cursor_style: &'static str,
     pub cursor_colour: String,
+    pub window_style: Option<String>,
+    pub window_active_style: Option<String>,
+    pub active_pane: bool,
 }
+
+/// Explicit `pane-border-style` / `pane-active-border-style` values resolved
+/// pane -> window -> global; `None` means unset everywhere (theme fallback).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PaneBorderStyleValues {
+    pub border: Option<String>,
+    pub active_border: Option<String>,
+}
+
+/// Explicit `window-style` / `window-active-style` values resolved
+/// pane -> window -> global; `None` means unset everywhere.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WindowStyleValues {
+    pub style: Option<String>,
+    pub active_style: Option<String>,
+}
+
+/// Explicit global `mode-style` and copy-mode match styles; `None` means unset.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CopyModeStyleValues {
+    pub mode: Option<String>,
+    pub search_match: Option<String>,
+    pub search_current_match: Option<String>,
+}
+
+/// Option values injected into status-row and command format expansion. The
+/// session map carries session/global-effective values; `windows` layers each
+/// window's explicit overrides on top, keyed by the `#{window_id}` string, so
+/// `#{T:window-status-format}`-class lookups resolve per loop item like the
+/// pin's `format_expand` option walk.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StatusRowVariables {
+    pub session: BTreeMap<String, String>,
+    pub sessions: BTreeMap<String, BTreeMap<String, String>>,
+    pub windows: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl StatusRowVariables {
+    #[must_use]
+    pub fn lookup(&self, session_id: &str, window_id: &str, name: &str) -> Option<&String> {
+        self.windows
+            .get(window_id)
+            .and_then(|overrides| overrides.get(name))
+            .or_else(|| {
+                self.sessions
+                    .get(session_id)
+                    .and_then(|overrides| overrides.get(name))
+            })
+            .or_else(|| self.session.get(name))
+    }
+}
+
+const ROW_GLOBAL_OPTION_NAMES: &[&str] = &[
+    "window-status-format",
+    "window-status-current-format",
+    "window-status-separator",
+    "window-status-style",
+    "window-status-current-style",
+    "window-status-last-style",
+    "window-status-bell-style",
+    "window-status-activity-style",
+    "pane-status-style",
+    "pane-status-current-style",
+    "session-status-style",
+    "session-status-current-style",
+    "window-pane-status-format",
+    "window-pane-current-status-format",
+    "window-style",
+    "window-active-style",
+    "mode-style",
+    "copy-mode-match-style",
+    "copy-mode-current-match-style",
+    "copy-mode-mark-style",
+    "pane-border-style",
+    "pane-active-border-style",
+];
+
+const ROW_SESSION_SCOPED_SCALARS: &[&str] = &["display-panes-format"];
+
+const ROW_WINDOW_SCOPED_SCALARS: &[&str] = &[
+    "pane-status-style",
+    "pane-status-current-style",
+    "session-status-style",
+    "session-status-current-style",
+    "window-pane-status-format",
+    "window-pane-current-status-format",
+    "window-style",
+    "window-active-style",
+    "mode-style",
+    "copy-mode-match-style",
+    "copy-mode-current-match-style",
+    "copy-mode-mark-style",
+    "pane-border-style",
+    "pane-active-border-style",
+];
 
 /// What an agent pane's daemon-owned adapter is started with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1161,7 +1262,7 @@ impl MuxEngine {
     pub fn status_row_variables_for_session(
         &self,
         session: Option<SessionId>,
-    ) -> BTreeMap<String, String> {
+    ) -> StatusRowVariables {
         let formats = self.status_formats_for_session(session);
         let mut variables = BTreeMap::new();
         for option in [
@@ -1181,27 +1282,57 @@ impl MuxEngine {
         ] {
             variables.insert(option.as_str().to_owned(), formats.value(option));
         }
-        for name in [
-            "window-status-format",
-            "window-status-current-format",
-            "window-status-separator",
-            "window-status-style",
-            "window-status-current-style",
-            "window-status-last-style",
-            "window-status-bell-style",
-            "window-status-activity-style",
-            "pane-status-style",
-            "pane-status-current-style",
-            "session-status-style",
-            "session-status-current-style",
-            "window-pane-status-format",
-            "window-pane-current-status-format",
-        ] {
+        for name in ROW_GLOBAL_OPTION_NAMES {
             if let Some(value) = self.global_tmux_option_value(name) {
-                variables.insert(name.to_owned(), value);
+                variables.insert((*name).to_owned(), value);
             }
         }
-        variables
+        variables.insert(
+            "display-panes-format".to_owned(),
+            self.display_panes_format_for_session(session),
+        );
+        let mut sessions = BTreeMap::new();
+        for (id, scalars) in &self.stored_scalars.sessions {
+            if session.is_some_and(|session| session != *id) {
+                continue;
+            }
+            let mut overrides = BTreeMap::new();
+            for name in ROW_SESSION_SCOPED_SCALARS {
+                if let Some(value) = scalars.get(name) {
+                    overrides.insert((*name).to_owned(), value.clone());
+                }
+            }
+            if !overrides.is_empty() {
+                sessions.insert(id.to_string(), overrides);
+            }
+        }
+        let mut windows = BTreeMap::new();
+        for window in self.state.windows.values() {
+            if session.is_some_and(|session| window.session != session) {
+                continue;
+            }
+            let mut overrides = BTreeMap::new();
+            if let Some(status_overrides) = self.window_status_options.get(&window.id) {
+                for (option, value) in status_overrides {
+                    overrides.insert(option.as_str().to_owned(), value.clone());
+                }
+            }
+            if let Some(scalars) = self.stored_scalars.windows.get(&window.id) {
+                for name in ROW_WINDOW_SCOPED_SCALARS {
+                    if let Some(value) = scalars.get(name) {
+                        overrides.insert((*name).to_owned(), value.clone());
+                    }
+                }
+            }
+            if !overrides.is_empty() {
+                windows.insert(window.id.to_string(), overrides);
+            }
+        }
+        StatusRowVariables {
+            session: variables,
+            sessions,
+            windows,
+        }
     }
 
     #[must_use]
@@ -1227,6 +1358,72 @@ impl MuxEngine {
         self.scalar_option_effective(target, "set-titles-string")
             .unwrap_or_default()
             .to_owned()
+    }
+
+    #[must_use]
+    pub fn display_panes_format_for_session(&self, session: Option<SessionId>) -> String {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        self.scalar_option_effective(target, "display-panes-format")
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[must_use]
+    pub fn pane_border_style_values(&self, pane: PaneId) -> PaneBorderStyleValues {
+        let target = TmuxOptionTarget::Pane(pane);
+        PaneBorderStyleValues {
+            border: self
+                .scalar_option_explicit(target, "pane-border-style")
+                .map(str::to_owned),
+            active_border: self
+                .scalar_option_explicit(target, "pane-active-border-style")
+                .map(str::to_owned),
+        }
+    }
+
+    #[must_use]
+    pub fn has_pane_border_style_settings(&self) -> bool {
+        self.has_stored_scalar_settings(&["pane-border-style", "pane-active-border-style"])
+    }
+
+    #[must_use]
+    pub fn window_style_values(&self, pane: PaneId) -> WindowStyleValues {
+        let target = TmuxOptionTarget::Pane(pane);
+        WindowStyleValues {
+            style: self
+                .scalar_option_explicit(target, "window-style")
+                .map(str::to_owned),
+            active_style: self
+                .scalar_option_explicit(target, "window-active-style")
+                .map(str::to_owned),
+        }
+    }
+
+    #[must_use]
+    pub fn has_window_style_settings(&self) -> bool {
+        self.has_stored_scalar_settings(&["window-style", "window-active-style"])
+    }
+
+    #[must_use]
+    pub fn copy_mode_style_values(&self) -> CopyModeStyleValues {
+        let explicit = |name| {
+            self.stored_scalars
+                .global_window
+                .get(name)
+                .map(String::to_owned)
+        };
+        CopyModeStyleValues {
+            mode: explicit("mode-style"),
+            search_match: explicit("copy-mode-match-style"),
+            search_current_match: explicit("copy-mode-current-match-style"),
+        }
+    }
+
+    fn has_stored_scalar_settings(&self, names: &[&str]) -> bool {
+        let contains = |table: &ScalarTable| names.iter().any(|name| table.contains_key(*name));
+        contains(&self.stored_scalars.global_window)
+            || self.stored_scalars.windows.values().any(contains)
+            || self.stored_scalars.panes.values().any(contains)
     }
 
     #[must_use]
@@ -1555,11 +1752,19 @@ impl MuxEngine {
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let pane_options = self.pane_knobs(pane);
+        let styles = self.window_style_values(pane);
         Ok(TerminalWorkerOptions {
             allow_passthrough: pane_options.allow_passthrough != AllowPassthrough::Off,
             wrap_search: self.window_knobs(window).wrap_search,
             cursor_style: pane_options.cursor_style.as_str(),
             cursor_colour: pane_options.cursor_colour,
+            window_style: styles.style,
+            window_active_style: styles.active_style,
+            active_pane: self
+                .state
+                .windows
+                .get(&window)
+                .is_some_and(|window| window.active_pane == pane),
         })
     }
 
@@ -9360,6 +9565,29 @@ fn stored_scalar_execution(name: &str, target: TmuxOptionTarget) -> Execution {
             _ => None,
         };
         return Execution::effect(MuxEffect::StatusFormatsChanged { session });
+    }
+    if matches!(
+        name,
+        "pane-border-style" | "pane-active-border-style" | "display-panes-format"
+    ) {
+        return Execution::effect(MuxEffect::SnapshotChanged);
+    }
+    if matches!(name, "window-style" | "window-active-style") {
+        let (window, pane) = match target {
+            TmuxOptionTarget::Pane(pane) => (None, Some(pane)),
+            TmuxOptionTarget::Window(window) => (Some(window), None),
+            _ => (None, None),
+        };
+        return Execution::effect(MuxEffect::TerminalKnobsChanged { window, pane });
+    }
+    if matches!(
+        name,
+        "mode-style"
+            | "copy-mode-match-style"
+            | "copy-mode-current-match-style"
+            | "copy-mode-mark-style"
+    ) {
+        return Execution::effect(MuxEffect::ModeStylesChanged);
     }
     Execution::default()
 }
@@ -17457,6 +17685,9 @@ mod tests {
                 wrap_search: false,
                 cursor_style: "blinking-underline",
                 cursor_colour: "sky blue".to_owned(),
+                window_style: None,
+                window_active_style: None,
+                active_pane: true,
             }
         );
         assert_eq!(
@@ -19539,31 +19770,48 @@ mod tests {
 
         let global = engine.status_row_variables_for_session(None);
         assert_eq!(
-            global.get("status-left").map(String::as_str),
+            global.session.get("status-left").map(String::as_str),
             Some(crate::tmux_options::STATUS_LEFT_DEFAULT)
         );
         assert_eq!(
-            global.get("status-justify").map(String::as_str),
+            global.session.get("status-justify").map(String::as_str),
             Some("left")
         );
         assert_eq!(
-            global.get("window-status-format").map(String::as_str),
+            global
+                .session
+                .get("window-status-format")
+                .map(String::as_str),
             Some(crate::DEFAULT_WINDOW_STATUS_FORMAT)
         );
         assert_eq!(
-            global.get("pane-status-current-style").map(String::as_str),
+            global
+                .session
+                .get("pane-status-current-style")
+                .map(String::as_str),
             Some("underscore")
+        );
+        assert_eq!(
+            global.session.get("mode-style").map(String::as_str),
+            Some("noattr,bg=themeyellow,fg=themeblack")
+        );
+        assert_eq!(
+            global
+                .session
+                .get("display-panes-format")
+                .map(String::as_str),
+            Some("#[align=right]#{pane_width}x#{pane_height}")
         );
 
         let scoped = engine.status_row_variables_for_session(Some(session));
         assert_eq!(
-            scoped.get("status-left").map(String::as_str),
+            scoped.session.get("status-left").map(String::as_str),
             Some("LOCAL ")
         );
     }
 
     #[test]
-    fn per_window_status_overrides_reach_the_label_surface_but_not_row_variables() {
+    fn per_window_status_overrides_reach_the_label_surface_and_row_variables() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -19589,11 +19837,264 @@ mod tests {
         let variables = engine.status_row_variables_for_session(Some(session));
         assert_eq!(
             variables
+                .session
                 .get("window-status-current-format")
                 .map(String::as_str),
             Some(crate::DEFAULT_WINDOW_STATUS_FORMAT),
-            "the row-loop variables map stays global: the ledgered scoping divergence"
+            "the session layer keeps the global value for windows without overrides"
         );
+        assert_eq!(
+            variables
+                .lookup(
+                    &session.to_string(),
+                    &window.to_string(),
+                    "window-status-current-format",
+                )
+                .map(String::as_str),
+            Some("OVERRIDE"),
+            "the row-loop surface resolves the loop window's override: both surfaces agree"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("setw", &["-t", "work:0", "mode-style", "bg=red"]),
+            )
+            .unwrap();
+        let variables = engine.status_row_variables_for_session(Some(session));
+        assert_eq!(
+            variables
+                .lookup(&session.to_string(), &window.to_string(), "mode-style")
+                .map(String::as_str),
+            Some("bg=red"),
+            "window-scoped stored scalars layer per window too"
+        );
+    }
+
+    #[test]
+    fn renderer_style_writes_emit_their_consuming_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "styles"]))
+            .unwrap();
+        let window = context.window.expect("window id");
+        let pane = context.pane.expect("pane id");
+
+        for (args, expected) in [
+            (
+                vec!["-g", "pane-border-style", "fg=red"],
+                MuxEffect::SnapshotChanged,
+            ),
+            (
+                vec!["-g", "pane-active-border-style", "fg=blue"],
+                MuxEffect::SnapshotChanged,
+            ),
+            (
+                vec!["-g", "display-panes-format", "#{pane_index}"],
+                MuxEffect::SnapshotChanged,
+            ),
+            (
+                vec!["-g", "window-style", "bg=colour236"],
+                MuxEffect::TerminalKnobsChanged {
+                    window: None,
+                    pane: None,
+                },
+            ),
+            (
+                vec!["-g", "mode-style", "bg=red"],
+                MuxEffect::ModeStylesChanged,
+            ),
+            (
+                vec!["-g", "copy-mode-match-style", "bg=blue"],
+                MuxEffect::ModeStylesChanged,
+            ),
+            (
+                vec!["-g", "copy-mode-current-match-style", "bg=green"],
+                MuxEffect::ModeStylesChanged,
+            ),
+            (
+                vec!["-g", "copy-mode-mark-style", "bg=yellow"],
+                MuxEffect::ModeStylesChanged,
+            ),
+        ] {
+            let execution = engine
+                .execute(&mut context, &command("set-option", &args))
+                .unwrap();
+            assert_eq!(execution.effects, vec![expected], "{args:?}");
+        }
+
+        let scoped = engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-t", "styles:0", "window-active-style", "bg=colour238"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            scoped.effects,
+            vec![MuxEffect::TerminalKnobsChanged {
+                window: Some(window),
+                pane: None,
+            }]
+        );
+        let pane_scoped = engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-p",
+                        "-t",
+                        &pane.to_string(),
+                        "window-style",
+                        "bg=colour239",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            pane_scoped.effects,
+            vec![MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: Some(pane),
+            }]
+        );
+        let unset = engine
+            .execute(&mut context, &command("set-option", &["-gu", "mode-style"]))
+            .unwrap();
+        assert_eq!(unset.effects, vec![MuxEffect::ModeStylesChanged]);
+    }
+
+    #[test]
+    fn window_and_border_style_values_resolve_pane_window_global() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "chain"]))
+            .unwrap();
+        let window = context.window.expect("window id");
+        engine
+            .execute(&mut context, &command("split-window", &["-d"]))
+            .unwrap();
+        let order = engine.state.windows[&window].pane_order().to_vec();
+        let (pane, second) = (order[0], order[1]);
+
+        assert!(!engine.has_window_style_settings());
+        assert!(!engine.has_pane_border_style_settings());
+        assert_eq!(
+            engine.window_style_values(pane),
+            WindowStyleValues::default()
+        );
+        assert_eq!(
+            engine.pane_border_style_values(pane),
+            PaneBorderStyleValues::default()
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "window-style", "bg=colour236"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-p", "-t", &second.to_string(), "window-style", "bg=red"],
+                ),
+            )
+            .unwrap();
+        assert!(engine.has_window_style_settings());
+        assert_eq!(
+            engine.window_style_values(pane).style.as_deref(),
+            Some("bg=colour236")
+        );
+        assert_eq!(
+            engine.window_style_values(second).style.as_deref(),
+            Some("bg=red")
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "pane-border-style", "fg=colour100"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-p",
+                        "-t",
+                        &second.to_string(),
+                        "pane-active-border-style",
+                        "fg=#112233",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(engine.has_pane_border_style_settings());
+        let first_borders = engine.pane_border_style_values(pane);
+        assert_eq!(first_borders.border.as_deref(), Some("fg=colour100"));
+        assert_eq!(first_borders.active_border, None);
+        let second_borders = engine.pane_border_style_values(second);
+        assert_eq!(second_borders.border.as_deref(), Some("fg=colour100"));
+        assert_eq!(second_borders.active_border.as_deref(), Some("fg=#112233"));
+
+        let options = engine
+            .terminal_worker_options_for_pane(pane)
+            .expect("worker options");
+        assert_eq!(options.window_style.as_deref(), Some("bg=colour236"));
+        assert_eq!(options.window_active_style, None);
+        assert!(options.active_pane);
+        let second_options = engine
+            .terminal_worker_options_for_pane(second)
+            .expect("worker options");
+        assert_eq!(second_options.window_style.as_deref(), Some("bg=red"));
+        assert!(!second_options.active_pane);
+    }
+
+    #[test]
+    fn display_panes_format_resolves_session_then_global_then_default() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "fmt"]))
+            .unwrap();
+        let session = context.session.expect("session id");
+        assert_eq!(
+            engine.display_panes_format_for_session(Some(session)),
+            "#[align=right]#{pane_width}x#{pane_height}"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "display-panes-format", "GLOBAL"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.display_panes_format_for_session(Some(session)),
+            "GLOBAL"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-t", "fmt", "display-panes-format", "#{pane_index}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.display_panes_format_for_session(Some(session)),
+            "#{pane_index}"
+        );
+        assert_eq!(engine.display_panes_format_for_session(None), "GLOBAL");
     }
 
     #[test]

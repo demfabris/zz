@@ -2192,6 +2192,23 @@ impl AppView {
                     && pane_content
                         .as_ref()
                         .is_none_or(|content| content.inactive_style == PaneInactiveStyle::Surface);
+                let border_fallback = if active {
+                    cx.theme().foreground.wash()
+                } else {
+                    cx.theme().border
+                };
+                let border_color = window
+                    .panes
+                    .get(pane)
+                    .and_then(|snapshot| {
+                        if active {
+                            snapshot.active_border_colour
+                        } else {
+                            snapshot.border_colour
+                        }
+                    })
+                    .and_then(|colour| crate::theme::resolve_tmux_colour(colour, cx))
+                    .unwrap_or(border_fallback);
                 pane_surface(
                     ("mux-pane", pane.0),
                     content,
@@ -2199,11 +2216,7 @@ impl AppView {
                     PaneChrome::new(
                         radii,
                         config::pane_border_width(cx),
-                        if active {
-                            cx.theme().foreground.wash()
-                        } else {
-                            cx.theme().border
-                        },
+                        border_color,
                         gap_background,
                         config::pane_gaps(cx),
                     )
@@ -2237,6 +2250,17 @@ impl AppView {
                     .split_drag
                     .filter(|drag| drag.drag.window == window.id)
                     .map(|drag| (drag.drag.split, drag.ratio));
+                let active_border = window
+                    .panes
+                    .get(&window.active_pane)
+                    .and_then(|snapshot| snapshot.active_border_colour)
+                    .and_then(|colour| crate::theme::resolve_tmux_colour(colour, cx))
+                    .unwrap_or_else(|| cx.theme().foreground.wash());
+                let hairline = first_layout_pane(first)
+                    .or_else(|| first_layout_pane(second))
+                    .and_then(|pane| window.panes.get(&pane))
+                    .and_then(|snapshot| snapshot.border_colour)
+                    .and_then(|colour| crate::theme::resolve_tmux_colour(colour, cx));
                 let highlight =
                     pane_separator(node, window.active_pane, ratio_override).map(|separator| {
                         let span = separator.span();
@@ -2247,7 +2271,7 @@ impl AppView {
                                 SeparatorSide::First => PaneSplitSide::First,
                                 SeparatorSide::Second => PaneSplitSide::Second,
                             },
-                            cx.theme().foreground.wash(),
+                            active_border,
                         )
                     });
                 let split_axis = match axis {
@@ -2280,6 +2304,7 @@ impl AppView {
                     resizing,
                     config::pane_gaps(cx),
                     config::pane_margin(cx),
+                    hairline,
                     highlight,
                     first_element,
                     second_element,
@@ -2353,6 +2378,37 @@ impl AppView {
         }
     }
 
+    fn pane_indicator_label(indicator: &PaneIndicator, cx: &Context<Self>) -> Option<AnyElement> {
+        if indicator.label.is_empty() {
+            return None;
+        }
+        let [left, centre, right] = split_indicator_label_alignment(&indicator.label);
+        let foreground = cx.theme().foreground;
+        let background = crate::theme::chrome_background(cx);
+        let bucket = |segments: &[zz_mux::StyledSegment]| {
+            crate::theme::tmux_styled_segments_text(segments, foreground, background, cx)
+                .into_styled_text()
+                .into_any_element()
+        };
+        Some(
+            div()
+                .absolute()
+                .top(px(8.0))
+                .left(px(8.0))
+                .right(px(8.0))
+                .overflow_hidden()
+                .flex()
+                .justify_between()
+                .font_family(TERMINAL_FONT)
+                .text_xs()
+                .text_color(foreground)
+                .child(bucket(&left))
+                .child(bucket(&centre))
+                .child(bucket(&right))
+                .into_any_element(),
+        )
+    }
+
     fn pane_indicator(&self, indicator: &PaneIndicator, cx: &Context<Self>) -> impl IntoElement {
         let active = indicator.active();
         let key: AnyElement = match indicator
@@ -2384,7 +2440,7 @@ impl AppView {
                 });
             cx.stop_propagation();
         });
-        pane_indicator_overlay(card)
+        pane_indicator_overlay(card).children(Self::pane_indicator_label(indicator, cx))
     }
 
     fn popup_overlay(
@@ -3151,6 +3207,28 @@ fn lerp_pixels(from: Pixels, to: Pixels, delta: f32) -> Pixels {
     from + (to - from) * delta
 }
 
+fn split_indicator_label_alignment(label: &str) -> [Vec<zz_mux::StyledSegment>; 3] {
+    let mut buckets: [Vec<zz_mux::StyledSegment>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for segment in zz_mux::parse_styled_segments(label) {
+        let bucket = match segment.style.align {
+            Some(zz_mux::TmuxAlign::Centre | zz_mux::TmuxAlign::AbsoluteCentre) => 1,
+            Some(zz_mux::TmuxAlign::Right) => 2,
+            _ => 0,
+        };
+        buckets[bucket].push(segment);
+    }
+    buckets
+}
+
+fn first_layout_pane(node: &LayoutNode) -> Option<PaneId> {
+    match node {
+        LayoutNode::Pane(pane) => Some(*pane),
+        LayoutNode::Split { first, second, .. } => {
+            first_layout_pane(first).or_else(|| first_layout_pane(second))
+        }
+    }
+}
+
 fn split_ratio_from_pointer(axis: Axis, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> f32 {
     let (offset, extent) = match axis {
         Axis::Horizontal => (
@@ -3189,6 +3267,35 @@ mod tests {
     enum PaneReleaseStep {
         Drop(CommandInvocation),
         Teardown(PaneId),
+    }
+
+    #[test]
+    fn indicator_labels_split_into_alignment_buckets_and_borders_pick_a_style_pane() {
+        let [left, centre, right] =
+            split_indicator_label_alignment("L#[align=centre]C#[align=right]#[fg=red]80x24");
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].text, "L");
+        assert_eq!(centre.len(), 1);
+        assert_eq!(centre[0].text, "C");
+        assert_eq!(right.len(), 1);
+        assert_eq!(right[0].text, "80x24");
+        assert_eq!(
+            right[0].style.fg,
+            Some(zz_mux::TmuxColour::Basic(1)),
+            "styled segments keep their parsed colours"
+        );
+        let [left, centre, right] = split_indicator_label_alignment("#[align=right]80x24");
+        assert!(left.is_empty() && centre.is_empty());
+        assert_eq!(right[0].text, "80x24");
+
+        let layout = LayoutNode::Split {
+            id: zz_protocol::SplitId(1),
+            axis: Axis::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Pane(PaneId(3))),
+            second: Box::new(LayoutNode::Pane(PaneId(4))),
+        };
+        assert_eq!(first_layout_pane(&layout), Some(PaneId(3)));
     }
 
     #[test]

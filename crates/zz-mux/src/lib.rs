@@ -15,9 +15,10 @@ mod status;
 mod tmux_options;
 
 pub use command::{
-    AgentOptions, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
-    MAX_WORD_SEPARATORS_BYTES, MenuOptions, MuxEffect, MuxEngine, PaneRuntimeFacts, PopupOptions,
-    hook_format_variables, if_shell_truthy,
+    AgentOptions, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution,
+    ExecutionContext, MAX_WORD_SEPARATORS_BYTES, MenuOptions, MuxEffect, MuxEngine,
+    PaneBorderStyleValues, PaneRuntimeFacts, PopupOptions, StatusRowVariables,
+    TerminalWorkerOptions, WindowStyleValues, hook_format_variables, if_shell_truthy,
 };
 pub use formats::{TmuxColour, display_width, format_true, indexed_colour_rgb, parse_tmux_colour};
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};

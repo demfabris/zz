@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: tmux divergence matrix
-description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 29 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 95 behave), and the protocol-level differences."
+description: "Every known divergence from tmux at the pinned reference commit: the 12 missing commands and why, the 29 implemented commands that still reject tmux flags, behavioral gaps on the implemented surface, the options coverage (all 180 store, 104 behave), and the protocol-level differences."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-20T00:00:00-03:00
@@ -221,7 +221,10 @@ daemon-owned command semantics in a client.
 | `display-time` | Status-message toasts consume the configured milliseconds. Since 2026-08-20 the omitted `display-panes -d` duration comes from `display-panes-time` like the pin (the old reuse divergence is closed). A zero toast remains until manual dismissal, while tmux dismisses its zero-duration status message on a key. | **silent**, deliberate |
 | `respawn-pane` / `respawn-window` | Dead panes revive with stable pane identity; `respawn-window` keeps its first pane and removes the rest. `-k`, `-c`, repeated `-e NAME=VALUE`, and stored command/cwd reuse are implemented. The pin's `-E` empty-environment flag is cataloged but rejected. | loud for `-E` |
 | Array options | Since the 2026-08-20 Lane-2 sweep all eight real array options (`command-alias`, `codepoint-widths`, `user-keys`, `terminal-overrides`, `terminal-features`, `status-format`, `pane-colours`, `update-environment`) store with the pin's separators, hole reuse, and `name[N]`/`-u name[N]` semantics, and the 68 hook names route to the hook table. Since the B1 server slice (2026-08-21) `status-format[]` drives the daemon's personalized `StatusLine.rows` production (sparse indices publish blank rows, a session array overrides the global one whole, scoped writes refresh that session's attached clients). Wave C added two more consumers (2026-08-21): `command-alias[]` expands one layer before canonical lookup at both dispatch chokepoints (`MuxEngine::expand_command_alias`), and, like the pin's parse-time expansion, `bind-key`/`set-hook`/`default-client-command` STORE the expansion, so `list-keys` and `show-hooks` print `list-windows` for an aliased `lsw` on both servers (differentially pinned). Aliases nested inside a `{ … }` argument of a stored command expand at execution instead of at store time, so their stored text keeps the alias name. Only SINGLE-command alias bodies expand: the pin also accepts a multi-command body (`x=cmd1 ; cmd2`, caller arguments appended to the last, `cmd-parse.c:2317`) and an empty body (silent rc 0), where zz refuses both with `unknown command: <alias>` rc 1 — loud rather than silent, per doctrine, because zz's dispatch chokepoint executes exactly one command. Alias lookup is exact on the typed name in both (a command prefix like `ls` never reaches the alias table). `update-environment[]` drives `seed_session_environment` plus its own readback. The remaining five still drive nothing. Indexed `@`/table scalars follow tmux (`not an array` on set; indexed show reads the scalar). | **silent**, store-only except `status-format[]`, `command-alias[]`, and `update-environment[]` |
-| Status-row window-option scoping | tmux resolves `window-status-*`, `pane-status-*`, and `window-pane-*-status-format` per loop item during `status-format` expansion, so a per-window override (`set -w -t work:2 window-status-style 'fg=red'`) styles that window's entry in the row. zz's B1 row expansion resolves those names at global/session-effective scope through a per-client variables map, while the `status_label` path keeps honoring per-window overrides — since B1's client half renders the rows (2026-08-21), the two surfaces can visibly disagree for windows with local overrides: the rendered status block shows the global/session style while the zz-native label surfaces show the override. Resolution path: per-window variable resolution through the loop-item hook seam (`Expander::lookup` already passes the item context), scheduled for Wave C (the `Expander::lookup` loop-item seam). | **silent**, bounded |
+| Status-row window-option scoping | **Closed 2026-08-22 (Wave C run 3).** `StatusRowVariables` now layers each window's explicit overrides (the `WindowStatusOption` set plus the window-scoped renderer styles) and each session's explicit session-scoped values over the global map, and `DaemonFormatHooks::variable` consults the loop item's `session_id`/`window_id` context before the flat map — exactly the loop-item seam `Expander::lookup` already fed. Both surfaces now agree: `per_window_status_overrides_reach_the_label_surface_and_row_variables` pins the engine seam, `per_window_status_overrides_style_the_rendered_row` pins the rendered rows, the `cli_binary` PTY smoke is back to its original `setw -t styled:0` shape end-to-end, and the `renderer-styles` differential scenario pins `setw -t w mode-style` reaching `display-message -p '#{mode-style}'` in the target window's context like the pin's `format_expand` option walk. Command-path expansion (`display-message -p`, the execute-time hooks) resolves the same injected option names; option names outside the injected status/renderer set still do not resolve as formats. | none — behaving (residue: only the injected names resolve as formats) |
+| Renderer-style residue (C9) | Only the COLOUR halves behave: `window-style`/`window-active-style` patch each pane's default fg/bg (attributes, `dim`, and the styles' `#()` shell branches stay inert — the appearance seam expands conditionals with context-only hooks), and `pane-border-style`/`pane-active-border-style` publish one fg colour per pane (`None` = theme fallback; non-colour border attributes and `bg` fills stay ledgered per the v71 contract). `mode-style` colours the copy-mode selection (the pin's `copy-mode-selection-style` default chain) and the copy-mode match styles colour the GUI's search overlays through the published appearance — which is global, so `setw -t` per-window copy-mode/mode styles store but do not recolour (the appearance channel carries one value). zz's copy-mode position indicator keeps its theme chrome (`copy-mode-position-style`/`-format` are store-only), the TUI flattens all overlays to reverse video, and `copy-mode-mark-style` resolves but paints nothing because zz renders no mark element. GUI border colours and window-style dimming are implemented and unit-tested; their visual smoke is hardware-pending. | **silent**, bounded |
+| Border style owner granularity | The pin resolves the border style per BORDER CELL SPAN (`redraw_get_pane_for_border_style`, `screen-redraw.c:1108-1131`): an explicit owner, else the active pane **only when it is adjacent to that span** (`redraw_data_has_pane`), else `top`→`bottom`→`left`→`right`, else the window-scoped default. zz resolves one colour per whole divider and attributes the active style when the active pane is anywhere in the split's SUBTREE (`Divider.style_pane`, `crates/zz-tui/src/layout.rs`; the GUI takes the window's active pane unconditionally in `crates/zz/src/workspace/view.rs`, though its per-pane surface border does mirror `window_pane_get_border_style` correctly). They agree for flat two-pane splits and diverge from three panes up: with `A | (B / C)` and C active, tmux paints the outer divider's top half with the inactive style (neighbours A and B) and only its bottom half active, where zz paints the whole divider active. Inert until a config sets `pane-border-style`/`pane-active-border-style` (both publish `None` at defaults). Closing it needs per-segment dividers in the layout model, not a predicate fix. | **silent**, bounded, opt-in |
+| `display-panes` label presentation | The pin paints big numerals plus the expanded `display-panes-format` across the pane's top row in the `display-panes-colour` cell. zz expands the same format per pane into `PaneIndicator.label` (1 KiB cap) and paints it through the shared styled-segment path: the TUI composes it across the pane header row right of the selection-key badge (alignment and exact-width clipping via `compose_status_row`), the GUI as an alignment-bucketed top strip inside the indicator overlay clipped at the pane edge. The label's base colours stay theme-derived — `display-panes-colour`/`display-panes-active-colour` remain store-only — and zz keeps its native badge/card instead of the pin's numerals. | **silent**, bounded |
 | Status-block suppression threshold | tmux hides the status line when `tty.sy <= statuslines` (resize.c `CLIENT_STATUSOFF`), so a 3-row terminal with `status 2` still shows both status rows plus one window row. zz panes carry a header row, so the TUI suppresses the block when `rows < statuslines + 2` (one header plus one content row must survive) — in that same 3-row terminal zz shows no status block and gives all rows to the pane. The GUI mirrors the rule against its measured canvas in line-height units. | **silent**, bounded |
 | `history-limit` default | zz keeps 10,000 lines for its product default; the pin keeps 2,000. `show-options -g history-limit` prints the effective 10,000 value. | **silent**, deliberate |
 | Plain option listings | No-argument listings contain tmux table names and `@` user names. The six zz-native settings stay available through explicit-name queries and never appear as unknown words in tmux-parsing scripts. | **silent**, zz extension hidden from tmux listings |
@@ -312,7 +315,7 @@ inside a generic “unsupported formats” claim.
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |
 | `window_offset_y` | Client viewport Y offset is not fed into window formats. | **silent** |
 
-# Options: all 180 store, 95 behave
+# Options: all 180 store, 104 behave
 
 tmux's `options-table.c` holds 180 named options (plus 68 hook entries) at the pin. Since
 the 2026-08-20 Lane-2 sweep **every one of the 180 stores** with the pin's exact default,
@@ -325,13 +328,15 @@ skipped lines**. That is test-enforced: `tmux_options.rs`
 the eight array options store with indexed semantics, and `set-option <hook-name>` writes
 the hook table — the two paths that used to silently succeed while doing nothing are dead.
 
-**86 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
+**104 behave**, meaning a value change is consumed somewhere outside set/show/inherit/
 readback (consumer-traced 2026-08-20; nine status-production names joined in the B1 server
 slice on 2026-08-21, `status-position` joined with B1's client half the same day,
 `mouse`, `escape-time`, `set-titles`, and `set-titles-string` joined with the B2/B3/title
 slice, and `command-alias`, `update-environment`, `exit-empty`, `exit-unattached`, and
 `destroy-unattached` joined with the Wave C alias/environment/lifecycle slice, and the
-nine alert/prefix2 names joined with Wave C run 2, all 2026-08-21). **85 are store-only.**
+nine alert/prefix2 names joined with Wave C run 2, all 2026-08-21; `display-panes-format`
+and the eight renderer styles joined with Wave C run 3 on 2026-08-22).
+**76 are store-only.**
 The earlier "78 behave" counted
 options given a typed home in the honest-knobs/status structs, twelve of which nothing
 read. `tmux_options::BEHAVES` distinguishes the consumer-traced names from storage-only
@@ -340,7 +345,7 @@ options and test-pins its count, uniqueness, and membership in the option catalo
 consumer wave wires a name up and moves it into `BEHAVES` (B1 moved six stored scalars and
 the `status-format` array).
 
-**Behaving (95):**
+**Behaving (104):**
 
 - Indexing and sessions: `base-index`, `pane-base-index`, `renumber-windows`,
   `default-size`, `window-size`, `aggressive-resize`, `history-limit` (10,000 product
@@ -397,8 +402,25 @@ the `status-format` array).
   synced into the shared `KeyTables` so either prefix arms the prefix table, published
   through `MuxOptionKey::Prefix2` and config-writable via `from_config_key`;
   `send-prefix -2` sends it and is a silent success while it is unset, like the pin.
+- Renderer styles and the display-panes label (Wave C run 3, 2026-08-22):
+  `display-panes-format` (the daemon expands it separately in each pane's context into
+  `PaneIndicator.label`, format-expanded but not strftime-expanded like the pin's
+  `format_single`; both clients parse the styled segments, honor `#[align=…]`, and clip),
+  `window-style`/`window-active-style` (colour halves feed the per-pane appearance bridge:
+  the daemon patches each pane's terminal fg/bg defaults with the pin's per-channel
+  active-over-base fallback, re-resolving on option writes, selection, and relocation),
+  `pane-border-style`/`pane-active-border-style` (explicit colours resolve pane → window →
+  global during personalized snapshot stamping into the v71 `PaneSnapshot` fields, `None`
+  = theme fallback; the TUI colours dividers and pane headers, the GUI its pane frame,
+  split hairline, and active-split highlight), `mode-style` (copy-mode selection colours,
+  matching the pin's `copy-mode-selection-style` default chain), and
+  `copy-mode-match-style`/`copy-mode-current-match-style` (search overlay colours through
+  the published appearance) — plus `copy-mode-mark-style`, resolved at the same seam but
+  visually inert because zz renders no mark (see the Renderer-styles row). All nine also
+  resolve as option-name formats and per-window/per-session layers in status rows and
+  `display-message -p` (see the closed scoping row).
 
-**Store-only (85):**
+**Store-only (76):**
 
 - Typed storage that nothing reads (32): `lock-after-time`,
   `lock-command` (the lock commands are no-ops); `allow-rename`, `alternate-screen`,
@@ -409,12 +431,11 @@ the `status-format` array).
   `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
   `prompt-*cursor-*`; `clock-mode-colour`, `clock-mode-style`;
   `window-status-separator`.
-- Generic scalar storage (48 of the 63 scalar-backed names) plus five of the eight
+- Generic scalar storage (39 of the 63 scalar-backed names) plus five of the eight
   arrays: everything else in the table,
-  including `display-panes-format`,
-  `remain-on-exit-format`, `status-keys`,
-  `pane-border-style`/`pane-active-border-style`,
-  `window-style`/`window-active-style`, `mode-style` and the `copy-mode-*` styles,
+  including `remain-on-exit-format`, `status-keys`,
+  `copy-mode-selection-style`, `copy-mode-position-style`,
+  `display-panes-colour`/`display-panes-active-colour`,
   `terminal-overrides[]`, `terminal-features[]`, `user-keys[]`,
   `pane-colours[]`, `codepoint-widths[]`, the 21 theme-palette options, and the
   `tree-mode-*` trio. Lane assignments live in the drop-in plan's "options residue"

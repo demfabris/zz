@@ -9,10 +9,10 @@ a dependency of this workspace**; nothing outside `gpui` itself is left.
 - At revision: `b004e595cf5de98a73b6b561394a559a94ae1e2a`
 - Upstream license: Apache-2.0, retained here as `LICENSE-APACHE`
   (© 2024–2025 Longbridge). Bundled icon artwork in `assets/icons` is
-  [Iconoir][iconoir] regular, MIT, retained as `assets/icons/LICENSE-ICONOIR`
-  (© 2021 Luca Burgio); it replaced the Lucide set the fork arrived with.
+  [Tabler Icons][tabler] outline, MIT, retained as `assets/icons/LICENSE-TABLER`
+  (© 2020–2026 Paweł Kuna); it replaced the Iconoir set.
   The vendor brand marks (`openai`, `claude`) are [Simple Icons][simple-icons],
-  CC0-1.0, and the `window-*` control glyphs are zz's own.
+  CC0-1.0.
 - `zz-ui`'s own code is `MIT OR Apache-2.0` like the rest of the workspace;
   the ported portions remain under upstream's Apache-2.0 terms.
 
@@ -128,5 +128,5 @@ Checked against this fork and deliberately **not** taken:
 [u5]: https://github.com/longbridge/gpui-component/commit/be3c8413766cafc736a0c1c80306ff0f293e04f3
 
 [upstream]: https://github.com/longbridge/gpui-component
-[iconoir]: https://iconoir.com
+[tabler]: https://tabler.io/icons
 [simple-icons]: https://simpleicons.org

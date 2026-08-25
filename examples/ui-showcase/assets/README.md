@@ -7,8 +7,8 @@ the catalog does not depend on a CDN.
 
 The upstream assets crate is distributed under Apache-2.0; see
 `LICENSE-APACHE` in this directory. The icon artwork itself is now
-[Iconoir](https://iconoir.com) regular, MIT, matching what `zz-ui`
-embeds; see `icons/LICENSE-ICONOIR`.
+[Tabler Icons](https://tabler.io/icons) outline, MIT, matching what `zz-ui`
+embeds; see `icons/LICENSE-TABLER`.
 
 The `fonts/inter/` directory contains the roman and italic variable TTFs from
 the official Inter v4.1 release. They are embedded only in the showcase and are

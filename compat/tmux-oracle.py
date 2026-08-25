@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 
-SCHEMA = 3
+SCHEMA = 4
 PIN = "d77c9dc6aa021e4bc61f0da128c591af695e6466"
 VERSION = "tmux next-3.8"
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,7 +137,7 @@ def source_commands(source):
             body = match.group(1)
             name_match = re.search(r'^\s*\.name\s*=\s*"([^"]+)"\s*,', body, re.MULTILINE)
             args_match = re.search(
-                r'^\s*\.args\s*=\s*\{\s*("(?:[^"\\]|\\.)*")\s*,\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*,',
+                r'^\s*\.args\s*=\s*\{\s*("(?:[^"\\]|\\.)*")\s*,\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*,\s*([A-Za-z_][A-Za-z0-9_]*|NULL)\s*\}',
                 body,
                 re.MULTILINE,
             )
@@ -155,8 +155,104 @@ def source_commands(source):
                 "flags": flag_shapes(specification),
                 "min_args": minimum,
                 "max_args": None if maximum == -1 else maximum,
+                "args_parse_callback": (
+                    None if args_match.group(4) == "NULL" else args_match.group(4)
+                ),
             }
     return commands
+
+
+def function_body(contents, name, path):
+    match = re.search(
+        rf"static\s+enum\s+args_parse_type\s+{re.escape(name)}\s*\([^;]*?\)\s*\{{",
+        contents,
+        re.DOTALL,
+    )
+    if match is None:
+        return None
+    start = match.end()
+    depth = 1
+    index = start
+    while index < len(contents) and depth:
+        if contents[index] == "{":
+            depth += 1
+        elif contents[index] == "}":
+            depth -= 1
+        index += 1
+    if depth:
+        fail(f"unterminated args_parse callback {name} in {path}")
+    return contents[start : index - 1]
+
+
+def classify_args_parse_body(body, name):
+    normalized = re.sub(r"\s+", "", body)
+    if normalized == "return(ARGS_PARSE_COMMANDS_OR_STRING);":
+        return "commands-or-string"
+    if normalized == (
+        "u_inti=0;enumargs_parse_typetype=ARGS_PARSE_STRING;for(;;){"
+        "type=ARGS_PARSE_STRING;if(i==idx)break;if(*args_string(args,i++)=='\\0')continue;"
+        "type=ARGS_PARSE_STRING;if(i++==idx)break;type=ARGS_PARSE_COMMANDS_OR_STRING;"
+        "if(i++==idx)break;}return(type);"
+    ):
+        return "display-menu-items"
+    if normalized == (
+        "if(idx==1||idx==2)return(ARGS_PARSE_COMMANDS_OR_STRING);"
+        "return(ARGS_PARSE_STRING);"
+    ):
+        return "if-shell-branches"
+    if normalized == (
+        "if(args_has(args,'C'))return(ARGS_PARSE_COMMANDS_OR_STRING);"
+        "return(ARGS_PARSE_STRING);"
+    ):
+        return "run-shell-command-flag"
+    if normalized == (
+        "if(args_has(args,'B'))return(ARGS_PARSE_COMMANDS_OR_STRING);"
+        "if(idx==1)return(ARGS_PARSE_COMMANDS_OR_STRING);return(ARGS_PARSE_STRING);"
+    ):
+        return "set-option-callback"
+    fail(f"unclassified args_parse callback body: {name}")
+
+
+def source_args_parse(source, commands):
+    callbacks = {
+        command["args_parse_callback"]
+        for command in commands.values()
+        if command["args_parse_callback"] is not None
+    }
+    if len(callbacks) != 9:
+        fail(f"expected 9 args_parse callbacks, got {len(callbacks)}")
+    callback_rules = {}
+    for path in sorted(source.glob("cmd-*.c")):
+        contents = path.read_text(encoding="utf-8")
+        for callback in sorted(callbacks):
+            body = function_body(contents, callback, path)
+            if body is None:
+                continue
+            if callback in callback_rules:
+                fail(f"duplicate args_parse callback definition: {callback}")
+            callback_rules[callback] = classify_args_parse_body(body, callback)
+    missing = sorted(callbacks - callback_rules.keys())
+    if missing:
+        fail(f"missing args_parse callback definitions: {', '.join(missing)}")
+    effective = {}
+    for name, command in commands.items():
+        callback = command["args_parse_callback"]
+        if callback is None:
+            continue
+        rule = callback_rules[callback]
+        if rule == "set-option-callback":
+            if name == "set-hook":
+                rule = "set-hook-monitor-or-value"
+            elif name in {"set-option", "set-window-option"}:
+                rule = "set-option-value"
+            else:
+                fail(f"unexpected command using set-option args_parse callback: {name}")
+        effective[name] = rule
+    if len(effective) != 14:
+        fail(f"expected 14 commands with args_parse callbacks, got {len(effective)}")
+    if len(set(effective.values())) != 6:
+        fail(f"expected 6 effective args_parse rules, got {len(set(effective.values()))}")
+    return dict(sorted(effective.items()))
 
 
 def source_formats(source):
@@ -280,6 +376,7 @@ def capture(path):
             env=env,
         )
     pinned_commands = source_commands(source)
+    args_parse = source_args_parse(source, pinned_commands)
     records = split_records(command_output, 3, "command", separator)
     observable_names = {name for name, _, _ in records}
     if observable_names != set(pinned_commands):
@@ -319,6 +416,7 @@ def capture(path):
         "pin": expected_pin,
         "version": version,
         "commands": commands,
+        "args_parse": args_parse,
         "options": option_names(option_outputs),
         "formats": source_formats(source),
         "format_contexts": source_format_contexts(source),

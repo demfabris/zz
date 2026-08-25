@@ -2905,7 +2905,18 @@
       ],
       "owner": "protocol",
       "items": [
-        "semantic:tracker-command-args-parse-callbacks",
+        "args-parse:bind-key",
+        "args-parse:choose-buffer",
+        "args-parse:choose-tree",
+        "args-parse:command-prompt",
+        "args-parse:confirm-before",
+        "args-parse:display-menu",
+        "args-parse:display-panes",
+        "args-parse:if-shell",
+        "args-parse:run-shell",
+        "args-parse:set-hook",
+        "args-parse:set-option",
+        "args-parse:set-window-option",
         "semantic:tracker-daemon-invalid-flag-runtime",
         "semantic:tracker-hook-producer-partition",
         "semantic:tracker-key-binding-behavior",
@@ -2914,14 +2925,17 @@
         "semantic:tracker-option-consumer-registration"
       ],
       "evidence": [
+        "resource:compat/tmux-oracle.py",
+        "resource:crates/zz-protocol/src/catalog.rs",
         "resource:crates/zz-mux/src/compat_manifest_tests.rs",
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "acceptance": [
-        "Producer- or consumer-owned inventories reconcile custom argument callbacks, hook production, shared key behavior, nonconstant and open-ended context formats, option consumption, and daemon invalid-flag handling against the live manifest."
+        "Each args-parse item moves to COMMAND_ARGS_PARSE_BEHAVES after tests prove that the runtime parser applies its pinned rule.",
+        "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, option consumption, and daemon invalid-flag handling against the live manifest."
       ],
       "depends_on": [],
-      "reason": "The source gate now reconciles structural names, coarse arity, constant stubs, selected context formats, and rendered shared binding commands plus repeat bits, but open-ended and runtime behavior still needs source-owned registrations instead of inference from matching structure."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, while per-command items mark each rule absent from `COMMAND_ARGS_PARSE_BEHAVES`. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3688,6 +3702,19 @@
         "scenario:compat/scenarios/smoke/source-file-tilde.txt"
       ],
       "resolution": "source-file no longer rewrites a literal leading ~/ after parsing: parser-expanded leading tildes still arrive as absolute paths, top-level literal tildes pass through cwd resolution, and registered-client nested literal tildes use the stable invoking base closed under source-file.nested-client-cwd. Startup and deferred event-hook base selection remain active. The CLI regression pins the top-level choice against a metacharacter-bearing daemon HOME."
+    },
+    {
+      "id": "tracker.args-parse-inventory",
+      "title": "Inventory custom command argument callbacks",
+      "closed_on": "2026-08-25",
+      "evidence": [
+        "resource:compat/tmux-oracle.py",
+        "resource:compat/tmux-tracker.py",
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Oracle schema 4 parses the pinned `args_parse` callback references and rejects callback bodies outside six recognized rules. It records 14 command-to-rule assignments from nine callbacks, including `display-menu` item groups, `run-shell -C`, and the `set-hook -B` specialization. The Rust catalog carries typed rules for the 12 implemented commands. The manifest gate requires every rule absent from `COMMAND_ARGS_PARSE_BEHAVES` to retain a command-specific `args-parse:` item; `choose-client` and `switch-mode` stay covered by their unimplemented command items. This closes discovery only. Runtime adoption remains open under `tracker.semantic-coverage`."
     }
   ],
   "known_differentials": [

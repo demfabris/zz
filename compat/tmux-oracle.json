@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 4,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "version": "tmux next-3.8",
   "commands": [
@@ -1557,6 +1557,22 @@
       "max_args": 1
     }
   ],
+  "args_parse": {
+    "bind-key": "commands-or-string",
+    "choose-buffer": "commands-or-string",
+    "choose-client": "commands-or-string",
+    "choose-tree": "commands-or-string",
+    "command-prompt": "commands-or-string",
+    "confirm-before": "commands-or-string",
+    "display-menu": "display-menu-items",
+    "display-panes": "commands-or-string",
+    "if-shell": "if-shell-branches",
+    "run-shell": "run-shell-command-flag",
+    "set-hook": "set-hook-monitor-or-value",
+    "set-option": "set-option-value",
+    "set-window-option": "set-option-value",
+    "switch-mode": "commands-or-string"
+  },
   "options": [
     "activity-action",
     "aggressive-resize",

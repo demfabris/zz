@@ -17,30 +17,30 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **91**. Classified items: **653**.
+Tracked gap groups: **91**. Classified items: **664**.
 
 - Status: open: 48, blocked: 22, accepted: 21.
 - Decision: adopt: 56, native: 15, park: 14, never: 6.
 - Priority: next: 10, later: 60, none: 21.
-- Closed history entries: 56.
-- Surface: command: 9, flag: 76, positional-min: 14, positional-max: 8, native-command: 19, option: 75, format: 101, hook: 10, key: 110, binding: 51, native-key: 58, semantic: 110, presentation: 9, protocol: 3.
+- Closed history entries: 57.
+- Surface: command: 9, flag: 76, positional-min: 14, positional-max: 8, args-parse: 12, native-command: 19, option: 75, format: 101, hook: 10, key: 110, binding: 51, native-key: 58, semantic: 109, presentation: 9, protocol: 3.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 14 selected context formats, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 76 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 14 positional-minimum mismatches, 8 positional-maximum mismatches, 0 zz-only flags on tmux command names, 19 native command names, 75 options absent from `BEHAVES`, 101 known limited formats, 0 selected context-format gaps, 0 zz-only selected context-format names, 10 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 14 selected context formats, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 76 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 14 positional-minimum mismatches, 8 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 12 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 19 native command names, 75 options absent from `BEHAVES`, 101 known limited formats, 0 selected context-format gaps, 0 zz-only selected context-format names, 10 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
-The gate reconciles command names, aliases, flag arities, positional bounds, option names,
-global and selected context-format names, hook names, and default key presence against the
-clean pinned tmux source and binary. It also reconciles options absent from `BEHAVES`,
-constant-backed formats against the live registry, omitted
+The gate reconciles command names, aliases, flag arities, positional bounds, custom
+`args_parse` rules, option names, global and selected context-format names, hook names,
+and default key presence against the clean pinned tmux source and binary. It also reconciles
+options absent from `BEHAVES`, constant-backed formats against the live registry, omitted
 and zz-only default keys against zz's key tables, rendered commands plus repeat bits for
 shared default bindings, the native roster against catalog minus oracle, every pinned
 canonical prefix against the resolver, and known scenarios against exact tuples.
 
-These structural checks cannot prove custom `args_parse` callback rules, open-ended dynamic
-format contexts, nonconstant format correctness, or whether a hook fires,
+These structural checks cannot prove that runtime parsing applies each inventoried `args_parse`
+rule, open-ended dynamic format contexts, nonconstant format correctness, or whether a hook fires,
 or that a structurally matching binding behaves identically at runtime. Differential scenarios,
 attached-client fixtures, unit tests, and manual GUI checks supply that behavioral evidence. The
 tracker keeps the remaining semantic discovery work explicit instead of treating matching
@@ -1729,20 +1729,23 @@ The mux cannot inspect cursor, history, or terminal mode state.
 
 ### `tracker.semantic-coverage`: Close the remaining semantic discovery blind spots
 
-The source gate now reconciles structural names, coarse arity, constant stubs, selected context formats, and rendered shared binding commands plus repeat bits, but open-ended and runtime behavior still needs source-owned registrations instead of inference from matching structure.
+Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, while per-command items mark each rule absent from `COMMAND_ARGS_PARSE_BEHAVES`. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `next` / `medium`
 - Owner: `protocol`
 - User impact: scripts
-- Items: `semantic:tracker-command-args-parse-callbacks`, `semantic:tracker-daemon-invalid-flag-runtime`, `semantic:tracker-hook-producer-partition`, `semantic:tracker-key-binding-behavior`, `semantic:tracker-nonconstant-format-behavior`, `semantic:tracker-open-context-format-vocabulary`, `semantic:tracker-option-consumer-registration`
+- Items: `args-parse:bind-key`, `args-parse:choose-buffer`, `args-parse:choose-tree`, `args-parse:command-prompt`, `args-parse:confirm-before`, `args-parse:display-menu`, `args-parse:display-panes`, `args-parse:if-shell`, `args-parse:run-shell`, `args-parse:set-hook`, `args-parse:set-option`, `args-parse:set-window-option`, `semantic:tracker-daemon-invalid-flag-runtime`, `semantic:tracker-hook-producer-partition`, `semantic:tracker-key-binding-behavior`, `semantic:tracker-nonconstant-format-behavior`, `semantic:tracker-open-context-format-vocabulary`, `semantic:tracker-option-consumer-registration`
 - Depends on: none
 - Evidence:
+  - `resource:compat/tmux-oracle.py`
+  - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
   - `resource:knowledge/playbooks/compat-harness.md`
 - Acceptance:
-  - `Producer- or consumer-owned inventories reconcile custom argument callbacks, hook production, shared key behavior, nonconstant and open-ended context formats, option consumption, and daemon invalid-flag handling against the live manifest.`
+  - `Each args-parse item moves to COMMAND_ARGS_PARSE_BEHAVES after tests prove that the runtime parser applies its pinned rule.`
+  - `Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, option consumption, and daemon invalid-flag handling against the live manifest.`
 
 ## Known differential scenarios
 
@@ -1811,3 +1814,4 @@ The source gate now reconciles structural names, coarse arity, constant stubs, s
 | `source-file.reload-config-client-cwd` | 2026-08-25 | A registered client's direct zz-native reload-config now snapshots the same selected source base as source-file and carries it through the default mux.conf replay. A CLI regression runs from a cwd containing spaces and glob metacharacters, places distinct leaf files in the caller cwd and beside mux.conf, clears the earlier sourced state, and proves direct reload selects the caller-root leaf. A daemon regression proves clientless replay still uses the containing-file fallback. The change reuses the v72 ClientHello cwd and existing daemon state without a protocol change. Startup, attached session-cwd selection, deferred event hooks, and hooks raised during sentinel replay retain their separate tracked gaps. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `source-file.startup-depth-accounting` | 2026-08-24 | One startup accounting value now spans every explicit or discovered top-level configuration. The roots do not consume slots; source commands 1 through 50 run, command 51 and later retain the declaring file and line in their cause, quiet misses consume slots, and one command with many paths consumes one slot. Runtime sequential source commands remain unbounded, while the zz-native `reload-config` whole-root replay takes one fresh startup budget of its own so reloading a file lands the same state a fresh start would. Client delivery and placement of retained startup causes remain tracked under config.startup-diagnostic-delivery. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs` |
 | `source-file.tilde-semantics` | 2026-08-23 | source-file no longer rewrites a literal leading ~/ after parsing: parser-expanded leading tildes still arrive as absolute paths, top-level literal tildes pass through cwd resolution, and registered-client nested literal tildes use the stable invoking base closed under source-file.nested-client-cwd. Startup and deferred event-hook base selection remain active. The CLI regression pins the top-level choice against a metacharacter-bearing daemon HOME. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/scenarios/smoke/fixtures/source-file-tilde-decoy.conf`, `scenario:compat/scenarios/smoke/source-file-tilde.txt` |
+| `tracker.args-parse-inventory` | 2026-08-25 | Oracle schema 4 parses the pinned `args_parse` callback references and rejects callback bodies outside six recognized rules. It records 14 command-to-rule assignments from nine callbacks, including `display-menu` item groups, `run-shell -C`, and the `set-hook -B` specialization. The Rust catalog carries typed rules for the 12 implemented commands. The manifest gate requires every rule absent from `COMMAND_ARGS_PARSE_BEHAVES` to retain a command-specific `args-parse:` item; `choose-client` and `switch-mode` stay covered by their unimplemented command items. This closes discovery only. Runtime adoption remains open under `tracker.semantic-coverage`. | `resource:compat/tmux-oracle.py`, `resource:compat/tmux-tracker.py`, `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `resource:knowledge/playbooks/compat-harness.md` |

@@ -61,6 +61,7 @@ ITEM_PATTERNS = [
     re.compile(r"^native-command:[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^native-alias:[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^extension-flag:[a-z0-9][a-z0-9-]*:-[A-Za-z0-9]$"),
+    re.compile(r"^args-parse:[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^(semantic|presentation|protocol):[a-z0-9][a-z0-9._-]*$"),
 ]
 
@@ -289,6 +290,7 @@ def validate_manifest(manifest, oracle, include_report):
             "pin",
             "version",
             "commands",
+            "args_parse",
             "options",
             "formats",
             "format_contexts",
@@ -301,8 +303,8 @@ def validate_manifest(manifest, oracle, include_report):
                 + ", ".join(sorted(expected_oracle))
                 + f"; got {', '.join(sorted(oracle))}"
             )
-        if oracle.get("schema") != 3:
-            errors.append("compat/tmux-oracle.json schema must be 3")
+        if oracle.get("schema") != 4:
+            errors.append("compat/tmux-oracle.json schema must be 4")
         if oracle.get("pin") != pin:
             errors.append("manifest and oracle pins differ")
         if not isinstance(oracle.get("version"), str) or not oracle.get("version"):
@@ -374,6 +376,41 @@ def validate_manifest(manifest, oracle, include_report):
             errors.append("oracle.commands must be sorted by name")
         if len(command_names) != len(set(command_names)):
             errors.append("oracle.commands contains duplicate names")
+        args_parse = oracle.get("args_parse")
+        if not isinstance(args_parse, dict) or not args_parse:
+            errors.append("compat/tmux-oracle.json args_parse must be a nonempty object")
+            args_parse = {}
+        if list(args_parse) != sorted(args_parse):
+            errors.append("oracle.args_parse must be sorted by command name")
+        args_parse_rules = {
+            "commands-or-string",
+            "display-menu-items",
+            "if-shell-branches",
+            "run-shell-command-flag",
+            "set-hook-monitor-or-value",
+            "set-option-value",
+        }
+        if len(args_parse) != 14:
+            errors.append(f"oracle.args_parse must contain 14 commands, got {len(args_parse)}")
+        observed_args_parse_rules = {
+            rule for rule in args_parse.values() if isinstance(rule, str)
+        }
+        if observed_args_parse_rules != args_parse_rules:
+            errors.append("oracle.args_parse must contain all 6 recognized effective rules")
+        for name, rule in args_parse.items():
+            if name not in command_names:
+                errors.append(f"oracle.args_parse names an unknown command: {name}")
+            if not isinstance(rule, str) or rule not in args_parse_rules:
+                errors.append(f"oracle.args_parse[{name!r}] has an unknown rule: {rule!r}")
+            item = f"args-parse:{name}"
+            if item in items and f"command:{name}" in items:
+                errors.append(f"unimplemented callback command has a separate args-parse item: {item}")
+        for item in items:
+            if not item.startswith("args-parse:"):
+                continue
+            name = item.removeprefix("args-parse:")
+            if name not in args_parse:
+                errors.append(f"stale args-parse item: {item}")
         for field in ("options", "formats", "hooks"):
             values = string_list(oracle.get(field), f"oracle.{field}", errors, allow_empty=False)
             if values != sorted(values):
@@ -563,6 +600,7 @@ def render_report(manifest, oracle):
         "flag-arity",
         "positional-min",
         "positional-max",
+        "args-parse",
         "extension-flag",
         "native-command",
         "native-alias",
@@ -627,6 +665,9 @@ def render_report(manifest, oracle):
         f"{item_counts['flag-arity']} implemented flag-arity mismatches, "
         f"{item_counts['positional-min']} positional-minimum mismatches, "
         f"{item_counts['positional-max']} positional-maximum mismatches, "
+        f"{len(oracle['args_parse'])} callback-bearing commands across "
+        f"{len(set(oracle['args_parse'].values()))} effective `args_parse` rules, "
+        f"{item_counts['args-parse']} implemented commands without verified callback behavior, "
         f"{item_counts['extension-flag']} zz-only flags on tmux command names, "
         f"{item_counts['native-command']} native command names, "
         f"{item_counts['option']} options absent from `BEHAVES`, "
@@ -640,16 +681,16 @@ def render_report(manifest, oracle):
         "",
         "## Enforcement boundary",
         "",
-        "The gate reconciles command names, aliases, flag arities, positional bounds, option names,",
-        "global and selected context-format names, hook names, and default key presence against the",
-        "clean pinned tmux source and binary. It also reconciles options absent from `BEHAVES`,",
-        "constant-backed formats against the live registry, omitted",
+        "The gate reconciles command names, aliases, flag arities, positional bounds, custom",
+        "`args_parse` rules, option names, global and selected context-format names, hook names,",
+        "and default key presence against the clean pinned tmux source and binary. It also reconciles",
+        "options absent from `BEHAVES`, constant-backed formats against the live registry, omitted",
         "and zz-only default keys against zz's key tables, rendered commands plus repeat bits for",
         "shared default bindings, the native roster against catalog minus oracle, every pinned",
         "canonical prefix against the resolver, and known scenarios against exact tuples.",
         "",
-        "These structural checks cannot prove custom `args_parse` callback rules, open-ended dynamic",
-        "format contexts, nonconstant format correctness, or whether a hook fires,",
+        "These structural checks cannot prove that runtime parsing applies each inventoried `args_parse`",
+        "rule, open-ended dynamic format contexts, nonconstant format correctness, or whether a hook fires,",
         "or that a structurally matching binding behaves identically at runtime. Differential scenarios,",
         "attached-client fixtures, unit tests, and manual GUI checks supply that behavioral evidence. The",
         "tracker keeps the remaining semantic discovery work explicit instead of treating matching",

@@ -10,7 +10,8 @@ mod style;
 mod terminal_codec;
 
 pub use catalog::{
-    COMMAND_SPECS, CommandOptionSpec, CommandResolution, CommandSpec, CommandValueKind,
+    COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, COMMAND_SPECS, CommandArgsParseRule,
+    CommandArgsParseSpec, CommandOptionSpec, CommandResolution, CommandSpec, CommandValueKind,
     DAEMON_COMMAND_SPECS, NATIVE_COMMAND_NAMES, canonical_command, catalog_command_spec,
     command_spec, command_specs, resolve_command,
 };

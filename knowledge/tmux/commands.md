@@ -41,6 +41,23 @@ accepted usage strings, flags/options, and completion value kinds; `canonical_co
 take the next arg or an attached form (`-tfoo`); a bare `--` ends option parsing; clustered short
 flags (`-Zs`) split into `-Z -s`. Target resolution lives in `MuxState`:
 
+Oracle schema 4 extracts tmux's custom `args_parse` callbacks from the pinned source. The extractor
+accepts six rules and fails when a callback body falls outside them:
+
+| Rule | Pinned command positions |
+| --- | --- |
+| `commands-or-string` | Every positional on `bind-key`, `choose-buffer`, `choose-client`, `choose-tree`, `command-prompt`, `confirm-before`, `display-panes`, and `switch-mode` |
+| `display-menu-items` | Each nonempty menu name has a string key followed by a command-or-string action; an empty name consumes no key or action |
+| `if-shell-branches` | Positions 1 and 2 are command-or-string branches; position 0 stays a string |
+| `run-shell-command-flag` | Every positional becomes command-or-string when `-C` is present and stays a string without it |
+| `set-option-value` | Position 1 is command-or-string for `set-option` and `set-window-option` |
+| `set-hook-monitor-or-value` | `set-hook -B` makes every positional command-or-string; without `-B`, position 1 uses that type |
+
+`COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
+remain unimplemented and need no sidecar entry. No implemented command has passed this behavior gate,
+so `COMMAND_ARGS_PARSE_BEHAVES` is empty and `tracker.semantic-coverage` owns 12 command-specific
+`args-parse:` items. This inventory adds no parser or daemon behavior.
+
 | Target | Resolver | Accepts |
 | --- | --- | --- |
 | `-t $N` / session name | `resolve_session` | `$id`, exact name, `=name` exact-only escape, unique prefix, unique `fnmatch` pattern (`*`, `?`, `[…]`, with `/` ordinary), or the current/first session. An empty string means current. |

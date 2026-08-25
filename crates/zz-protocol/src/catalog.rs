@@ -135,6 +135,75 @@ impl CommandSpec {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandArgsParseRule {
+    CommandsOrString,
+    DisplayMenuItems,
+    IfShellBranches,
+    RunShellCommandFlag,
+    SetHookMonitorOrValue,
+    SetOptionValue,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommandArgsParseSpec {
+    pub name: &'static str,
+    pub rule: CommandArgsParseRule,
+}
+
+pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
+    CommandArgsParseSpec {
+        name: "bind-key",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
+    CommandArgsParseSpec {
+        name: "choose-buffer",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
+    CommandArgsParseSpec {
+        name: "choose-tree",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
+    CommandArgsParseSpec {
+        name: "command-prompt",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
+    CommandArgsParseSpec {
+        name: "confirm-before",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
+    CommandArgsParseSpec {
+        name: "display-menu",
+        rule: CommandArgsParseRule::DisplayMenuItems,
+    },
+    CommandArgsParseSpec {
+        name: "display-panes",
+        rule: CommandArgsParseRule::CommandsOrString,
+    },
+    CommandArgsParseSpec {
+        name: "if-shell",
+        rule: CommandArgsParseRule::IfShellBranches,
+    },
+    CommandArgsParseSpec {
+        name: "run-shell",
+        rule: CommandArgsParseRule::RunShellCommandFlag,
+    },
+    CommandArgsParseSpec {
+        name: "set-hook",
+        rule: CommandArgsParseRule::SetHookMonitorOrValue,
+    },
+    CommandArgsParseSpec {
+        name: "set-option",
+        rule: CommandArgsParseRule::SetOptionValue,
+    },
+    CommandArgsParseSpec {
+        name: "set-window-option",
+        rule: CommandArgsParseRule::SetOptionValue,
+    },
+];
+
+pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[];
+
 use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
 };

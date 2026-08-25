@@ -47,9 +47,10 @@ The reference commit is tmux `d77c9dc6aa021e4bc61f0da128c591af695e6466`
 
 The pin is an oracle, not a dependency. Updating it is a separate compatibility event.
 
-Oracle schema 3 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
+Oracle schema 4 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
 valueless, 246 required-value, and 8 optional-value. Each command also carries positional minimum
-and maximum metadata. The remaining inventories contain 180 options, 198 global format-table
+and maximum metadata. It parses nine custom `args_parse` callbacks used by 14 commands and reduces
+them to six effective rules. The remaining inventories contain 180 options, 198 global format-table
 names, 14 source-enumerated names across three selected format contexts, 68 hooks, and 303 default
 bindings across five tables. The context selection consists of 1 shared `command-item` name, 3
 `list-commands` names, and 10 `list-keys` names. zz implements all 14. The 13 list-specific names
@@ -81,19 +82,22 @@ set status.
 
 `just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, then
 runs the full `zz-mux` library suite. The Rust gate reconciles upstream command and alias names,
-flag arities, positional bounds, option names, global and selected context-format names, and hook
-names. It classifies native commands, native aliases, zz-only flags on tmux command names, and every
-zz-only default key. It derives the guarded native-name roster from the catalog minus the pinned
-oracle, then checks every pinned canonical prefix against the live resolver. It pairs every
+flag arities, positional bounds, custom argument rules, option names, global and selected
+context-format names, and hook names. It classifies native commands, native aliases, zz-only flags
+on tmux command names, and every zz-only default key. It derives the guarded native-name roster from
+the catalog minus the pinned oracle, then checks every pinned canonical prefix against the live
+resolver. It pairs every
 constant-backed format with a manifest item and tracks every missing default key across `root`,
 `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. For each shared default key, it reconciles the
 rendered command and repeat bit or requires a named `binding:` divergence.
 
-The gate does not prove custom `args_parse` callbacks, open-ended or dynamic context-format names,
-nonconstant format behavior, hook production, runtime behavior for shared bindings, consumer truth
-for `BEHAVES`, or daemon runtime handling of invalid flags. `tracker.semantic-coverage` owns those
-seven blind spots. Differential scenarios, attached-client fixtures, unit tests, and manual GUI
-checks supply behavioral evidence.
+The gate does not prove that the runtime parser applies each inventoried `args_parse` rule,
+open-ended or dynamic context-format names, nonconstant format behavior, hook production, runtime
+behavior for shared bindings, consumer truth for option `BEHAVES`, or daemon runtime handling of
+invalid flags. `tracker.semantic-coverage` owns those seven blind spots. Its 12 `args-parse:` items
+name the implemented callback commands; `choose-client` and `switch-mode` remain covered by their
+unimplemented command items. Differential scenarios, attached-client fixtures, unit tests, and
+manual GUI checks supply behavioral evidence.
 
 The [2026-08-22 CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
 preserves the measured baseline at commit `202f322`. Its counts describe that audit date. The

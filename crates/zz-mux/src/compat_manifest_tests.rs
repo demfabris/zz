@@ -6,8 +6,8 @@ use std::{
 
 use serde::Deserialize;
 use zz_protocol::{
-    CommandResolution, DAEMON_COMMAND_SPECS, KeyTables, NATIVE_COMMAND_NAMES, canonical_key,
-    resolve_command,
+    COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, CommandArgsParseRule, CommandResolution,
+    DAEMON_COMMAND_SPECS, KeyTables, NATIVE_COMMAND_NAMES, canonical_key, resolve_command,
 };
 
 use crate::{
@@ -33,6 +33,7 @@ struct Gap {
 #[derive(Deserialize)]
 struct Oracle {
     commands: Vec<OracleCommand>,
+    args_parse: BTreeMap<String, String>,
     options: Vec<String>,
     formats: Vec<String>,
     format_contexts: BTreeMap<String, Vec<String>>,
@@ -101,6 +102,17 @@ fn item_key(value: &str) -> String {
     let key = canonical_key(value);
     key.strip_suffix(' ')
         .map_or_else(|| key.clone(), |prefix| format!("{prefix}Space"))
+}
+
+fn args_parse_rule_name(rule: CommandArgsParseRule) -> &'static str {
+    match rule {
+        CommandArgsParseRule::CommandsOrString => "commands-or-string",
+        CommandArgsParseRule::DisplayMenuItems => "display-menu-items",
+        CommandArgsParseRule::IfShellBranches => "if-shell-branches",
+        CommandArgsParseRule::RunShellCommandFlag => "run-shell-command-flag",
+        CommandArgsParseRule::SetHookMonitorOrValue => "set-hook-monitor-or-value",
+        CommandArgsParseRule::SetOptionValue => "set-option-value",
+    }
 }
 
 #[test]
@@ -492,6 +504,94 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
     assert_eq!(
         tracked_native_contexts, native_contexts,
         "native selected context formats and tracked items differ"
+    );
+}
+
+#[test]
+fn args_parse_gaps_match_the_pinned_oracle() {
+    let (oracle, items) = inventory();
+    let specs = specs();
+    let mut sidecar = BTreeMap::new();
+    let mut sidecar_order = Vec::new();
+    for spec in COMMAND_ARGS_PARSE_SPECS {
+        assert!(
+            sidecar
+                .insert(spec.name, args_parse_rule_name(spec.rule))
+                .is_none(),
+            "duplicate args_parse sidecar command: {}",
+            spec.name
+        );
+        sidecar_order.push(spec.name);
+    }
+    assert_eq!(
+        sidecar_order,
+        sidecar_order
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        "args_parse sidecar must be sorted and unique"
+    );
+
+    let implemented = oracle
+        .args_parse
+        .keys()
+        .filter(|name| specs.contains_key(name.as_str()))
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        sidecar.keys().copied().collect::<BTreeSet<_>>(),
+        implemented,
+        "args_parse sidecar commands differ from the implemented pinned callback inventory"
+    );
+    for (name, rule) in &oracle.args_parse {
+        if let Some(sidecar_rule) = sidecar.get(name.as_str()) {
+            assert_eq!(
+                *sidecar_rule, rule,
+                "args_parse rule differs for implemented command {name}"
+            );
+            assert!(
+                !items.contains_key(&format!("command:{name}")),
+                "implemented callback command has a command item: {name}"
+            );
+        } else {
+            assert!(
+                items.contains_key(&format!("command:{name}")),
+                "unimplemented callback command lacks its command item: {name}"
+            );
+            assert!(
+                !items.contains_key(&format!("args-parse:{name}")),
+                "unimplemented callback command has a separate args-parse item: {name}"
+            );
+        }
+    }
+
+    let behaves = COMMAND_ARGS_PARSE_BEHAVES
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        behaves.len(),
+        COMMAND_ARGS_PARSE_BEHAVES.len(),
+        "args_parse BEHAVES contains duplicates"
+    );
+    assert!(
+        behaves.is_subset(&implemented),
+        "args_parse BEHAVES contains a command outside the sidecar"
+    );
+    let expected_items = implemented
+        .difference(&behaves)
+        .map(|name| format!("args-parse:{name}"))
+        .collect::<BTreeSet<_>>();
+    let tracked_items = items
+        .keys()
+        .filter(|item| item.starts_with("args-parse:"))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        tracked_items, expected_items,
+        "unverified args_parse rules and tracked items differ"
     );
 }
 

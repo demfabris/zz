@@ -281,13 +281,14 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    not tmux compatibility gates.
 6. Put every compatibility TODO and accepted difference in one repo-owned registry. **Schema 3
    review complete 2026-08-23:** `compat/tmux-gaps.json` owns stable IDs, product status,
-   `depends_on` ordering, priorities, evidence, `updated_on`, and closed history. Oracle schema 3
+   `depends_on` ordering, priorities, evidence, `updated_on`, and closed history. Oracle schema 4
    captures 92 commands, 78 aliases, 572 flag shapes split into 318 valueless, 246 required-value,
-   and 8 optional-value shapes, plus positional minimum and maximum metadata. It also captures 180
-   options, 198 global formats, 14 source-enumerated names across the selected `command-item`,
-   `list-commands`, and `list-keys` contexts, 68 hooks, and 303 default bindings across five tables
-   from an attested clean build at the exact pin. `just compat-check` runs the oracle and registry
-   checks plus the full `zz-mux` library suite.
+   and 8 optional-value shapes, plus positional minimum and maximum metadata. It parses nine custom
+   `args_parse` callbacks used by 14 commands and reduces them to six effective rules. It also
+   captures 180 options, 198 global formats, 14 source-enumerated names across the selected
+   `command-item`, `list-commands`, and `list-keys` contexts, 68 hooks, and 303 default bindings
+   across five tables from an attested clean build at the exact pin. `just compat-check` runs the
+   oracle and registry checks plus the full `zz-mux` library suite.
 
    `mux.resize-pane-optional-values` closed on 2026-08-25 as a catalog-only reconciliation.
    Runtime already accepted bare direction flags with amount 1 and attached or separated integer
@@ -354,10 +355,16 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    `aliases.config-parse-unit`, while local argument validation and replay-group parse abort stay
    under `mux.chain-parse-abort`.
 
-   `tracker.semantic-coverage` tracks custom `args_parse` callbacks, open-ended or dynamic context
-   formats, nonconstant formats, hook production, shared binding runtime behavior, `BEHAVES`
-   consumer truth, and daemon runtime invalid-flag handling. `knowledge/tmux/gaps.md` remains
-   generated from the registry.
+   `tracker.args-parse-inventory` closed callback discovery on 2026-08-25. The oracle rejects an
+   unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
+   commands, and the third manifest test requires one `args-parse:` item for each rule absent from
+   `COMMAND_ARGS_PARSE_BEHAVES`. That behaving roster starts empty. The unimplemented
+   `choose-client` and `switch-mode` callbacks stay covered by their command items.
+
+   `tracker.semantic-coverage` tracks runtime adoption of the six argument rules, open-ended or
+   dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
+   option `BEHAVES` consumer truth, and daemon runtime invalid-flag handling.
+   `knowledge/tmux/gaps.md` remains generated from the registry.
 
 Without this gate, easy compatibility fixes can land while the persisted proof quietly goes stale.
 
@@ -631,6 +638,10 @@ permanent product decision has been recorded for them.
   and Command and Control clients keep stdout. Stock copy tables now expose the pin's zero repeat
   metadata without changing runtime copy repetition. zz uses a documented total order where the
   pin's truncated comparator is non-total.
+- 2026-08-25: Oracle schema 4 added a fail-closed inventory for custom command argument callbacks.
+  Nine callback bodies reduce to six rules across 14 commands. The protocol catalog mirrors the 12
+  implemented commands, while `COMMAND_ARGS_PARSE_BEHAVES` and command-specific tracker items record
+  behavior adoption. The two unimplemented callback commands keep their command-level gaps.
 - 2026-08-25: vi numeric counts moved onto one flat protocol-v75 terminal action. The first `send`
   or `send-keys` command whose option prefix contains `-X` consumes the count. Its stored `-N` wins;
   otherwise zz inserts separate `-N <count>` arguments before the option argument containing `-X`.

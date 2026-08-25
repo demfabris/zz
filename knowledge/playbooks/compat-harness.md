@@ -42,24 +42,25 @@ just compat-check
 ```
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
-and registry, asserts that both named manifest tests still exist, then runs the full `zz-mux`
+and registry, asserts that all three named manifest tests still exist, then runs the full `zz-mux`
 library suite. Linux CI runs the same command after restoring the pinned tmux cache. A full
 `compat/run.sh` checks the oracle and tracker before executing scenarios.
 
-Oracle schema 3 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
+Oracle schema 4 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
 valueless, 246 required-value, and 8 optional-value. Every command also carries its positional
-minimum and maximum. The remaining inventories contain 180 options, 198 global format-table names,
-14 source-enumerated names across the selected `command-item`, `list-commands`, and `list-keys`
-contexts, 68 hooks, and 303 default bindings across `root`, `prefix`, `copy-mode`, `copy-mode-vi`,
-and `move`.
+minimum and maximum. The source pass also records 14 commands that use nine custom `args_parse`
+callbacks as six effective rules. The remaining inventories contain 180 options, 198 global
+format-table names, 14 source-enumerated names across the selected `command-item`, `list-commands`,
+and `list-keys` contexts, 68 hooks, and 303 default bindings across `root`, `prefix`, `copy-mode`,
+`copy-mode-vi`, and `move`.
 
-The Rust gate reconciles command and alias names, flag arities, positional bounds, option names,
-global and selected context-format names, and hook names. It also classifies native commands,
-native aliases, zz-only flags on tmux command names, and every zz-only default key. It derives the
-guarded native-name roster from the catalog minus the pinned oracle and checks every pinned
-canonical prefix against the resolver. It pairs every constant-backed format with a manifest item
-and tracks every missing default key across all five tmux tables. For each shared default key, it
-also reconciles the rendered command and repeat bit or requires a named `binding:` divergence. The
+The Rust gate reconciles command and alias names, flag arities, positional bounds, custom argument
+rules, option names, global and selected context-format names, and hook names. It also classifies
+native commands, native aliases, zz-only flags on tmux command names, and every zz-only default key.
+It derives the guarded native-name roster from the catalog minus the pinned oracle and checks every
+pinned canonical prefix against the resolver. It pairs every constant-backed format with a manifest
+item and tracks every missing default key across all five tmux tables. For each shared default key,
+it also reconciles the rendered command and repeat bit or requires a named `binding:` divergence. The
 three selected context rosters contain 1 `command-item` name, 3 `list-commands` names, and 10
 `list-keys` names. zz implements all 14. `formats.command-item-context` closed on 2026-08-24: the
 mux dispatch chokepoint carries the canonical entry name into every command it runs, so `#{command}`
@@ -106,11 +107,17 @@ Local attach, stdin, kill, and malformed-alias preprocessing also has focused bi
 Remote `--host` preparation, local flag or arity prevalidation, and config or source-file
 replay-group abort remain explicit tracker gaps.
 
-Those structural checks leave seven semantic discovery gaps: custom `args_parse` callbacks,
-open-ended or dynamic context-format names, nonconstant format behavior, hook production, runtime
-behavior for shared bindings, consumer truth for names in `BEHAVES`, and daemon runtime handling of
-invalid flags. `tracker.semantic-coverage` owns that work. Differential scenarios, attached-client
-fixtures, unit tests, and manual GUI checks remain the behavioral evidence.
+Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
+12 implemented callback commands, and `COMMAND_ARGS_PARSE_BEHAVES` stays empty until runtime tests
+prove a command's rule. The manifest therefore carries 12 `args-parse:` items. The unimplemented
+`choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
+the whole command.
+
+Seven semantic gaps remain: runtime adoption of the inventoried argument rules, open-ended or
+dynamic context-format names, nonconstant format behavior, hook production, runtime behavior for
+shared bindings, consumer truth for names in option `BEHAVES`, and daemon runtime handling of invalid
+flags. `tracker.semantic-coverage` owns that work. Differential scenarios, attached-client fixtures,
+unit tests, and manual GUI checks remain the behavioral evidence.
 
 Regenerate the readable report after changing the manifest:
 
@@ -130,7 +137,7 @@ Use the registry vocabulary consistently:
   while a blocked gap may have no tracked dependency.
 - `priority` is `now`, `next`, `later`, or `none`; `ease` is `easy`, `medium`, `hard`, `hardest`, or
   `none`. Accepted items use `none` for both.
-- `items` holds normalized upstream, arity, positional-bound, selected context-format,
+- `items` holds normalized upstream, arity, positional-bound, `args-parse`, selected context-format,
   native-extension, semantic, presentation, and protocol identifiers. The source gate reconciles
   structural identifiers where code exposes an inventory. `evidence` points to source, tests, or
   scenarios; `acceptance` states the condition that closes or accepts the gap.
@@ -447,7 +454,7 @@ than this corpus.
 | --- | --- |
 | `compat/check.sh` | Runs the oracle, registry, and full `zz-mux` library gate |
 | `compat/tmux-gaps.json` | Owns active gaps, product status, ordering, evidence, and closed history |
-| `compat/tmux-oracle.json` | Records schema 3 source and runtime inventories from the pin |
+| `compat/tmux-oracle.json` | Records schema 4 source and runtime inventories from the pin |
 | `compat/tmux-oracle.py` | Captures and verifies the oracle from a clean pinned source checkout |
 | `compat/tmux-tracker.py` | Validates the registry and generates the readable gap report |
 | `compat/run.sh` | Builds both binaries and selects scenarios; a full run with `--attached-client` writes the canonical combined summary |

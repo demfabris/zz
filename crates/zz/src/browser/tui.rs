@@ -12,7 +12,7 @@ use zz_browser::{
     OsrFrame, PointerButton, PointerEvent, PointerPhase, RuntimePhase, RuntimeSignal, SessionPhase,
     Viewport, WheelEvent, normalize_browser_profile_name,
 };
-use zz_protocol::{BrowserCommand, BrowserDescriptor, KeyToken, PaneId};
+use zz_protocol::{BrowserCommand, BrowserDescriptor, KeyToken, MAX_BROWSER_KEY_REPEAT, PaneId};
 use zz_terminal::{
     KeyAction as TerminalKeyAction, KeyCode as TerminalKeyCode, KeyInput as TerminalKeyInput,
 };
@@ -501,7 +501,9 @@ impl BrowserFrameProvider for TuiBrowserProvider {
     fn command(&mut self, pane: PaneId, command: &BrowserCommand) {
         if matches!(
             command,
-            BrowserCommand::SendKeys(_) | BrowserCommand::Key(_)
+            BrowserCommand::SendKeys(_)
+                | BrowserCommand::SendKeysRepeated { .. }
+                | BrowserCommand::Key(_)
         ) {
             self.focus(pane);
         }
@@ -541,6 +543,23 @@ impl BrowserFrameProvider for TuiBrowserProvider {
                         KeyToken::Named(name) => {
                             if let Some(input) = browser_named_key(name) {
                                 session.browser.send_key(input);
+                            }
+                        }
+                    }
+                }
+            }
+            BrowserCommand::SendKeysRepeated { keys, count } => {
+                let Some(session) = surface.session.as_ref() else {
+                    return;
+                };
+                for _ in 0..(*count).min(MAX_BROWSER_KEY_REPEAT) {
+                    for token in keys {
+                        match token {
+                            KeyToken::Literal(text) => session.browser.send_text(text),
+                            KeyToken::Named(name) => {
+                                if let Some(input) = browser_named_key(name) {
+                                    session.browser.send_key(input);
+                                }
                             }
                         }
                     }

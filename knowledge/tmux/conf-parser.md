@@ -4,7 +4,7 @@ title: tmux-grammar config parser (parser.rs)
 description: A single-pass tmux-style tokenizer plus the daemon replay layer that keeps stored zz/config mux overrides above the sourced zz/mux.conf configuration.
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
-timestamp: 2026-08-19T00:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -64,27 +64,55 @@ quotes the next character, a wildcard does not include a leading dot, repeated s
 wildcards rather than recursive traversal, and an unmatched bracket can be a literal. A pattern
 that finds nothing follows the ordinary missing-file path, including malformed forms that libc
 treats as no match. A `-q` miss is silent without stopping later paths. Nested loud no-match and
-glob errors retain the post-`-F` declared argument; a nested `-q` no-match stays silent. Command and
-Interactive clients receive those diagnostics directly. For the current pinned English families,
-zz Control groups all misses from one nested source command into a synthesized standalone plain
-`%error` after the successful outer frame. That is not tmux's complete replay model: tmux gives every
-sourced command its own guard, ends a nested partial match with `%end`, and orders a containing
-command's missing arguments before deeper recursion. `control-mode.sourced-command-frames` owns the
-missing guards; `source-file.nested-control-queue` owns nested termination and ordering. Typed
-Control classification also remains open for localized or platform-specific
-errors. Counting the initial `source-file` as invocation 1, both sides run 50 concurrent
+glob errors retain the post-`-F` declared argument; a nested `-q` no-match stays silent. For a
+registered client, the daemon snapshots the top-level source base before replay and passes it through
+each recursive load. An ordinary sourced command still executes through `ClientId(u64::MAX)` and
+clears the mutable `ExecutionContext` cwd, but the next nested source continues to use the invoking
+client's stable base. Runtime `source-file` treats the active default `zz/mux.conf` as an ordinary
+matched path and forwards that same base into nested replay. A direct `reload-config` from a
+registered client snapshots and forwards the base through its separate native reset path. Startup
+replay and sentinel-client reloads pass no source base, so startup remains under
+`source-file.startup-client-cwd`. Deferred event hooks still use the sentinel client under
+`source-file.event-hook-client-cwd`. A hook raised by an ordinary sourced command also starts from
+the sentinel replay client, outside this recursion base; `source-file.sourced-hook-client-cwd`
+tracks that path.
+`clients.attach-context` still owns the attached case where the session cwd differs
+from the cwd in the client hello. Command and Interactive clients receive those diagnostics
+directly. Protocol v76 gives Control one `SourcedCommandGuard` for each replayed command that
+survives command-name resolution. Unknown or ambiguous command names and malformed alias names
+publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary success
+and a quiet all-miss produce an empty flags-1 `%end` guard. A nested hit plus miss carries
+its declared-path diagnostic inside `%end`; an all-miss, flag or arity failure, runtime failure, or
+depth refusal ends `%error`. `client_failure` is separate from the terminator, so runtime failures
+retain exit 1 through a later clean detach while parse and source-command diagnostics can remain
+nonsticky. The Control writer defers guards FIFO until the direct outer frame closes. The existing
+loader preflights every declared path for one source command before recursion. A focused regression
+and the strict six-step Control differential prove the resulting root-miss guard, middle-miss guard,
+then leaf-output guard order, each exactly once; no production change was required. This closes
+`source-file.nested-control-queue` for ordering only. A matched source replay can still return a
+completed nonzero `CommandResponse::Success` that the Control front end does not retain through every
+EOF and detach ordering. `control-mode.source-file-exit-status` owns that client process-state gap;
+source-command diagnostics do not become globally sticky.
+
+Matched child read failures follow their parent source guard as typed standalone Error events.
+Invalid UTF-8, numeric OS errors, and colon-space paths use that path without text classification.
+No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
+summaries and lexer-owned diagnostics remain generic Warning events
+behind the prose classifier in `control-mode.diagnostic-typing`. The known-family Warning fallback
+remains for legacy producers, while the exact protocol handshake rejects v75 and v76 client-daemon
+skew before either event path can mix. Counting the initial `source-file` as invocation 1, both sides run 50 concurrent
 source invocations and refuse invocation 51 with `too many nested files` before any of its
 paths are matched or loaded: Command stderr at rc 1, the same lowercase text on the Control
 error channel while the outer typed line continues, and the capitalized `Too many nested
 files` on an attached status line. `-q` does not suppress it, one diagnostic covers a refused
 command rather than each of its paths, and the containing file keeps running its later
-physical lines. Exact Control frame placement is not part of that: the pin prints the refusal
-inside the rejected nested command's own flags-1 `%begin`/`%error` frame, while zz synthesizes
-a standalone `%error`, which `control-mode.sourced-command-frames` and
-`source-file.nested-control-queue` own. A same-line `;` sibling inside the containing config
-file is a separate boundary: the pin removes the rest of that sourced line and zz still runs
-it, tracked under `config.same-line-error-group`. The typed outer line's own same-line sibling
-runs on both sides, because the outer `source-file` does not itself return an error. A malformed
+physical lines. Both Control implementations place the refusal inside the rejected nested
+command's own flags-1 `%begin`/`%error` guard. The closed nested queue proof covers its cross-depth
+placement without widening the depth slice. Same-line replay grouping now matches the pin: the refused
+source's later `;` siblings are dropped, the next physical line runs, and a matched parent source
+still runs its own same-line sibling. Matched child runtime, parser, and read failures do not prune
+that parent group; zz retains a child read failure in `ConfigLoadReport`. Exact diagnostic text,
+channel placement, and exit semantics remain under their existing gaps. A malformed
 invocation at the refused depth is diagnosed as malformed rather than as depth on both sides,
 because the pin rejects it while parsing the containing file and never consults its depth guard, and
 zz runs its depth guard after the command's own flag and positional validation for the same reason.
@@ -95,20 +123,38 @@ one cumulative 50-command source budget across every top-level config. Top-level
 slots, quiet misses do, and one command with many paths consumes one slot. Invocation 51 and later
 retain `<file>:<line>: too many nested files` in the startup report while later ordinary commands
 continue. Runtime sequential sources stay unbounded. zz still discards that startup report before a
-client can see it, which `config.startup-diagnostic-delivery` owns. A replayed command that fails for
-an ordinary runtime reason is a separate hole. tmux reports every such failure through `cmdq_error`,
-so the bare message
-reaches the invoking client's error channel and that client exits 1 while the file's later physical
-lines still run. zz logs the daemon-side error and continues, so a sourced `kill-session -t nosuch`
-or `set-option -t nosuch status on` is silent on Command, Control, and attached channels at rc 0,
-and the failures zz classifies as invalid commands arrive as `path:line:`-prefixed stdout parse
-diagnostics instead. `config.replayed-command-errors` owns both halves.
-Parse-only `-n`, explicit target `-t`, and verbose `-v` remain rejected rather than
-being accepted without their tmux behavior. `source-file` does not expand tildes again during path
-resolution. Leading tildes that the config lexer expands already arrive as absolute paths; a quoted
-literal tilde or a tilde passed through direct argv remains relative and follows the command's
-normal base selection. One parser edge remains tracked separately: tmux expands a tilde immediately
-after a closing quote, while zz leaves it literal.
+client can see it, which `config.startup-diagnostic-delivery` owns. Runtime replay errors now follow
+the invoking client. A missing `kill-session` target and a semantic failure from a syntactically
+valid `set-option` use the pin's bare text on Command stderr at rc 1, as typed Control errors with
+the client's final status retained at 1, and as capitalized attached warnings. Later physical lines
+still run, and a containing `source-file` propagates the inner error and status without blocking
+inner or outer continuation. Unknown command names and malformed set-option syntax retain the
+existing file-prefixed parse-diagnostic path. Protocol v76 carries runtime failures inside their
+own sourced guards. Clientless startup delivery stays separate.
+`source-file -n` runs the same lexer and condition evaluation, retains syntax diagnostics and
+optional verbose output, and applies neither parser environment assignments nor parsed commands.
+This is no-effect source parsing, not full tmux parse validation: tmux also validates command names,
+flags, and arity while building its command list, while zz still performs those checks during replay.
+`config.parser-edge-cases`, `mux.error-shapes`, and `mux.chain-parse-abort` retain that boundary.
+`-t` resolves one pane target before path expansion and replay. A missing target follows tmux's
+`CMD_FIND_CANFAIL` path: the file still loads with an empty target context, while the invoking client
+cwd remains the source base. `-F` reads the resolved target context. `-v` emits canonical parsed
+command groups as `path:line: command`, preserves declared-path and glob order, and carries into
+nested sources. Control clients suppress explicit and inherited verbose lines. Command clients get
+stdout; Interactive clients get Info events, while `config.replayed-command-output` still owns exact
+attached view-mode presentation plus physical ordering between ordinary replay output and the
+collected verbose batch. Every runtime match, including the active native `zz/mux.conf`, enters the
+ordinary loader when encountered. Declared default, after, and default paths therefore apply as
+`DAD`; a loud miss returns status 1 without stopping later matches, and diagnostics plus `-v` lines
+retain declared path and glob order. Explicit `reload-config` keeps its native default rediscovery,
+key-table reset, appearance rebuild, and stored-override replay. Startup still chooses the first
+existing zz-owned candidate, while ordered explicit `-f` files remain its roots. Parse-only and
+nested source paths keep their existing behavior.
+`source-file` does not expand tildes again during path resolution.
+Leading tildes that the config lexer expands already arrive as absolute paths; a quoted literal
+tilde or a tilde passed through direct argv remains relative and follows the command's normal base
+selection. One parser edge remains tracked separately: tmux expands a tilde immediately after a
+closing quote, while zz leaves it literal.
 
 # Syntax and tokenization rules
 

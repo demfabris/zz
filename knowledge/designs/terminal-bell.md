@@ -10,7 +10,7 @@ tags:
 - protocol
 - daemon
 - design-plan
-timestamp: 2026-08-07T20:06:22Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -51,6 +51,10 @@ A program rings BEL in a pane:
   the active pane, or its window becomes the active window (tmux's activation-clear). Both events are daemon-visible, so clearing needs no knowledge of
   client focus. This approximates Ghostty's clear-on-focus-or-input with the two signals a
   multiplexer daemon actually has.
+  Input consumed by a chooser or command prompt never reaches that pane-input seam, so it leaves
+  both the bell latch and terminal resize ownership unchanged by design.
+  Protocol v73 client-window focus and pane/application Focus transitions also leave the bell
+  unchanged, including when a client sends both signals for one scene transition.
 
 * macOS also plays the system beep (`objc2_app_kit::NSBeep`, one call, no new deps) on
   the same edge. Unlike the bounce it sounds while the window is key . readline's

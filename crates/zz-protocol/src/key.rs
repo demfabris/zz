@@ -247,13 +247,27 @@ impl Default for KeyTables {
             ("copy-mode", "C-n", "cursor-down"),
             ("copy-mode", "C-a", "start-of-line"),
             ("copy-mode", "C-e", "end-of-line"),
-            ("copy-mode", "M-f", "next-word"),
+            ("copy-mode", "Home", "start-of-line"),
+            ("copy-mode", "End", "end-of-line"),
+            ("copy-mode", "M-f", "next-word-end"),
             ("copy-mode", "M-b", "previous-word"),
+            ("copy-mode", "C-M-f", "next-matching-bracket"),
             ("copy-mode", "M-v", "page-up"),
             ("copy-mode", "PPage", "page-up"),
             ("copy-mode", "C-v", "page-down"),
             ("copy-mode", "NPage", "page-down"),
+            ("copy-mode", "Space", "page-down"),
+            ("copy-mode", "M-Up", "halfpage-up"),
+            ("copy-mode", "M-Down", "halfpage-down"),
+            ("copy-mode", "C-Up", "scroll-up"),
+            ("copy-mode", "C-Down", "scroll-down"),
+            ("copy-mode", "M-<", "history-top"),
+            ("copy-mode", "M->", "history-bottom"),
+            ("copy-mode", "M-R", "top-line"),
+            ("copy-mode", "C-M-Up", "previous-prompt"),
+            ("copy-mode", "C-M-Down", "next-prompt"),
             ("copy-mode", "C-Space", "begin-selection"),
+            ("copy-mode", "R", "rectangle-toggle"),
             ("copy-mode", "M-m", "back-to-indentation"),
             ("copy-mode", "M-r", "middle-line"),
             ("copy-mode", "M-{", "previous-paragraph"),
@@ -266,11 +280,16 @@ impl Default for KeyTables {
             ("copy-mode", "T", "jump-to-backward"),
             ("copy-mode", ";", "jump-again"),
             ("copy-mode", ",", "jump-reverse"),
+            ("copy-mode", "n", "search-again"),
+            ("copy-mode", "N", "search-reverse"),
             ("copy-mode", "Enter", "copy-pipe-and-cancel"),
             ("copy-mode", "M-w", "copy-pipe-and-cancel"),
+            ("copy-mode", "C-w", "copy-pipe-and-cancel"),
+            ("copy-mode", "C-k", "copy-pipe-end-of-line-and-cancel"),
             ("copy-mode", "q", "cancel"),
             ("copy-mode", "C-g", "clear-selection"),
             ("copy-mode", "C-c", "cancel"),
+            ("copy-mode", "C-[", "cancel"),
             ("copy-mode", "Escape", "cancel"),
             ("choose-tree", "Up", "cursor-up"),
             ("choose-tree", "k", "cursor-up"),
@@ -572,10 +591,24 @@ pub enum KeyDecision {
 pub struct KeyEngine {
     table: Option<String>,
     pending: Option<(Vec<CommandInvocation>, bool)>,
-    repeat_count: Option<u16>,
+    repeat_count: Option<CopyModeRepeatPrefix>,
     repeat_deadline: Option<Instant>,
     prefix_deadline: Option<Instant>,
     last_repeat_key: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyModeRepeatPrefix {
+    Armed(u16),
+    Capturing(u16),
+}
+
+impl CopyModeRepeatPrefix {
+    fn count(self) -> u16 {
+        match self {
+            Self::Armed(count) | Self::Capturing(count) => count,
+        }
+    }
 }
 
 impl KeyEngine {
@@ -584,11 +617,13 @@ impl KeyEngine {
         self.table.as_deref()
     }
 
-    pub fn set_repeat_count(&mut self, count: usize) {
-        self.repeat_count = if count == 0 {
+    pub fn set_repeat_count(&mut self, count: u32) {
+        self.repeat_count = if count <= 1 {
             None
         } else {
-            Some(u16::try_from(count.min(9_999)).expect("clamped repeat count fits in u16"))
+            Some(CopyModeRepeatPrefix::Armed(
+                u16::try_from(count.min(9_999)).expect("clamped repeat count fits in u16"),
+            ))
         };
     }
 
@@ -605,28 +640,48 @@ impl KeyEngine {
         Some((KeyDecision::Commands(commands), repeat))
     }
 
-    fn decide(&mut self, commands: Vec<CommandInvocation>, repeat: bool) -> (KeyDecision, bool) {
+    fn decide(
+        &mut self,
+        mut commands: Vec<CommandInvocation>,
+        repeat: bool,
+    ) -> (KeyDecision, bool) {
         if let Some(digit) = copy_mode_repeat_digit(&commands) {
-            self.repeat_count = Some(u16::from(digit));
+            self.repeat_count = Some(CopyModeRepeatPrefix::Capturing(u16::from(digit)));
             return (KeyDecision::Ignore, false);
         }
-        let commands = match self.repeat_count.take() {
-            Some(count) if commands.iter().all(copy_mode_action_command) => {
-                let mut repeated =
-                    Vec::with_capacity(commands.len().saturating_mul(usize::from(count)));
-                for _ in 0..count {
-                    repeated.extend(commands.iter().cloned());
-                }
-                repeated
+        let copy_action = commands
+            .iter_mut()
+            .find(|command| copy_mode_action_command(command));
+        if let Some(command) = copy_action {
+            let (mode_index, has_repeat) =
+                copy_mode_action_options(command).expect("copy-mode action options were found");
+            if let Some(prefix) = self.repeat_count.take()
+                && !has_repeat
+            {
+                let count = prefix.count();
+                command.args.insert(mode_index, count.to_string());
+                command.args.insert(mode_index, "-N".to_owned());
             }
-            _ => commands,
-        };
+        } else if commands.iter().any(copy_mode_prefix_consuming_prompt) {
+            self.repeat_count = None;
+        }
         if commands.iter().any(copy_jump_needs_target) {
             self.pending = Some((commands, repeat));
             (KeyDecision::Ignore, false)
         } else {
             (KeyDecision::Commands(commands), repeat)
         }
+    }
+
+    fn decide_synthetic_any(
+        &mut self,
+        commands: Vec<CommandInvocation>,
+        repeat: bool,
+    ) -> (KeyDecision, bool) {
+        let pending = self.pending.take();
+        let decision = self.decide(commands, repeat);
+        self.pending = pending;
+        decision
     }
 
     pub fn handle(&mut self, tables: &KeyTables, key: &str) -> KeyDecision {
@@ -693,23 +748,18 @@ impl KeyEngine {
         if let Some(decision) = self.take_pending_jump_target(&key) {
             return decision;
         }
-        if self.repeat_count.is_some() && self.table.as_deref() == Some("copy-mode-vi") {
-            if key == "Escape" {
-                self.repeat_count = None;
-                return (KeyDecision::Ignore, false);
-            }
-            if key.len() == 1
-                && let Some(digit) = key.as_bytes().first().copied().filter(u8::is_ascii_digit)
-            {
-                let count = self.repeat_count.unwrap_or_default();
-                self.repeat_count = Some(
-                    count
-                        .saturating_mul(10)
-                        .saturating_add(u16::from(digit - b'0'))
-                        .min(9_999),
-                );
-                return (KeyDecision::Ignore, false);
-            }
+        if self.table.as_deref() == Some("copy-mode-vi")
+            && key.len() == 1
+            && let Some(digit) = key.as_bytes().first().copied().filter(u8::is_ascii_digit)
+            && let Some(CopyModeRepeatPrefix::Capturing(count)) = self.repeat_count
+        {
+            self.repeat_count = Some(CopyModeRepeatPrefix::Capturing(
+                count
+                    .saturating_mul(10)
+                    .saturating_add(u16::from(digit - b'0'))
+                    .min(9_999),
+            ));
+            return (KeyDecision::Ignore, false);
         }
         if self.table.is_none() && tables.is_prefix(&key) {
             self.table = Some("prefix".to_owned());
@@ -755,7 +805,6 @@ impl KeyEngine {
             }
         }
         let Some(binding) = binding else {
-            self.repeat_count = None;
             if table == "prefix" {
                 self.table = None;
                 self.prefix_deadline = None;
@@ -793,6 +842,79 @@ impl KeyEngine {
         self.decide(commands, binding.repeat)
     }
 
+    pub fn handle_synthetic_any_with_repeat_metadata(
+        &mut self,
+        tables: &KeyTables,
+        now: Instant,
+        repeat_time: Duration,
+        initial_repeat_time: Duration,
+        root_table: &str,
+    ) -> (KeyDecision, bool) {
+        if self.repeat_deadline.is_some_and(|deadline| now >= deadline) {
+            self.clear_explicit_table();
+        }
+
+        let mut table = self.table.clone().unwrap_or_else(|| root_table.to_owned());
+        let mut explicit = self.table.is_some() && table != root_table;
+        let mut binding = tables.get(&table, "Any");
+        let prefix_expired =
+            table == "prefix" && self.prefix_deadline.is_some_and(|deadline| now > deadline);
+        if prefix_expired
+            || (self.repeat_deadline.is_some() && binding.is_none_or(|binding| !binding.repeat))
+            || (binding.is_none() && explicit)
+        {
+            self.clear_explicit_table();
+            root_table.clone_into(&mut table);
+            explicit = false;
+            binding = tables.get(root_table, "Any");
+        }
+
+        let Some(binding) = binding else {
+            return (KeyDecision::Ignore, false);
+        };
+        if explicit && binding.repeat && !repeat_time.is_zero() {
+            let repeat_time = if self.repeat_deadline.is_none()
+                || self.last_repeat_key.as_deref() != Some("Any")
+            {
+                if initial_repeat_time.is_zero() {
+                    repeat_time
+                } else {
+                    initial_repeat_time
+                }
+            } else {
+                repeat_time
+            };
+            self.table = Some(table);
+            self.repeat_deadline = Some(now + repeat_time);
+            self.last_repeat_key = Some("Any".to_owned());
+        } else if explicit {
+            self.clear_explicit_table();
+        }
+        self.decide_synthetic_any(binding.commands.clone(), binding.repeat)
+    }
+
+    pub fn handle_transient_mode_synthetic_any(
+        &mut self,
+        tables: &KeyTables,
+        mode_table: &str,
+        root_table: &str,
+    ) -> (KeyDecision, bool) {
+        let Some(binding) = tables
+            .get(mode_table, "Any")
+            .or_else(|| tables.get(root_table, "Any"))
+        else {
+            return (KeyDecision::Ignore, false);
+        };
+        self.decide_synthetic_any(binding.commands.clone(), binding.repeat)
+    }
+
+    fn clear_explicit_table(&mut self) {
+        self.table = None;
+        self.repeat_deadline = None;
+        self.prefix_deadline = None;
+        self.last_repeat_key = None;
+    }
+
     pub fn switch_table(&mut self, table: Option<String>) {
         self.table = table;
         self.pending = None;
@@ -820,8 +942,51 @@ fn copy_mode_repeat_digit(commands: &[CommandInvocation]) -> Option<u8> {
 }
 
 fn copy_mode_action_command(command: &CommandInvocation) -> bool {
-    matches!(command.name.as_str(), "send" | "send-keys")
-        && command.args.iter().any(|argument| argument == "-X")
+    copy_mode_action_options(command).is_some()
+}
+
+fn copy_mode_prefix_consuming_prompt(command: &CommandInvocation) -> bool {
+    matches!(
+        command.name.as_str(),
+        "copy-mode-search-prompt" | "command-prompt"
+    )
+}
+
+fn copy_mode_action_options(command: &CommandInvocation) -> Option<(usize, bool)> {
+    if !matches!(command.name.as_str(), "send" | "send-keys") {
+        return None;
+    }
+    let mut mode_index = None;
+    let mut has_repeat = false;
+    let mut skip_value = false;
+    for (index, argument) in command.args.iter().enumerate() {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if argument == "--" || !argument.starts_with('-') || argument == "-" {
+            break;
+        }
+        let flags = &argument.as_bytes()[1..];
+        for (offset, flag) in flags.iter().copied().enumerate() {
+            match flag {
+                b'X' => {
+                    mode_index.get_or_insert(index);
+                }
+                b'N' => {
+                    has_repeat = true;
+                    skip_value = offset + 1 == flags.len();
+                    break;
+                }
+                b't' | b'c' => {
+                    skip_value = offset + 1 == flags.len();
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+    mode_index.map(|index| (index, has_repeat))
 }
 
 fn copy_jump_needs_target(command: &CommandInvocation) -> bool {
@@ -1863,6 +2028,448 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_focus_dispatches_only_any_in_effective_default_tables() {
+        let mut tables = KeyTables::empty();
+        for table in ["root", "custom"] {
+            for name in ["FocusIn", "FocusOut"] {
+                tables.bind(
+                    table,
+                    name,
+                    Binding {
+                        commands: vec![CommandInvocation::new(
+                            "display-message",
+                            [format!("exact-{name}")],
+                        )],
+                        repeat: false,
+                        note: None,
+                    },
+                );
+            }
+            tables.bind(
+                table,
+                "Any",
+                Binding {
+                    commands: vec![CommandInvocation::new("display-message", [table])],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        assert!(!is_key_name("FocusIn"));
+        assert!(!is_key_name("FocusOut"));
+
+        for table in ["root", "custom"] {
+            let mut engine = KeyEngine::default();
+            assert_eq!(
+                engine.handle_synthetic_any_with_repeat_metadata(
+                    &tables,
+                    Instant::now(),
+                    Duration::from_millis(500),
+                    Duration::ZERO,
+                    table,
+                ),
+                (
+                    KeyDecision::Commands(vec![
+                        CommandInvocation::new("display-message", [table],)
+                    ]),
+                    false,
+                ),
+                "table={table}",
+            );
+        }
+
+        let mut explicit_custom = KeyEngine::default();
+        explicit_custom.switch_table(Some("custom".to_owned()));
+        assert_eq!(
+            explicit_custom.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                Instant::now(),
+                Duration::from_millis(500),
+                Duration::ZERO,
+                "custom",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["custom"],)]),
+                false,
+            )
+        );
+        assert_eq!(explicit_custom.active_table(), Some("custom"));
+    }
+
+    #[test]
+    fn synthetic_any_explicit_custom_table_falls_back_and_retires() {
+        let mut tables = KeyTables::empty();
+        for (table, label) in [("root", "root"), ("switched", "switched")] {
+            tables.bind(
+                table,
+                "Any",
+                Binding {
+                    commands: vec![CommandInvocation::new("display-message", [label])],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+
+        let mut matched = KeyEngine::default();
+        matched.switch_table(Some("switched".to_owned()));
+        assert_eq!(
+            matched.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                Instant::now(),
+                Duration::from_millis(500),
+                Duration::ZERO,
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "display-message",
+                    ["switched"],
+                )]),
+                false,
+            )
+        );
+        assert_eq!(matched.active_table(), None);
+
+        tables.bind(
+            "switched",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "display-message",
+                    ["switched-repeat"],
+                )],
+                repeat: true,
+                note: None,
+            },
+        );
+        let start = Instant::now();
+        let mut repeating = KeyEngine::default();
+        repeating.switch_table(Some("switched".to_owned()));
+        for now in [start, start + Duration::from_millis(150)] {
+            assert_eq!(
+                repeating.handle_synthetic_any_with_repeat_metadata(
+                    &tables,
+                    now,
+                    Duration::from_millis(100),
+                    Duration::from_millis(300),
+                    "root",
+                ),
+                (
+                    KeyDecision::Commands(vec![CommandInvocation::new(
+                        "display-message",
+                        ["switched-repeat"],
+                    )]),
+                    true,
+                )
+            );
+            assert_eq!(repeating.active_table(), Some("switched"));
+        }
+        assert_eq!(
+            repeating.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                start + Duration::from_millis(250),
+                Duration::from_millis(100),
+                Duration::from_millis(300),
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["root"],)]),
+                false,
+            )
+        );
+        assert_eq!(repeating.active_table(), None);
+
+        tables.unbind("switched", "Any");
+        let mut fallback = KeyEngine::default();
+        fallback.switch_table(Some("switched".to_owned()));
+        assert_eq!(
+            fallback.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                Instant::now(),
+                Duration::from_millis(500),
+                Duration::ZERO,
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["root"],)]),
+                false,
+            )
+        );
+        assert_eq!(fallback.active_table(), None);
+    }
+
+    #[test]
+    fn transient_mode_synthetic_any_precedes_default_without_leaving_mode() {
+        let mut tables = KeyTables::empty();
+        for (table, label) in [("copy-mode-vi", "mode"), ("custom", "default")] {
+            tables.bind(
+                table,
+                "Any",
+                Binding {
+                    commands: vec![CommandInvocation::new("display-message", [label])],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        tables.bind(
+            "copy-mode-vi",
+            "FocusIn",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["exact-focus"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(
+            engine.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "custom"),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["mode"],)]),
+                false,
+            )
+        );
+        assert_eq!(engine.active_table(), Some("copy-mode-vi"));
+
+        tables.unbind("copy-mode-vi", "Any");
+        assert_eq!(
+            engine.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "custom"),
+            (
+                KeyDecision::Commands(vec![
+                    CommandInvocation::new("display-message", ["default"],)
+                ]),
+                false,
+            )
+        );
+        assert_eq!(engine.active_table(), Some("copy-mode-vi"));
+    }
+
+    #[test]
+    fn transient_synthetic_jump_any_preserves_pending_jump_target() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "copy-mode-vi",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new("send-keys", ["-X", "jump-backward"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "root"),
+            (KeyDecision::Ignore, false)
+        );
+        assert_eq!(
+            engine.handle(&tables, "x"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "jump-forward", "x"],
+            )])
+        );
+    }
+
+    #[test]
+    fn transient_synthetic_jump_any_does_not_claim_the_next_real_key() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "copy-mode-vi",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new("send-keys", ["-X", "jump-backward"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(
+            engine.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "root"),
+            (KeyDecision::Ignore, false)
+        );
+        assert_eq!(
+            engine.handle(&tables, "h"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "cursor-left"],
+            )])
+        );
+    }
+
+    #[test]
+    fn synthetic_any_honors_prefix_repeat_nonrepeat_and_expiry() {
+        let mut tables = KeyTables::empty();
+        tables.bind(
+            "root",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["root"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        tables.bind(
+            "prefix",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["prefix-repeat"])],
+                repeat: true,
+                note: None,
+            },
+        );
+        let start = Instant::now();
+        let repeat_time = Duration::from_millis(100);
+        let initial_repeat_time = Duration::from_millis(300);
+        let prefix_timeout = Duration::from_millis(100);
+        let mut repeat = KeyEngine::default();
+        assert_eq!(
+            repeat.handle_with_repeat_times(
+                &tables,
+                "C-b",
+                start,
+                repeat_time,
+                initial_repeat_time,
+                Duration::ZERO,
+                "root",
+            ),
+            KeyDecision::Prefix
+        );
+        for now in [start, start + Duration::from_millis(150)] {
+            assert_eq!(
+                repeat.handle_synthetic_any_with_repeat_metadata(
+                    &tables,
+                    now,
+                    repeat_time,
+                    initial_repeat_time,
+                    "root",
+                ),
+                (
+                    KeyDecision::Commands(vec![CommandInvocation::new(
+                        "display-message",
+                        ["prefix-repeat"],
+                    )]),
+                    true,
+                )
+            );
+            assert_eq!(repeat.active_table(), Some("prefix"));
+        }
+        assert_eq!(
+            repeat.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                start + Duration::from_millis(250),
+                repeat_time,
+                initial_repeat_time,
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["root"],)]),
+                false,
+            )
+        );
+        assert_eq!(repeat.active_table(), None);
+
+        tables.bind(
+            "prefix",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["prefix-once"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut nonrepeat = KeyEngine::default();
+        nonrepeat.handle_with_repeat_times(
+            &tables,
+            "C-b",
+            start,
+            repeat_time,
+            initial_repeat_time,
+            prefix_timeout,
+            "root",
+        );
+        assert_eq!(
+            nonrepeat.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                start,
+                repeat_time,
+                initial_repeat_time,
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "display-message",
+                    ["prefix-once"],
+                )]),
+                false,
+            )
+        );
+        assert_eq!(nonrepeat.active_table(), None);
+
+        tables.bind(
+            "prefix",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "display-message",
+                    ["expired-prefix"],
+                )],
+                repeat: true,
+                note: None,
+            },
+        );
+        let mut expired = KeyEngine::default();
+        expired.handle_with_repeat_times(
+            &tables,
+            "C-b",
+            start,
+            repeat_time,
+            initial_repeat_time,
+            prefix_timeout,
+            "root",
+        );
+        assert_eq!(
+            expired.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                start,
+                repeat_time,
+                initial_repeat_time,
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "display-message",
+                    ["expired-prefix"],
+                )]),
+                true,
+            )
+        );
+        assert_eq!(expired.active_table(), Some("prefix"));
+        assert_eq!(expired.repeat_deadline, Some(start + initial_repeat_time));
+        assert_eq!(
+            expired.handle_synthetic_any_with_repeat_metadata(
+                &tables,
+                start + prefix_timeout + Duration::from_millis(1),
+                repeat_time,
+                initial_repeat_time,
+                "root",
+            ),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new("display-message", ["root"],)]),
+                false,
+            )
+        );
+        assert_eq!(expired.active_table(), None);
+    }
+
+    #[test]
     fn root_and_custom_bindings_work() {
         let mut tables = KeyTables::default();
         tables.bind(
@@ -2104,11 +2711,10 @@ mod tests {
         assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
         assert_eq!(
             engine.handle(&tables, "x"),
-            KeyDecision::Commands(
-                (0..3)
-                    .map(|_| CommandInvocation::new("send-keys", ["-X", "jump-forward", "x"]))
-                    .collect(),
-            )
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "jump-forward", "x"],
+            )])
         );
     }
 
@@ -2130,6 +2736,141 @@ mod tests {
         }
         for key in ["Escape", "q", "C-c"] {
             assert_eq!(action("copy-mode", key), sends("cancel"));
+        }
+    }
+
+    #[test]
+    fn copy_mode_emacs_m_f_moves_to_the_next_word_end() {
+        let tables = KeyTables::default();
+        assert_eq!(
+            tables
+                .get("copy-mode", "M-f")
+                .expect("M-f binding")
+                .commands,
+            vec![CommandInvocation::new("send-keys", ["-X", "next-word-end"],)]
+        );
+    }
+
+    #[test]
+    fn stock_copy_mode_emacs_navigation_bindings_match_the_pin() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode".to_owned()));
+
+        for (key, action) in [
+            ("C-Down", "scroll-down"),
+            ("C-M-Down", "next-prompt"),
+            ("C-M-Up", "previous-prompt"),
+            ("C-M-f", "next-matching-bracket"),
+            ("C-Up", "scroll-up"),
+            ("End", "end-of-line"),
+            ("Home", "start-of-line"),
+            ("M-<", "history-top"),
+            ("M->", "history-bottom"),
+            ("M-Down", "halfpage-down"),
+            ("M-R", "top-line"),
+            ("M-Up", "halfpage-up"),
+            ("Space", "page-down"),
+        ] {
+            let expected = vec![CommandInvocation::new("send-keys", ["-X", action])];
+            let binding = tables
+                .get("copy-mode", key)
+                .unwrap_or_else(|| panic!("copy-mode {key} is bound"));
+            assert_eq!(binding.commands, expected, "copy-mode {key}");
+            assert!(!binding.repeat, "copy-mode {key}");
+            assert_eq!(
+                engine.handle(&tables, key),
+                KeyDecision::Commands(expected),
+                "copy-mode {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn stock_copy_mode_emacs_non_navigation_bindings_match_the_pin() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode".to_owned()));
+
+        for (key, action) in [
+            ("C-[", "cancel"),
+            ("C-k", "copy-pipe-end-of-line-and-cancel"),
+            ("C-w", "copy-pipe-and-cancel"),
+            ("N", "search-reverse"),
+            ("R", "rectangle-toggle"),
+            ("n", "search-again"),
+        ] {
+            let expected = vec![CommandInvocation::new("send-keys", ["-X", action])];
+            let binding = tables
+                .get("copy-mode", key)
+                .unwrap_or_else(|| panic!("copy-mode {key} is bound"));
+            assert_eq!(binding.commands, expected, "copy-mode {key}");
+            assert!(!binding.repeat, "copy-mode {key}");
+            assert_eq!(
+                engine.handle(&tables, key),
+                KeyDecision::Commands(expected),
+                "copy-mode {key}"
+            );
+        }
+
+        for (key, action) in [
+            ("Escape", "cancel"),
+            ("M-w", "copy-pipe-and-cancel"),
+            ("C-g", "clear-selection"),
+        ] {
+            assert_eq!(
+                tables
+                    .get("copy-mode", key)
+                    .unwrap_or_else(|| panic!("copy-mode {key} remains bound"))
+                    .commands,
+                vec![CommandInvocation::new("send-keys", ["-X", action])],
+                "copy-mode {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_copy_mode_emacs_keyboard_table_matches_the_audited_key_set() {
+        let tables = KeyTables::default();
+        let expected = [
+            " ", ",", ";", "C- ", "C-Down", "C-M-Down", "C-M-Up", "C-M-f", "C-Up", "C-[", "C-a",
+            "C-b", "C-c", "C-e", "C-f", "C-g", "C-k", "C-n", "C-p", "C-r", "C-s", "C-v", "C-w",
+            "Down", "End", "Enter", "Escape", "F", "Home", "Left", "M-<", "M->", "M-Down", "M-R",
+            "M-Up", "M-b", "M-f", "M-m", "M-r", "M-v", "M-w", "M-x", "M-{", "M-}", "N", "NPage",
+            "PPage", "R", "Right", "T", "Up", "X", "f", "n", "q", "t",
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        let actual = tables.tables["copy-mode"]
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn shifted_alt_emacs_navigation_names_reach_the_stock_bindings() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode".to_owned()));
+        let alt_shift = Modifiers::new(true, false, true, false);
+
+        for (character, key, action) in [
+            ('R', "M-R", "top-line"),
+            ('<', "M-<", "history-top"),
+            ('>', "M->", "history-bottom"),
+        ] {
+            let input = press(
+                KeyCode::Character(character),
+                alt_shift,
+                Some(&character.to_string()),
+            );
+            assert_eq!(input_key_name(&input).as_str(), key);
+            assert_eq!(
+                engine.handle(&tables, key),
+                KeyDecision::Commands(vec![CommandInvocation::new("send-keys", ["-X", action])])
+            );
         }
     }
 
@@ -2235,31 +2976,433 @@ mod tests {
     }
 
     #[test]
-    fn copy_mode_vi_numeric_prefix_repeats_the_next_motion() {
+    fn copy_mode_vi_numeric_prefix_carries_count_into_one_action() {
         let tables = KeyTables::default();
         let mut engine = KeyEngine::default();
         engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "next-space-end"],
+            )])
+        );
+
+        assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "5"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "35", "-X", "next-space-end"],
+            )])
+        );
 
         assert_eq!(engine.handle(&tables, "1"), KeyDecision::Ignore);
         assert_eq!(engine.handle(&tables, "0"), KeyDecision::Ignore);
         assert_eq!(
             engine.handle(&tables, "E"),
-            KeyDecision::Commands(
-                (0..10)
-                    .map(|_| CommandInvocation::new("send-keys", ["-X", "next-space-end"]))
-                    .collect(),
-            )
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "10", "-X", "next-space-end"],
+            )])
         );
 
         assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
         assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
         assert_eq!(
             engine.handle(&tables, "x"),
-            KeyDecision::Commands(
-                (0..3)
-                    .map(|_| { CommandInvocation::new("send-keys", ["-X", "jump-forward", "x"]) })
-                    .collect(),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "jump-forward", "x"],
+            )])
+        );
+
+        for (key, action) in [
+            ("%", "next-matching-bracket"),
+            ("V", "select-line"),
+            ("o", "other-end"),
+        ] {
+            assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+            assert_eq!(
+                engine.handle(&tables, key),
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-N", "3", "-X", action],
+                )]),
+                "3{key}",
+            );
+        }
+
+        for (key, action) in [
+            ("v", "rectangle-toggle"),
+            ("Space", "begin-selection"),
+            ("o", "other-end"),
+            ("Enter", "copy-pipe-and-cancel"),
+            ("q", "cancel"),
+        ] {
+            assert_eq!(engine.handle(&tables, "2"), KeyDecision::Ignore);
+            assert_eq!(
+                engine.handle(&tables, key),
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-N", "2", "-X", action],
+                )]),
+                "2{key}",
+            );
+        }
+
+        assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "Escape"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "clear-selection"],
+            )])
+        );
+    }
+
+    #[test]
+    fn copy_mode_vi_numeric_prefix_counts_only_the_first_action_in_a_chain() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "copy-mode-vi",
+            "x",
+            Binding {
+                commands: vec![
+                    CommandInvocation::new("display-message", ["before"]),
+                    CommandInvocation::new("send-keys", ["-X", "cursor-right"]),
+                    CommandInvocation::new("send-keys", ["-X", "cursor-left"]),
+                ],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(engine.handle(&tables, "2"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "x"),
+            KeyDecision::Commands(vec![
+                CommandInvocation::new("display-message", ["before"]),
+                CommandInvocation::new("send-keys", ["-N", "2", "-X", "cursor-right"]),
+                CommandInvocation::new("send-keys", ["-X", "cursor-left"]),
+            ])
+        );
+    }
+
+    #[test]
+    fn copy_mode_vi_numeric_prefix_waits_for_an_action_and_defers_to_its_repeat() {
+        let mut tables = KeyTables::default();
+        for (key, command) in [
+            (
+                "x",
+                CommandInvocation::new("send-keys", ["literal-without-copy-action"]),
+            ),
+            (
+                "y",
+                CommandInvocation::new("send-keys", ["-N", "7", "-X", "cursor-right"]),
+            ),
+            ("z", CommandInvocation::new("send", ["-XN2", "cursor-left"])),
+        ] {
+            tables.bind(
+                "copy-mode-vi",
+                key,
+                Binding {
+                    commands: vec![command],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "x"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["literal-without-copy-action"],
+            )])
+        );
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "next-space-end"],
+            )])
+        );
+
+        assert_eq!(engine.handle(&tables, "4"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "y"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "7", "-X", "cursor-right"],
+            )])
+        );
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "next-space-end"],
+            )])
+        );
+
+        assert_eq!(engine.handle(&tables, "5"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "z"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send",
+                ["-XN2", "cursor-left"],
+            )])
+        );
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "next-space-end"],
+            )])
+        );
+    }
+
+    #[test]
+    fn externally_armed_copy_prefix_starts_a_fresh_native_digit_capture() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+        engine.set_repeat_count(3);
+
+        assert_eq!(engine.handle(&tables, "5"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "5", "-X", "next-space-end"],
+            )])
+        );
+    }
+
+    #[test]
+    fn unbound_copy_keys_preserve_armed_and_capturing_prefixes() {
+        let tables = KeyTables::default();
+
+        let mut armed = KeyEngine::default();
+        armed.switch_table(Some("copy-mode-vi".to_owned()));
+        armed.set_repeat_count(3);
+        assert_eq!(armed.handle(&tables, "Unbound"), KeyDecision::Ignore);
+        assert_eq!(
+            armed.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "next-space-end"],
+            )])
+        );
+
+        let mut capturing = KeyEngine::default();
+        capturing.switch_table(Some("copy-mode-vi".to_owned()));
+        assert_eq!(capturing.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(capturing.handle(&tables, "Unbound"), KeyDecision::Ignore);
+        assert_eq!(
+            capturing.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "next-space-end"],
+            )])
+        );
+    }
+
+    #[test]
+    fn synthetic_any_preserves_and_consumes_both_copy_prefix_states() {
+        let mut tables = KeyTables::default();
+
+        for armed in [true, false] {
+            let mut engine = KeyEngine::default();
+            engine.switch_table(Some("copy-mode-vi".to_owned()));
+            if armed {
+                engine.set_repeat_count(3);
+            } else {
+                assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+            }
+            assert_eq!(
+                engine.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "root",),
+                (KeyDecision::Ignore, false),
+                "armed={armed}",
+            );
+            assert_eq!(
+                engine.handle(&tables, "E"),
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-N", "3", "-X", "next-space-end"],
+                )]),
+                "armed={armed}",
+            );
+        }
+
+        tables.bind(
+            "copy-mode-vi",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new("send-keys", ["-X", "cursor-right"])],
+                repeat: false,
+                note: None,
+            },
+        );
+        for armed in [true, false] {
+            let mut engine = KeyEngine::default();
+            engine.switch_table(Some("copy-mode-vi".to_owned()));
+            if armed {
+                engine.set_repeat_count(4);
+            } else {
+                assert_eq!(engine.handle(&tables, "4"), KeyDecision::Ignore);
+            }
+            assert_eq!(
+                engine.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "root",),
+                (
+                    KeyDecision::Commands(vec![CommandInvocation::new(
+                        "send-keys",
+                        ["-N", "4", "-X", "cursor-right"],
+                    )]),
+                    false,
+                ),
+                "armed={armed}",
+            );
+            assert_eq!(
+                engine.handle(&tables, "E"),
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-X", "next-space-end"],
+                )]),
+                "armed={armed}",
+            );
+        }
+
+        tables.bind(
+            "copy-mode-vi",
+            "Any",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "copy-mode-search-prompt",
+                    [] as [&str; 0],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut prompt = KeyEngine::default();
+        prompt.switch_table(Some("copy-mode-vi".to_owned()));
+        assert_eq!(prompt.handle(&tables, "5"), KeyDecision::Ignore);
+        assert_eq!(
+            prompt.handle_transient_mode_synthetic_any(&tables, "copy-mode-vi", "root"),
+            (
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "copy-mode-search-prompt",
+                    [] as [&str; 0],
+                )]),
+                false,
             )
+        );
+        assert_eq!(
+            prompt.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "next-space-end"],
+            )])
+        );
+    }
+
+    #[test]
+    fn copy_mode_prompts_consume_native_prefixes_without_leaking_into_later_motion() {
+        let tables = KeyTables::default();
+
+        for (key, command) in [
+            (
+                "/",
+                CommandInvocation::new("copy-mode-search-prompt", [] as [&str; 0]),
+            ),
+            (
+                ":",
+                CommandInvocation::new(
+                    "command-prompt",
+                    ["-p", "(goto line)", "send-keys -X goto-line -- '%%'"],
+                ),
+            ),
+        ] {
+            let mut engine = KeyEngine::default();
+            engine.switch_table(Some("copy-mode-vi".to_owned()));
+            assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+            assert_eq!(
+                engine.handle(&tables, key),
+                KeyDecision::Commands(vec![command])
+            );
+            assert_eq!(
+                engine.handle(&tables, "E"),
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-X", "next-space-end"],
+                )]),
+                "copy-mode {key}",
+            );
+        }
+    }
+
+    #[test]
+    fn neutral_external_repeat_counts_clear_live_native_capture() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        for count in [1, 0] {
+            assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+            engine.set_repeat_count(count);
+            assert_eq!(
+                engine.handle(&tables, "E"),
+                KeyDecision::Commands(vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-X", "next-space-end"],
+                )]),
+                "set_repeat_count({count})",
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_copy_action_resets_prefix_before_the_next_digit() {
+        let mut tables = KeyTables::default();
+        tables.bind(
+            "copy-mode-vi",
+            "x",
+            Binding {
+                commands: vec![CommandInvocation::new(
+                    "send-keys",
+                    ["-X", "unknown-action"],
+                )],
+                repeat: false,
+                note: None,
+            },
+        );
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+
+        assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "x"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "unknown-action"],
+            )])
+        );
+        assert_eq!(engine.handle(&tables, "5"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "E"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "5", "-X", "next-space-end"],
+            )])
         );
     }
 

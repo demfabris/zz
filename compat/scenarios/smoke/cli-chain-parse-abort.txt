@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/cli-chain-parse-abort.sh ~/cli-chain-parse-abort.sh
+run-shell 'sh ~/cli-chain-parse-abort.sh'
+out: show-environment -g CLI_PARSE_ABORT
+out: show-environment -g CLI_RUNTIME_ORDER

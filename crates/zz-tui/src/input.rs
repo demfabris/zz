@@ -5,6 +5,7 @@ use zz_daemon::{
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, CommandInvocation, CommandPromptAction,
     CommandPromptMode, DisplayPanesAction, InputMessage, MAX_COMMAND_PROMPT_BYTES,
+    PaneKindSnapshot,
 };
 use zz_terminal::{
     CopyModeAction, KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, TerminalMouseButton,
@@ -32,6 +33,7 @@ pub(crate) enum InputOutcome {
     Repaint,
     RepaintAll,
     Resize(crate::tty::TerminalSize),
+    AttachRequested,
     SwitchHost(HostSwitch),
     Detach,
 }
@@ -225,10 +227,8 @@ fn handle_sidebar_key(
         ChromeAction::SidebarSelectUp => model.move_sidebar_selection(-1),
         ChromeAction::SidebarSelectDown => model.move_sidebar_selection(1),
         ChromeAction::SidebarConfirm => {
-            if let Some(target) = model.selected_sidebar_target()
-                && let Some(host) = activate_sidebar_target(model, client, target)?
-            {
-                return Ok(InputOutcome::SwitchHost(host));
+            if let Some(target) = model.selected_sidebar_target() {
+                return activate_sidebar_target(model, client, target);
             }
         }
         ChromeAction::SidebarRename => model.begin_sidebar_rename(),
@@ -249,32 +249,35 @@ fn activate_sidebar_target(
     model: &mut Model,
     client: &InteractiveClient,
     target: SidebarTarget,
-) -> Result<Option<HostSwitch>, String> {
+) -> Result<InputOutcome, String> {
     match target {
         SidebarTarget::Session(session) => {
             client
                 .attach(session.to_string())
                 .map_err(|error| error.to_string())?;
-            Ok(None)
+            model.begin_client_focus_attach();
+            Ok(InputOutcome::AttachRequested)
         }
         SidebarTarget::Window(window) => {
             execute_target(client, "select-window", window.to_string())?;
-            Ok(None)
+            Ok(InputOutcome::Repaint)
         }
         SidebarTarget::Pane(pane) => {
             focus_pane(client, pane)?;
             model.sidebar.focused = false;
-            Ok(None)
+            Ok(InputOutcome::Repaint)
         }
         SidebarTarget::NewPane(target) => {
             execute_target(client, "split-picker", target.to_string())?;
             model.sidebar.focused = false;
-            Ok(None)
+            Ok(InputOutcome::Repaint)
         }
-        SidebarTarget::LocalHost | SidebarTarget::FleetHost(_) => Ok(model.host_switch(target)),
+        SidebarTarget::LocalHost | SidebarTarget::FleetHost(_) => Ok(model
+            .host_switch(target)
+            .map_or(InputOutcome::Repaint, InputOutcome::SwitchHost)),
         SidebarTarget::AddHost => {
             model.begin_add_host();
-            Ok(None)
+            Ok(InputOutcome::Repaint)
         }
     }
 }
@@ -678,10 +681,8 @@ fn handle_mouse(
             MouseEventKind::ScrollUp => model.scroll_sidebar(-3),
             MouseEventKind::ScrollDown => model.scroll_sidebar(3),
             MouseEventKind::Down(MouseButton::Left) if global_row < model.sidebar_tree_height() => {
-                if let Some(target) = model.select_sidebar_row(global_row)
-                    && let Some(host) = activate_sidebar_target(model, client, target)?
-                {
-                    return Ok(InputOutcome::SwitchHost(host));
+                if let Some(target) = model.select_sidebar_row(global_row) {
+                    return activate_sidebar_target(model, client, target);
                 }
             }
             _ => return Ok(InputOutcome::None),
@@ -874,16 +875,37 @@ fn focus_pane(client: &InteractiveClient, pane: zz_protocol::PaneId) -> Result<(
         .map_err(|error| error.to_string())
 }
 
-fn send_focus(model: &Model, client: &InteractiveClient, focused: bool) -> Result<(), String> {
-    let Some(pane) = model.active_pane() else {
-        return Ok(());
-    };
-    client
-        .send_input(InputMessage::TerminalView {
+fn send_focus(model: &mut Model, client: &InteractiveClient, focused: bool) -> Result<(), String> {
+    if let Some(input) = model.client_focus_changed(focused) {
+        client
+            .send_input(input)
+            .map_err(|error| error.to_string())?;
+    }
+    let active_pane = model.active_pane().and_then(|pane| {
+        model
+            .pane_snapshot(pane)
+            .map(|snapshot| (pane, &snapshot.kind))
+    });
+    if let Some(input) = pane_focus_input(active_pane, focused) {
+        client
+            .send_input(input)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn pane_focus_input(
+    active_pane: Option<(zz_protocol::PaneId, &PaneKindSnapshot)>,
+    focused: bool,
+) -> Option<InputMessage> {
+    if let Some((pane, PaneKindSnapshot::Terminal)) = active_pane {
+        Some(InputMessage::TerminalView {
             pane,
             action: TerminalViewAction::Focus(focused),
         })
-        .map_err(|error| error.to_string())
+    } else {
+        None
+    }
 }
 
 fn browser_pointer_input(
@@ -1133,6 +1155,28 @@ mod tests {
         assert_eq!(
             chrome.resolve(SIDEBAR_TABLE, &key_input(rebound)),
             Some(ChromeAction::SidebarSelectUp)
+        );
+    }
+
+    #[test]
+    fn focus_events_forward_pane_focus_only_for_terminals() {
+        assert_eq!(pane_focus_input(None, true), None);
+        assert_eq!(
+            pane_focus_input(
+                Some((zz_protocol::PaneId(7), &PaneKindSnapshot::Terminal)),
+                false,
+            ),
+            Some(InputMessage::TerminalView {
+                pane: zz_protocol::PaneId(7),
+                action: TerminalViewAction::Focus(false),
+            })
+        );
+        assert_eq!(
+            pane_focus_input(
+                Some((zz_protocol::PaneId(8), &PaneKindSnapshot::Picker)),
+                true,
+            ),
+            None
         );
     }
 

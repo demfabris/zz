@@ -1,0 +1,23 @@
+# send-keys accepts the pin's attached, separate, duplicated, clustered, alias,
+# unique-prefix, and format-expanded repeat spellings without expanding one
+# repeated request into a command list.
+send-keys -t =w:0.0 -l -N 3 x
+send-keys -t =w:0.0 C-u
+send-keys -t =w:0.0 -lN3 y
+send-keys -t =w:0.0 C-u
+send-keys -t =w:0.0 -N2 -X cursor-right
+send-keys -t =w:0.0 -XN2 cursor-left
+send-keys -t =w:0.0 -FXN2 cursor-right
+send -t =w:0.0 -XN2 cursor-left
+send-k -t =w:0.0 -XN2 cursor-right
+send-keys -t =w:0.0 -N '#{window_width}' -X cursor-left
+
+# The last duplicate value wins before validation.
+send-keys -t =w:0.0 -N 0 -N 2 -X cursor-right
+send-keys -t =w:0.0 -N 2 -N 0 -X cursor-right
+
+# strtonum rejects zero, overflow, malformed clusters, and non-numbers.
+send-keys -t =w:0.0 -N 0 -X cursor-right
+send-keys -t =w:0.0 -N 4294967296 -X cursor-right
+send-keys -t =w:0.0 -N bogus -X cursor-right
+send-keys -t =w:0.0 -NX2 cursor-right

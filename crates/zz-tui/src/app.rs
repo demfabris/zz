@@ -361,11 +361,26 @@ enum HostSwitchDecision<T> {
     Switch { host: HostSwitch, connected: T },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AttachAttempt {
+    Idle,
     Default,
     Explicit,
     Remembered,
+}
+
+impl AttachAttempt {
+    const fn is_pending(self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+}
+
+fn attach_attempt_owns_missing_response(attempt: AttachAttempt, error: &ServerError) -> bool {
+    attempt.is_pending()
+        && matches!(
+            error,
+            ServerError::MissingTarget(_) | ServerError::SessionNotFound(_)
+        )
 }
 
 enum ProtocolOutcome {
@@ -471,6 +486,9 @@ pub(crate) fn run(
         local_endpoint,
         fleet_hosts,
     );
+    if attach_flags.is_some() {
+        model.begin_client_focus_attach();
+    }
     let mut renderer = Renderer::new();
     let mut browser = BrowserState::new(browser_provider);
     let mut kitty_probe = KittyProbe::new(configured_frame_transport_override());
@@ -638,6 +656,13 @@ pub(crate) fn run(
                             .paint(&model, true)
                             .map_err(|error| error.to_string())?;
                     }
+                    InputOutcome::AttachRequested => {
+                        attempt = AttachAttempt::Explicit;
+                        creating_default = false;
+                        renderer
+                            .paint(&model, false)
+                            .map_err(|error| error.to_string())?;
+                    }
                     InputOutcome::SwitchHost(host) => {
                         let label = host.label.clone();
                         match prepare_host_switch(&endpoint, host, |target| {
@@ -677,6 +702,7 @@ pub(crate) fn run(
                                     renderer.reset_kitty_images();
                                     endpoint = next_endpoint;
                                     model.set_connected_host(host, &lock_core(&core));
+                                    model.begin_client_focus_attach();
                                     refresh_terminal_options(&mut model, &core, &escape_time);
                                     if let Some(sequence) =
                                         sync_mouse_modes(&mut model, pixel_mouse)
@@ -805,6 +831,7 @@ pub(crate) fn run(
                 browser.reset_connection();
                 renderer.reset_kitty_images();
                 model.reset_connection(&lock_core(&core));
+                model.begin_client_focus_attach();
                 refresh_terminal_options(&mut model, &core, &escape_time);
                 if let Some(sequence) = sync_mouse_modes(&mut model, pixel_mouse) {
                     renderer.queue_control(sequence);
@@ -1248,10 +1275,16 @@ fn handle_core_event(
         // adopting the snapshot here keeps the new session and the painted
         // layout from ever disagreeing.
         CoreEvent::Attached { session } => {
+            *attempt = AttachAttempt::Idle;
             model.attached_session = Some(session);
             model.viewports.clear();
             model.client_message = None;
             model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
+            if let Some(input) = model.finish_client_focus_attach() {
+                client
+                    .send_input(input)
+                    .map_err(|error| error.to_string())?;
+            }
             *creating_default = false;
             Ok(ProtocolOutcome::None)
         }
@@ -1434,34 +1467,68 @@ fn handle_command_response(
     match response {
         CommandResponse::Error {
             request_id: 0,
-            error: ServerError::MissingTarget(target) | ServerError::SessionNotFound(target),
+            error,
             ..
-        } => match attempt {
-            AttachAttempt::Remembered => {
-                *attempt = AttachAttempt::Default;
-                client.attach("").map_err(|error| error.to_string())?;
-                Ok(ProtocolOutcome::None)
-            }
-            AttachAttempt::Default if !*creating_default => {
-                *creating_default = true;
-                client.request_resync().map_err(|error| error.to_string())?;
-                client
-                    .execute(CommandInvocation::new("new-session", [] as [&str; 0]))
-                    .map_err(|error| error.to_string())?;
-                let attaches = lock_core(core)
-                    .capabilities()
-                    .iter()
-                    .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY);
-                if !attaches {
-                    client
-                        .execute(CommandInvocation::new("attach-session", [] as [&str; 0]))
-                        .map_err(|error| error.to_string())?;
+        } if attach_attempt_owns_missing_response(*attempt, &error) => {
+            let (ServerError::MissingTarget(target) | ServerError::SessionNotFound(target)) = error
+            else {
+                unreachable!("attach response guard accepted a different error")
+            };
+            match *attempt {
+                AttachAttempt::Remembered => {
+                    if let Err(error) = client.attach("") {
+                        recover_client_focus_after_attach_error(model, client)?;
+                        *attempt = AttachAttempt::Idle;
+                        return Err(error.to_string());
+                    }
+                    model.begin_client_focus_attach();
+                    *attempt = AttachAttempt::Default;
+                    Ok(ProtocolOutcome::None)
                 }
-                Ok(ProtocolOutcome::Repaint)
+                AttachAttempt::Default if !*creating_default => {
+                    *creating_default = true;
+                    let creation = (|| {
+                        client.request_resync().map_err(|error| error.to_string())?;
+                        client
+                            .execute(CommandInvocation::new("new-session", [] as [&str; 0]))
+                            .map_err(|error| error.to_string())?;
+                        let attaches = lock_core(core)
+                            .capabilities()
+                            .iter()
+                            .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY);
+                        if !attaches {
+                            client
+                                .execute(CommandInvocation::new("attach-session", [] as [&str; 0]))
+                                .map_err(|error| error.to_string())?;
+                        }
+                        Ok(())
+                    })();
+                    if let Err(error) = creation {
+                        recover_client_focus_after_attach_error(model, client)?;
+                        *attempt = AttachAttempt::Idle;
+                        return Err(error);
+                    }
+                    Ok(ProtocolOutcome::Repaint)
+                }
+                AttachAttempt::Default => Ok(ProtocolOutcome::None),
+                AttachAttempt::Explicit if model.attached_session.is_some() => {
+                    recover_client_focus_after_attach_error(model, client)?;
+                    *attempt = AttachAttempt::Idle;
+                    model.client_message = Some(ClientMessage::local(format!(
+                        "session `{target}` was not found"
+                    )));
+                    Ok(ProtocolOutcome::Repaint)
+                }
+                AttachAttempt::Explicit => {
+                    recover_client_focus_after_attach_error(model, client)?;
+                    *attempt = AttachAttempt::Idle;
+                    Err(format!("session `{target}` was not found"))
+                }
+                AttachAttempt::Idle => {
+                    unreachable!("attach response guard requires a pending attempt")
+                }
             }
-            AttachAttempt::Default => Ok(ProtocolOutcome::None),
-            AttachAttempt::Explicit => Err(format!("session `{target}` was not found")),
-        },
+        }
         CommandResponse::Error {
             request_id: 0,
             error: ServerError::PaneExited(_) | ServerError::PaneNotAttached(_),
@@ -1471,9 +1538,12 @@ fn handle_command_response(
             request_id: 0,
             error: ServerError::InvalidCommand(message),
             ..
-        } if model.attached_session.is_none()
+        } if attempt.is_pending()
+            && model.attached_session.is_none()
             && message == "sessions should be nested with care, unset $TMUX to force" =>
         {
+            recover_client_focus_after_attach_error(model, client)?;
+            *attempt = AttachAttempt::Idle;
             Err(message)
         }
         CommandResponse::Error { error, .. } => {
@@ -1485,6 +1555,18 @@ fn handle_command_response(
             Ok(ProtocolOutcome::Repaint)
         }
     }
+}
+
+fn recover_client_focus_after_attach_error(
+    model: &mut Model,
+    client: &InteractiveClient,
+) -> Result<(), String> {
+    if let Some(input) = model.fail_client_focus_attach() {
+        client
+            .send_input(input)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// Tighten the browser's wait so the loop wakes up when a message's own
@@ -1708,6 +1790,31 @@ mod tests {
             focused_window: Some(window),
         }));
         (model, pane)
+    }
+
+    #[test]
+    fn unrelated_request_zero_error_preserves_pending_attach_recovery() {
+        let (mut model, _) = paned_model();
+        assert!(model.finish_client_focus_attach().is_some());
+        model.begin_client_focus_attach();
+        assert_eq!(model.client_focus_changed(false), None);
+        let mut attempt = AttachAttempt::Explicit;
+
+        let unrelated = ServerError::InvalidCommand("unrelated input error".to_owned());
+        assert!(!attach_attempt_owns_missing_response(attempt, &unrelated));
+        assert!(attempt.is_pending());
+        assert!(model.client_focus_attach_pending());
+
+        let missing = ServerError::SessionNotFound("missing".to_owned());
+        assert!(attach_attempt_owns_missing_response(attempt, &missing));
+        let recovered = model.fail_client_focus_attach();
+        attempt = AttachAttempt::Idle;
+        assert_eq!(
+            recovered,
+            Some(InputMessage::ClientFocus { focused: false })
+        );
+        assert!(!attempt.is_pending());
+        assert!(!attach_attempt_owns_missing_response(attempt, &missing));
     }
 
     fn tracking_viewport(tracking: bool) -> zz_terminal::TerminalViewport {

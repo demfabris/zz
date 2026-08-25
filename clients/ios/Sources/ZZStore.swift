@@ -101,14 +101,22 @@ final class ZZStore: ObservableObject {
         sceneIsActive = active
         terminalModifiers = 0
         if active {
+            let wasConnected = client != nil
             start()
+            if wasConnected, let client {
+                _ = zz_client_set_focused(client, true)
+            }
             if let pane = terminalInput.owner.pane {
                 focus(pane: pane, focused: true)
-                terminalInput.acquire(pane)
             }
-        } else if let pane = terminalInput.owner.pane {
-            focus(pane: pane, focused: false)
-            restoreStableGeometryAfterTransientInput(for: pane)
+        } else {
+            if let client {
+                _ = zz_client_set_focused(client, false)
+            }
+            if let pane = terminalInput.owner.pane {
+                focus(pane: pane, focused: false)
+                restoreStableGeometryAfterTransientInput(for: pane)
+            }
         }
     }
 
@@ -423,7 +431,10 @@ final class ZZStore: ObservableObject {
             switch event.kind {
             case ZZ_EVENT_HELLO:
                 connectionState = .connected
-            case ZZ_EVENT_ATTACHED, ZZ_EVENT_SNAPSHOT_CHANGED:
+            case ZZ_EVENT_ATTACHED:
+                _ = zz_client_set_focused(client, sceneIsActive)
+                refreshMux = true
+            case ZZ_EVENT_SNAPSHOT_CHANGED:
                 refreshMux = true
             case ZZ_EVENT_VIEWPORT_CHANGED:
                 let damage = TerminalDamage(

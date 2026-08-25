@@ -4,7 +4,7 @@ title: Session persistence & daemon lifecycle
 description: Why mux state and terminals outlive GPUI windows, which GUI state is disk-backed, which browser/Agent descriptors can restore, and how attach, detach, eviction, per-client state, and local transport work when several devices share one session.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [daemon, persistence, attach, detach, transport, lifecycle, multi-client]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -123,15 +123,17 @@ Attaching more devices forks what each person looks through. The session underne
 | Focused window (`focused_windows: BTreeMap<ClientId, WindowId>`, falling back to `session.active_window` when the entry names a window that is gone) | `session.active_window`, window and pane names |
 | Reported pane geometry, key engine and prefix state, command prompt, choosers, command output | The PTY, its scrollback, and every process inside it |
 
-PTY size is arbitrated rather than last-writer-wins. With `aggressive-resize` off,
-`terminal_resize_for_pane` uses the visible viewer with the newest terminal-input sequence, with the
-lowest `ClientId` breaking a tie; columns, rows, and cell pixels all come from that owner. With it
-on, columns and rows become the componentwise minima across clients currently viewing the pane's
-window, while cell pixels come from the newest eligible viewer. The same measurement feeds the
-window extent through the fixed zoom gate, active-pane single writer, one-cell dead-band, and repeat
-memo. Resize reports, focus changes, option changes, attach, and detach recompute the affected
-panes. Navigating the laptop to another window removes it from that window's aggressive candidate
-set.
+PTY size is arbitrated rather than last-writer-wins. `terminal_resize_for_pane` uses the eligible
+viewer with the newest geometry-owner sequence, with the lowest `ClientId` breaking a tie. Terminal
+input advances that sequence. Client FocusIn also advances it when the server
+`focus-events` option is on. `window-size latest` takes the owner's complete geometry. Largest and
+smallest aggregate rows and columns across eligible viewers, while manual retains the stored layout
+extent; all three take cell metrics from the owner.
+`aggressive-resize` only filters eligibility to clients viewing the pane's window. The resulting
+measurement feeds the window extent through the fixed zoom gate, active-pane single writer,
+one-cell dead-band, and repeat memo. Resize reports, client focus, option changes, attach, and detach
+recompute the affected panes. Navigating the laptop to another window removes it from that window's
+aggressive candidate set.
 
 Presence rides the snapshot. `snapshot_presence` turns the attached set into
 `SessionViewer { name, window, is_self }` rows named from `ClientHello.device_name` (`device-{id}`
@@ -140,6 +142,19 @@ when a client sent none), and `stamp_snapshot_for_client` writes each subscriber
 client. A view action from an attached client steers that client's view; one from an unattached
 command client fans out to every attached client's view of the pane, because a CLI caller has no view
 of its own.
+
+Client-window focus is transient event input, not daemon-retained presence state. The desktop
+client caches the latest desired state and replays it once after each `Attached` event. A rejected
+same-connection session switch restores the retained session's focus epoch and flushes a desired
+state that changed while the request was pending. The iPhone client waits for `ZZ_EVENT_ATTACHED`
+before sending its current scene state, covering initial, selected-session, recovery, and
+recreated-session attachments. The TUI assumes its outer terminal starts focused when it enables
+focus reporting, caches outer focus changes while attachment is pending, and replays the latest
+client-window focus once after each `Attached` event. A rejected sidebar session switch restores the
+retained session epoch, and repeated focus reports with the same value do not send another signal.
+Its separate attach-attempt marker owns missing-target retry and returns to idle on `Attached` or
+terminal failure; unrelated request-zero errors leave both it and the focus epoch unchanged. These
+attachment paths do not replay pane/application focus.
 
 ## Involuntary detach and roaming
 

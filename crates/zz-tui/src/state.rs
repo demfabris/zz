@@ -7,9 +7,9 @@ use std::{
 use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
-    ChooseBufferState, ChooseTreeState, CommandPromptState, DisplayPanesState, MuxSnapshot, PaneId,
-    PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine, StatusPosition,
-    TmuxColour, TmuxRange, WindowSnapshot,
+    ChooseBufferState, ChooseTreeState, CommandPromptState, DisplayPanesState, InputMessage,
+    MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine,
+    StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{TerminalAppearance, TerminalViewport};
 
@@ -27,6 +27,27 @@ use crate::{
 pub(crate) struct HostSwitch {
     pub label: String,
     pub endpoint: Endpoint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ClientFocusState {
+    focused: bool,
+    attach_ready: bool,
+    attach_pending: bool,
+    attach_recoverable: bool,
+    sent: Option<bool>,
+}
+
+impl Default for ClientFocusState {
+    fn default() -> Self {
+        Self {
+            focused: true,
+            attach_ready: false,
+            attach_pending: false,
+            attach_recoverable: false,
+            sent: None,
+        }
+    }
 }
 
 /// One status-line message. Daemon-timed messages carry the `message_id` the
@@ -88,6 +109,7 @@ pub(crate) struct Model {
     pub last_sent_geometry: HashMap<PaneId, (u16, u16, u32, u32)>,
     pub mouse_option: bool,
     pub mouse_modes_active: bool,
+    client_focus: ClientFocusState,
     local_host_label: String,
     local_endpoint: Endpoint,
     fleet_hosts: Vec<HostEntry>,
@@ -128,6 +150,7 @@ impl Model {
             last_sent_geometry: HashMap::new(),
             mouse_option: crate::app::mouse_option_enabled(core.mux_options()),
             mouse_modes_active: crate::app::mouse_option_enabled(core.mux_options()),
+            client_focus: ClientFocusState::default(),
             local_host_label,
             local_endpoint,
             fleet_hosts,
@@ -137,6 +160,7 @@ impl Model {
     /// Reseeds the caches from a freshly handshaken core and drops the
     /// presentation state that belonged to the previous connection.
     pub fn reset_connection(&mut self, core: &ClientCore) {
+        self.reset_client_focus_attach();
         self.snapshot = Arc::clone(core.snapshot());
         self.attached_session = core.attached_session();
         self.viewports.clear();
@@ -154,6 +178,63 @@ impl Model {
         self.last_sent_geometry.clear();
         self.layout = ResolvedLayout::default();
         self.clamp_sidebar();
+    }
+
+    pub fn begin_client_focus_attach(&mut self) {
+        if !self.client_focus.attach_pending {
+            self.client_focus.attach_recoverable = self.client_focus.attach_ready;
+        }
+        self.client_focus.attach_ready = false;
+        self.client_focus.attach_pending = true;
+    }
+
+    pub fn reset_client_focus_attach(&mut self) {
+        self.client_focus.attach_ready = false;
+        self.client_focus.attach_pending = false;
+        self.client_focus.attach_recoverable = false;
+        self.client_focus.sent = None;
+    }
+
+    pub fn fail_client_focus_attach(&mut self) -> Option<InputMessage> {
+        if !self.client_focus.attach_pending {
+            return None;
+        }
+        self.client_focus.attach_pending = false;
+        if self.client_focus.attach_recoverable {
+            self.client_focus.attach_recoverable = false;
+            self.client_focus.attach_ready = true;
+            self.pending_client_focus()
+        } else {
+            self.reset_client_focus_attach();
+            None
+        }
+    }
+
+    #[cfg(test)]
+    pub fn client_focus_attach_pending(&self) -> bool {
+        self.client_focus.attach_pending
+    }
+
+    pub fn finish_client_focus_attach(&mut self) -> Option<InputMessage> {
+        self.client_focus.attach_ready = true;
+        self.client_focus.attach_pending = false;
+        self.client_focus.attach_recoverable = false;
+        self.client_focus.sent = None;
+        self.pending_client_focus()
+    }
+
+    pub fn client_focus_changed(&mut self, focused: bool) -> Option<InputMessage> {
+        self.client_focus.focused = focused;
+        self.pending_client_focus()
+    }
+
+    fn pending_client_focus(&mut self) -> Option<InputMessage> {
+        let focused = self.client_focus.focused;
+        if !self.client_focus.attach_ready || self.client_focus.sent == Some(focused) {
+            return None;
+        }
+        self.client_focus.sent = Some(focused);
+        Some(InputMessage::ClientFocus { focused })
     }
 
     pub fn update_snapshot(&mut self, snapshot: Arc<MuxSnapshot>) {
@@ -596,6 +677,96 @@ mod tests {
             endpoint,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn client_focus_assumes_foreground_and_replays_on_initial_attach() {
+        let mut model = make_model(80, 24);
+
+        assert_eq!(
+            model.finish_client_focus_attach(),
+            Some(InputMessage::ClientFocus { focused: true })
+        );
+        assert_eq!(model.client_focus_changed(true), None);
+    }
+
+    #[test]
+    fn client_focus_changed_while_attach_is_pending_replays_the_latest_state() {
+        let mut model = make_model(80, 24);
+
+        assert_eq!(model.client_focus_changed(false), None);
+        assert_eq!(
+            model.finish_client_focus_attach(),
+            Some(InputMessage::ClientFocus { focused: false })
+        );
+    }
+
+    #[test]
+    fn client_focus_replays_once_per_reattach_without_pane_focus() {
+        let mut model = make_model(80, 24);
+        assert!(matches!(
+            model.finish_client_focus_attach(),
+            Some(InputMessage::ClientFocus { focused: true })
+        ));
+        assert_eq!(
+            model.client_focus_changed(false),
+            Some(InputMessage::ClientFocus { focused: false })
+        );
+
+        model.begin_client_focus_attach();
+        assert_eq!(model.client_focus_changed(false), None);
+        let replay = model.finish_client_focus_attach();
+        assert_eq!(replay, Some(InputMessage::ClientFocus { focused: false }));
+        assert!(!matches!(replay, Some(InputMessage::TerminalView { .. })));
+    }
+
+    #[test]
+    fn failed_attach_recovers_latest_focus_without_same_value_churn() {
+        let mut model = make_model(80, 24);
+        assert!(model.finish_client_focus_attach().is_some());
+
+        model.begin_client_focus_attach();
+        assert_eq!(model.client_focus_changed(false), None);
+        assert_eq!(model.client_focus_changed(true), None);
+        assert_eq!(model.client_focus_changed(false), None);
+        assert_eq!(
+            model.fail_client_focus_attach(),
+            Some(InputMessage::ClientFocus { focused: false })
+        );
+        assert_eq!(model.client_focus_changed(false), None);
+        assert_eq!(
+            model.client_focus_changed(true),
+            Some(InputMessage::ClientFocus { focused: true })
+        );
+    }
+
+    #[test]
+    fn unrelated_failure_while_ready_does_not_change_focus_delivery() {
+        let mut model = make_model(80, 24);
+        assert!(model.finish_client_focus_attach().is_some());
+        assert!(!model.client_focus_attach_pending());
+        assert_eq!(model.fail_client_focus_attach(), None);
+        assert_eq!(
+            model.client_focus_changed(false),
+            Some(InputMessage::ClientFocus { focused: false })
+        );
+    }
+
+    #[test]
+    fn reconnect_discards_the_old_epoch_and_replays_without_pane_focus() {
+        let mut model = make_model(80, 24);
+        assert!(model.finish_client_focus_attach().is_some());
+        assert_eq!(
+            model.client_focus_changed(false),
+            Some(InputMessage::ClientFocus { focused: false })
+        );
+
+        model.reset_client_focus_attach();
+        assert_eq!(model.client_focus_changed(true), None);
+        assert_eq!(model.fail_client_focus_attach(), None);
+        let replay = model.finish_client_focus_attach();
+        assert_eq!(replay, Some(InputMessage::ClientFocus { focused: true }));
+        assert!(!matches!(replay, Some(InputMessage::TerminalView { .. })));
     }
 
     fn status(rows: Vec<&str>, position: StatusPosition, message_line: u8) -> StatusLine {

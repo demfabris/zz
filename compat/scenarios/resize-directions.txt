@@ -1,9 +1,17 @@
 # Directional and absolute resizing through a nested split.
 split-window -h -t w:0.0
 split-window -v -t w:0.1
-resize-pane -t w:0.0 -L 5
+resize-pane -t w:0.0 -L
+resize-pane -t w:0.0 -L2
+resize-pane -t w:0.0 -L 3
+resize-pane -t w:0.0 -R
+resize-pane -t w:0.0 -R2
 resize-pane -t w:0.0 -R 3
-resize-pane -t w:0.1 -U 2
-resize-pane -t w:0.1 -D 4
+resize-pane -t w:0.1 -U
+resize-pane -t w:0.1 -U2
+resize-pane -t w:0.1 -U 3
+resize-pane -t w:0.1 -D
+resize-pane -t w:0.1 -D2
+resize-pane -t w:0.1 -D 3
 resize-pane -t w:0.0 -x 30
 resize-pane -t w:0.1 -y 75%

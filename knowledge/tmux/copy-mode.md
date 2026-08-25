@@ -4,7 +4,7 @@ title: Copy mode and view mode
 description: "Daemon-native tmux copy/view mode over libghostty history: vi/emacs movement tables, selection, incremental search, jumps, and copy/pipe variants, driven by send-keys -X and painted by GPUI."
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, copy-mode, view-mode, selection, search]
-timestamp: 2026-08-10T00:00:00Z
+timestamp: 2026-08-25T00:00:00Z
 ---
 
 # Overview
@@ -21,8 +21,9 @@ sequences: GPUI paints the cursor, selection, matches, scrollbar, and mode indic
 every navigation/selection/copy action arrives as `send-keys -X <action>` from the
 [`copy-mode`/`copy-mode-vi` key tables](/tmux/key-tables.md). `command.rs::copy_mode_action` parses
 each `-X` action into a `zz_terminal::CopyModeAction` (see [zz-terminal](/crates/zz-terminal.md))
-wrapped in `MuxEffect::TerminalView { pane, action: TerminalViewAction::CopyMode(...) }`; the terminal
-actor executes it against the frozen revision. `-X` actions never reach the PTY.
+wrapped in `MuxEffect::TerminalView`. A single action uses `TerminalViewAction::CopyMode`; a counted
+action uses the flat `TerminalViewAction::CopyModeCounted { action, count }` shape. The terminal
+actor executes both against the frozen revision. `-X` actions never reach the PTY.
 
 # Entry, mode-keys, and search
 
@@ -66,13 +67,38 @@ actor executes it against the frozen revision. `-X` actions never reach the PTY.
 | Pipe | `copy-pipe`, `copy-pipe-no-clear`, `copy-pipe-and-cancel`, `pipe`, `pipe-no-clear`, `pipe-and-cancel` |
 | Exit | `cancel`, `clear-selection-or-cancel` (exits only with no selection) |
 
+The pinned `window-copy` command table contains 95 action names. zz currently maps 66 to typed mux
+and terminal behavior; 29 remain missing. `copy-mode.action-fidelity` keeps those 29 names explicit
+across seven categories: vocabulary, cursor geometry, logical-line and mode-key behavior, goto-line,
+selection lifecycle, jump/page/prompt actions, and copy formatting and destination effects. The
+table above describes the mapped surface. It is not a complete inventory of the pin.
+
+`top-line`, `middle-line`, and `bottom-line` now set the copy cursor's column to zero and place its
+row at the top, middle, or bottom of the current frozen viewport. They preserve the viewport offset
+and clamp to the retained revision. The full `zz-terminal` library suite passes 197 tests for this
+slice. That evidence does not cover `history-bottom`, logical-line behavior, wrapping, scrolling, or
+the other missing actions.
+
 Copy/pipe actions build a `CopyModeCopy` whose flags mirror tmux: `clipboard` is set unless `-C` or
 `set-clipboard off`; a paste buffer is created unless `-P` (append variants append); `pipe` runs the
 argument or the configured `copy-command`; `-no-clear` keeps the selection and `-and-cancel` leaves
 the mode. Jump bindings are the reason [`KeyEngine`](/tmux/key-tables.md) has a `pending` state:
 it captures exactly one following key as the jump target. Vi digits `1` through `9` similarly buffer
-a numeric prefix; following digits extend it (so `10E` works) and the next `send-keys -X` motion is
-repeated. Bare `0` remains `start-of-line`.
+a numeric prefix; following digits extend it (so `10E` works), then one `send-keys -N <count> -X ...`
+invocation carries the count through one mux effect and terminal action. Prefix-consuming movements,
+jumps, matching brackets, and repeat-search actions execute N times without allocating N cloned
+effects. `other-end` swaps only for odd N, and `select-line` selects N lines downward. Ordinary
+rectangle toggles, begin-selection, clear-selection, copy-selection, cancel, and later actions in
+the same binding execute once. The copy-end-of-line family extends through the end of the Nth row
+and copies once, which covers direct `3D` and counted `C-k` command shapes. Resolution stops at the
+first `send` or `send-keys` command whose option prefix contains `-X`. Its stored `-N` wins;
+otherwise the engine inserts separate `-N <count>` arguments immediately before the option argument
+containing `-X`. It does not scan onward after a stored `-N`, and a binding with no qualifying `-X`
+leaves the buffered count armed. Invalid nonempty `-X` grammar restores the neutral count of one,
+represented as no buffered count, so a following `5` starts at five rather than extending one to
+fifteen. Bare `0` remains `start-of-line`; counted `Escape` runs clear-selection once. Empty
+`send-keys -N <n> -X` still needs tmux's pane-owned prefix persistence and remains tracked under
+`terminal.key-control`.
 
 # Selection text
 
@@ -83,10 +109,22 @@ rectangle columns, and keeps the final newline for linewise (`V`) selections. It
 wide-character spacer cells. The resulting `String` is passed unchanged through the daemon and system
 clipboard; paste encoding does not normalize spaces or tabs.
 
-Two pinned-tmux keyboard actions remain intentionally outside the native model: `P` toggles tmux's
-position label, while zz always presents its copy-mode position in native chrome; `r` toggles live
-refresh, while zz copy mode is defined as a stable frozen revision. Mouse pseudo-keys are handled by
-the direct pointer route rather than `KeyEngine` bindings.
+The stock emacs table includes all 13 direct navigation aliases that map to existing typed actions:
+scroll lines, semantic prompts, matching brackets, line and history endpoints, half pages, top-line
+positioning, and page-down. Each binding stores the pin's `send-keys -X` command with no repeat bit.
+
+The emacs table also installs `C-[`, `C-k`, `C-w`, `N`, `R`, and `n` for cancel, both copy variants,
+reverse search, rectangle toggle, and forward search. Each binding stores the pin's command and has
+no repeat bit.
+
+Seventeen keyboard defaults remain tracked. Ten require the pin's numeric-repeat or goto-line
+command-prompt flow. Seven emacs or vi keys depend on five missing actions:
+`previous-matching-bracket`, `recentre-top-bottom`, `cursor-centre-horizontal`, `toggle-position`,
+and `refresh-toggle`. `keys.copy-mode-unsupported-default-actions` owns only those seven keys and
+depends on the wider 29-action inventory in `copy-mode.action-fidelity`. zz presents the position
+label in native chrome and freezes the copy revision, but the tracker keeps both tmux toggles open
+until the project makes a product decision. Mouse pseudo-keys use the direct pointer route instead
+of `KeyEngine` bindings.
 
 # App-initiated clipboard writes (OSC 52)
 

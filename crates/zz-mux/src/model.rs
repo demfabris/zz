@@ -250,6 +250,7 @@ pub struct Session {
     pub id: SessionId,
     pub name: String,
     pub created: Option<i64>,
+    pub activity: Option<i64>,
     pub sort_created: u64,
     pub sort_activity: u64,
     pub windows: Vec<WindowId>,
@@ -423,6 +424,7 @@ impl MuxState {
                 id: session_id,
                 name,
                 created: None,
+                activity: None,
                 sort_created: created,
                 sort_activity: created,
                 windows: vec![window_id],
@@ -2104,20 +2106,16 @@ impl MuxState {
             .or_else(|| self.default_context())
     }
 
-    pub(crate) fn mark_session_active(&mut self, session: SessionId) {
-        if self.sessions.contains_key(&session) {
-            self.touch_session_activity(session);
-            self.last_active_session = Some(session);
-        }
-    }
-
-    pub(crate) fn touch_session_activity(&mut self, session: SessionId) {
+    pub(crate) fn mark_session_active_at(&mut self, session: SessionId, now: u64) {
         if self.sessions.contains_key(&session) {
             let activity = self.allocate_sort_point();
-            self.sessions
+            let state = self
+                .sessions
                 .get_mut(&session)
-                .expect("active session exists")
-                .sort_activity = activity;
+                .expect("active session exists");
+            state.activity = i64::try_from(now).ok();
+            state.sort_activity = activity;
+            self.last_active_session = Some(session);
         }
     }
 
@@ -6068,6 +6066,31 @@ mod tests {
         assert!(!state.set_pane_bell(pane, false));
 
         assert!(!state.set_pane_bell(PaneId(9999), false));
+    }
+
+    #[test]
+    fn session_activity_marks_keep_exact_seconds_and_logical_mru() {
+        let mut state = MuxState::default();
+        let (first, _, _) = state.create_session("first").unwrap();
+        let (second, _, _) = state.create_session("second").unwrap();
+        let second_created = state.sessions[&second].sort_activity;
+
+        state.mark_session_active_at(first, 1_700_000_123);
+        assert_eq!(state.sessions[&first].activity, Some(1_700_000_123));
+        assert!(state.sessions[&first].sort_activity > second_created);
+        assert_eq!(
+            state.most_recent_context().map(|context| context.0),
+            Some(first)
+        );
+
+        let first_activity = state.sessions[&first].sort_activity;
+        state.mark_session_active_at(second, 1_700_000_123);
+        assert_eq!(state.sessions[&second].activity, Some(1_700_000_123));
+        assert!(state.sessions[&second].sort_activity > first_activity);
+        assert_eq!(
+            state.most_recent_context().map(|context| context.0),
+            Some(second)
+        );
     }
 
     #[test]

@@ -14,9 +14,10 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 72;
+pub const PROTOCOL_VERSION: u16 = 76;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
+pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
 /// Value-token prefix naming the caller's controlling tty, `client-tty-v1:/dev/ttys007`.
 pub const CLIENT_TTY_CAPABILITY_PREFIX: &str = "client-tty-v1:";
 /// Value-token prefix naming the caller's terminal size, `client-size-v1:80x24`.
@@ -25,6 +26,7 @@ pub const SPLIT_RATIO_BASIS: u16 = 10_000;
 pub const MAX_COMMAND_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_CHOOSE_TREE_QUERY_BYTES: usize = 4 * 1024;
 pub const MAX_CHOOSE_BUFFER_QUERY_BYTES: usize = 4 * 1024;
+pub const MAX_BROWSER_KEY_REPEAT: u32 = 9_999;
 /// Longest either half of a rendered status line may be.
 pub const MAX_STATUS_TEXT_BYTES: usize = 4096;
 /// Most personalized status rows one client may be shown.
@@ -891,6 +893,7 @@ pub struct ClientHello {
 
 impl ClientHello {
     pub const CLIENT_TERMINAL_CAPABILITY: &'static str = CLIENT_TERMINAL_CAPABILITY;
+    pub const CLIENT_NESTED_CAPABILITY: &'static str = CLIENT_NESTED_CAPABILITY;
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
 }
@@ -1111,6 +1114,21 @@ pub fn split_command_words(words: impl IntoIterator<Item = String>) -> Vec<Vec<S
 pub struct CommandRequest {
     pub request_id: u64,
     pub command: CommandInvocation,
+    pub prepared: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedCommand {
+    pub invocation: CommandInvocation,
+    pub canonical_name: Option<String>,
+    pub alias_matched: bool,
+    pub result: PreparedCommandResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PreparedCommandResult {
+    Ready,
+    Error(ServerError),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1154,13 +1172,20 @@ pub enum ServerError {
     WindowNotFound(String),
     #[error("can't find pane: {0}")]
     PaneNotFound(String),
+    #[error("invalid command: {0}")]
+    CommandParse(String),
 }
 
 impl ServerError {
     #[must_use]
+    pub const fn is_command_parse(&self) -> bool {
+        matches!(self, Self::CommandParse(_))
+    }
+
+    #[must_use]
     pub fn tmux_message(&self) -> String {
         match self {
-            Self::InvalidCommand(message) => message.clone(),
+            Self::InvalidCommand(message) | Self::CommandParse(message) => message.clone(),
             error => error.to_string(),
         }
     }
@@ -1251,6 +1276,9 @@ pub enum InputMessage {
         columns: u16,
         rows: u16,
     },
+    ClientFocus {
+        focused: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1281,6 +1309,10 @@ pub enum BrowserCommand {
         request_id: u64,
         #[serde(deserialize_with = "deserialize_gui_text")]
         path: String,
+    },
+    SendKeysRepeated {
+        keys: Vec<KeyToken>,
+        count: u32,
     },
 }
 
@@ -2124,6 +2156,11 @@ pub enum EventPayload {
     TimedClientMessageCleared {
         message_id: u64,
     },
+    SourcedCommandGuard {
+        output: String,
+        error: bool,
+        client_failure: bool,
+    },
 }
 
 impl EventPayload {
@@ -2294,6 +2331,14 @@ pub enum ProtocolMessage {
         pane: PaneId,
         reclaim_id: u64,
     },
+    PrepareCommandList {
+        request_id: u64,
+        commands: Vec<CommandInvocation>,
+    },
+    PreparedCommandList {
+        request_id: u64,
+        commands: Vec<PreparedCommand>,
+    },
 }
 
 #[cfg(test)]
@@ -2327,9 +2372,27 @@ mod tests {
             "width too small"
         );
         assert_eq!(
+            super::ServerError::CommandParse("usage: split-window".to_owned()).tmux_message(),
+            "usage: split-window"
+        );
+        assert_eq!(
             super::ServerError::SessionNotFound("missing".to_owned()).tmux_message(),
             "can't find session: missing"
         );
+    }
+
+    #[test]
+    fn command_parse_error_holds_wire_tag_twelve() {
+        let error = super::ServerError::CommandParse("usage: split-window".to_owned());
+        let bytes = postcard::to_stdvec(&error).expect("command parse error encodes");
+        assert_eq!(bytes[0], 12);
+        assert_eq!(
+            postcard::from_bytes::<super::ServerError>(&bytes)
+                .expect("command parse error decodes"),
+            error
+        );
+        assert!(error.is_command_parse());
+        assert!(!super::ServerError::InvalidCommand(String::new()).is_command_parse());
     }
 
     #[test]
@@ -2445,6 +2508,38 @@ mod tests {
             assert_eq!(
                 u8::try_from(21 + index).expect("tag"),
                 message_tag(&message)
+            );
+        }
+
+        let invocation = super::CommandInvocation::new("list-sessions", std::iter::empty::<&str>());
+        let prepared = super::PreparedCommand {
+            invocation: invocation.clone(),
+            canonical_name: Some("list-sessions".to_owned()),
+            alias_matched: false,
+            result: super::PreparedCommandResult::Ready,
+        };
+        for (message, tag) in [
+            (
+                super::ProtocolMessage::PrepareCommandList {
+                    request_id: 7,
+                    commands: vec![invocation],
+                },
+                31,
+            ),
+            (
+                super::ProtocolMessage::PreparedCommandList {
+                    request_id: 7,
+                    commands: vec![prepared],
+                },
+                32,
+            ),
+        ] {
+            let bytes = postcard::to_stdvec(&message).expect("prepare message encodes");
+            assert_eq!(bytes[0], tag);
+            assert_eq!(
+                postcard::from_bytes::<super::ProtocolMessage>(&bytes)
+                    .expect("prepare message decodes"),
+                message
             );
         }
 
@@ -3058,7 +3153,26 @@ mod tests {
     }
 
     #[test]
+    fn sourced_command_guard_holds_wire_tag_forty_seven() {
+        let event = super::Event {
+            sequence: 7,
+            payload: super::EventPayload::SourcedCommandGuard {
+                output: "diagnostic\n".to_owned(),
+                error: true,
+                client_failure: false,
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("sourced command guard encodes");
+        assert_eq!(bytes[1], 47);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("sourced command guard decodes"),
+            event
+        );
+    }
+
+    #[test]
     fn client_terminal_size_input_holds_wire_tag_seventeen() {
+        assert_eq!(super::CLIENT_NESTED_CAPABILITY, "client-nested-v1");
         assert_eq!(super::CLIENT_TTY_CAPABILITY_PREFIX, "client-tty-v1:");
         assert_eq!(super::CLIENT_SIZE_CAPABILITY_PREFIX, "client-size-v1:");
         let input = super::InputMessage::ClientTerminalSize {
@@ -3070,6 +3184,42 @@ mod tests {
         assert_eq!(
             postcard::from_bytes::<super::InputMessage>(&bytes).expect("client size decodes"),
             input
+        );
+    }
+
+    #[test]
+    fn client_focus_input_holds_wire_tag_eighteen() {
+        let input = super::InputMessage::ClientFocus { focused: true };
+        let bytes = postcard::to_stdvec(&input).expect("client focus encodes");
+        assert_eq!(bytes[0], 18);
+        assert_eq!(
+            postcard::from_bytes::<super::InputMessage>(&bytes).expect("client focus decodes"),
+            input
+        );
+    }
+
+    #[test]
+    fn command_request_carries_the_v74_prepared_bit() {
+        let request = |prepared| {
+            super::ProtocolMessage::CommandRequest(super::CommandRequest {
+                request_id: 7,
+                command: super::CommandInvocation::new("list-sessions", std::iter::empty::<&str>()),
+                prepared,
+            })
+        };
+        let ordinary = postcard::to_stdvec(&request(false)).expect("ordinary request encodes");
+        let prepared = postcard::to_stdvec(&request(true)).expect("prepared request encodes");
+        assert_eq!(ordinary.last(), Some(&0));
+        assert_eq!(prepared.last(), Some(&1));
+        assert_eq!(
+            postcard::from_bytes::<super::ProtocolMessage>(&ordinary)
+                .expect("ordinary request decodes"),
+            request(false)
+        );
+        assert_eq!(
+            postcard::from_bytes::<super::ProtocolMessage>(&prepared)
+                .expect("prepared request decodes"),
+            request(true)
         );
     }
 
@@ -3099,8 +3249,43 @@ mod tests {
     }
 
     #[test]
+    fn counted_copy_mode_action_holds_wire_tag_twenty_eight_without_recursive_actions() {
+        use zz_terminal::{CopyModeAction, TerminalViewAction};
+
+        let action = TerminalViewAction::CopyModeCounted {
+            action: CopyModeAction::NextMatchingBracket,
+            count: u32::MAX,
+        };
+        let bytes = postcard::to_stdvec(&action).expect("counted copy action encodes");
+        assert_eq!(bytes[0], 28);
+        assert_eq!(bytes[1], 45);
+        assert_eq!(
+            postcard::from_bytes::<TerminalViewAction>(&bytes)
+                .expect("counted copy action decodes"),
+            action
+        );
+        assert!(postcard::from_bytes::<CopyModeAction>(&[50, 0, 1]).is_err());
+        assert!(postcard::from_bytes::<TerminalViewAction>(&[28, 50, 0, 1]).is_err());
+    }
+
+    #[test]
+    fn repeated_browser_keys_hold_wire_tag_seven() {
+        let command = super::BrowserCommand::SendKeysRepeated {
+            keys: vec![super::KeyToken::Literal("x".to_owned())],
+            count: u32::MAX,
+        };
+        let bytes = postcard::to_stdvec(&command).expect("repeated browser keys encode");
+        assert_eq!(bytes[0], 7);
+        assert_eq!(
+            postcard::from_bytes::<super::BrowserCommand>(&bytes)
+                .expect("repeated browser keys decode"),
+            command
+        );
+    }
+
+    #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 72);
+        assert_eq!(super::PROTOCOL_VERSION, 76);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

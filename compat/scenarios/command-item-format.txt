@@ -63,10 +63,10 @@ split-window -d -h -t =sp:0.0
 select-pane -t =sp:0.1 -T sp-destination
 new-session -d -s argfmt-current -n current
 
-# rename-session expands after target resolution and before mutation. Its
-# session context descends through the target's active window and pane.
-rename-session -t =rs-c '#{session_name}-#{window_name}-#{pane_title}-#{command}'
-out: display-message -p -t =rs-c-rs-window-rs-pane-rename-session: [#{session_name}]
+# rename-session expands after target resolution and before mutation. The
+# resolved target supplies its active pane and therefore uses pane format type.
+rename-session -t =rs-c '#{session_name}-#{window_name}-#{pane_title}-#{session_format}-#{pane_format}-#{command}'
+out: display-message -p -t =rs-c-rs-window-rs-pane-0-1-rename-session: [#{session_name}]
 rename -t =rs-a '#{session_name}-#{command}'
 out: display-message -p -t =rs-a-rename-session: [#{session_name}]
 rename-s -t =rs-p '#{session_name}-#{command}'
@@ -106,3 +106,68 @@ out: display-message -p -t =sp:0.1 [#{pane_title}]
 select-pane -t =sp:0.0 -T sp-alias
 selectp -t =sp:0.0 -R -T '#{pane_title}-#{command}'
 out: display-message -p -t =sp:0.1 [#{pane_title}]
+
+# new-session expands -s once before both lookup and creation. A command
+# client contributes no attached session, window, or pane defaults, while the
+# command-item value stays canonical for the long name, alias, and prefix.
+new-session -d -s '#{command}'
+new-session -d -s '#{command}'
+new -d -s 'alias-#{command}'
+new-s -d -s 'prefix-#{command}'
+new-session -d -s '#{session_name}'
+new-session -d -s 'slash\#{command}'
+
+# The initial window name expands before the session name and follows the same
+# validation and vis-cleaning path. Valid Unicode and empty expansion results
+# survive unchanged; backslashes are escaped exactly once.
+new-session -d -s name-window-clean -n 'window\#{command}'
+out: display-message -p -t =name-window-clean:0 [#{window_name}]
+new -d -s name-window-unicode -n 'janela-日本語-#{command}'
+out: display-message -p -t =name-window-unicode:0 [#{window_name}]
+new-s -d -s name-window-empty -n '#{missing_name}'
+out: display-message -p -t =name-window-empty:0 [#{window_name}]
+new-session -d -s new-window-name-target -n new-window-name-origin
+select-pane -t =new-window-name-target:0.0 -T new-window-name-pane
+new-session -d -s new-window-name-current
+neww -d -t =new-window-name-target:5 -n 'janela-日本語\#{command}-#{session_name}-#{window_name}-#{pane_title}'
+out: display-message -p -t =new-window-name-target:5 [#{window_name}]
+select-window -t =new-window-name-target:0
+new-window -d -n 'collision\#{command}'
+new-window -d -S -n 'collision\#{command}'
+
+# -S performs a second expansion of the cleaned name only for an unindexed
+# reuse lookup. A miss and an explicit-index bypass both create with the
+# first-pass cleaned name, not the lookup expansion.
+new-session -d -s new-window-reuse-hit -n new-window-reuse-hit
+new-window -d -S -t =new-window-reuse-hit: -n '##{session_name}'
+out: list-windows -t =new-window-reuse-hit -F [#{window_index}:#{window_name}]
+new-session -d -s new-window-reuse-miss -n anchor
+new-window -d -S -t =new-window-reuse-miss: -n '##{session_name}'
+out: list-windows -t =new-window-reuse-miss -F [#{window_index}:#{window_name}]
+new-session -d -s new-window-reuse-index -n new-window-reuse-index
+new-window -d -S -t =new-window-reuse-index:5 -n '##{session_name}'
+out: list-windows -t =new-window-reuse-index -F [#{window_index}:#{window_name}]
+
+new-session -d -s break-pane-name -n break-pane-origin
+split-window -d -h -t =break-pane-name:0.0
+breakp -d -s =break-pane-name:0.1 -n 'janela-日本語\#{command}'
+out: display-message -p -t =break-pane-name:1 [#{window_name}]
+split-window -d -h -t =break-pane-name:0.0
+break-pane -d -s =break-pane-name:0.1 -n 'janela-日本語\#{command}'
+out: list-windows -t =break-pane-name -F [#{window_name}]
+
+# Rename commands expand in the old target context, reject the same invalid
+# name class, and then share new-session's vis-cleaning behavior.
+new-session -d -s rename-clean-session
+rename-session -t =rename-clean-session 'renamed\#{command}'
+out: list-sessions -F [#{session_name}]
+new-session -d -s rename-clean-window -n original
+rename-window -t =rename-clean-window:0 'renamed\#{command}'
+out: list-windows -t =rename-clean-window -F [#{window_name}]
+rename-window -t =rename-clean-window:0 'janela-日本語-#{command}'
+out: display-message -p -t =rename-clean-window:0 [#{window_name}]
+rename-window -t =rename-clean-window:0 '#{missing_name}'
+out: display-message -p -t =rename-clean-window:0 [#{window_name}]
+new-session -d -s rename-collision-source
+new-session -d -s 'collision\rename-session'
+rename-session -t =rename-collision-source 'collision\rename-session'

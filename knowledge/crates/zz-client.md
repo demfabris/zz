@@ -26,6 +26,19 @@ with `client.server_hello().clone()` before starting its receive loop. A reconne
 `adopt_hello` alone to keep frozen frames, or handle the full hello to reset attachment and overlay
 state.
 
+Connection-time caller facts stay outside this crate. `zz-daemon::InteractiveClient` constructs a
+local Control hello with the process cwd, an stdin-only `client-tty-v1:` identity when available,
+and `client-nested-v1` for a nonempty `$TMUX`. `ClientCore` neither discovers nor retains those
+facts. The Control path sends no `client-size-v1:` fact and no `ClientTerminalSize` update, so it
+adds no implicit geometry or renderer state here.
+
+`ClientCore` accepts and ignores the Control-only `SourcedCommandGuard` event. It does not own `-C`
+frame rendering, stdin ordering, or process exit state; `crates/zz/src/control_mode.rs` owns those
+front-end concerns. The daemon already returns a completed nonzero success for a matched source replay
+that failed, but the Control front end does not retain that result through every EOF and detach order.
+`control-mode.source-file-exit-status` tracks the exact source-file matrix. It does not ask this shared
+interactive core to make diagnostics globally sticky.
+
 # Desktop hot-path boundary
 
 The desktop `MuxClient` sends non-frame messages through `ClientCore` and drains the resulting

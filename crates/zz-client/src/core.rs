@@ -745,6 +745,7 @@ impl ClientCore {
             | EventPayload::PaneOutputState { .. }
             | EventPayload::PaneOutputAged { .. }
             | EventPayload::ControlFlags { .. }
+            | EventPayload::SourcedCommandGuard { .. }
             | EventPayload::SubscriptionChanged { .. } => {}
         }
     }

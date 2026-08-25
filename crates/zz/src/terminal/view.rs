@@ -2681,6 +2681,17 @@ mod tests {
     }
 
     #[test]
+    fn gpui_terminal_commits_text_as_one_standalone_message() {
+        assert_eq!(
+            terminal_text_input(PaneId(7), "typed"),
+            InputMessage::Text {
+                pane: PaneId(7),
+                text: "typed".to_owned(),
+            }
+        );
+    }
+
+    #[test]
     fn space_release_preserves_its_unshifted_codepoint_for_kitty_encoding() {
         let keystroke = Keystroke {
             key: "space".to_owned(),

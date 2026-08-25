@@ -10,7 +10,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-08-15T00:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -59,9 +59,15 @@ use the same raw-key FFI path. Text input remains Unicode and IME aware through 
 
 The store owns one explicit input target: no pane or one terminal pane. A focus request advances an
 activation token, and UIKit reconciles first-responder state on the next main-actor turn only while
-the matching surface is mounted and the scene is active. Overview navigation, pane switching, and
-scene deactivation release the old responder and daemon focus through the same state transition.
-Backgrounding gates focus without destroying the FFI client, reduced core, or retained viewports.
+the matching surface is mounted and the scene is active. Overview navigation and pane switching
+release the old responder and pane/application focus through the same state transition. The initial
+connection waits for `ZZ_EVENT_ATTACHED`, then sends the separate v73 client-window focus signal.
+Each later `ZZ_EVENT_ATTACHED` does the same for session selection, recovery, and recreated-session
+flows. `zz_client_attach` returning true confirms the request write, so the store does not send scene
+focus from that return path. Attachment does not replay pane focus. A foreground or background
+transition sends the terminal input owner's distinct pane/application focus signal so the child
+application retains its `CSI I`/`CSI O` path. Backgrounding keeps the FFI client, reduced core, and
+retained viewports alive.
 
 A two-finger pinch changes the current pane's terminal font in one-point steps from 9 through 23
 points. Each crossed step emits selection haptics and reports the resulting cell geometry to the

@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/control-alias-prepare.sh ~/control-alias-prepare.sh
+run-shell 'sh ~/control-alias-prepare.sh'
+out: show-environment -g CONTROL_ALIAS_SNAPSHOT
+out: show-environment -g CONTROL_PREPARE_ABORT

@@ -44,14 +44,14 @@ use thiserror::Error;
 use crate::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, ClipboardTarget, Color, CopyJump,
-    CopyJumpDirection, CopyModeAction, Cursor, CursorBlinkPolicy, CursorStyle, GRAPHEME_TABLE_BIT,
-    IMAGE_PLACEHOLDER_SCHEME, KeyAction, KeyCode, KeyInput, KittyLayer, KittyPlacement,
-    MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES, OVERLAY_RECTANGLE, OverlayKind, OverlaySpan,
-    PackedCell, PackedStyle, PasteBufferAction, PointerCellEvent, ScrollbarState, SearchCase,
-    SearchDirection, SearchMode, SearchQuery, SearchStatus, SessionStatus, TerminalAppearance,
-    TerminalColorScheme, TerminalDictionary, TerminalMode, TerminalMouseButton, TerminalMouseInput,
-    TerminalMousePhase, TerminalPresentation, TerminalViewAction, TerminalViewId, TerminalViewport,
-    UnderlineStyle, WordSeparators,
+    CopyJumpDirection, CopyModeAction, CopyModeCountPolicy, Cursor, CursorBlinkPolicy, CursorStyle,
+    GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME, KeyAction, KeyCode, KeyInput, KittyLayer,
+    KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES, OVERLAY_RECTANGLE, OverlayKind,
+    OverlaySpan, PackedCell, PackedStyle, PasteBufferAction, PointerCellEvent, ScrollbarState,
+    SearchCase, SearchDirection, SearchMode, SearchQuery, SearchStatus, SessionStatus,
+    TerminalAppearance, TerminalColorScheme, TerminalDictionary, TerminalMode, TerminalMouseButton,
+    TerminalMouseInput, TerminalMousePhase, TerminalPresentation, TerminalViewAction,
+    TerminalViewId, TerminalViewport, UnderlineStyle, WordSeparators,
 };
 
 mod mode_revision;
@@ -1109,10 +1109,14 @@ impl TerminalSession {
     }
 
     pub fn send_text(&self, text: impl Into<Arc<str>>) {
+        self.try_send_text(text);
+    }
+
+    pub fn try_send_text(&self, text: impl Into<Arc<str>>) -> bool {
         self.send_command(Command::Text {
             view: None,
             text: text.into(),
-        });
+        })
     }
 
     pub fn send_text_for_view(&self, view: TerminalViewId, text: impl Into<Arc<str>>) {
@@ -1124,10 +1128,14 @@ impl TerminalSession {
 
     /// Send a physical key event through libghostty's key encoder.
     pub fn send_key(&self, input: KeyInput) {
+        self.try_send_key(input);
+    }
+
+    pub fn try_send_key(&self, input: KeyInput) -> bool {
         self.send_command(Command::Key {
             view: None,
             input: Box::new(input),
-        });
+        })
     }
 
     pub fn send_key_for_view(&self, view: TerminalViewId, input: KeyInput) {
@@ -5689,6 +5697,41 @@ fn apply_view_action(
             )?;
             Ok(ViewActionResult::Snapshot)
         }
+        TerminalViewAction::CopyModeCounted { action, count } => {
+            let was_frozen = copy_mode.is_some();
+            let result = if let CopyModeAction::SearchAgain { reverse } = action {
+                let forward = search
+                    .as_ref()
+                    .is_none_or(|search| search.query.direction == SearchDirection::Forward);
+                let direction = if forward ^ reverse { 1 } else { -1 };
+                for _ in 0..count {
+                    step_search(search, direction, wrap_search);
+                }
+                sync_copy_cursor_to_search(copy_mode, search.as_deref());
+                reveal_search_for_view(terminal, copy_mode.as_deref(), search.as_deref())?;
+                ViewActionResult::Snapshot
+            } else {
+                apply_counted_copy_mode_action(
+                    terminal,
+                    selection,
+                    copy_mode,
+                    unseen_output,
+                    action,
+                    count,
+                    word_separators,
+                )?
+            };
+            if was_frozen && copy_mode.is_none() {
+                drop_view_search(
+                    view_id,
+                    search_worker,
+                    search,
+                    search_origin,
+                    search_snapshot,
+                );
+            }
+            Ok(result)
+        }
         TerminalViewAction::CopyMode(CopyModeAction::SearchAgain { reverse }) => {
             let forward = search
                 .as_ref()
@@ -7358,15 +7401,7 @@ fn apply_copy_mode_action(
             Ok(ViewActionResult::Snapshot)
         }
         CopyModeAction::SelectLine => {
-            let (anchor, focus) = mode_logical_line_bounds(&mode.revision, mode.cursor.y);
-            mode.selection = Some(ModeSelection {
-                anchor,
-                focus,
-                mode: SelectionMode::Line,
-                rectangle: false,
-            });
-            mode.selecting = true;
-            mode.rectangle = false;
+            select_copy_mode_lines(&mut mode, 1);
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
@@ -7478,16 +7513,7 @@ fn apply_copy_mode_action(
             })))
         }
         CopyModeAction::CopyEndOfLine(copy) => {
-            mode.selection = Some(ModeSelection {
-                anchor: mode.cursor,
-                focus: PointCoordinate {
-                    x: revision_copy_line_end(&mode.revision, mode.cursor.y),
-                    y: mode.cursor.y,
-                },
-                mode: SelectionMode::Cell,
-                rectangle: false,
-            });
-            mode.selecting = true;
+            select_copy_mode_to_line_end(&mut mode, 1);
             *copy_mode = Some(mode);
             apply_copy_mode_action(
                 terminal,
@@ -7506,6 +7532,127 @@ fn apply_copy_mode_action(
             cancel_copy_mode(terminal, selection, unseen_output)
         }
     }
+}
+
+fn select_copy_mode_to_line_end(mode: &mut CopyModeState, count: u32) {
+    if count == 0 {
+        return;
+    }
+    let focus_y = mode
+        .cursor
+        .y
+        .saturating_add(count - 1)
+        .min(mode.revision.total_rows().saturating_sub(1));
+    mode.selection = Some(ModeSelection {
+        anchor: mode.cursor,
+        focus: PointCoordinate {
+            x: revision_copy_line_end(&mode.revision, focus_y),
+            y: focus_y,
+        },
+        mode: SelectionMode::Cell,
+        rectangle: false,
+    });
+    mode.selecting = true;
+}
+
+fn apply_counted_copy_mode_action(
+    terminal: &mut Terminal<'_, '_>,
+    selection: &mut Option<SelectionState>,
+    copy_mode: &mut CopyModeSlot,
+    unseen_output: &mut u32,
+    action: CopyModeAction,
+    count: u32,
+    word_separators: &WordSeparators,
+) -> Result<ViewActionResult, WorkerError> {
+    if count == 0 {
+        return Ok(ViewActionResult::None);
+    }
+    match action.count_policy() {
+        CopyModeCountPolicy::Repeat => {
+            if copy_mode.is_none() {
+                return Ok(ViewActionResult::None);
+            }
+            for _ in 0..count {
+                apply_copy_mode_action(
+                    terminal,
+                    selection,
+                    copy_mode,
+                    unseen_output,
+                    action.clone(),
+                    word_separators,
+                )?;
+                if copy_mode.is_none() {
+                    break;
+                }
+            }
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeCountPolicy::OtherEnd if count.is_multiple_of(2) => Ok(ViewActionResult::Snapshot),
+        CopyModeCountPolicy::OtherEnd | CopyModeCountPolicy::Once => apply_copy_mode_action(
+            terminal,
+            selection,
+            copy_mode,
+            unseen_output,
+            action,
+            word_separators,
+        ),
+        CopyModeCountPolicy::SelectLine => {
+            let Some(mode) = copy_mode.as_mut() else {
+                return Ok(ViewActionResult::None);
+            };
+            select_copy_mode_lines(mode, count);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeCountPolicy::CopyEndOfLine => {
+            let CopyModeAction::CopyEndOfLine(copy) = action else {
+                unreachable!("copy-end policy is only assigned to copy-end-of-line")
+            };
+            let Some(mut mode) = copy_mode.take() else {
+                return Ok(ViewActionResult::None);
+            };
+            select_copy_mode_to_line_end(&mut mode, count);
+            *copy_mode = Some(mode);
+            apply_copy_mode_action(
+                terminal,
+                selection,
+                copy_mode,
+                unseen_output,
+                CopyModeAction::CopySelection(copy),
+                word_separators,
+            )
+        }
+    }
+}
+
+fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
+    if count == 0 {
+        return;
+    }
+    let (anchor, mut focus) = mode_logical_line_bounds(&mode.revision, mode.cursor.y);
+    for _ in 1..count {
+        let next = focus.y.saturating_add(1);
+        if next >= mode.revision.total_rows() {
+            break;
+        }
+        let (_, next_focus) = mode_logical_line_bounds(&mode.revision, next);
+        if next_focus.y == focus.y {
+            break;
+        }
+        focus = next_focus;
+    }
+    mode.cursor = PointCoordinate {
+        x: revision_copy_line_end(&mode.revision, focus.y),
+        y: focus.y,
+    };
+    mode.selection = Some(ModeSelection {
+        anchor,
+        focus,
+        mode: SelectionMode::Line,
+        rectangle: false,
+    });
+    mode.selecting = true;
+    mode.rectangle = false;
+    reveal_copy_cursor(mode);
 }
 
 fn copy_mode_scroll_exit_ready(mode: &CopyModeState) -> bool {
@@ -7609,14 +7756,19 @@ fn move_copy_cursor(
             point.y = 0;
         }
         CopyModeAction::Bottom => point.y = total - 1,
-        CopyModeAction::TopLine => point.y = mode.viewport_offset,
+        CopyModeAction::TopLine => {
+            point.x = 0;
+            point.y = mode.viewport_offset;
+        }
         CopyModeAction::MiddleLine => {
+            point.x = 0;
             point.y = mode
                 .viewport_offset
                 .saturating_add(page.saturating_sub(1) / 2)
                 .min(total - 1);
         }
         CopyModeAction::BottomLine => {
+            point.x = 0;
             point.y = mode
                 .viewport_offset
                 .saturating_add(page.saturating_sub(1))
@@ -14045,6 +14197,220 @@ mod tests {
     }
 
     #[test]
+    fn counted_copy_mode_actions_apply_pinned_parity_brackets_and_line_span() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 24,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"(a[b]c)\r\ntwo\r\nthree\r\nfour");
+        let mut live_selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            false,
+            false,
+        )
+        .expect("copy mode");
+        let first = (0..copy_mode.as_ref().expect("mode").revision.total_rows())
+            .find(|row| {
+                copy_mode
+                    .as_ref()
+                    .expect("mode")
+                    .revision
+                    .first_char(PointCoordinate { x: 0, y: *row })
+                    == Some('(')
+            })
+            .expect("first fixture row");
+        let mut unseen_output = 0;
+        let separators = WordSeparators::default();
+
+        {
+            let mode = copy_mode.as_mut().expect("mode");
+            mode.cursor = PointCoordinate { x: 2, y: first };
+            mode.selection = Some(ModeSelection {
+                anchor: PointCoordinate { x: 0, y: first },
+                focus: PointCoordinate { x: 2, y: first },
+                mode: SelectionMode::Cell,
+                rectangle: false,
+            });
+            mode.selecting = true;
+        }
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::OtherEnd,
+            2,
+            &separators,
+        )
+        .expect("even other-end");
+        let mode = copy_mode.as_ref().expect("mode");
+        let selection = mode.selection.expect("selection");
+        assert_eq!(selection.anchor.x, 0);
+        assert_eq!(selection.focus.x, 2);
+        assert_eq!(mode.cursor.x, 2);
+
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::OtherEnd,
+            3,
+            &separators,
+        )
+        .expect("odd other-end");
+        let mode = copy_mode.as_ref().expect("mode");
+        let selection = mode.selection.expect("selection");
+        assert_eq!(selection.anchor.x, 2);
+        assert_eq!(selection.focus.x, 0);
+        assert_eq!(mode.cursor.x, 0);
+
+        copy_mode.as_mut().expect("mode").cursor = PointCoordinate { x: 0, y: first };
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::NextMatchingBracket,
+            2,
+            &separators,
+        )
+        .expect("two bracket transitions");
+        assert_eq!(
+            copy_mode.as_ref().expect("mode").cursor,
+            PointCoordinate { x: 0, y: first }
+        );
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::NextMatchingBracket,
+            3,
+            &separators,
+        )
+        .expect("three bracket transitions");
+        assert_eq!(
+            copy_mode.as_ref().expect("mode").cursor,
+            PointCoordinate { x: 6, y: first }
+        );
+
+        copy_mode.as_mut().expect("mode").cursor = PointCoordinate { x: 0, y: first };
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::SelectLine,
+            3,
+            &separators,
+        )
+        .expect("three-line selection");
+        let mode = copy_mode.as_ref().expect("mode");
+        let selection = mode.selection.expect("line selection");
+        assert_eq!(selection.anchor.y, first);
+        assert_eq!(selection.focus.y, first + 2);
+        assert_eq!(selection.mode, SelectionMode::Line);
+        assert_eq!(mode.cursor.y, first + 2);
+    }
+
+    #[test]
+    fn counted_copy_mode_once_policy_runs_stateful_actions_once() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 2,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"abcdef");
+        let mut live_selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            false,
+            false,
+        )
+        .expect("copy mode");
+        let mut unseen_output = 0;
+        let separators = WordSeparators::default();
+
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::ToggleRectangle,
+            2,
+            &separators,
+        )
+        .expect("toggle once");
+        assert!(copy_mode.as_ref().expect("mode").rectangle);
+
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::StartSelection,
+            2,
+            &separators,
+        )
+        .expect("selection once");
+        assert!(copy_mode.as_ref().expect("mode").selection.is_some());
+
+        let copied = apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::copy_selection(crate::CopyModeCopy {
+                request_id: 41,
+                clipboard: false,
+                buffer: None,
+                pipe: None,
+                clear_selection: true,
+                cancel: true,
+            }),
+            2,
+            &separators,
+        )
+        .expect("copy once");
+        assert!(matches!(
+            copied,
+            ViewActionResult::Copy(copy) if copy.request_id == 41
+        ));
+        assert!(copy_mode.is_none());
+
+        enter_copy_mode(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            false,
+            false,
+        )
+        .expect("copy mode again");
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::Cancel,
+            2,
+            &separators,
+        )
+        .expect("cancel once");
+        assert!(copy_mode.is_none());
+    }
+
+    #[test]
     fn osc133_prompt_navigation_finds_prompts_and_command_output() {
         let mut terminal = Terminal::new(TerminalOptions {
             cols: 24,
@@ -14209,6 +14575,41 @@ mod tests {
         move_copy_cursor(mode, &CopyModeAction::Up, &WordSeparators::default());
         let point = mode.cursor;
         assert!(point.y < u32::try_from(terminal.total_rows().expect("rows")).unwrap());
+    }
+
+    #[test]
+    fn copy_mode_fixed_rows_reset_column() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"abcdefgh\r\nmiddle\r\nxy");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let mode = copy_mode.as_mut().expect("mode");
+        let viewport = mode.viewport_offset;
+        let page = u32::from(mode.revision.viewport_rows);
+
+        for (action, y) in [
+            (CopyModeAction::TopLine, viewport),
+            (
+                CopyModeAction::MiddleLine,
+                viewport.saturating_add(page.saturating_sub(1) / 2),
+            ),
+            (
+                CopyModeAction::BottomLine,
+                viewport.saturating_add(page.saturating_sub(1)),
+            ),
+        ] {
+            mode.cursor = PointCoordinate { x: 6, y: viewport };
+            move_copy_cursor(mode, &action, &WordSeparators::default());
+            assert_eq!(mode.cursor, PointCoordinate { x: 0, y }, "{action:?}");
+            assert_eq!(mode.viewport_offset, viewport, "{action:?}");
+        }
     }
 
     #[test]
@@ -14595,6 +14996,66 @@ mod tests {
             result,
             ViewActionResult::Copy(copy) if copy.text == "let  x = 1"
         ));
+    }
+
+    #[test]
+    fn counted_copy_mode_end_of_line_spans_the_requested_rows_once() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"abcdef\r\nghijkl\r\nmnopqr");
+        let mut live_selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            false,
+            false,
+        )
+        .expect("copy mode");
+        let first = (0..copy_mode.as_ref().expect("mode").revision.total_rows())
+            .find(|row| {
+                copy_mode
+                    .as_ref()
+                    .expect("mode")
+                    .revision
+                    .first_char(PointCoordinate { x: 0, y: *row })
+                    == Some('a')
+            })
+            .expect("first fixture row");
+        copy_mode.as_mut().expect("mode").cursor = PointCoordinate { x: 2, y: first };
+        let mut unseen_output = 0;
+
+        let result = apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut live_selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::copy_end_of_line(crate::CopyModeCopy {
+                request_id: 3,
+                clipboard: true,
+                buffer: None,
+                pipe: None,
+                clear_selection: false,
+                cancel: false,
+            }),
+            3,
+            &WordSeparators::default(),
+        )
+        .expect("counted copy to end of line");
+
+        assert!(matches!(
+            result,
+            ViewActionResult::Copy(copy) if copy.text == "cdef\nghijkl\nmnopqr"
+        ));
+        assert_eq!(
+            copy_mode.as_ref().expect("mode").cursor,
+            PointCoordinate { x: 2, y: first }
+        );
     }
 
     #[test]

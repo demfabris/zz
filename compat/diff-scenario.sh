@@ -150,6 +150,7 @@ tmux_command() {
   else
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
       -u EDITOR -u VISUAL \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
       "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" "$@"
   fi
 }
@@ -166,6 +167,7 @@ tmux_start_command() {
   else
     env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
       -u EDITOR -u VISUAL \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
       "$TMUX_BIN" -L "$TMUX_SOCKET_NAME" -f /dev/null "$@"
   fi
 }

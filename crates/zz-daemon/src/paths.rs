@@ -1,9 +1,6 @@
 //! Discovery of the zz-owned mux configuration file (`zz/mux.conf`).
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 const MUX_CONFIG_DIRECTORY_NAME: &str = "zz";
 const MUX_CONFIG_FILE_NAME: &str = "mux.conf";
@@ -146,16 +143,6 @@ pub fn mux_config_write_path() -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
         .cloned()
         .or_else(|| candidates.into_iter().next())
-}
-
-pub(crate) fn is_default_mux_config(path: &Path) -> bool {
-    let canonical = fs::canonicalize(path);
-    mux_config_candidates().iter().any(|candidate| {
-        match (&canonical, fs::canonicalize(candidate)) {
-            (Ok(path), Ok(candidate)) => *path == candidate,
-            _ => path == candidate,
-        }
-    })
 }
 
 #[cfg(test)]

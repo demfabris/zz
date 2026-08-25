@@ -27,7 +27,10 @@ use zz_daemon::{
     DaemonError, Endpoint, InteractiveClient, classify_local_connect_error, configured_fleet_hosts,
     default_socket_path, short_device_name, terminate_incompatible_daemon,
 };
-use zz_protocol::{CommandInvocation, CommandResponse, ProtocolMessage, ServerError};
+use zz_protocol::{
+    CommandInvocation, CommandResponse, PreparedCommand, PreparedCommandResult, ProtocolMessage,
+    ServerError,
+};
 use zz_terminal::TerminalColorScheme;
 
 use crate::browser::BrowserFrameProvider;
@@ -164,6 +167,23 @@ pub fn run_new_session<'a>(
     request: impl Into<RunRequest<'a>>,
     invocations: impl IntoIterator<Item = CommandInvocation>,
 ) -> Result<(), Error> {
+    run_new_session_commands(request, invocations.into_iter().map(NewSessionCommand::Raw))
+}
+
+pub fn run_prepared_new_session<'a>(
+    request: impl Into<RunRequest<'a>>,
+    commands: impl IntoIterator<Item = PreparedCommand>,
+) -> Result<(), Error> {
+    run_new_session_commands(
+        request,
+        commands.into_iter().map(NewSessionCommand::Prepared),
+    )
+}
+
+fn run_new_session_commands<'a>(
+    request: impl Into<RunRequest<'a>>,
+    commands: impl IntoIterator<Item = NewSessionCommand>,
+) -> Result<(), Error> {
     let request = request.into();
     let options = request.options;
     let resolved = resolve_run(options)?;
@@ -175,7 +195,7 @@ pub fn run_new_session<'a>(
         options.restart_daemon,
         request.local_reconnect,
     )?;
-    match execute_new_session(&initial, invocations)? {
+    match execute_new_session(&initial, commands)? {
         NewSessionOutcome::Detached => Ok(()),
         NewSessionOutcome::Attached { session, messages } => {
             let browser_provider = request.browser_provider.and_then(|provider| provider());
@@ -236,16 +256,41 @@ enum NewSessionOutcome {
     },
 }
 
+enum NewSessionCommand {
+    Raw(CommandInvocation),
+    Prepared(PreparedCommand),
+}
+
 fn execute_new_session(
     client: &InteractiveClient,
-    invocations: impl IntoIterator<Item = CommandInvocation>,
+    commands: impl IntoIterator<Item = NewSessionCommand>,
 ) -> Result<NewSessionOutcome, Error> {
     let mut attached_session = None;
     let mut messages = Vec::new();
-    'commands: for invocation in invocations {
-        let request_id = client
-            .execute(invocation)
-            .map_err(|error| Error::message(error.to_string()))?;
+    'commands: for command in commands {
+        let request_id = match command {
+            NewSessionCommand::Raw(invocation) => client.execute(invocation),
+            NewSessionCommand::Prepared(PreparedCommand {
+                invocation,
+                result: PreparedCommandResult::Ready,
+                ..
+            }) => client.execute_prepared(invocation),
+            NewSessionCommand::Prepared(PreparedCommand {
+                result: PreparedCommandResult::Error(error),
+                ..
+            }) => {
+                if attached_session.is_none() {
+                    return Err(Error::message(error.tmux_message()));
+                }
+                messages.push(ProtocolMessage::CommandResponse(CommandResponse::Error {
+                    request_id: u64::MAX,
+                    error,
+                    output: String::new(),
+                }));
+                break 'commands;
+            }
+        }
+        .map_err(|error| Error::message(error.to_string()))?;
         loop {
             let message = client
                 .recv()

@@ -540,6 +540,17 @@ pub unsafe extern "C" fn zz_client_scroll_lines(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_set_focused(client: *mut ZzClient, focused: bool) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client
+        .client
+        .send_input(InputMessage::ClientFocus { focused })
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_client_focus_terminal(
     client: *mut ZzClient,
     pane: u64,

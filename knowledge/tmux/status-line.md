@@ -4,7 +4,7 @@ title: tmux status rows and format expansion
 description: The daemon expands tmux status formats per client; the TUI draws terminal rows while the GUI maps their semantic regions onto native widgets.
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
-timestamp: 2026-08-24T00:00:00-03:00
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -133,6 +133,14 @@ window is born at tmux's `default-size` 80x24 and reports its exact allocations,
 tracks the measuring client, and a zoomed pane reports the full window extent (tmux swaps in a
 one-leaf layout during zoom; zz mirrors the observable).
 
+`#{command}` is separate from those row facts: it names the canonical command-queue item currently
+expanding a format. Built-in aliases, unique prefixes, and one-layer user aliases therefore report
+the resolved entry. Explicit item-state variables outrank that fallback. Daemon-owned commands
+carry it through immediate expansion and the post-spawn `new-window`/`split-window -P -F`
+re-expansion that adds live pane facts. A typed child block reports the child's command, while
+confirm prompts, periodic status work, and delayed Control subscriptions expand outside an item
+and leave it empty.
+
 ## Variable backing and honest defaults
 
 The table below accounts for all 198 registered names. Live values can still be empty outside their
@@ -142,7 +150,7 @@ the [divergence matrix](/tmux/divergences.md#format-variables-that-remain-unback
 
 | Backing | Names |
 | --- | --- |
-| Live mux/server state | `active_window_index`, `history_limit`, `host`, `host_short`, `last_window_index`, `next_session_id`, `pane_active`, `pane_at_bottom`, `pane_at_left`, `pane_at_right`, `pane_at_top`, `pane_bottom`, `pane_dead`, `pane_dead_status`, `pane_flags`, `pane_format`, `pane_height`, `pane_id`, `pane_index`, `pane_input_off`, `pane_last`, `pane_left`, `pane_right`, `pane_start_command`, `pane_start_command_list`, `pane_synchronized`, `pane_title`, `pane_top`, `pane_width`, `pane_x`, `pane_y`, `pane_z`, `pane_zoomed_flag`, `pid`, `server_sessions`, `session_activity_flag`, `session_alert`, `session_alerts`, `session_attached`, `session_attached_list`, `session_bell_flag`, `session_format`, `session_id`, `session_many_attached`, `session_name`, `session_silence_flag`, `session_stack`, `session_windows`, `socket_path`, `start_time`, `uid`, `user`, `version`, `window_active`, `window_activity_flag`, `window_active_clients`, `window_active_clients_list`, `window_active_sessions`, `window_active_sessions_list`, `window_bell_flag`, `window_end_flag`, `window_flags`, `window_format`, `window_height`, `window_id`, `window_index`, `window_last_flag`, `window_layout`, `window_linked`, `window_linked_sessions`, `window_linked_sessions_list`, `window_manual_height`, `window_manual_width`, `window_name`, `window_panes`, `window_raw_flags`, `window_silence_flag`, `window_stack_index`, `window_start_flag`, `window_visible_layout`, `window_width`, `window_zoomed_flag` |
+| Live mux/server state | `active_window_index`, `history_limit`, `host`, `host_short`, `last_window_index`, `next_session_id`, `pane_active`, `pane_at_bottom`, `pane_at_left`, `pane_at_right`, `pane_at_top`, `pane_bottom`, `pane_dead`, `pane_dead_status`, `pane_flags`, `pane_format`, `pane_height`, `pane_id`, `pane_index`, `pane_input_off`, `pane_last`, `pane_left`, `pane_right`, `pane_start_command`, `pane_start_command_list`, `pane_synchronized`, `pane_title`, `pane_top`, `pane_width`, `pane_x`, `pane_y`, `pane_z`, `pane_zoomed_flag`, `pid`, `server_sessions`, `session_activity`, `session_activity_flag`, `session_alert`, `session_alerts`, `session_attached`, `session_attached_list`, `session_bell_flag`, `session_format`, `session_id`, `session_many_attached`, `session_name`, `session_silence_flag`, `session_stack`, `session_windows`, `socket_path`, `start_time`, `uid`, `user`, `version`, `window_active`, `window_activity_flag`, `window_active_clients`, `window_active_clients_list`, `window_active_sessions`, `window_active_sessions_list`, `window_bell_flag`, `window_end_flag`, `window_flags`, `window_format`, `window_height`, `window_id`, `window_index`, `window_last_flag`, `window_layout`, `window_linked`, `window_linked_sessions`, `window_linked_sessions_list`, `window_manual_height`, `window_manual_width`, `window_name`, `window_panes`, `window_raw_flags`, `window_silence_flag`, `window_stack_index`, `window_start_flag`, `window_visible_layout`, `window_width`, `window_zoomed_flag` |
 | Daemon config-selection feed | `config_files` (the comma-joined startup selection; native reload replaces it with the selected default path or empty, while later `source-file` calls do not append) |
 | Daemon runtime feed | `pane_current_command`, `pane_current_path`, `pane_path`, `pane_start_path`, `pane_pid`, `pane_tty`, `pane_dead_signal`, `pane_dead_time`, `pane_pipe`, `pane_pipe_pid`, `session_created` |
 | Daemon buffer hook | `buffer_created`, `buffer_full`, `buffer_name`, `buffer_sample`, `buffer_size` |
@@ -151,7 +159,86 @@ the [divergence matrix](/tmux/divergences.md#format-variables-that-remain-unback
 | `list-clients`-only injection | `client_activity`, `client_key_table`, `client_last_session`, `client_readonly`, `session_last_attached` |
 | Pin-null without the missing client, mouse, or group context | `client_cell_height`, `client_cell_width`, `client_control_mode`, `client_discarded`, `client_pid`, `client_prefix`, `client_utf8`, `client_written`, `mouse_x`, `mouse_y`, `session_active`, `session_group_attached`, `session_group_many_attached`, `session_group_size`, `window_bigger` |
 | Pinned inactive/default state | `alternate_on`, `alternate_saved_x`, `alternate_saved_y`, `bracket_paste_flag`, `cursor_blinking`, `cursor_shape`, `cursor_very_visible`, `cursor_x`, `cursor_y`, `history_all_bytes`, `history_bytes`, `history_size`, `insert_flag`, `keypad_cursor_flag`, `keypad_flag`, `mouse_all_flag`, `mouse_any_flag`, `mouse_button_flag`, `mouse_sgr_flag`, `mouse_standard_flag`, `mouse_utf8_flag`, `origin_flag`, `pane_floating_flag`, `pane_in_mode`, `pane_marked`, `pane_marked_set`, `pane_pb_progress`, `pane_unseen_changes`, `scroll_region_lower`, `scroll_region_upper`, `session_grouped`, `session_marked`, `sixel_support`, `synchronized_output_flag`, `window_cell_height`, `window_cell_width`, `window_marked_flag` |
-| Always unavailable (32; `client_termname` has an empty-valued seam) | `buffer_mode_format`, `client_colours`, `client_created`, `client_mode_format`, `client_termfeatures`, `client_termname`, `client_termtype`, `client_tty`, `cursor_character`, `cursor_colour`, `mouse_hyperlink`, `mouse_line`, `mouse_pane`, `mouse_status_line`, `mouse_status_range`, `mouse_word`, `pane_bg`, `pane_fg`, `pane_key_mode`, `pane_mode`, `pane_pb_state`, `pane_search_string`, `pane_tabs`, `session_activity`, `session_group`, `session_group_attached_list`, `session_group_list`, `session_path`, `tree_mode_format`, `window_activity`, `window_offset_x`, `window_offset_y` |
+| Always unavailable (31; `client_termname` has an empty-valued seam) | `buffer_mode_format`, `client_colours`, `client_created`, `client_mode_format`, `client_termfeatures`, `client_termname`, `client_termtype`, `client_tty`, `cursor_character`, `cursor_colour`, `mouse_hyperlink`, `mouse_line`, `mouse_pane`, `mouse_status_line`, `mouse_status_range`, `mouse_word`, `pane_bg`, `pane_fg`, `pane_key_mode`, `pane_mode`, `pane_pb_state`, `pane_search_string`, `pane_tabs`, `session_group`, `session_group_attached_list`, `session_group_list`, `session_path`, `tree_mode_format`, `window_activity`, `window_offset_x`, `window_offset_y` |
+
+Eligible local terminal surfaces and Command clients retain a tty internally for attached-client
+selection and nested-attach checks. Local Control retains the same identity only when stdin has a
+discoverable tty; piped stdin retains none. That state is not part of `ClientFormatFacts`, so it
+does not make `client_tty` available to list, status, title, or ordinary format expansion. The
+Control identity scope also does not add TERM or terminal-name facts. It publishes no implicit
+size; only explicit `refresh-client -C` state can supply Control geometry.
+
+The `ClientFocus` shape introduced in protocol v73 drives activity and geometry ownership but does
+not retain a current focused boolean. `client_flags` therefore omits tmux's `focused` flag.
+
+`session_activity` retains Unix seconds and starts at the same timestamp as `session_created`.
+Successful same- or other-session selection and queued terminal input refresh it. Every attach also
+advances the terminal geometry-owner sequence and recalculates affected panes, whether or not
+`focus-events` is enabled. A client with retained geometry therefore becomes `window-size latest`
+on a same-session reattach; a newly attached client becomes latest as soon as its pane geometry
+arrives.
+
+Read-only `Key` messages bypass chooser, command-prompt, and `display-panes` consumption and resolve
+through the ordinary root key table. Direct local scrolling and read-only-safe copy-mode navigation
+refresh activity and latest geometry once without clearing the bell. Rejected shared-state actions,
+including raw mouse motion, use the same accounting before rejection while retaining the modal.
+Pane Focus is rejected without activity because `ClientFocus` owns the client-window transition.
+Writable chooser input is different because the native choosers are pane
+modes: raw keys, dedicated actions, and terminal-view input each refresh activity exactly once but
+also advance latest geometry without clearing bells. A chooser activation into another session
+then records the target attach as a second legitimate activity boundary. Raw chooser routing is
+client-scoped, so a peer's key does not operate another client's chooser. Read-only-safe local view
+actions bypass a retained chooser or `display-panes` overlay, reach the pane, and account once while
+leaving the modal and bell intact. Writable `display-panes` consumes a valid selection and bare
+buttonless hover Motion without activity. An unmatched key, Escape, non-hover mouse action, or wheel
+closes the overlay and falls through ordinary input; timeout closes it without fabricating activity.
+
+Client-window focus is separate from pane/application focus through the `ClientFocus` shape
+introduced in protocol v73. When the server `focus-events` option is on, both directions update the retained session and client
+activity facts exactly once. FocusIn additionally becomes the geometry owner and resizes visible
+terminal panes; `window-size latest` takes that owner's rows, columns, and cell metrics, while
+manual, largest, and smallest keep their mode-correct rows and columns but refresh the owner's cell
+metrics. FocusOut does not change geometry ownership.
+Read-only clients use the same activity path, but zz does not couple read-only with tmux's
+`ignore-size` flag. The read-only regression proves zz accepts the notification and updates
+activity; it does not prove tmux `attach -r` resize behavior. A zz-side writable two-client
+regression mirrors the pinned FocusIn/latest rows-and-columns rule, but `ClientFocus` is not
+CLI-drivable, so this is not a differential-harness proof. Neither direction clears a pane bell.
+Writable `TerminalViewAction::Focus` only reaches the terminal application and changes neither
+activity nor geometry; pairing the two signals still records one activity update. Read-only pane
+Focus is rejected, while its client-window activity uses `ClientFocus`. The client-focus activity
+path is inert when the server option is off. Writable focus first dismisses an active status message
+and resumes any frozen terminal publication, then closes `display-panes` before either direction
+reaches activity accounting. Text, Single, Incremental, and BackspaceExit prompts consume the
+transition and stay open. Key prompts submit `FocusIn` or `FocusOut` and consume it; Numeric prompts
+submit their buffer without recording prompt history and pass it into ordinary focus accounting.
+Native chooser pane modes and read-only clients bypass the writable prequeue, so those modals and
+messages stay open. A FocusIn that changes both latest geometry and an activity-sorted chooser
+publishes the snapshot and independently refreshes the chooser. Writable
+command-prompt consumed key or text input does not refresh activity. Committed text uses a bounded
+ordered queue per client; every entry records its pane and input lane. A press or repeat `Key` with
+`text_follows: true` records the pending pair. `Text`
+scans forward to the first entry for the same pane and lane, retires only the skipped prefix, and
+consumes that match while preserving its suffix. The matched Key's modal and authorization result
+wins without a second activity or latest-geometry update. Empty matching text is inert and retires
+its dispatch suppression. If no entry matches, the queue stays intact and nonempty text is
+standalone. Writable standalone text reaches chooser, prompt, and `display-panes` before activity;
+terminal command-output text accounts once before it is swallowed, while browser command-output
+text is consumed before activity. Standalone read-only terminal text
+accounts once without clearing a bell or writing the PTY; read-only browser text retains zz's
+silent drop. The queue clears on detach, unregister or reconnect, and successful wire attach, but
+survives a binding-driven synchronous `switch-client` so its trailing text still belongs to the
+key. Native client-theme notifications, resize, key-table-only switches, and detached commands leave
+activity unchanged. A separate logical counter drives `list-sessions -O activity` and `S/t`, so
+same-second touches still produce deterministic MRU order with the session name breaking exact
+ties. Native browser input outside modal consumption keeps its existing superset activity behavior.
+The absent tmux suspend/wake lifecycle is accepted under
+`formats.session-activity-wake-lifecycle`, not left as an unnamed TODO. Synthetic focus `Any`
+dispatch now follows writable modal prequeue, activity and FocusIn-only latest geometry, chooser or
+copy-mode `Any`, then effective-root `Any`. An unbound transient table falls back without closing
+that mode. Read-only focus retains its modal bypass and authorizes the whole selected binding before
+any effect. Exact `FocusIn` and `FocusOut` remain invalid as bindable key names. Pane-rendered
+`command-prompt -P` remains under `prompt.pane-rendered`.
 
 The daemon reads `pane_current_path` from the foreground process through the operating system. It
 feeds `pane_path` from the terminal's reported working directory after stripping the OSC 7

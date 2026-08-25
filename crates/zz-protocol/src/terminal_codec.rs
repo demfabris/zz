@@ -2727,6 +2727,7 @@ mod tests {
                 pane: PaneId(4),
                 text: "browser text".to_owned(),
             }),
+            ProtocolMessage::Input(crate::InputMessage::ClientFocus { focused: true }),
             ProtocolMessage::Event(Event {
                 sequence: 7,
                 payload: EventPayload::PrefixArmed { armed: true },
@@ -2762,6 +2763,20 @@ mod tests {
                 message
             );
         }
+
+        let message = ProtocolMessage::Input(crate::InputMessage::TerminalView {
+            pane: PaneId(3),
+            action: zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: zz_terminal::CopyModeAction::NextMatchingBracket,
+                count: u32::MAX,
+            },
+        });
+        let frame = encode_protocol_message(&message).expect("encode counted copy-mode action");
+        assert_eq!(frame[4], Lane::Control as u8);
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode counted copy-mode action"),
+            message
+        );
     }
 
     #[test]
@@ -3848,6 +3863,22 @@ mod tests {
             encode_protocol_message(&oversized),
             Err(ProtocolError::InvalidGuiRequest(_))
         ));
+    }
+
+    #[test]
+    fn repeated_browser_keys_round_trip_without_expansion() {
+        let message = ProtocolMessage::Event(Event {
+            sequence: 106,
+            payload: EventPayload::BrowserCommand {
+                pane: PaneId(8),
+                command: BrowserCommand::SendKeysRepeated {
+                    keys: vec![crate::KeyToken::Literal("x".to_owned())],
+                    count: u32::MAX,
+                },
+            },
+        });
+        let encoded = encode_protocol_message(&message).expect("encode");
+        assert_eq!(decode_protocol_frame(&encoded).expect("decode"), message);
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub struct CommandOptionSpec {
     pub completable: bool,
     /// Whether zz accepts a value only when it is attached to the flag.
     pub attached_value: bool,
+    pub optional_value: bool,
     /// Whether the option is catalogued only so its value can be rejected.
     pub unsupported: bool,
 }
@@ -37,17 +38,19 @@ impl CommandOptionSpec {
             description,
             completable: true,
             attached_value: false,
+            optional_value: false,
             unsupported: false,
         }
     }
 
-    const fn attached_flag(name: &'static str, description: &'static str) -> Self {
+    const fn optional_value(name: &'static str, description: &'static str) -> Self {
         Self {
             name,
             value: None,
             description,
             completable: true,
             attached_value: true,
+            optional_value: true,
             unsupported: false,
         }
     }
@@ -59,6 +62,7 @@ impl CommandOptionSpec {
             description,
             completable: true,
             attached_value: false,
+            optional_value: false,
             unsupported: false,
         }
     }
@@ -70,6 +74,7 @@ impl CommandOptionSpec {
             description: "unsupported tmux option",
             completable: false,
             attached_value: false,
+            optional_value: false,
             unsupported: true,
         }
     }
@@ -81,6 +86,7 @@ impl CommandOptionSpec {
             description: "unsupported tmux flag",
             completable: false,
             attached_value: false,
+            optional_value: false,
             unsupported: true,
         }
     }
@@ -92,6 +98,7 @@ impl CommandOptionSpec {
             description: "unsupported tmux option",
             completable: false,
             attached_value: true,
+            optional_value: false,
             unsupported: true,
         }
     }
@@ -368,6 +375,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
                 description: "accepted and ignored like the pin",
                 completable: false,
                 attached_value: false,
+                optional_value: false,
                 unsupported: false,
             },
         ],
@@ -603,6 +611,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
                 description: "accepted and ignored like the pin",
                 completable: false,
                 attached_value: false,
+                optional_value: false,
                 unsupported: false,
             },
         ],
@@ -706,12 +715,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "detach-client",
         aliases: &["detach"],
         description: "Detach the current client",
-        usage: "[-a] [-s target-session]",
+        usage: "[-a] [-s target-session] [-t target-client]",
         options: &[
             CommandOptionSpec::flag("-a", "detach every other client"),
             CommandOptionSpec::value("-s", Session, "detach every client on the session"),
+            CommandOptionSpec::value("-t", FreeForm, "target client"),
             CommandOptionSpec::unsupported_value("-E"),
-            CommandOptionSpec::unsupported_value("-t"),
             CommandOptionSpec::unsupported_flag("-P"),
         ],
         positionals: &[],
@@ -1249,10 +1258,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),
             CommandOptionSpec::value("-y", FreeForm, "height in cells or percent"),
-            CommandOptionSpec::attached_flag("-D", "resize downward, optionally by attached cells"),
-            CommandOptionSpec::attached_flag("-L", "resize left, optionally by attached cells"),
-            CommandOptionSpec::attached_flag("-R", "resize right, optionally by attached cells"),
-            CommandOptionSpec::attached_flag("-U", "resize upward, optionally by attached cells"),
+            CommandOptionSpec::optional_value("-D", "resize downward by an optional amount"),
+            CommandOptionSpec::optional_value("-L", "resize left by an optional amount"),
+            CommandOptionSpec::optional_value("-R", "resize right by an optional amount"),
+            CommandOptionSpec::optional_value("-U", "resize upward by an optional amount"),
             CommandOptionSpec::flag("-Z", "toggle zoom"),
             CommandOptionSpec::unsupported_flag("-M"),
             CommandOptionSpec::unsupported_flag("-T"),
@@ -1514,18 +1523,18 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-message",
         aliases: &["display"],
         description: "Display or print a formatted message",
-        usage: "[-Clp] [-d delay] [-F format] [-t target-pane] [message]",
+        usage: "[-ClNp] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
         options: &[
             CommandOptionSpec::flag("-p", "print the message"),
             CommandOptionSpec::flag("-C", "keep terminal updates flowing while it shows"),
+            CommandOptionSpec::value("-c", FreeForm, "destination client"),
             CommandOptionSpec::value("-d", FreeForm, "milliseconds to show the message"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::flag("-l", "do not expand the message template"),
+            CommandOptionSpec::flag("-N", "ignore key presses while the message shows"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::unsupported_flag("-a"),
-            CommandOptionSpec::unsupported_value("-c"),
             CommandOptionSpec::unsupported_flag("-I"),
-            CommandOptionSpec::unsupported_flag("-N"),
             CommandOptionSpec::unsupported_flag("-v"),
         ],
         positionals: &[],
@@ -1762,13 +1771,13 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "source-file",
         aliases: &["source"],
         description: "Load a tmux configuration file",
-        usage: "[-Fq] path ...",
+        usage: "[-Fnqv] [-t target-pane] path ...",
         options: &[
             CommandOptionSpec::flag("-F", "expand formats in file paths"),
+            CommandOptionSpec::flag("-n", "parse without applying commands"),
             CommandOptionSpec::flag("-q", "do not report a missing file"),
-            CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_flag("-n"),
-            CommandOptionSpec::unsupported_flag("-v"),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-v", "print parsed commands"),
         ],
         positionals: &[FreeForm],
         variadic: Some(FreeForm),

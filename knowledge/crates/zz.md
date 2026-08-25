@@ -87,6 +87,23 @@ in `lib.rs` on Windows because the application runs from the library there. The 
 `zz.exe` keeps serving everything that needs no window . `--version`, `daemon`, mux verbs,
 askpass . and only refuses to open the GUI, pointing at the bundle instead.
 
+## Control-mode front end (`control_mode.rs`)
+
+The `-C` front end owns direct flags-1 command frames, stdin and protocol ordering, deferred sourced
+guards, and the process exit code. Protocol v76 supplies one `SourcedCommandGuard` for each replayed
+command that survives command-name resolution. The writer emits those guards after the direct outer
+frame. Existing daemon preflight also guarantees root missing-path guard, then middle missing-path
+guard, then leaf output guard in a three-level replay, each exactly once. The focused nested queue
+regression and strict six-step differential closed that ordering with no production change.
+
+One client-side status boundary remains. A matched source replay can complete with a nonzero
+`CommandResponse::Success` while its source-command guards correctly leave `client_failure` false.
+The long-lived Control loop does not retain that completed result across every stdin ordering. Pinned
+behavior is exit 1 for failed replay followed by EOF, exit 0 for explicit detach read after replay
+completion, and exit 1 when detach plus EOF were already queued while replay waited.
+`control-mode.source-file-exit-status` owns those three cases. It is not a request to make all source
+diagnostics sticky.
+
 # Application configuration (`config/mod.rs`)
 
 On GUI startup, the app loads the first bounded [`zz/config`](/configuration/app-config.md) file from

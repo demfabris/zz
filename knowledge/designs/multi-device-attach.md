@@ -10,7 +10,7 @@ tags:
 - views
 - resize
 - design-plan
-timestamp: 2026-07-30T23:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -82,27 +82,31 @@ untouched downstream. Cost is O(attached devices) per pane, N≤3 in practice.
 
 ## Resize arbitration
 
-The daemon stops forwarding `ResizeTerminal` verbatim. It records each client's last-reported
-geometry per pane plus a global terminal-input sequence per client. The viewer with the newest
-sequence owns the pane's **whole geometry**; absent/equal sequences tie on lowest `ClientId`, and
-an owner without a report falls through to the next-ranked viewer that has one. Resize reports
-and visibility changes recompute the owner, while terminal input recomputes only the panes whose
-owner changed. Columns, rows, and both cell-pixel dimensions always come from that one owner.
+The daemon records each client's last-reported geometry per pane plus a global geometry-owner
+sequence per client. Terminal input advances that sequence. Client FocusIn also advances it when
+the server `focus-events` option is on. Absent or equal sequences tie on lowest
+`ClientId`, and an owner without a report falls through to the next-ranked viewer that has one.
+Resize reports and visibility changes recompute the owner.
 
-That is the default policy. The inherited window option `aggressive-resize` adds an explicit
-exception: when ON, columns and rows are the componentwise minima across clients actually viewing
-that window, while cell-pixel dimensions still come from the newest-input eligible viewer. The
-result flows through the same guarded window-extent write-back. A single viewer behaves exactly like
+`window-size latest` takes columns, rows, and cell metrics from the owner. Largest and smallest
+aggregate columns and rows across eligible viewers, while manual retains its stored extent; all
+three still take cell metrics from the owner. The inherited `aggressive-resize` option filters that
+eligible set to clients viewing the window when ON. The result flows through the same guarded
+window-extent write-back. A single viewer behaves exactly like
 the default path.
 
 "Terminal input" means the user reached for *that* terminal: keys, text, paste, non-motion mouse,
-scrolling, selection, search, copy mode. It deliberately excludes focus. Pane focus is shared mux
-state (see the scope table), so one client's focus change is echoed to every other client through
-the snapshot and re-applied to its local focus . counting focus as input therefore let each
-machine's focus echo claim the pty back from the other, and two attached clients of different
-widths resized the shell on every focus change. `terminal_view_action_is_input` enumerates the
-verdict per action rather than defaulting, because that flicker began life as a wildcard arm
-quietly absorbing a newly added `Focus` variant.
+scrolling, selection, search, copy mode. It deliberately excludes `TerminalViewAction::Focus`,
+which reports pane/application focus. Pane focus is shared mux state (see the scope table), so one
+client's pane-focus change is echoed to every other client through the snapshot and re-applied to
+its local focus. Counting pane focus as input therefore let each machine's focus echo claim the pty
+back from the other, and two attached clients of different widths resized the shell on every focus
+change. `terminal_view_action_is_input` enumerates the verdict per action rather than defaulting,
+because that flicker began life as a wildcard arm quietly absorbing a newly added `Focus` variant.
+
+Protocol v73 `ClientFocus` is separate client-window lifecycle input. When the server
+`focus-events` option is on, it can refresh activity and let FocusIn claim geometry ownership
+without changing shared pane focus or being echoed as pane focus through the snapshot.
 
 ## Per-client window focus
 

@@ -4,7 +4,7 @@ title: Running the tmux compatibility harness
 description: How to run the pinned tmux differential corpus, read topology, geometry, format, and query-stdout results, and record known divergences.
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
-timestamp: 2026-08-24T00:00:00-03:00
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -63,14 +63,48 @@ also reconciles the rendered command and repeat bit or requires a named `binding
 three selected context rosters contain 1 `command-item` name, 3 `list-commands` names, and 10
 `list-keys` names. zz implements all 14. `formats.command-item-context` closed on 2026-08-24: the
 mux dispatch chokepoint carries the canonical entry name into every command it runs, so `#{command}`
-expands inside any command item and stays empty outside one. The daemon-preempted verbs that build
-their own format hooks remain open under `formats.daemon-command-item-context`.
+expands inside any command item and stays empty outside one. The daemon-preempted half closed under
+`formats.daemon-command-item-context`; its immediate format hooks now carry the same canonical name,
+and the daemon's post-spawn `new-window`/`split-window -P -F` pass retains it while adding live pane
+facts. Delayed subscriptions and prompts stay outside an item.
 
-`formats.command-argument-expansion` closed on 2026-08-24. The 76-step
+`formats.command-argument-expansion` closed five target-sensitive paths on 2026-08-24. The current
 `command-item-format` scenario covers the positional names for `rename-session` and
-`rename-window`, optional option names for both show commands, and `select-pane -T`. Its fixtures
-use exact non-current targets. `native-prefix-isolation` covers the 25 unique tmux prefixes that
-native names had changed, plus exact alias and user `command-alias` precedence.
+`rename-window`, optional option names for both show commands, `select-pane -T`, both
+`new-session` names, formatted `new-window -n`, literal `break-pane -n`, and shared name cleaning.
+Its fixtures use exact non-current targets and cover Unicode, backslash identity, clean-name reuse,
+literal format tokens, and the pin's pane format type for both rename commands. Control-byte
+rejection and expansion-count assertions stay in focused
+Rust tests because this line-oriented fixture cannot carry those values. The
+focused run prints the authoritative step count; this playbook does not duplicate that moving
+number. `formats.new-session-name-expansion` closed `new-session -s` on 2026-08-25, and
+`formats.name-validation-cleaning` then closed the shared `new-session`, `new-window`, rename, and
+literal `break-pane` name pipeline. `formats.creation-name-edges` closed the pin's second
+`new-window -S` lookup expansion and `break-pane -n` automatic-rename side effect on 2026-08-25.
+`formats.buffer-path-expansion` closed both buffer paths the same day; the focused
+`buffer-path-format` scenario covers one-pass expansion, format-before-home ordering, canonical,
+alias, unique-prefix, and user-alias command identity, and load/save file effects.
+`native-prefix-isolation` covers the 25 unique tmux prefixes that native names had changed, plus
+exact alias and user `command-alias` precedence. Matched empty, multi-command, and unparsable alias
+shadows are unit-tested at the mux and daemon dispatch seams instead: their expected zz result is a
+loud `unknown command: <typed name>`, so they are not a differential claim while
+`aliases.command-bodies` remains open.
+Protocol v74 closes Control's former static unknown-name precheck through focused daemon and CLI
+tests. The client prepares the entire initial argv unit or complete LF line before opening execution
+frames, observes one daemon alias snapshot for that unit, preserves command numbering and
+notifications, and executes the prepared invocation with ordinary read-only authorization. These
+tests do not claim tmux-compatible empty or multi-command alias bodies. The strict
+`smoke/control-alias-prepare` fixture adds pinned proof for one whole-line alias snapshot and a
+whole-line preparation error that aborts before either surrounding effect. The strict
+`smoke/cli-chain-parse-abort` fixture proves that a local CLI unknown-name parse failure aborts
+before an earlier mutation while a runtime command failure keeps the earlier effect and prunes the
+later command. This atomicity requires a live compatible daemon. When preparation fails open before
+autospawn, an earlier starting command may take effect before a later unknown name. Only the
+unknown-name error shape is pinned here; malformed alias-body text remains zz-defined while
+`aliases.command-bodies` is open.
+Local attach, stdin, kill, and malformed-alias preprocessing also has focused binary coverage.
+Remote `--host` preparation, local flag or arity prevalidation, and config or source-file
+replay-group abort remain explicit tracker gaps.
 
 Those structural checks leave seven semantic discovery gaps: custom `args_parse` callbacks,
 open-ended or dynamic context-format names, nonconstant format behavior, hook production, runtime
@@ -105,7 +139,8 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` records the canonical scenario paths and executable step counts. The
+`compat/results/summary.md` is the persisted canonical artifact. Its current source-row inventory
+is intentionally stale as described below. The
 expanded corpus pins capture routing and ranges, manual window geometry,
 join and break placement, pane-local and creation-time environments, empty panes, post-split zoom,
 last-pane input gating, buffer rename, source path formatting, and the small accepted-flag cluster.
@@ -113,20 +148,37 @@ last-pane input gating, buffer rename, source path formatting, and the small acc
 positional filtering, `-1` aggregates, stock repeat metadata, and canonical Space spellings;
 `smoke/cheap-flags` contributes 22 checks for `new-window -b` and `unbind-key -a/-q`; and
 `smoke/kill-filters` contributes 17 contextual `kill-session`/`kill-window`/`kill-pane -a -f`
-checks. `smoke/source-file-depth` contributes 3 command-client checks for the 50-invocation source
-limit and the refused 51st. `formats-values` also proves explicit startup `config_files`; both
+checks. `smoke/source-file-depth` contributes 4 command-client checks for the 50-invocation source
+limit and the refused 51st. `smoke/source-file-diagnostics` contributes 12 checks for parser and
+path diagnostics plus replayed runtime failures, continuation, and outer propagation. Its final
+check sources the active default config, a loud missing middle path, an after file, and the default
+again. It pins rc 1, declared `-v` order, later-file continuation, and final `DAD` state.
+`source-file-format` contributes 40 checks for parse-only, target, target-format, quiet miss,
+verbose order, and final state. `smoke/source-file-control` contributes 6 checks including Control
+verbose suppression, replayed runtime error delivery, and the three-level root-miss, middle-miss,
+leaf-output guard order. `resize-directions` contributes 16 checks for bare direction flags with
+the default amount 1, attached amounts such as `-L2`, separated amounts such as `-L 2`, and the
+existing absolute resize forms. `formats-values` also proves explicit
+startup `config_files`; both
 servers start with `-f /dev/null` so that fact is symmetric. `native-prefix-isolation` contributes
-28 byte-exact command-name queries without state or plugin-corpus dependencies.
+29 steps: 28 byte-exact command-name queries plus one alias setup, without plugin-corpus
+dependencies.
 
-The latest complete strict run is canonical: every ordinary row has zero TOPO, GEO, FMT, OUT, and
-WARN differences, while each of the two `known/` rows has exactly its single documented GEO
-difference and zero TOPO, FMT, OUT, or WARN differences. The attached-client fixture passes in the
-same run.
+The checked-in summary is intentionally stale for the current focused slices and remains the last
+completed canonical artifact pending the final strict-plus-attached regeneration. The tracker
+closures record `smoke/source-file-diagnostics`, `source-file-format`, and
+`smoke/source-file-control` at 12, 40, and 6 focused steps while the summary retains 9, 20, and 3.
+The `resize-directions` focused row has 16 clean steps while the summary retains 8. Its stored
+ordinary, known-row, and attached-client results describe the earlier corpus and do not prove the
+current full inventory.
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
-requires its persisted attached-client status to be `PASS`. The check exits before building or
-running either server. Linux CI first asserts that `compat/results/summary.md` is tracked, then runs
+requires its persisted attached-client status to be `PASS`. Until the final strict-plus-attached run
+replaces the summary, `--check-summary` is expected to fail on the 12/40/6 versus 9/20/3 source-row
+counts and the 16 versus 8 `resize-directions` count. The check exits before building or running
+either server. Linux CI first asserts that
+`compat/results/summary.md` is tracked, then runs
 the inventory and result check after checkout. A named partial run, a headless-only full run, a failed
 run, or a run with a SKIP cannot overwrite the canonical report. After a complete strict run with
 `--attached-client`, CI diffs the full tracked summary, so changes to Steps, TOPO, GEO, FMT, OUT,
@@ -155,7 +207,7 @@ compat/run.sh windows panes
 compat/run.sh known/known-geometry-gap.txt
 ```
 
-Check only that the persisted inventory and attached proof are current:
+Check whether the persisted inventory and attached proof are current:
 
 ```sh
 compat/run.sh --check-summary
@@ -174,7 +226,13 @@ root/prefix/prefix2 bindings, copy-mode entry/exit, prompt-driven window rename,
 keys, choose-buffer paste/deletion, exact nested-attach refusal, and the attached status message
 for a refused 51st `source-file` invocation. It also checks that `list-keys -1` shows a timed status
 without replacing the terminal with command output; the short result marker comes from the binding
-note and does not appear in the typed prompt. Failure output includes both
+note and does not appear in the typed prompt. The local Control probe runs `-C` from each outer PTY,
+requires existing-session refusal for `attach-session` and `new-session -A`, permits a fresh `-A`
+miss, and pipes stdin through a final attach to prove a nonterminal stdin does not publish tty
+identity. The daemon unit matrix covers `new-session -Ad`; the attached fixture does not. The
+current full fixture passed for zz and pinned tmux after independent review of the fresh-session
+marker. This focused attached proof does not update the intentionally stale canonical summary.
+Failure output includes both
 outer screens and zz daemon stderr; cleanup removes outer servers before inner servers.
 `--attached-client` runs it after the headless scenarios and includes it in the overall exit status
 without adding a fake row or step count to the canonical summary. Its `PASS` status is persisted

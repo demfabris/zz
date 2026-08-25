@@ -55,7 +55,6 @@ pub(crate) struct FormatHookFacts {
     pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     pub(crate) pane_pipes: Arc<BTreeMap<PaneId, u32>>,
     pub(crate) session_attachments: Arc<BTreeMap<SessionId, (usize, String)>>,
-    pub(crate) session_activity: Arc<BTreeMap<SessionId, u64>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) message: Option<MessageFormatFacts>,
@@ -484,6 +483,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     facts: &'a FormatHookFacts,
     status_context: Option<&'a StatusContext>,
     variables: Option<&'a BTreeMap<String, String>>,
+    command_item: Option<&'a str>,
     options: Option<&'a StatusRowVariables>,
     cache: Option<&'a mut BTreeMap<String, String>>,
     touched: Option<&'a mut BTreeSet<String>>,
@@ -506,6 +506,7 @@ impl<'a> DaemonFormatHooks<'a> {
             facts,
             status_context: None,
             variables,
+            command_item: None,
             options: None,
             cache: None,
             touched: None,
@@ -528,6 +529,11 @@ impl<'a> DaemonFormatHooks<'a> {
         self
     }
 
+    pub(crate) fn with_command_item(mut self, command: &'a str) -> Self {
+        self.command_item = Some(command);
+        self
+    }
+
     fn status(
         facts: &'a FormatHookFacts,
         context: &'a StatusContext,
@@ -543,6 +549,7 @@ impl<'a> DaemonFormatHooks<'a> {
             facts,
             status_context: Some(context),
             variables: None,
+            command_item: None,
             options,
             cache: Some(cache),
             touched: Some(touched),
@@ -628,6 +635,9 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         if let Some(value) = self.variables.and_then(|variables| variables.get(name)) {
             return Some(value.clone());
         }
+        if name == "command" {
+            return self.command_item.map(str::to_owned);
+        }
         if let Some(value) = self
             .options
             .and_then(|options| options.lookup(&context.session_id, &context.window_id, name))
@@ -709,14 +719,6 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             ),
             _ => None,
         }
-    }
-
-    fn session_activity(&mut self, session: SessionId) -> u64 {
-        self.facts
-            .session_activity
-            .get(&session)
-            .copied()
-            .unwrap_or_default()
     }
 
     fn pane_search(

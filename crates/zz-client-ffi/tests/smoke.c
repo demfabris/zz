@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (!zz_client_attach(client, "smoke")) {
-        fprintf(stderr, "smoke: attach failed\n");
+        fprintf(stderr, "smoke: attach request send failed\n");
         return 1;
     }
 
@@ -163,6 +163,10 @@ int main(int argc, char **argv) {
     zz_mux_snapshot *snapshot = zz_client_snapshot_acquire(client);
     if (snapshot == NULL || zz_snapshot_session_count(snapshot) == 0) {
         fprintf(stderr, "smoke: no mux snapshot appeared\n");
+        return 1;
+    }
+    if (!zz_client_set_focused(client, true)) {
+        fprintf(stderr, "smoke: client focus after attach failed\n");
         return 1;
     }
     size_t session_count = zz_snapshot_session_count(snapshot);
@@ -254,7 +258,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (!zz_client_attach(client, "smoke")) {
-        fprintf(stderr, "smoke: recovery attach failed\n");
+        fprintf(stderr, "smoke: recovery attach request send failed\n");
         return 1;
     }
     uint64_t recovered_session = 0;
@@ -266,10 +270,18 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (!zz_client_set_focused(client, false)) {
+        fprintf(stderr, "smoke: client blur failed\n");
+        return 1;
+    }
     zz_client_free(client);
     client = zz_client_connect(argv[1]);
-    if (client == NULL || !zz_client_attach(client, "smoke")) {
+    if (client == NULL) {
         fprintf(stderr, "smoke: reconnect after free failed\n");
+        return 1;
+    }
+    if (!zz_client_attach(client, "smoke")) {
+        fprintf(stderr, "smoke: reconnect attach request send failed\n");
         return 1;
     }
     sleep(2);

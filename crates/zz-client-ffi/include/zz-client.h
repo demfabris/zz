@@ -140,6 +140,7 @@ bool zz_client_resize_terminal(zz_client *client, uint64_t pane,
                                uint16_t columns, uint16_t rows,
                                uint32_t cell_width_px, uint32_t cell_height_px);
 bool zz_client_scroll_lines(zz_client *client, uint64_t pane, int32_t lines);
+bool zz_client_set_focused(zz_client *client, bool focused);
 bool zz_client_focus_terminal(zz_client *client, uint64_t pane, bool focused);
 
 zz_mux_snapshot *zz_client_snapshot_acquire(const zz_client *client);

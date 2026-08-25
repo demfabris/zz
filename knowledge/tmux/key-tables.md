@@ -4,7 +4,7 @@ title: Key tables (key.rs)
 description: Root/prefix/copy-mode/chooser key resolution with the default C-b prefix and optional prefix2, canonical and shifted key encoding, bind/unbind, send-prefix (-2), numeric vi counts, pending jump-key capture, and wire publication of every table.
 resource: crates/zz-protocol/src/key.rs
 tags: [tmux, keys, bindings, prefix, copy-mode, choosers]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-25T00:00:00Z
 ---
 
 # Overview
@@ -68,12 +68,36 @@ literal `None` value also reads as unset). Resolution in `KeyEngine::handle`:
 - Persistent tables (`copy-mode`, `copy-mode-vi`, or any table set via `switch_table`) consume unbound
   keys as `Ignore` instead of exiting, matching tmux copy-mode behavior. `Any` is honored as a
   catch-all fallback key within a table.
+- `KeyEngine::handle_synthetic_any_with_repeat_metadata` resolves non-key ingress through `Any` in
+  the effective explicit or root table. `handle_transient_mode_synthetic_any` checks a transient mode
+  table first and then the effective root. Both helpers preserve pending jump capture, and the first
+  helper retains ordinary repeat deadlines and table retirement. Exact `FocusIn` and `FocusOut` names
+  remain invalid key spellings and never become direct lookup keys. With `focus-events` enabled, the
+  daemon routes writable `ClientFocus` through the modal prequeue, activity and FocusIn-only latest
+  geometry, then synthetic `Any`. It checks choose-tree, choose-buffer, active copy or command-output
+  mode, and the effective root in that order. A transient `Any` wins; an unbound transient table
+  falls back to root without retiring the mode. Read-only focus resolves and authorizes the complete
+  binding before any effect. Disabled focus bypasses both accounting and dispatch. The focused daemon
+  cluster passes 9 of 9 tests, and an independent Codex review returned CODE GO. `ClientFocus` is not
+  CLI-drivable, so this closure makes no differential or canonical-suite claim.
 - Jump bindings (`send-keys -X jump-forward|jump-backward|jump-to-forward|jump-to-backward`) set
   `pending` and return `Ignore`; the next key is appended as the jump target (or `Escape` cancels
   with `Ignore`).
 - In `copy-mode-vi`, `1` through `9` begin a numeric prefix. More digits, including `0`, extend it;
-  the next `send-keys -X` motion is emitted that many times. Escape or an unbound key clears the
-  prefix. Without a prefix, `0` keeps its normal `start-of-line` meaning.
+  the next copy action carries that count once as `send-keys -N <count> -X ...`. The typed count
+  policy repeats prefix-consuming movements, jumps, matching brackets, and repeat-search actions;
+  `other-end` swaps only for odd counts, `select-line` spans the requested lines, and the
+  copy-end-of-line family selects through the end of the Nth row before copying once. Other
+  toggles, selection, copy, clear-selection, cancel, and later actions in the same binding run once.
+  Resolution stops at the first `send` or `send-keys` command whose option prefix contains `-X`.
+  That command's stored `-N` wins over the buffered count; otherwise the engine inserts a separate
+  `-N <count>` pair immediately before the option argument containing `-X`. It never scans onward to
+  a later action. A command list with no qualifying `-X` leaves the count armed for a later binding.
+  Invalid nonempty `-X` grammar restores the neutral count of one, represented as no buffered count,
+  so a following digit begins a fresh prefix. An unbound key preserves the prefix. `Escape` reaches
+  its stock `clear-selection` binding once. Without a prefix, `0` keeps its normal `start-of-line`
+  meaning. Empty `send-keys -N <n> -X` pane-prefix persistence remains tracked under
+  `terminal.key-control`.
 
 # Key encoding (`canonical_key`)
 
@@ -108,10 +132,13 @@ back to `Space` and `C-Space`, computes widths from the displayed spelling, and 
 key by tmux base, type, and modifier identity. Stored spelling and key flags do not affect that
 filter.
 
-The daemon preserves and executes these stored commands exactly — there is no key-time rewriting.
-A binding of `split-window` (or `splitw`), whether imported from a tmux config or typed at
-`prefix :`, creates a plain terminal split like tmux. zz's *default* `%`/`"` bindings name the
-zz-native `split-picker` verb instead, which is what opens the pane-kind picker.
+The daemon preserves stored commands except for one tmux-compatible copy-mode operation. An armed vi
+count is consumed by the first `send` or `send-keys` command whose option prefix contains `-X`.
+That command keeps its own `-N`; otherwise the engine inserts separate `-N <count>` arguments before
+the argument containing `-X`. Other commands and later actions stay unchanged. A binding of
+`split-window` (or `splitw`), whether imported from a
+tmux config or typed at `prefix :`, creates a plain terminal split like tmux. zz's *default* `%`/`"`
+bindings name the zz-native `split-picker` verb instead, which opens the pane-kind picker.
 
 # Default bindings (seeded in `KeyTables::default`)
 
@@ -181,16 +208,35 @@ their normal behavior from a Browser pane. Terminal input continues to resolve t
 
 `copy-mode` and `copy-mode-vi` seed the native movement, selection, search, and copy actions. The vi
 table includes `B/E/W`, `J/K`, `C-e/C-y`, `z`, `%`, `D`, `#/*`, `1` through `9`, `:`, and the stock
-control/named-key aliases; search keys `/`,`?` (vi) and `C-s`,`C-r` (emacs) bind
-`copy-mode-search-prompt`. Stock vi Escape is `clear-selection`; `q` and `C-c` cancel. The two
-keyboard exceptions are `P` (tmux's position-label toggle, redundant with zz's native indicator) and
-`r` (tmux live-refresh toggle, incompatible with the frozen revision). Pointer pseudo-bindings stay
-in the direct mouse route instead of this keyboard table. Every stock binding in these two persistent
-tables carries `repeat = false`, matching tmux's `list-keys` metadata. Copy-mode movement, jump
-capture, and numeric repetition do not read that binding field; `copy-mode-repeat`, `repeat_count`,
-and the copy action's runtime repeat policy own them. Prefix-table and user-created `bind-key -r`
-bindings still carry and use their repeat bit. The remaining shared copy-table differences are the 25
-command shapes listed in the live gap report, not repeat metadata. See [copy mode](/tmux/copy-mode.md).
+control/named-key aliases. Search keys `/`,`?` (vi) and `C-s`,`C-r` (emacs) bind
+`copy-mode-search-prompt`. Stock vi Escape clears the selection; `q` and `C-c` cancel.
+
+The emacs table includes the pin's direct navigation aliases for scroll lines, prompt marks,
+matching brackets, line and history endpoints, half pages, top-line positioning, and page-down. The
+13 keys are `C-Down`, `C-M-Down`, `C-M-Up`, `C-M-f`, `C-Up`, `End`, `Home`, `M-<`, `M->`,
+`M-Down`, `M-R`, `M-Up`, and `Space`. Each key stores the pin's `send-keys -X` command and carries
+`repeat = false`.
+
+The emacs table also includes the pin's supported cancel, copy, rectangle, and repeat-search aliases:
+`C-[`, `C-k`, `C-w`, `N`, `R`, and `n`. Their stored commands and nonrepeat metadata match the pin.
+The table retains the existing `Escape`, `M-w`, and `C-g` bindings. Exact equality with the audited
+stock key set guards against accidental overwrite, and shifted Alt input tests reach `M-R`, `M-<`,
+and `M->`.
+
+Seventeen stock keyboard keys remain open. Ten emacs keys need numeric-repeat or goto-line command
+prompts. Seven keys name five unsupported actions:
+`previous-matching-bracket`, `recentre-top-bottom`, `cursor-centre-horizontal`, `toggle-position`,
+and `refresh-toggle`. Those seven keys depend on `copy-mode.action-fidelity`, whose source audit
+classifies all 95 pinned actions: 66 mapped and 29 missing across seven behavior categories. The
+default-key group does not own the other 24 missing actions. Pointer pseudo-bindings stay in the
+direct mouse route.
+
+Copy-mode movement, jump capture, and numeric repetition do not read the binding repeat field;
+`copy-mode-repeat`, `repeat_count`, and the copy action's runtime repeat policy own them. The nine vi
+digit bindings retain zz's per-client `copy-mode-repeat` command shape instead of tmux's pane-cell
+numeric prompt. Prefix-table and user-created `bind-key -r` bindings still carry and use their repeat
+bit. The remaining open shared-binding command-shape group contains 15 cursor-word, search,
+goto-line, and jump bindings. See [copy mode](/tmux/copy-mode.md).
 
 # Shifted key spellings
 
@@ -212,7 +258,7 @@ With control or alt held nothing is uppercased: the binding is spelled off the b
 
 | File | Role |
 | --- | --- |
-| `crates/zz-protocol/src/key.rs` | `KeyTables`, `KeyEngine` (`handle`), `Binding`, `KeyDecision`, `canonical_key`, `input_key_name`, typed-text precedence, and default bindings. |
+| `crates/zz-protocol/src/key.rs` | `KeyTables`, `KeyEngine` (`handle`, synthetic `Any`, and transient-mode `Any`), `Binding`, `KeyDecision`, `canonical_key`, `input_key_name`, typed-text precedence, and default bindings. |
 | `crates/zz-mux/src/command.rs` | `bind-key`/`unbind-key`/`list-keys`, `send-prefix`, and `set-option prefix` drive these tables. |
 | `crates/zz-daemon/src/keys.rs` | Daemon overlay-action projection and tmux `send-keys` token conversion; it consumes the shared fold and tables. |
 | `crates/zz-client/src/chrome.rs` | Client-side `ui`, `sidebar`, `browser`, and `terminal` chrome tables, resolved before the skin applies an action. |

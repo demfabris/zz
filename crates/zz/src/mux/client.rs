@@ -944,6 +944,11 @@ pub struct MuxClient {
     #[cfg(all(test, feature = "agent-pane"))]
     agent_client_instance_id: Option<zz_protocol::ClientInstanceId>,
     attached_snapshot_pending: bool,
+    desired_client_window_focus: Option<bool>,
+    client_focus_attach_ready: bool,
+    client_focus_attach_pending: bool,
+    client_focus_attach_recoverable: bool,
+    sent_client_window_focus: Option<bool>,
     viewports: BTreeMap<PaneId, Arc<RwLock<RetainedTerminalViewport>>>,
     kitty_images: BTreeMap<PaneId, Arc<RwLock<KittyImageCache>>>,
     kitty_image_assemblies: BTreeMap<(PaneId, u32, u64), KittyImageAssembly>,
@@ -1051,6 +1056,11 @@ impl MuxClient {
             #[cfg(all(test, feature = "agent-pane"))]
             agent_client_instance_id: None,
             attached_snapshot_pending: false,
+            desired_client_window_focus: None,
+            client_focus_attach_ready: false,
+            client_focus_attach_pending: false,
+            client_focus_attach_recoverable: false,
+            sent_client_window_focus: None,
             viewports: BTreeMap::new(),
             kitty_images: BTreeMap::new(),
             kitty_image_assemblies: BTreeMap::new(),
@@ -1136,6 +1146,7 @@ impl MuxClient {
         let connection = HostConnection::connected(client, HostId::LOCAL, cx)
             .map_err(|error| error.to_string())?;
         self.connections.insert(HostId::LOCAL, connection);
+        self.begin_client_focus_attach();
         Ok(())
     }
 
@@ -1918,7 +1929,10 @@ impl MuxClient {
             #[cfg(not(test))]
             unreachable!("a connected host has an interactive client");
         };
-        if let Err(error) = result {
+        if result.is_ok() {
+            self.begin_client_focus_attach();
+        } else if let Err(error) = result {
+            self.reset_client_focus_attach();
             self.connections
                 .get_mut(&host)
                 .expect("reconnected host still has a connection slot")
@@ -1955,7 +1969,10 @@ impl MuxClient {
             #[cfg(not(test))]
             unreachable!("a connected host has an interactive client");
         };
-        if let Err(error) = result {
+        if result.is_ok() {
+            self.begin_client_focus_attach();
+        } else if let Err(error) = result {
+            self.reset_client_focus_attach();
             log::warn!("failed to fall back to the default session after reconnect: {error}");
             if let Some(connection) = self.connections.get_mut(&host) {
                 connection.reconnect_attach = None;
@@ -2465,6 +2482,52 @@ impl MuxClient {
         sent
     }
 
+    pub(crate) fn set_client_window_focused(&mut self, focused: bool) {
+        self.desired_client_window_focus = Some(focused);
+        self.flush_client_window_focus();
+    }
+
+    fn begin_client_focus_attach(&mut self) {
+        if !self.client_focus_attach_pending {
+            self.client_focus_attach_recoverable = self.client_focus_attach_ready;
+        }
+        self.client_focus_attach_ready = false;
+        self.client_focus_attach_pending = true;
+    }
+
+    fn reset_client_focus_attach(&mut self) {
+        self.client_focus_attach_ready = false;
+        self.client_focus_attach_pending = false;
+        self.client_focus_attach_recoverable = false;
+        self.sent_client_window_focus = None;
+    }
+
+    fn fail_client_focus_attach(&mut self) {
+        if !self.client_focus_attach_pending {
+            return;
+        }
+        self.client_focus_attach_pending = false;
+        let recoverable = std::mem::take(&mut self.client_focus_attach_recoverable);
+        if recoverable {
+            self.client_focus_attach_ready = true;
+            self.flush_client_window_focus();
+        } else {
+            self.reset_client_focus_attach();
+        }
+    }
+
+    fn flush_client_window_focus(&mut self) {
+        let Some(focused) = self.desired_client_window_focus else {
+            return;
+        };
+        if !self.client_focus_attach_ready || self.sent_client_window_focus == Some(focused) {
+            return;
+        }
+        if self.send_input(InputMessage::ClientFocus { focused }) {
+            self.sent_client_window_focus = Some(focused);
+        }
+    }
+
     pub(crate) fn send_prefix_cancel(&mut self) -> Option<u64> {
         let request_id = self.next_prefix_cancel_request.saturating_add(1).max(1);
         if self.send_input(InputMessage::CancelPrefix { request_id }) {
@@ -2595,11 +2658,24 @@ impl MuxClient {
         }
     }
 
-    pub(crate) fn attach(&self, session: SessionId) {
-        if let Some(client) = &self.attached_connection().client
-            && let Err(error) = client.attach(session.to_string())
-        {
-            log::warn!("failed to attach mux session: {error}");
+    pub(crate) fn attach(&mut self, session: SessionId) {
+        let client = self.attached_connection().client.as_ref().map(Arc::clone);
+        #[cfg(test)]
+        let fake_client = self
+            .attached_connection()
+            .fake_client
+            .as_ref()
+            .map(Arc::clone);
+        #[cfg(not(test))]
+        let result = client.map(|client| client.attach(session.to_string()));
+        #[cfg(test)]
+        let result = client
+            .map(|client| client.attach(session.to_string()))
+            .or_else(|| fake_client.map(|client| client.attach(Some(session))));
+        match result {
+            Some(Ok(())) => self.begin_client_focus_attach(),
+            Some(Err(error)) => log::warn!("failed to attach mux session: {error}"),
+            None => {}
         }
     }
 
@@ -2711,8 +2787,12 @@ impl MuxClient {
             #[cfg(not(test))]
             unreachable!("a connected host has an interactive client");
         };
-        if let Err(error) = attach_result {
-            log::warn!("failed to attach mux session on fleet host {name}: {error}");
+        match attach_result {
+            Ok(()) => self.begin_client_focus_attach(),
+            Err(error) => {
+                self.reset_client_focus_attach();
+                log::warn!("failed to attach mux session on fleet host {name}: {error}");
+            }
         }
         self.reconcile_hosts(cx);
         cx.notify();
@@ -2752,14 +2832,20 @@ impl MuxClient {
             #[cfg(not(test))]
             unreachable!("a connected host has an interactive client");
         };
-        if let Err(error) = result {
-            log::warn!("failed to fall back after removing fleet host {name}: {error}");
-        } else {
-            self.error_after_next_attach = Some(banner);
+        match result {
+            Ok(()) => {
+                self.begin_client_focus_attach();
+                self.error_after_next_attach = Some(banner);
+            }
+            Err(error) => {
+                self.reset_client_focus_attach();
+                log::warn!("failed to fall back after removing fleet host {name}: {error}");
+            }
         }
     }
 
     fn clear_cross_host_state(&mut self) {
+        self.reset_client_focus_attach();
         self.core.clear_attachment();
         self.attached_snapshot_pending = true;
         self.viewports.clear();
@@ -2780,6 +2866,7 @@ impl MuxClient {
     }
 
     fn reset_session_state(&mut self, _cx: &mut Context<Self>) {
+        self.reset_client_focus_attach();
         let connection = self.attached_connection_mut();
         connection.resync_pending = false;
         connection.full_requests_pending.clear();
@@ -3758,6 +3845,11 @@ impl MuxClient {
         connection.history_requests_pending.clear();
         connection.history_backfill_deferred.clear();
         self.error = self.error_after_next_attach.take();
+        self.client_focus_attach_ready = true;
+        self.client_focus_attach_pending = false;
+        self.client_focus_attach_recoverable = false;
+        self.sent_client_window_focus = None;
+        self.flush_client_window_focus();
         if reconnected {
             let name = self
                 .registry
@@ -3893,6 +3985,7 @@ impl MuxClient {
             } if self.core.attached_session().is_none()
                 && self.core.snapshot().sessions.is_empty() =>
             {
+                self.fail_client_focus_attach();
                 self.error = None;
                 let connection = self.attached_connection_mut();
                 if !connection.resync_pending
@@ -3910,6 +4003,17 @@ impl MuxClient {
                 error: ServerError::PaneExited(pane) | ServerError::PaneNotAttached(pane),
                 ..
             } => log::debug!("ignoring stale input for detached pane {pane}"),
+            CommandResponse::Error {
+                request_id: 0,
+                error: error @ (ServerError::MissingTarget(_) | ServerError::SessionNotFound(_)),
+                ..
+            } if self.client_focus_attach_pending => {
+                self.fail_client_focus_attach();
+                if !self.report_command_failure(host, 0, &error, cx) {
+                    self.attached_connection_mut().reconnect_attach = None;
+                    self.error = Some(Arc::from(error.to_string()));
+                }
+            }
             CommandResponse::Error {
                 request_id, error, ..
             } => {
@@ -5118,6 +5222,360 @@ mod tests {
                 ClientMessageKind::Warning,
                 "connection to remote lost: reconnecting…".to_owned(),
             )]
+        );
+    }
+
+    #[gpui::test]
+    fn client_window_focus_waits_for_initial_attach_and_deduplicates(cx: &mut TestAppContext) {
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread("focus test client".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+
+        mux.update(cx, |mux, cx| {
+            mux.begin_client_focus_attach();
+            mux.set_client_window_focused(true);
+            mux.set_client_window_focused(true);
+            assert!(input.borrow().is_empty());
+            mux.handle_message_for_test(
+                ProtocolMessage::Attached {
+                    session: SessionId(1),
+                    snapshot: MuxSnapshot {
+                        generation: 1,
+                        ..MuxSnapshot::default()
+                    },
+                },
+                cx,
+            );
+            mux.set_client_window_focused(true);
+        });
+
+        assert_eq!(
+            &*input.borrow(),
+            &[InputMessage::ClientFocus { focused: true }]
+        );
+    }
+
+    #[gpui::test]
+    fn rejected_session_attach_recovers_focus_on_the_retained_session(cx: &mut TestAppContext) {
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread("focus attach failure".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let input = mux.update(cx, |mux, _| {
+            let fake = install_fake_connection(mux, HostId::LOCAL);
+            let input = mux.record_input_for_test();
+            mux.set_client_window_focused(true);
+            (input, fake)
+        });
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message(
+                HostId::LOCAL,
+                ProtocolMessage::Attached {
+                    session: SessionId(1),
+                    snapshot: MuxSnapshot {
+                        generation: 1,
+                        ..MuxSnapshot::default()
+                    },
+                },
+                cx,
+            );
+            input.0.borrow_mut().clear();
+
+            mux.attach(SessionId(99));
+            assert_eq!(input.1.attached_session.get(), Some(SessionId(99)));
+            mux.set_client_window_focused(false);
+            assert!(input.0.borrow().is_empty());
+
+            mux.handle_command_response(
+                HostId::LOCAL,
+                CommandResponse::Error {
+                    request_id: 0,
+                    error: ServerError::SessionNotFound("99".to_owned()),
+                    output: String::new(),
+                },
+                cx,
+            );
+            mux.set_client_window_focused(false);
+            mux.set_client_window_focused(true);
+        });
+
+        assert_eq!(
+            &*input.0.borrow(),
+            &[
+                InputMessage::ClientFocus { focused: false },
+                InputMessage::ClientFocus { focused: true },
+            ]
+        );
+    }
+
+    #[gpui::test]
+    fn successful_session_attach_replays_focus_for_the_new_epoch(cx: &mut TestAppContext) {
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread("focus session switch".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let (input, fake) = mux.update(cx, |mux, _| {
+            let fake = install_fake_connection(mux, HostId::LOCAL);
+            (mux.record_input_for_test(), fake)
+        });
+
+        mux.update(cx, |mux, cx| {
+            mux.set_client_window_focused(true);
+            mux.handle_message(
+                HostId::LOCAL,
+                ProtocolMessage::Attached {
+                    session: SessionId(1),
+                    snapshot: MuxSnapshot::default(),
+                },
+                cx,
+            );
+            input.borrow_mut().clear();
+
+            mux.attach(SessionId(2));
+            mux.set_client_window_focused(false);
+            assert!(input.borrow().is_empty());
+            mux.handle_message(
+                HostId::LOCAL,
+                ProtocolMessage::Attached {
+                    session: SessionId(2),
+                    snapshot: MuxSnapshot::default(),
+                },
+                cx,
+            );
+        });
+
+        assert_eq!(fake.attached_session.get(), Some(SessionId(2)));
+        assert_eq!(
+            &*input.borrow(),
+            &[InputMessage::ClientFocus { focused: false }]
+        );
+    }
+
+    #[gpui::test]
+    fn unrelated_request_zero_error_does_not_close_the_ready_focus_epoch(cx: &mut TestAppContext) {
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread("focus request error".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+
+        mux.update(cx, |mux, cx| {
+            mux.set_client_window_focused(true);
+            mux.handle_message_for_test(
+                ProtocolMessage::Attached {
+                    session: SessionId(1),
+                    snapshot: MuxSnapshot {
+                        generation: 1,
+                        ..MuxSnapshot::default()
+                    },
+                },
+                cx,
+            );
+            input.borrow_mut().clear();
+
+            mux.handle_command_response(
+                HostId::LOCAL,
+                CommandResponse::Error {
+                    request_id: 0,
+                    error: ServerError::InvalidCommand("unrelated input error".to_owned()),
+                    output: String::new(),
+                },
+                cx,
+            );
+            mux.set_client_window_focused(false);
+        });
+
+        assert_eq!(
+            &*input.borrow(),
+            &[InputMessage::ClientFocus { focused: false }]
+        );
+    }
+
+    #[gpui::test]
+    fn unrelated_request_zero_error_does_not_close_a_pending_focus_epoch(cx: &mut TestAppContext) {
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread(
+                    "focus pending request error".to_owned(),
+                )),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let (input, fake) = mux.update(cx, |mux, _| {
+            let fake = install_fake_connection(mux, HostId::LOCAL);
+            (mux.record_input_for_test(), fake)
+        });
+
+        mux.update(cx, |mux, cx| {
+            mux.set_client_window_focused(true);
+            mux.handle_message(
+                HostId::LOCAL,
+                ProtocolMessage::Attached {
+                    session: SessionId(1),
+                    snapshot: MuxSnapshot::default(),
+                },
+                cx,
+            );
+            input.borrow_mut().clear();
+
+            mux.attach(SessionId(99));
+            mux.set_client_window_focused(false);
+            mux.handle_command_response(
+                HostId::LOCAL,
+                CommandResponse::Error {
+                    request_id: 0,
+                    error: ServerError::InvalidCommand("unrelated input error".to_owned()),
+                    output: String::new(),
+                },
+                cx,
+            );
+            assert!(input.borrow().is_empty());
+
+            mux.handle_command_response(
+                HostId::LOCAL,
+                CommandResponse::Error {
+                    request_id: 0,
+                    error: ServerError::SessionNotFound("99".to_owned()),
+                    output: String::new(),
+                },
+                cx,
+            );
+        });
+
+        assert_eq!(fake.attached_session.get(), Some(SessionId(99)));
+        assert_eq!(
+            &*input.borrow(),
+            &[InputMessage::ClientFocus { focused: false }]
+        );
+    }
+
+    #[gpui::test]
+    fn client_window_focus_replays_latest_pending_state_after_host_switch(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(
+                vec![test_host("remote", "unix:///tmp/zz-focus-host-switch.sock")],
+                cx,
+            );
+        });
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread("focus test client".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+
+        mux.update(cx, |mux, cx| {
+            install_fake_connection(mux, HostId::LOCAL);
+            let remote = mux.registry.get_by_name("remote").expect("remote host").0;
+            install_fake_connection(mux, remote);
+            mux.set_client_window_focused(true);
+            mux.handle_message(
+                HostId::LOCAL,
+                ProtocolMessage::Attached {
+                    session: SessionId(1),
+                    snapshot: MuxSnapshot {
+                        generation: 1,
+                        ..MuxSnapshot::default()
+                    },
+                },
+                cx,
+            );
+            input.borrow_mut().clear();
+
+            assert!(mux.attach_to_host(remote, SessionId(2), cx));
+            mux.set_client_window_focused(false);
+            mux.set_client_window_focused(true);
+            mux.set_client_window_focused(false);
+            assert!(input.borrow().is_empty());
+            mux.handle_message(
+                remote,
+                ProtocolMessage::Attached {
+                    session: SessionId(2),
+                    snapshot: MuxSnapshot {
+                        generation: 2,
+                        ..MuxSnapshot::default()
+                    },
+                },
+                cx,
+            );
+            mux.set_client_window_focused(false);
+        });
+
+        assert_eq!(
+            &*input.borrow(),
+            &[InputMessage::ClientFocus { focused: false }]
+        );
+    }
+
+    #[gpui::test]
+    fn client_window_focus_replays_after_reconnect_attach(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::config::set_fleet_hosts_for_test(
+                vec![test_host("remote", "unix:///tmp/zz-focus-reconnect.sock")],
+                cx,
+            );
+        });
+        let mux = cx.new(|cx| {
+            MuxClient::new(
+                Err(DaemonError::Thread("focus reconnect".to_owned())),
+                zz_daemon::default_socket_path(),
+                cx,
+            )
+        });
+        let input = mux.update(cx, |mux, _| {
+            let remote = mux.registry.get_by_name("remote").expect("remote host").0;
+            install_fake_connection(mux, remote);
+            mux.attached_host = remote;
+            mux.record_input_for_test()
+        });
+
+        mux.update(cx, |mux, cx| {
+            let remote = mux.registry.get_by_name("remote").expect("remote host").0;
+            mux.set_client_window_focused(true);
+            mux.handle_message(
+                remote,
+                ProtocolMessage::Attached {
+                    session: SessionId(9),
+                    snapshot: MuxSnapshot::default(),
+                },
+                cx,
+            );
+            input.borrow_mut().clear();
+
+            mux.reattach_after_reconnect(remote, cx);
+            mux.set_client_window_focused(false);
+            assert!(input.borrow().is_empty());
+            mux.handle_message(
+                remote,
+                ProtocolMessage::Attached {
+                    session: SessionId(9),
+                    snapshot: MuxSnapshot::default(),
+                },
+                cx,
+            );
+        });
+
+        assert_eq!(
+            &*input.borrow(),
+            &[InputMessage::ClientFocus { focused: false }]
         );
     }
 

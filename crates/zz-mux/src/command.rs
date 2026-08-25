@@ -16,9 +16,9 @@ use zz_protocol::{
     normalize_browser_profile_name, resolve_command,
 };
 use zz_terminal::{
-    CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, DEFAULT_HISTORY_LIMIT,
-    DEFAULT_WORD_SEPARATORS, MAX_HISTORY_LIMIT, PasteBufferAction, SearchDirection,
-    TerminalViewAction,
+    CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
+    DEFAULT_HISTORY_LIMIT, DEFAULT_WORD_SEPARATORS, MAX_HISTORY_LIMIT, PasteBufferAction,
+    SearchDirection, TerminalViewAction,
 };
 
 use crate::{
@@ -172,10 +172,6 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         }
     }
 
-    fn session_activity(&mut self, session: SessionId) -> u64 {
-        self.inner.session_activity(session)
-    }
-
     fn window_activity(&mut self, window: WindowId) -> u64 {
         self.inner.window_activity(window)
     }
@@ -203,6 +199,8 @@ pub struct ExecutionContext {
     client_terminal: ClientTerminal,
     client_size: Option<(u16, u16)>,
     client_working_directory: Option<PathBuf>,
+    client_attached: bool,
+    client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     repeat_binding: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
@@ -225,6 +223,8 @@ impl Default for ExecutionContext {
             client_terminal: ClientTerminal::Present,
             client_size: None,
             client_working_directory: None,
+            client_attached: true,
+            client_attached_context: None,
             repeat_binding: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
@@ -276,6 +276,35 @@ impl ExecutionContext {
 
     pub fn set_no_client(&mut self) {
         self.client_terminal = ClientTerminal::NoClient;
+        self.client_attached = false;
+        self.client_attached_context = None;
+    }
+
+    pub fn set_client_attached(&mut self, attached: bool) {
+        self.client_attached = attached;
+        self.client_attached_context = None;
+    }
+
+    #[must_use]
+    pub fn attached_client_context(
+        &self,
+    ) -> Option<(Option<SessionId>, Option<WindowId>, Option<PaneId>)> {
+        self.client_attached.then(|| {
+            self.client_attached_context.map_or(
+                (self.session, self.window, self.pane),
+                |(session, window, pane)| (Some(session), Some(window), Some(pane)),
+            )
+        })
+    }
+
+    pub fn set_attached_client_context(&mut self, context: Option<(SessionId, WindowId, PaneId)>) {
+        self.client_attached = context.is_some();
+        self.client_attached_context = context;
+    }
+
+    pub fn copy_client_attachment(&mut self, source: &Self) {
+        self.client_attached = source.client_attached;
+        self.client_attached_context = source.client_attached_context;
     }
 
     #[must_use]
@@ -363,10 +392,11 @@ pub enum MuxEffect {
     SendKeys {
         pane: PaneId,
         keys: Vec<KeyToken>,
+        repeat: u32,
     },
     CopyModeRepeat {
         pane: PaneId,
-        count: usize,
+        count: u32,
     },
     TerminalView {
         pane: PaneId,
@@ -408,13 +438,11 @@ pub enum MuxEffect {
     },
     DisplayMessage {
         pane: Option<PaneId>,
+        target_client: Option<String>,
         text: String,
-        /// Milliseconds to show the message; zero waits for a key like the
-        /// pin's `status_message_set` with `delay == 0`.
-        duration_ms: u32,
-        /// False for `display-message -C`, the pin's `no_freeze` argument:
-        /// terminal updates keep reaching the client while the message shows.
+        duration_ms: Option<u32>,
         freeze: bool,
+        ignore_keys: bool,
     },
     PrintOrMessage {
         pane: Option<PaneId>,
@@ -460,10 +488,13 @@ pub enum MuxEffect {
         detach_others: bool,
         read_only: bool,
     },
-    Detach(DetachScope),
+    Detach(DetachRequest),
     SourceFile {
         path: String,
         quiet: bool,
+        parse_only: bool,
+        verbose: bool,
+        context: ExecutionContext,
     },
     RunHook {
         name: String,
@@ -479,15 +510,17 @@ pub enum MuxEffect {
     ModeStylesChanged,
 }
 
-/// Which clients `detach-client` hangs up on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetachRequest {
+    pub target_client: Option<String>,
+    pub scope: DetachScope,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DetachScope {
-    /// The client that ran the command.
     Client,
-    /// Every attached client except the caller.
     Others,
-    /// Every client attached to one session, the caller included.
-    Session(SessionId),
+    Session(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -601,10 +634,6 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner
             .variable(name, context)
             .or_else(|| Some(command.to_owned()))
-    }
-
-    fn session_activity(&mut self, session: SessionId) -> u64 {
-        self.inner.session_activity(session)
     }
 
     fn window_activity(&mut self, window: WindowId) -> u64 {
@@ -903,6 +932,33 @@ const NATIVE_OPTIONS: &[&str] = &[
     "agent-claude-code-command",
     "agent-auto-approve",
 ];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandAliasBodyError {
+    Empty,
+    Multiple,
+    Unparsable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommandAliasResolution {
+    Miss,
+    Expanded(CommandInvocation),
+    MatchedUnsupported(CommandAliasBodyError),
+}
+
+impl CommandAliasResolution {
+    pub fn into_command(self, typed: &CommandInvocation) -> Result<CommandInvocation, ServerError> {
+        match self {
+            Self::Miss => Ok(typed.clone()),
+            Self::Expanded(command) => Ok(command),
+            Self::MatchedUnsupported(_) => Err(ServerError::CommandParse(format!(
+                "unknown command: {}",
+                typed.name
+            ))),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct MuxEngine {
@@ -2202,12 +2258,8 @@ impl MuxEngine {
         );
     }
 
-    pub fn mark_session_active(&mut self, session: SessionId) {
-        self.state.mark_session_active(session);
-    }
-
-    pub fn touch_session_activity(&mut self, session: SessionId) {
-        self.state.touch_session_activity(session);
+    pub fn mark_session_active_at(&mut self, session: SessionId, now: u64) {
+        self.state.mark_session_active_at(session, now);
     }
 
     pub fn set_pane_runtime_facts(&mut self, pane: PaneId, facts: PaneRuntimeFacts) -> bool {
@@ -2546,6 +2598,12 @@ impl MuxEngine {
             .unwrap_or(self.global_display_time_ms)
     }
 
+    pub fn display_time_for_client_session(&self, session: Option<SessionId>) -> u32 {
+        session.map_or(self.global_display_time_ms, |session| {
+            self.display_time_for_session(session)
+        })
+    }
+
     fn mouse_for_session(&self, session: SessionId) -> bool {
         self.session_mouse
             .get(&session)
@@ -2697,7 +2755,7 @@ impl MuxEngine {
         Ok(options.has("-A") || !options.has("-d"))
     }
 
-    pub fn new_session_will_attach(
+    pub fn new_session_needs_attach_preflight(
         &self,
         context: &ExecutionContext,
         args: &[String],
@@ -2705,15 +2763,6 @@ impl MuxEngine {
         let (options, _) = parse_command_options("new-session", args)?;
         if !context.has_client_terminal() {
             return Ok(false);
-        }
-        if options.has("-A") {
-            let existing = match options.value("-s") {
-                Some(name) => session_named(&self.state, name),
-                None => self.state.resolve_session(None, context.session).ok(),
-            };
-            if existing.is_some() {
-                return Ok(true);
-            }
         }
         Ok(!options.has("-d"))
     }
@@ -2738,26 +2787,33 @@ impl MuxEngine {
     }
 
     #[must_use]
-    pub fn expand_command_alias(&self, command: &CommandInvocation) -> Option<CommandInvocation> {
-        let alias = self
-            .array_option(TmuxOptionTarget::Server, "command-alias")?
-            .values()
-            .find_map(|entry| {
-                let (name, expansion) = entry.split_once('=')?;
-                (name == command.name).then_some(expansion)
-            })?;
+    pub fn resolve_command_alias(&self, command: &CommandInvocation) -> CommandAliasResolution {
+        let Some(alias) = self
+            .array_option(TmuxOptionTarget::Server, "command-alias")
+            .and_then(|aliases| {
+                aliases.values().find_map(|entry| {
+                    let (name, expansion) = entry.split_once('=')?;
+                    (name == command.name).then_some(expansion)
+                })
+            })
+        else {
+            return CommandAliasResolution::Miss;
+        };
         let parsed = self.parse_config("<command-alias>", alias);
         if !parsed.diagnostics.is_empty() {
-            return None;
+            return CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Unparsable);
         }
         let mut commands = parsed.commands;
+        if commands.is_empty() {
+            return CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Empty);
+        }
         if commands.len() != 1 {
-            return None;
+            return CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Multiple);
         }
         let mut expanded = commands.remove(0);
         expanded.args.extend(command.args.iter().cloned());
         expanded.source.clone_from(&command.source);
-        Some(expanded)
+        CommandAliasResolution::Expanded(expanded)
     }
 
     pub fn execute_with_shell_validator(
@@ -2767,9 +2823,8 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
-        let expanded = self.expand_command_alias(command);
-        let command = expanded.as_ref().unwrap_or(command);
-        self.execute_without_alias_expansion(context, command, hooks, default_shell_is_valid)
+        let command = self.resolve_command_alias(command).into_command(command)?;
+        self.execute_without_alias_expansion(context, &command, hooks, default_shell_is_valid)
     }
 
     pub fn execute_without_alias_expansion(
@@ -2846,7 +2901,7 @@ impl MuxEngine {
             "kill-pane" => self.kill_pane(context, &command.args, hooks)?,
             "respawn-pane" => self.respawn_pane(context, &command.args, hooks)?,
             "respawn-window" => self.respawn_window(context, &command.args, hooks)?,
-            "send-keys" => self.send_keys(context, &command.args)?,
+            "send-keys" => self.send_keys(context, &command.args, hooks)?,
             "send-prefix" => self.send_prefix(context, &command.args)?,
             "copy-mode" => self.copy_mode(context, &command.args)?,
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
@@ -2891,7 +2946,7 @@ impl MuxEngine {
                 if command.args.is_empty() {
                     Execution::effect(MuxEffect::ReloadConfig)
                 } else {
-                    return Err(ServerError::InvalidCommand(
+                    return Err(ServerError::CommandParse(
                         "reload-config does not take arguments".to_owned(),
                     ));
                 }
@@ -2910,8 +2965,8 @@ impl MuxEngine {
                     CommandResolution::Unimplemented(name) => {
                         ServerError::UnsupportedCommand(name.to_owned())
                     }
-                    CommandResolution::Ambiguous(message) => ServerError::InvalidCommand(message),
-                    _ => ServerError::InvalidCommand(format!("unknown command: {}", command.name)),
+                    CommandResolution::Ambiguous(message) => ServerError::CommandParse(message),
+                    _ => ServerError::CommandParse(format!("unknown command: {}", command.name)),
                 });
             }
         };
@@ -3020,8 +3075,16 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("new-session", args)?;
         let command = shell_command_positional(&positional);
         let detached = options.has("-d") || context.client_terminal == ClientTerminal::NoClient;
+        let requested_window_name = options
+            .value("-n")
+            .map(|name| self.expand_new_session_item_name(context, name, "window", hooks))
+            .transpose()?;
+        let requested_name = options
+            .value("-s")
+            .map(|name| self.expand_new_session_item_name(context, name, "session", hooks))
+            .transpose()?;
         if options.has("-A") {
-            let existing = match options.value("-s") {
+            let existing = match requested_name.as_deref() {
                 Some(name) => session_named(&self.state, name),
                 None => self.state.resolve_session(None, context.session).ok(),
             };
@@ -3044,9 +3107,7 @@ impl MuxEngine {
                 }));
             }
         }
-        let name = options
-            .value("-s")
-            .map_or_else(|| next_session_name(&self.state), str::to_owned);
+        let name = requested_name.unwrap_or_else(|| next_session_name(&self.state));
         if session_named(&self.state, &name).is_some() {
             return Err(ServerError::InvalidCommand(format!(
                 "duplicate session: {name}"
@@ -3065,14 +3126,17 @@ impl MuxEngine {
             .state
             .create_session_with_extent_at(name, extent, base_index)?;
         self.seed_session_environment(session, !options.has("-E"), environment);
-        self.state
-            .sessions
-            .get_mut(&session)
-            .expect("new session exists")
-            .created = i64::try_from(self.format_now)
+        let created = i64::try_from(self.format_now)
             .ok()
             .filter(|created| *created != 0);
-        if let Some(window_name) = options.value("-n") {
+        let session_state = self
+            .state
+            .sessions
+            .get_mut(&session)
+            .expect("new session exists");
+        session_state.created = created;
+        session_state.activity = created;
+        if let Some(window_name) = requested_window_name {
             window_name.clone_into(
                 &mut self
                     .state
@@ -3122,6 +3186,31 @@ impl MuxEngine {
             });
         }
         Ok(Execution { output, effects })
+    }
+
+    fn expand_new_session_item_name(
+        &self,
+        context: &ExecutionContext,
+        name: &str,
+        kind: &str,
+        hooks: &mut impl StatusHooks,
+    ) -> Result<String, ServerError> {
+        let (session, window, pane) = context
+            .attached_client_context()
+            .unwrap_or((None, None, None));
+        let expanded = expand_format_with_hooks(
+            name,
+            self,
+            FormatContext {
+                session,
+                window,
+                pane,
+                active_session: session,
+                format_type: FormatType::None,
+            },
+            hooks,
+        );
+        tmux_clean_name(&expanded, kind)
     }
 
     fn list_sessions(
@@ -3199,10 +3288,11 @@ impl MuxEngine {
                 window: None,
                 pane: None,
                 active_session: context.session,
-                format_type: FormatType::Session,
+                format_type: FormatType::Pane,
             },
             hooks,
         );
+        let name = tmux_clean_name(&name, "session")?;
         self.state.rename_session(session, name)?;
         Ok(Execution::default())
     }
@@ -3303,19 +3393,20 @@ impl MuxEngine {
 
     fn detach_client(
         &self,
-        context: &ExecutionContext,
+        _context: &ExecutionContext,
         args: &[String],
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("detach-client", args)?;
         reject_positionals("detach-client", &positional)?;
         let scope = match options.value("-s") {
-            Some(target) => {
-                DetachScope::Session(self.state.resolve_session(Some(target), context.session)?)
-            }
+            Some(target) => DetachScope::Session(target.to_owned()),
             None if options.has("-a") => DetachScope::Others,
             None => DetachScope::Client,
         };
-        Ok(Execution::effect(MuxEffect::Detach(scope)))
+        Ok(Execution::effect(MuxEffect::Detach(DetachRequest {
+            target_client: options.value("-t").map(str::to_owned),
+            scope,
+        })))
     }
 
     fn has_session(
@@ -3356,29 +3447,30 @@ impl MuxEngine {
         let empty = pane_spawn_empty(options, command.as_deref())?;
         let environment = spawn_environment(options);
         let selects = !options.has("-d");
-        let name = options.value("-n").map(|name| {
-            expand_format_with_hooks(
-                name,
-                self,
-                FormatContext {
-                    session: Some(session),
-                    window: None,
-                    pane: None,
-                    active_session,
-                    format_type: FormatType::Window,
-                },
-                hooks,
-            )
-        });
+        let name_context = FormatContext {
+            session: Some(session),
+            window: None,
+            pane: None,
+            active_session,
+            format_type: FormatType::Session,
+        };
+        let name = options
+            .value("-n")
+            .map(|name| {
+                let expanded = expand_format_with_hooks(name, self, name_context, hooks);
+                tmux_clean_name(&expanded, "window")
+            })
+            .transpose()?;
         if options.has("-S")
             && destination.index.is_none()
             && let Some(name) = name.as_deref()
         {
+            let lookup_name = expand_format_with_hooks(name, self, name_context, hooks);
             let matches = self.state.sessions[&session]
                 .windows
                 .iter()
                 .copied()
-                .filter(|window| self.state.windows[window].name == name)
+                .filter(|window| self.state.windows[window].name == lookup_name)
                 .collect::<Vec<_>>();
             if matches.len() > 1 {
                 return Err(ServerError::InvalidCommand(format!(
@@ -3606,10 +3698,11 @@ impl MuxEngine {
                 window: Some(window),
                 pane: None,
                 active_session: context.session,
-                format_type: FormatType::Window,
+                format_type: FormatType::Pane,
             },
             hooks,
         );
+        let name = tmux_clean_name(&name, "window")?;
         self.state.rename_window(window, name)?;
         self.state
             .set_window_automatic_rename(window, Some(false))?;
@@ -4030,7 +4123,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("find-window", args)?;
         if positional.len() != 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "find-window requires exactly one match string".to_owned(),
             ));
         }
@@ -4066,7 +4159,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-picker", args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "split-picker does not accept positional arguments".to_owned(),
             ));
         }
@@ -4110,7 +4203,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-pane-kind", args)?;
         let [selection] = positional.as_slice() else {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "select-pane-kind requires exactly one of: terminal, browser, agent, editor"
                     .to_owned(),
             ));
@@ -4187,7 +4280,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("break-pane", args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "break-pane does not accept positional arguments".to_owned(),
             ));
         }
@@ -4205,6 +4298,11 @@ impl MuxEngine {
             },
         };
         let destination_session = destination.session;
+        let name = options
+            .value("-n")
+            .map(|name| tmux_clean_name(name, "window"))
+            .transpose()?;
+        let has_name = name.is_some();
         let destination_index = if options.has("-a") || options.has("-b") {
             Some(shift_window_insertion_index(
                 &mut self.state,
@@ -4222,10 +4320,14 @@ impl MuxEngine {
             source,
             destination_session,
             destination_index,
-            options.value("-n").map(str::to_owned),
+            name,
             detached,
             base_index,
         )?;
+        if has_name {
+            self.state
+                .set_window_automatic_rename(window, Some(false))?;
+        }
         self.record_destroyed_session(destroyed_source);
         if detached {
             if original_context.window == Some(source_window)
@@ -4287,7 +4389,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options(command, args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(format!(
+            return Err(ServerError::CommandParse(format!(
                 "{command} does not accept positional arguments"
             )));
         }
@@ -4465,7 +4567,7 @@ impl MuxEngine {
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let url = positional
             .first()
-            .ok_or_else(|| ServerError::InvalidCommand("set-browser-url needs a URL".to_owned()))?;
+            .ok_or_else(|| ServerError::CommandParse("set-browser-url needs a URL".to_owned()))?;
         self.state.update_browser_url(pane, url.clone())?;
         Ok(Execution::default())
     }
@@ -4482,7 +4584,7 @@ impl MuxEngine {
             .map_or(Ok(0), str::parse)
             .map_err(|_| ServerError::InvalidCommand("-a needs a numeric tab index".to_owned()))?;
         if positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "set-browser-tabs needs at least one URL".to_owned(),
             ));
         }
@@ -4499,7 +4601,7 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("set-browser-profile", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         if positional.len() != 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "set-browser-profile needs exactly one profile name".to_owned(),
             ));
         }
@@ -4515,7 +4617,7 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("set-agent-session", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let [session_id] = positional.as_slice() else {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "set-agent-session needs exactly one ACP session ID".to_owned(),
             ));
         };
@@ -4533,7 +4635,7 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("set-agent-provider", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let [provider] = positional.as_slice() else {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "set-agent-provider needs exactly one provider".to_owned(),
             ));
         };
@@ -4552,7 +4654,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("restart-agent-pane", args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "restart-agent-pane does not accept positional arguments".to_owned(),
             ));
         }
@@ -4579,7 +4681,7 @@ impl MuxEngine {
             [] => None,
             [path] => Some(path.clone()),
             _ => {
-                return Err(ServerError::InvalidCommand(
+                return Err(ServerError::CommandParse(
                     "set-editor-path accepts at most one absolute path".to_owned(),
                 ));
             }
@@ -4727,7 +4829,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("select-pane", args)?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "select-pane accepts at most one target".to_owned(),
             ));
         }
@@ -4808,7 +4910,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("last-pane", args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "last-pane supports only -d, -e, -t, and -Z".to_owned(),
             ));
         }
@@ -4833,7 +4935,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("swap-pane", args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "swap-pane supports -d, -D, -U, -Z, -s, and -t".to_owned(),
             ));
         }
@@ -5006,7 +5108,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-pane", args)?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "resize-pane accepts at most one adjustment".to_owned(),
             ));
         }
@@ -5092,7 +5194,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("resize-window", args)?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "resize-window accepts at most one adjustment".to_owned(),
             ));
         }
@@ -5253,7 +5355,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options(command, args)?;
         if positional.len() > usize::from(command == "select-layout") {
-            return Err(ServerError::InvalidCommand(format!(
+            return Err(ServerError::CommandParse(format!(
                 "{command} accepts {} layout names",
                 usize::from(command == "select-layout")
             )));
@@ -5294,7 +5396,7 @@ impl MuxEngine {
             self.state.spread_layout(pane)?;
         } else if options.has("-o") {
             if !positional.is_empty() {
-                return Err(ServerError::InvalidCommand(
+                return Err(ServerError::CommandParse(
                     "select-layout -o does not accept a layout name".to_owned(),
                 ));
             }
@@ -5318,7 +5420,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("rotate-window", args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "rotate-window does not accept positional arguments".to_owned(),
             ));
         }
@@ -5539,10 +5641,18 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("send-keys", args)?;
-        let repeat = repeat_count("send-keys", &options)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let repeat = if let Some(value) = options.value("-N") {
+            let target = ExecutionContext::for_pane(&self.state, pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+            let expanded = self.expand_pane_format(value, &target, context.session, hooks);
+            parse_repeat_count(&expanded)?
+        } else {
+            1
+        };
         if options.value("-N").is_some() && positional.is_empty() && !options.has("-X") {
             return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
                 pane,
@@ -5565,21 +5675,15 @@ impl MuxEngine {
                     count: 1,
                 }));
             };
-            let repeat = if repeats_in_copy_mode(&action) {
-                repeat
-            } else {
-                1
+            let action = match action.count_policy() {
+                CopyModeCountPolicy::Once => TerminalViewAction::CopyMode(action),
+                _ if repeat == 1 => TerminalViewAction::CopyMode(action),
+                _ => TerminalViewAction::CopyModeCounted {
+                    action,
+                    count: repeat,
+                },
             };
-            return Ok(Execution {
-                output: String::new(),
-                effects: vec![
-                    MuxEffect::TerminalView {
-                        pane,
-                        action: TerminalViewAction::CopyMode(action),
-                    };
-                    repeat
-                ],
-            });
+            return Ok(Execution::effect(MuxEffect::TerminalView { pane, action }));
         }
         let keys = if options.has("-H") {
             positional
@@ -5593,7 +5697,8 @@ impl MuxEngine {
         };
         Ok(Execution::effect(MuxEffect::SendKeys {
             pane,
-            keys: std::iter::repeat_n(keys, repeat).flatten().collect(),
+            keys,
+            repeat,
         }))
     }
 
@@ -5615,6 +5720,7 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::SendKeys {
             pane,
             keys: vec![KeyToken::Named(key)],
+            repeat: 1,
         }))
     }
 
@@ -5696,7 +5802,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("command-prompt", args)?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "command-prompt accepts at most one template".to_owned(),
             ));
         }
@@ -5828,7 +5934,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("focus-sidebar", args)?;
         if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "focus-sidebar does not take positional arguments".to_owned(),
             ));
         }
@@ -5869,20 +5975,15 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("display-message", args)?;
-        let pane = match options.value("-t") {
-            Some(target) => Some(self.resolve_pane(Some(target), context.window, context.pane)?),
-            None if self.state.sessions.is_empty() => None,
-            None => Some(self.resolve_pane(None, context.window, context.pane)?),
-        };
-        let format_context = pane
-            .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
-            .map_or_else(FormatContext::default, |target| FormatContext {
-                session: target.session,
-                window: target.window,
-                pane: target.pane,
-                active_session: context.session,
-                format_type: FormatType::Pane,
-            });
+        let target = self.resolve_display_message_context(context, &options)?;
+        let pane = target.as_ref().and_then(|target| target.pane);
+        let format_context = target.map_or_else(FormatContext::default, |target| FormatContext {
+            session: target.session,
+            window: target.window,
+            pane: target.pane,
+            active_session: context.session,
+            format_type: FormatType::Pane,
+        });
         let format = if positional.is_empty() {
             options
                 .value("-F")
@@ -5890,7 +5991,7 @@ impl MuxEngine {
                 .to_owned()
         } else {
             if options.value("-F").is_some() {
-                return Err(ServerError::InvalidCommand(
+                return Err(ServerError::CommandParse(
                     "only one of -F or argument must be given".to_owned(),
                 ));
             }
@@ -5908,22 +6009,91 @@ impl MuxEngine {
         if options.has("-p") {
             Ok(Execution::output(text))
         } else {
-            let duration_ms = delay.map_or_else(
-                || {
-                    pane.map_or(self.global_display_time_ms, |pane| {
-                        self.display_time_for_pane(pane)
-                            .expect("display-message pane was resolved")
-                    })
-                },
-                |delay| u32::try_from(delay).expect("delay was bounded to u32"),
-            );
             Ok(Execution::effect(MuxEffect::DisplayMessage {
                 pane,
+                target_client: options.value("-c").map(str::to_owned),
                 text,
-                duration_ms,
+                duration_ms: delay
+                    .map(|delay| u32::try_from(delay).expect("delay was bounded to u32")),
                 freeze: !options.has("-C"),
+                ignore_keys: options.has("-N"),
             }))
         }
+    }
+
+    pub fn display_message_format_target(
+        &self,
+        context: &ExecutionContext,
+        args: &[String],
+    ) -> Result<(Option<ExecutionContext>, Option<String>), ServerError> {
+        let (options, _) = parse_command_options("display-message", args)?;
+        Ok((
+            self.resolve_display_message_context(context, &options)?,
+            options.value("-c").map(str::to_owned),
+        ))
+    }
+
+    fn resolve_display_message_context(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+    ) -> Result<Option<ExecutionContext>, ServerError> {
+        match options.value("-t") {
+            Some(target) => match self.resolve_pane(Some(target), context.window, context.pane) {
+                Ok(pane) => Ok(ExecutionContext::for_pane(&self.state, pane)),
+                Err(
+                    ServerError::SessionNotFound(_)
+                    | ServerError::WindowNotFound(_)
+                    | ServerError::PaneNotFound(_),
+                ) => Ok(self.resolve_display_message_partial_context(context, target)),
+                Err(error) => Err(error),
+            },
+            None if self.state.sessions.is_empty() => Ok(None),
+            None => self
+                .resolve_pane(None, context.window, context.pane)
+                .map(|pane| ExecutionContext::for_pane(&self.state, pane)),
+        }
+    }
+
+    fn resolve_display_message_partial_context(
+        &self,
+        context: &ExecutionContext,
+        target: &str,
+    ) -> Option<ExecutionContext> {
+        let window = if let Some((session_target, window_and_pane)) = target.split_once(':') {
+            let session = self
+                .state
+                .resolve_session(
+                    (!session_target.is_empty()).then_some(session_target),
+                    context.session,
+                )
+                .ok()?;
+            let active_window = self.state.sessions.get(&session)?.active_window;
+            let window_target = window_and_pane
+                .split_once('.')
+                .map_or(window_and_pane, |(window, _)| window);
+            if window_target.is_empty() {
+                active_window
+            } else {
+                let target = format!("{session}:{window_target}");
+                self.resolve_window(Some(&target), Some(session), context.window)
+                    .unwrap_or(active_window)
+            }
+        } else {
+            let (window_target, _) = target.split_once('.')?;
+            self.resolve_window(
+                (!window_target.is_empty()).then_some(window_target),
+                context.session,
+                context.window,
+            )
+            .ok()?
+        };
+        let window_state = self.state.windows.get(&window)?;
+        Some(ExecutionContext::new(
+            Some(window_state.session),
+            Some(window),
+            Some(window_state.active_pane),
+        ))
     }
 
     fn display_panes(
@@ -5990,7 +6160,7 @@ impl MuxEngine {
         let table = key_table(&options);
         let quiet = options.has("-q");
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "command unbind-key: too many arguments (need at most 1)".to_owned(),
             ));
         }
@@ -6027,14 +6197,14 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-keys", args).map_err(|error| {
-            if error == ServerError::InvalidCommand("-O requires an argument".to_owned()) {
-                ServerError::InvalidCommand("command list-keys: -O expects an argument".to_owned())
+            if error == ServerError::CommandParse("-O requires an argument".to_owned()) {
+                ServerError::CommandParse("command list-keys: -O expects an argument".to_owned())
             } else {
                 error
             }
         })?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "command list-keys: too many arguments (need at most 1)".to_owned(),
             ));
         }
@@ -6160,7 +6330,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("list-commands", args)?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "list-commands accepts at most one command".to_owned(),
             ));
         }
@@ -6222,13 +6392,13 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-hook", args)?;
         if options.value("-B").is_some() {
-            return Err(ServerError::InvalidCommand("invalid flag -B".to_owned()));
+            return Err(ServerError::CommandParse("invalid flag -B".to_owned()));
         }
         let Some(argument) = positional.first() else {
-            return Err(ServerError::InvalidCommand("missing argument".to_owned()));
+            return Err(ServerError::CommandParse("missing argument".to_owned()));
         };
         if positional.len() > 2 {
-            return Err(ServerError::InvalidCommand("too many arguments".to_owned()));
+            return Err(ServerError::CommandParse("too many arguments".to_owned()));
         }
         let (argument, target_context) =
             self.expand_hook_name(context, &options, argument, hooks)?;
@@ -6932,10 +7102,10 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("show-hooks", args)?;
         if options.has("-B") {
-            return Err(ServerError::InvalidCommand("invalid flag -B".to_owned()));
+            return Err(ServerError::CommandParse("invalid flag -B".to_owned()));
         }
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand("too many arguments".to_owned()));
+            return Err(ServerError::CommandParse("too many arguments".to_owned()));
         }
         let Some(argument) = positional.first() else {
             let target = self.hook_listing_target(context, &options)?;
@@ -7075,12 +7245,12 @@ impl MuxEngine {
         };
         let (options, positional) = parse_command_options(command, args)?;
         let Some(option) = positional.first() else {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "set-option needs an option".to_owned(),
             ));
         };
         if positional.len() > 2 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "set-option accepts at most one value".to_owned(),
             ));
         }
@@ -7336,7 +7506,7 @@ impl MuxEngine {
         };
         let (options, positional) = parse_command_options(command, args)?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "show-options accepts at most one option".to_owned(),
             ));
         }
@@ -7554,7 +7724,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("set-environment", args)?;
         if !(1..=2).contains(&positional.len()) {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "set-environment needs a variable and optional value".to_owned(),
             ));
         }
@@ -7625,7 +7795,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("show-environment", args)?;
         if positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "show-environment accepts at most one variable".to_owned(),
             ));
         }
@@ -10172,23 +10342,39 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("source-file", args)?;
         if positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "source-file needs a path".to_owned(),
             ));
         }
         let quiet = options.has("-q");
         let expand_paths = options.has("-F");
+        let parse_only = options.has("-n");
+        let verbose = options.has("-v");
+        let mut source_context = context.clone();
+        if let Some(target) = options.value("-t") {
+            match self.resolve_pane(Some(target), context.window, context.pane) {
+                Ok(pane) => {
+                    let target = ExecutionContext::for_pane(&self.state, pane)
+                        .expect("resolved pane has an execution context");
+                    source_context.retarget(&target);
+                }
+                Err(_) => source_context.retarget(&ExecutionContext::new(None, None, None)),
+            }
+        }
         Ok(Execution {
             output: String::new(),
             effects: positional
                 .into_iter()
                 .map(|path| MuxEffect::SourceFile {
                     path: if expand_paths {
-                        self.expand_pane_format(&path, context, context.session, hooks)
+                        self.expand_pane_format(&path, &source_context, context.session, hooks)
                     } else {
                         path
                     },
                     quiet,
+                    parse_only,
+                    verbose,
+                    context: source_context.clone(),
                 })
                 .collect(),
         })
@@ -10528,6 +10714,15 @@ fn tmux_vis(value: &str, double_quoted: bool) -> String {
         }
     }
     escaped
+}
+
+fn tmux_clean_name(name: &str, kind: &str) -> Result<String, ServerError> {
+    if name.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(ServerError::InvalidCommand(format!(
+            "invalid {kind} name: {name}"
+        )));
+    }
+    Ok(tmux_vis(name, false))
 }
 
 fn tmux_flag(value: bool) -> &'static str {
@@ -11698,11 +11893,11 @@ fn validate_options(
     {
         let Some(option) = spec.option(name) else {
             if command == "send-keys" && matches!(name, "-C" | "-P" | "-o") {
-                return Err(ServerError::InvalidCommand(format!(
+                return Err(ServerError::CommandParse(format!(
                     "command send-keys: unknown flag {name}"
                 )));
             }
-            return Err(ServerError::InvalidCommand(format!(
+            return Err(ServerError::CommandParse(format!(
                 "{command} does not support {name}"
             )));
         };
@@ -11790,7 +11985,7 @@ fn required_arg<'a>(
 ) -> Result<&'a str, ServerError> {
     args.get(index)
         .map(String::as_str)
-        .ok_or_else(|| ServerError::InvalidCommand(format!("{option} requires an argument")))
+        .ok_or_else(|| ServerError::CommandParse(format!("{option} requires an argument")))
 }
 
 /// One `-N` asks a chooser for no preview, which is the only layout zz's
@@ -11806,7 +12001,7 @@ fn reject_large_preview(command: &str, options: &Options) -> Result<(), ServerEr
 
 fn reject_positionals(command: &str, positional: &[String]) -> Result<(), ServerError> {
     if let Some(argument) = positional.first() {
-        Err(ServerError::InvalidCommand(format!(
+        Err(ServerError::CommandParse(format!(
             "{command} does not take positional arguments: {argument}"
         )))
     } else {
@@ -11895,7 +12090,7 @@ fn exactly_one_argument<'a>(
     if positional.len() == 1 {
         Ok(positional[0].as_str())
     } else {
-        Err(ServerError::InvalidCommand(format!(
+        Err(ServerError::CommandParse(format!(
             "{command} requires exactly one new name"
         )))
     }
@@ -12122,25 +12317,18 @@ fn hex_key_token(value: &str) -> Result<KeyToken, ServerError> {
     }
 }
 
-fn repeat_count(command: &str, options: &Options) -> Result<usize, ServerError> {
-    let Some(value) = options.value("-N") else {
-        return Ok(1);
-    };
-    match value.parse::<usize>() {
-        Ok(count) if count > 0 => Ok(count),
-        _ => Err(ServerError::InvalidCommand(format!(
-            "{command} -N needs a positive repeat count: {value}"
-        ))),
-    }
+fn parse_repeat_count(value: &str) -> Result<u32, ServerError> {
+    u32::try_from(parse_strtonum(
+        value,
+        1,
+        i64::from(u32::MAX),
+        "repeat count",
+    )?)
+    .map_err(|_| ServerError::InvalidCommand("repeat count too large".to_owned()))
 }
 
-/// tmux hands the repeat count to the copy-mode command, which uses it only when
-/// it is a movement; repeating a copy or a cancel would mean something else.
-/// The copy-mode commands that honor tmux's `-N` repeat prefix: exactly the
-/// window-copy handlers that read `wme->prefix` and loop. Everything else runs
-/// once no matter the count (a repeated `rectangle-toggle` or copy would be a
-/// different command, not a repeated one).
-fn repeats_in_copy_mode(action: &CopyModeAction) -> bool {
+#[must_use]
+pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
     matches!(
         action,
         CopyModeAction::Left
@@ -12151,21 +12339,84 @@ fn repeats_in_copy_mode(action: &CopyModeAction) -> bool {
             | CopyModeAction::PageDown
             | CopyModeAction::HalfPageUp
             | CopyModeAction::HalfPageDown
-            | CopyModeAction::ScrollUp
-            | CopyModeAction::ScrollDown
+            | CopyModeAction::Top
+            | CopyModeAction::Bottom
+            | CopyModeAction::TopLine
+            | CopyModeAction::MiddleLine
+            | CopyModeAction::BottomLine
+            | CopyModeAction::StartOfLine
+            | CopyModeAction::BackToIndentation
+            | CopyModeAction::EndOfLine
             | CopyModeAction::NextWord
             | CopyModeAction::PreviousWord
             | CopyModeAction::NextWordEnd
+            | CopyModeAction::NextParagraph
+            | CopyModeAction::PreviousParagraph
+            | CopyModeAction::NextPrompt { .. }
+            | CopyModeAction::PreviousPrompt { .. }
+            | CopyModeAction::SetMark
+            | CopyModeAction::JumpToMark
+            | CopyModeAction::Cancel
             | CopyModeAction::NextSpace
             | CopyModeAction::PreviousSpace
             | CopyModeAction::NextSpaceEnd
-            | CopyModeAction::NextParagraph
-            | CopyModeAction::PreviousParagraph
-            | CopyModeAction::Jump(_)
-            | CopyModeAction::RepeatJump { .. }
-            | CopyModeAction::SearchAgain { .. }
+            | CopyModeAction::ScrollUp
+            | CopyModeAction::ScrollDown
+            | CopyModeAction::ScrollMiddle
+            | CopyModeAction::NextMatchingBracket
+            | CopyModeAction::GotoLine(_)
+            | CopyModeAction::PageDownScrollExit
     )
 }
+
+pub fn send_keys_is_read_only_safe(args: &[String]) -> Result<bool, ServerError> {
+    let spec = command_spec("send-keys").expect("send-keys has catalog metadata");
+    let (unvalidated_options, _) = parse_options_for_spec(args, spec)?;
+    if !unvalidated_options.has("-X") {
+        return Ok(false);
+    }
+    let (_, positional) = parse_command_options("send-keys", args)?;
+    let Some(command) = positional.first() else {
+        return Ok(true);
+    };
+    if PINNED_UNSAFE_COPY_MODE_COMMANDS.contains(&command.as_str()) {
+        return Ok(false);
+    }
+    if let Ok(Some(action)) = copy_mode_action(command, &positional[1..], SetClipboard::Off, "") {
+        return Ok(copy_mode_action_is_read_only_safe(&action));
+    }
+    let probe_argument = match command.as_str() {
+        "goto-line" => Some("1"),
+        "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward" => Some("x"),
+        _ => None,
+    };
+    let probe_arguments = probe_argument
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    Ok(
+        copy_mode_action(command, &probe_arguments, SetClipboard::Off, "")?
+            .as_ref()
+            .is_none_or(copy_mode_action_is_read_only_safe),
+    )
+}
+
+const PINNED_UNSAFE_COPY_MODE_COMMANDS: &[&str] = &[
+    "copy-line",
+    "copy-line-and-cancel",
+    "copy-pipe-line",
+    "copy-pipe-line-and-cancel",
+    "scroll-exit-on",
+    "scroll-exit-off",
+    "scroll-exit-toggle",
+    "search-backward",
+    "search-backward-text",
+    "search-backward-incremental",
+    "search-forward",
+    "search-forward-text",
+    "search-forward-incremental",
+    "selection-mode",
+];
 
 fn copy_mode_action(
     command: &str,
@@ -12471,7 +12722,7 @@ fn bound_commands(
         }
         commands
     };
-    expand_stored_aliases(engine, &mut commands);
+    expand_stored_aliases(engine, &mut commands)?;
     for command in &commands {
         validate_bound_command(command, "bind-key")?;
     }
@@ -12491,7 +12742,7 @@ fn parse_hook_commands(
         return Err(ServerError::InvalidCommand(diagnostic.message));
     }
     let mut commands = parsed.commands;
-    expand_stored_aliases(engine, &mut commands);
+    expand_stored_aliases(engine, &mut commands)?;
     for command in &commands {
         validate_bound_command(command, "set-hook")?;
     }
@@ -12506,10 +12757,10 @@ fn normalize_option_command(engine: &MuxEngine, value: &str) -> Result<String, S
     parsed
         .commands
         .into_iter()
-        .map(|mut command| {
-            if let Some(expanded) = engine.expand_command_alias(&command) {
-                command = expanded;
-            }
+        .map(|command| {
+            let mut command = engine
+                .resolve_command_alias(&command)
+                .into_command(&command)?;
             command.name = match resolve_command(&command.name) {
                 CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
                     name.to_owned()
@@ -12580,12 +12831,16 @@ fn has_unquoted_hook_format(input: &str) -> bool {
     false
 }
 
-fn expand_stored_aliases(engine: &MuxEngine, commands: &mut [CommandInvocation]) {
+fn expand_stored_aliases(
+    engine: &MuxEngine,
+    commands: &mut [CommandInvocation],
+) -> Result<(), ServerError> {
     for command in commands {
-        if let Some(expanded) = engine.expand_command_alias(command) {
-            *command = expanded;
-        }
+        *command = engine
+            .resolve_command_alias(command)
+            .into_command(command)?;
     }
+    Ok(())
 }
 
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
@@ -12601,14 +12856,14 @@ fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<()
         return Err(ServerError::UnsupportedCommand(format!("{owner} {name}")));
     }
     match resolve_command(&command.name) {
-        CommandResolution::Ambiguous(message) => Err(ServerError::InvalidCommand(message)),
-        _ => Err(ServerError::InvalidCommand(format!(
+        CommandResolution::Ambiguous(message) => Err(ServerError::CommandParse(message)),
+        _ => Err(ServerError::CommandParse(format!(
             "unknown command: {name}"
         ))),
     }
 }
 
-fn format_command(command: &CommandInvocation) -> String {
+pub fn format_command(command: &CommandInvocation) -> String {
     tmux_command_print(command)
 }
 
@@ -13068,7 +13323,7 @@ mod tests {
             engine
                 .execute(&mut context, &command("wibble", &[]))
                 .unwrap_err(),
-            ServerError::InvalidCommand("unknown command: wibble".to_owned())
+            ServerError::CommandParse("unknown command: wibble".to_owned())
         );
         assert_eq!(
             engine
@@ -13349,6 +13604,322 @@ mod tests {
             Err(ServerError::InvalidCommand(message)) if message == "height too small"
         ));
         assert_eq!(engine.state.sessions.len(), 2);
+    }
+
+    #[test]
+    fn new_session_name_expands_once_before_attach_and_duplicate_lookup() {
+        struct Once {
+            calls: usize,
+            order: usize,
+        }
+
+        impl StatusHooks for Once {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                match name {
+                    "once" => {
+                        self.calls += 1;
+                        Some(if self.calls == 1 { "once" } else { "twice" }.to_owned())
+                    }
+                    "order" => {
+                        self.order += 1;
+                        Some(self.order.to_string())
+                    }
+                    _ => None,
+                }
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "origin", "-n", "origin-window"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-T", "origin-pane"]),
+            )
+            .unwrap();
+
+        let mut hooks = Once { calls: 0, order: 0 };
+        engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new",
+                    &[
+                        "-d",
+                        "-n",
+                        "created-window-#{order}-#{command}",
+                        "-s",
+                        "#{session_name}-#{window_name}-#{pane_title}-#{once}-#{order}-#{command}",
+                    ],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert_eq!(hooks.calls, 1);
+        assert_eq!(hooks.order, 2);
+        let name = "origin-origin-window-origin-pane-once-2-new-session";
+        let created = session_named(&engine.state, name).unwrap();
+        assert_eq!(context.session, Some(created));
+        let created_window = engine.state.sessions[&created].active_window;
+        assert_eq!(
+            engine.state.windows[&created_window].name,
+            "created-window-1-new-session"
+        );
+
+        let attached = engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-A", "-d", "-s", "#{session_name}"]),
+            )
+            .unwrap();
+        assert!(attached.effects.iter().any(
+            |effect| matches!(effect, MuxEffect::Attach { session, .. } if *session == created)
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "#{session_name}"]),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == format!("duplicate session: {name}")
+        ));
+    }
+
+    #[test]
+    fn new_session_name_uses_canonical_and_explicit_command_item_values() {
+        for spelling in ["new-session", "new", "new-s"] {
+            let mut engine = MuxEngine::default();
+            let mut context = ExecutionContext::default();
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        spelling,
+                        &["-d", "-n", "window-#{command}", "-s", "#{command}"],
+                    ),
+                )
+                .unwrap();
+            let session = session_named(&engine.state, "new-session").unwrap();
+            assert_eq!(
+                engine.state.windows[&engine.state.sessions[&session].active_window].name,
+                "window-new-session"
+            );
+        }
+
+        struct ExplicitCommand;
+
+        impl StatusHooks for ExplicitCommand {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                (name == "command").then(|| "explicit-item".to_owned())
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new",
+                    &["-d", "-n", "window-#{command}", "-s", "#{command}"],
+                ),
+                &mut ExplicitCommand,
+            )
+            .unwrap();
+        let session = session_named(&engine.state, "explicit-item").unwrap();
+        assert_eq!(
+            engine.state.windows[&engine.state.sessions[&session].active_window].name,
+            "window-explicit-item"
+        );
+    }
+
+    #[test]
+    fn new_session_name_keeps_empty_values_and_applies_pin_name_cleaning() {
+        let mut engine = MuxEngine::default();
+        let mut setup_context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut setup_context,
+                &command("new-session", &["-d", "-s", "origin"]),
+            )
+            .unwrap();
+        let mut context = ExecutionContext::new(
+            setup_context.session,
+            setup_context.window,
+            setup_context.pane,
+        );
+        context.set_client_attached(false);
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-n", "#{window_name}", "-s", "#{session_name}"],
+                ),
+            )
+            .unwrap();
+        let empty = session_named(&engine.state, "").unwrap();
+        assert!(
+            engine.state.windows[&engine.state.sessions[&empty].active_window]
+                .name
+                .is_empty()
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "#{session_name}"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "duplicate session: "
+        ));
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-n", r"window\#{command}", "-s", r"slash\#{command}"],
+                ),
+            )
+            .unwrap();
+        let slash = session_named(&engine.state, r"slash\\new-session").unwrap();
+        assert_eq!(
+            engine.state.windows[&engine.state.sessions[&slash].active_window].name,
+            r"window\\new-session"
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-n", "janela-日本語", "-s", "sessão-日本語"],
+                ),
+            )
+            .unwrap();
+        let unicode = session_named(&engine.state, "sessão-日本語").unwrap();
+        assert_eq!(
+            engine.state.windows[&engine.state.sessions[&unicode].active_window].name,
+            "janela-日本語"
+        );
+    }
+
+    #[test]
+    fn new_session_name_rejects_ascii_control_values_before_creation() {
+        struct InvalidName {
+            session_calls: usize,
+        }
+
+        impl StatusHooks for InvalidName {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                match name {
+                    "invalid_name" => Some("line\nname".to_owned()),
+                    "session_probe" => {
+                        self.session_calls += 1;
+                        Some("untouched".to_owned())
+                    }
+                    _ => None,
+                }
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let mut hooks = InvalidName { session_calls: 0 };
+        assert!(matches!(
+            engine.execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-session",
+                    &[
+                        "-d",
+                        "-n",
+                        "#{invalid_name}",
+                        "-s",
+                        "#{session_probe}",
+                    ],
+                ),
+                &mut hooks,
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "invalid window name: line\nname"
+        ));
+        assert_eq!(hooks.session_calls, 0);
+        assert!(matches!(
+            engine.execute_with_format_hooks(
+                &mut context,
+                &command("new-session", &["-d", "-s", "#{invalid_name}"]),
+                &mut hooks,
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "invalid session name: line\nname"
+        ));
+        assert!(engine.state.sessions.is_empty());
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "existing", "-n", "original"]),
+            )
+            .unwrap();
+        let existing = context.session.unwrap();
+        let existing_window = context.window.unwrap();
+        assert!(matches!(
+            engine.execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-A", "-d", "-n", "#{invalid_name}", "-s", "existing"],
+                ),
+                &mut hooks,
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "invalid window name: line\nname"
+        ));
+        let attached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-A", "-d", "-n", r"ignored\#{command}", "-s", "existing"],
+                ),
+            )
+            .unwrap();
+        assert!(attached.effects.iter().any(
+            |effect| matches!(effect, MuxEffect::Attach { session, .. } if *session == existing)
+        ));
+        assert_eq!(engine.state.windows[&existing_window].name, "original");
+        assert_eq!(engine.state.sessions.len(), 1);
     }
 
     #[test]
@@ -14371,6 +14942,316 @@ mod tests {
     }
 
     #[test]
+    fn new_window_dash_s_reexpands_only_the_unindexed_lookup_name() {
+        struct LookupHooks {
+            first_calls: usize,
+            second_calls: usize,
+        }
+
+        impl StatusHooks for LookupHooks {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                match name {
+                    "first" => {
+                        self.first_calls += 1;
+                        Some("#{second}".to_owned())
+                    }
+                    "second" => {
+                        self.second_calls += 1;
+                        Some(
+                            match self.second_calls {
+                                1 => "lookup-hit",
+                                2 => "lookup-miss",
+                                _ => "lookup-index",
+                            }
+                            .to_owned(),
+                        )
+                    }
+                    _ => None,
+                }
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let mut hooks = LookupHooks {
+            first_calls: 0,
+            second_calls: 0,
+        };
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "reuse-hit", "-n", "lookup-hit"],
+                ),
+            )
+            .unwrap();
+        let hit_session = session_named(&engine.state, "reuse-hit").unwrap();
+        let hit = engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-window",
+                    &["-d", "-S", "-t", "=reuse-hit:", "-n", "#{first}"],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert!(hit.effects.contains(&MuxEffect::SuppressAfterHook));
+        assert_eq!(engine.state.sessions[&hit_session].windows.len(), 1);
+        assert_eq!(hooks.first_calls, 1);
+        assert_eq!(hooks.second_calls, 1);
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "reuse-miss", "-n", "anchor"]),
+            )
+            .unwrap();
+        let miss_session = session_named(&engine.state, "reuse-miss").unwrap();
+        let miss = engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-window",
+                    &["-d", "-S", "-t", "=reuse-miss:", "-n", "#{first}"],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert!(!miss.effects.contains(&MuxEffect::SuppressAfterHook));
+        let miss_window = engine.state.window_at_index(miss_session, 1).unwrap();
+        assert_eq!(engine.state.windows[&miss_window].name, "#{second}");
+        assert_eq!(hooks.first_calls, 2);
+        assert_eq!(hooks.second_calls, 2);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "reuse-index", "-n", "lookup-index"],
+                ),
+            )
+            .unwrap();
+        let index_session = session_named(&engine.state, "reuse-index").unwrap();
+        let indexed = engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-window",
+                    &["-d", "-S", "-t", "=reuse-index:5", "-n", "#{first}"],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert!(!indexed.effects.contains(&MuxEffect::SuppressAfterHook));
+        let indexed_window = engine.state.window_at_index(index_session, 5).unwrap();
+        assert_eq!(engine.state.windows[&indexed_window].name, "#{second}");
+        assert_eq!(hooks.first_calls, 3);
+        assert_eq!(hooks.second_calls, 2);
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn new_window_name_expands_once_then_validates_and_cleans() {
+        struct NameHooks {
+            calls: usize,
+        }
+
+        impl StatusHooks for NameHooks {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                match name {
+                    "once" => {
+                        self.calls += 1;
+                        Some(if self.calls == 1 {
+                            "value-#{late}".to_owned()
+                        } else {
+                            "twice".to_owned()
+                        })
+                    }
+                    "invalid_name" => Some("line\nname".to_owned()),
+                    _ => None,
+                }
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "target", "-n", "target-window"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-T", "target-pane"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "current"]),
+            )
+            .unwrap();
+
+        let mut hooks = NameHooks { calls: 0 };
+        let created = engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "neww",
+                    &[
+                        "-d",
+                        "-t",
+                        "=target:5",
+                        "-n",
+                        r"janela-日本語\#{command}-#{session_name}-#{window_name}-#{pane_title}-#{once}",
+                    ],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert_eq!(hooks.calls, 1);
+        let pane = created
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("created pane");
+        let window = engine.state.window_for_pane(pane).expect("created window");
+        assert_eq!(
+            engine.state.windows[&window].name,
+            r"janela-日本語\\new-window-target-target-window-target-pane-value-#{late}"
+        );
+
+        let target = session_named(&engine.state, "target").unwrap();
+        let windows_before = engine.state.sessions[&target].windows.len();
+        assert!(matches!(
+            engine.execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-window",
+                    &["-d", "-t", "=target:6", "-n", "#{invalid_name}"],
+                ),
+                &mut hooks,
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "invalid window name: line\nname"
+        ));
+        assert_eq!(engine.state.sessions[&target].windows.len(), windows_before);
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-window", &["-t", "=target:0"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-n", r"collision\#{command}"]),
+            )
+            .unwrap();
+        let windows_before = engine.state.sessions[&target].windows.len();
+        let reused = engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-S", "-n", r"collision\#{command}"]),
+            )
+            .unwrap();
+        assert!(reused.effects.contains(&MuxEffect::SuppressAfterHook));
+        assert_eq!(engine.state.sessions[&target].windows.len(), windows_before);
+    }
+
+    #[test]
+    fn name_commands_use_pin_format_types() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let created = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-window",
+                    &[
+                        "-d",
+                        "-n",
+                        "new-#{session_format}:#{window_format}:#{pane_format}",
+                    ],
+                ),
+            )
+            .unwrap();
+        let pane = created
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .unwrap();
+        let window = engine.state.window_for_pane(pane).unwrap();
+        assert_eq!(engine.state.windows[&window].name, "new-1:0:0");
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "rename-window",
+                    &[
+                        "-t",
+                        &window.to_string(),
+                        "renamed-#{session_format}:#{window_format}:#{pane_format}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.state.windows[&window].name, "renamed-0:0:1");
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "rename-session",
+                    &[
+                        "-t",
+                        &session.to_string(),
+                        "renamed-#{session_format}:#{window_format}:#{pane_format}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.state.sessions[&session].name, "renamed-0:0:1");
+    }
+
+    #[test]
     fn break_pane_dash_t_names_the_destination_index() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -14420,6 +15301,222 @@ mod tests {
             .window_for_pane(broken)
             .expect("the first broken pane kept its window");
         assert_eq!(engine.state.windows[&first_break].index, 5);
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn break_pane_name_stays_literal_then_validates_and_cleans() {
+        struct NameHooks {
+            calls: usize,
+        }
+
+        impl StatusHooks for NameHooks {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                (name == "probe").then(|| {
+                    self.calls += 1;
+                    "expanded".to_owned()
+                })
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &[]))
+            .unwrap();
+        let first = context.pane.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &[]))
+            .unwrap();
+        let second = context.pane.unwrap();
+        let original_window = context.window.unwrap();
+        let windows_before = engine.state.windows.len();
+        let panes_before = engine
+            .state
+            .windows
+            .values()
+            .map(|window| window.panes.len())
+            .sum::<usize>();
+        let layout_before = window_layout(&engine, session);
+        let cell_layout_before = engine.state.windows[&original_window].layout.clone();
+        let indices_before = engine.state.sessions[&session]
+            .windows
+            .iter()
+            .map(|window| engine.state.windows[window].index)
+            .collect::<Vec<_>>();
+        let mut hooks = NameHooks { calls: 0 };
+        assert!(matches!(
+            engine.execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &[
+                        "-d",
+                        "-b",
+                        "-s",
+                        &first.to_string(),
+                        "-t",
+                        "work:0",
+                        "-n",
+                        "line\nname",
+                    ],
+                ),
+                &mut hooks,
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == "invalid window name: line\nname"
+        ));
+        assert_eq!(window_layout(&engine, session), layout_before);
+        assert_eq!(engine.state.windows[&original_window].index, 0);
+        assert_eq!(
+            engine.state.windows[&original_window].layout,
+            cell_layout_before
+        );
+        assert_eq!(
+            engine.state.sessions[&session]
+                .windows
+                .iter()
+                .map(|window| engine.state.windows[window].index)
+                .collect::<Vec<_>>(),
+            indices_before
+        );
+        assert_eq!(engine.state.windows.len(), windows_before);
+        assert_eq!(
+            engine
+                .state
+                .windows
+                .values()
+                .map(|window| window.panes.len())
+                .sum::<usize>(),
+            panes_before
+        );
+
+        let literal = r"janela-日本語\#{probe}";
+        for pane in [first, second] {
+            engine
+                .execute_with_format_hooks(
+                    &mut context,
+                    &command("breakp", &["-d", "-s", &pane.to_string(), "-n", literal]),
+                    &mut hooks,
+                )
+                .unwrap();
+        }
+        assert_eq!(hooks.calls, 0);
+        assert_eq!(
+            engine
+                .state
+                .windows
+                .values()
+                .filter(|window| window.name == r"janela-日本語\\#{probe}")
+                .count(),
+            2
+        );
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn break_pane_name_disables_automatic_rename_on_both_window_paths() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "relink"]))
+            .unwrap();
+        let relink_window = context.window.unwrap();
+        let relink_pane = context.pane.unwrap();
+        engine
+            .state
+            .set_window_automatic_rename(relink_window, Some(true))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &[
+                        "-d",
+                        "-s",
+                        &relink_pane.to_string(),
+                        "-t",
+                        "=relink:5",
+                        "-n",
+                        "relinked",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine.state.window_for_pane(relink_pane),
+            Some(relink_window)
+        );
+        assert_eq!(engine.state.windows[&relink_window].name, "relinked");
+        assert_eq!(engine.state.windows[&relink_window].index, 5);
+        assert_eq!(
+            engine
+                .state
+                .window_automatic_rename_override(relink_window)
+                .unwrap(),
+            Some(false)
+        );
+
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "created"]))
+            .unwrap();
+        let source_window = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &[]))
+            .unwrap();
+        let moved_pane = context.pane.unwrap();
+        engine
+            .state
+            .set_window_automatic_rename(source_window, Some(true))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &[
+                        "-d",
+                        "-s",
+                        &moved_pane.to_string(),
+                        "-t",
+                        "=created:5",
+                        "-n",
+                        "created-name",
+                    ],
+                ),
+            )
+            .unwrap();
+        let created_window = engine.state.window_for_pane(moved_pane).unwrap();
+        assert_ne!(created_window, source_window);
+        assert_eq!(engine.state.windows[&created_window].name, "created-name");
+        assert_eq!(engine.state.windows[&created_window].index, 5);
+        assert_eq!(
+            engine
+                .state
+                .window_automatic_rename_override(created_window)
+                .unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            engine
+                .state
+                .window_automatic_rename_override(source_window)
+                .unwrap(),
+            Some(true)
+        );
         assert!(engine.state.validate().is_ok());
     }
 
@@ -14548,7 +15645,7 @@ mod tests {
                     &["-a", "-s", "missing", "-t", "missing:8", "extra"],
                 ),
             ),
-            Err(ServerError::InvalidCommand(message))
+            Err(ServerError::CommandParse(message))
                 if message == "break-pane does not accept positional arguments"
         ));
         assert!(matches!(
@@ -14760,7 +15857,7 @@ mod tests {
     }
 
     #[test]
-    fn session_listing_is_name_sorted_but_the_s_loop_stays_creation_sorted() {
+    fn session_listing_and_loops_use_creation_and_logical_activity_orders() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine.set_format_now(1_700_000_000);
@@ -14769,6 +15866,14 @@ mod tests {
                 .execute(&mut context, &command("new-session", &["-d", "-s", name]))
                 .unwrap();
         }
+        assert!(
+            engine
+                .state
+                .sessions
+                .values()
+                .all(|session| session.activity == session.created
+                    && session.created == Some(1_700_000_000))
+        );
 
         assert_eq!(
             engine
@@ -14789,6 +15894,16 @@ mod tests {
                 .unwrap()
                 .output,
             "w A B "
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-p", "#{S/t:#{session_name} }"]),
+                )
+                .unwrap()
+                .output,
+            "B A w "
         );
 
         assert_eq!(
@@ -14816,6 +15931,61 @@ mod tests {
                 .unwrap()
                 .output,
             "B\nA\nw"
+        );
+        let w = engine.state.resolve_session(Some("w"), None).unwrap();
+        let a = engine.state.resolve_session(Some("A"), None).unwrap();
+        engine.mark_session_active_at(w, 1_700_000_123);
+        assert_eq!(engine.state.sessions[&w].activity, Some(1_700_000_123));
+        engine.mark_session_active_at(a, 1_700_000_123);
+        assert_eq!(engine.state.sessions[&a].activity, Some(1_700_000_123));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-sessions",
+                        &["-O", "activity", "-F", "#{session_name}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "A\nw\nB"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-p", "#{S/t:#{session_name} }"]),
+                )
+                .unwrap()
+                .output,
+            "A w B "
+        );
+        for session in engine.state.sessions.values_mut() {
+            session.sort_activity = 41;
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-sessions",
+                        &["-O", "activity", "-F", "#{session_name}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "A\nB\nw"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-p", "#{S/t:#{session_name} }"]),
+                )
+                .unwrap()
+                .output,
+            "A B w "
         );
         assert_eq!(
             engine
@@ -16014,9 +17184,11 @@ mod tests {
             displayed.effects,
             [MuxEffect::DisplayMessage {
                 pane: Some(first),
+                target_client: None,
                 text: format!("hello {first} 0"),
-                duration_ms: 750,
+                duration_ms: None,
                 freeze: true,
+                ignore_keys: false,
             }]
         );
 
@@ -16032,11 +17204,120 @@ mod tests {
                 .effects,
             [MuxEffect::DisplayMessage {
                 pane: None,
+                target_client: None,
                 text: "[] :, current pane  - (09:41 23-Aug-26)".to_owned(),
-                duration_ms: 750,
+                duration_ms: None,
                 freeze: true,
+                ignore_keys: false,
             }]
         );
+    }
+
+    #[test]
+    fn display_message_keeps_client_and_pane_targets_independent() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "source"]))
+            .expect("create source session");
+        let source_pane = context.pane.expect("source pane");
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "other"]),
+            )
+            .expect("create other session");
+
+        let execution = engine
+            .execute(
+                &mut context,
+                &command(
+                    "display-message",
+                    &[
+                        "-c",
+                        "destination:",
+                        "-t",
+                        &source_pane.to_string(),
+                        "#{session_name}:#{pane_id}",
+                    ],
+                ),
+            )
+            .expect("display targeted message");
+        assert!(matches!(
+            execution.effects.as_slice(),
+            [MuxEffect::DisplayMessage {
+                pane: Some(pane),
+                target_client: Some(target_client),
+                text,
+                ..
+            }] if *pane == source_pane
+                && target_client == "destination:"
+                && text == &format!("source:{source_pane}")
+        ));
+    }
+
+    #[test]
+    fn display_message_falls_forward_from_partial_can_fail_targets() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "alpha"]))
+            .expect("create target session");
+        engine
+            .execute(&mut context, &command("rename-window", &["current"]))
+            .expect("name current window");
+        let current_pane = context.pane.expect("current pane");
+        engine
+            .execute(&mut context, &command("new-window", &["-n", "requested"]))
+            .expect("create requested window");
+        let requested_pane = context.pane.expect("requested pane");
+        engine
+            .execute(
+                &mut context,
+                &command("select-window", &["-t", "alpha:current"]),
+            )
+            .expect("restore current window");
+
+        for (target, expected) in [
+            ("alpha:missing", format!("alpha|current|{current_pane}")),
+            (
+                "alpha:requested.999",
+                format!("alpha|requested|{requested_pane}"),
+            ),
+            ("=missing:requested", "||".to_owned()),
+            ("%999", "||".to_owned()),
+        ] {
+            let output = engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-t",
+                            target,
+                            "#{session_name}|#{window_name}|#{pane_id}",
+                        ],
+                    ),
+                )
+                .expect("display partial target")
+                .output;
+            assert_eq!(output, expected, "target {target}");
+        }
+
+        let effect = engine
+            .execute(
+                &mut context,
+                &command("display-message", &["-t", "alpha:missing", "message"]),
+            )
+            .expect("display through partial target");
+        assert!(matches!(
+            effect.effects.as_slice(),
+            [MuxEffect::DisplayMessage {
+                pane: Some(pane),
+                ..
+            }] if *pane == current_pane
+        ));
     }
 
     /// `-C` is the pin's `no_freeze` argument to `status_message_set` and `-d`
@@ -16050,13 +17331,19 @@ mod tests {
             .execute(&mut context, &command("new-session", &["-s", "timed"]))
             .expect("create session");
 
-        for (arguments, duration_ms, freeze) in [
-            (vec!["plain"], 750, true),
-            (vec!["-C", "flowing"], 750, false),
-            (vec!["-d", "1500", "delayed"], 1500, true),
-            (vec!["-d", "0", "pinned"], 0, true),
-            (vec!["-C", "-d", "4294967295", "both"], u32::MAX, false),
-            (vec!["-d", "+5", "signed"], 5, true),
+        for (arguments, duration_ms, freeze, ignore_keys) in [
+            (vec!["plain"], None, true, false),
+            (vec!["-C", "flowing"], None, false, false),
+            (vec!["-N", "ignored"], None, true, true),
+            (vec!["-d", "1500", "delayed"], Some(1500), true, false),
+            (vec!["-N", "-d", "0", "pinned"], Some(0), true, true),
+            (
+                vec!["-C", "-N", "-d", "4294967295", "both"],
+                Some(u32::MAX),
+                false,
+                true,
+            ),
+            (vec!["-d", "+5", "signed"], Some(5), true, false),
         ] {
             let execution = engine
                 .execute(&mut context, &command("display-message", &arguments))
@@ -16067,8 +17354,11 @@ mod tests {
                     [MuxEffect::DisplayMessage {
                         duration_ms: actual,
                         freeze: actual_freeze,
+                        ignore_keys: actual_ignore_keys,
                         ..
-                    }] if *actual == duration_ms && *actual_freeze == freeze
+                    }] if *actual == duration_ms
+                        && *actual_freeze == freeze
+                        && *actual_ignore_keys == ignore_keys
                 ),
                 "display-message {arguments:?} produced {:?}",
                 execution.effects
@@ -16110,7 +17400,7 @@ mod tests {
                 &mut context,
                 &command("display-message", &["-d", "abc", "-F", "x", "y"]),
             ),
-            Err(ServerError::InvalidCommand(ref actual))
+            Err(ServerError::CommandParse(ref actual))
                 if actual == "only one of -F or argument must be given"
         ));
     }
@@ -16139,7 +17429,7 @@ mod tests {
                 &mut context,
                 &command("display-message", &["-p", "-F", "#{start_time}", "message"]),
             ),
-            Err(ServerError::InvalidCommand(message))
+            Err(ServerError::CommandParse(message))
                 if message == "only one of -F or argument must be given"
         ));
     }
@@ -16187,14 +17477,15 @@ mod tests {
                     &["-l", "-t", "missing", "-d", "bad", "-F", "x", "y"],
                 ),
             ),
-            Err(ServerError::PaneNotFound(target)) if target == "missing"
+            Err(ServerError::CommandParse(message))
+                if message == "only one of -F or argument must be given"
         ));
         assert!(matches!(
             engine.execute(
                 &mut context,
                 &command("display-message", &["-l", "-d", "bad", "-F", "x", "y"]),
             ),
-            Err(ServerError::InvalidCommand(message))
+            Err(ServerError::CommandParse(message))
                 if message == "only one of -F or argument must be given"
         ));
         assert!(matches!(
@@ -16204,6 +17495,43 @@ mod tests {
             ),
             Err(ServerError::InvalidCommand(message)) if message == "delay invalid"
         ));
+
+        assert!(matches!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("display-message", &["-t", "=missing:", "quiet"]),
+                )
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::DisplayMessage {
+                pane: None,
+                text,
+                duration_ms: None,
+                ..
+            }] if text == "quiet"
+        ));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-c",
+                            "missing",
+                            "-t",
+                            "=missing:",
+                            "#{session_name}|#{window_name}|#{pane_id}|#{client_name}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "|||"
+        );
     }
 
     #[test]
@@ -17149,7 +18477,7 @@ mod tests {
         ] {
             assert!(matches!(
                 engine.execute(&mut context, &invalid),
-                Err(ServerError::InvalidCommand(_))
+                Err(ServerError::CommandParse(_))
             ));
         }
     }
@@ -17223,7 +18551,7 @@ mod tests {
         assert_eq!(execution.effects, [MuxEffect::ReloadConfig]);
         assert!(matches!(
             engine.execute(&mut context, &command("reload-config", &["unexpected"])),
-            Err(ServerError::InvalidCommand(_))
+            Err(ServerError::CommandParse(_))
         ));
     }
 
@@ -17234,7 +18562,7 @@ mod tests {
         for flag in ["-C", "-P", "-o"] {
             assert_eq!(
                 engine.execute(&mut context, &command("send-keys", &[flag])),
-                Err(ServerError::InvalidCommand(format!(
+                Err(ServerError::CommandParse(format!(
                     "command send-keys: unknown flag {flag}"
                 )))
             );
@@ -17243,9 +18571,261 @@ mod tests {
                     &mut context,
                     &command("send-keys", &["-X", flag, "copy-selection"]),
                 ),
-                Err(ServerError::InvalidCommand(format!(
+                Err(ServerError::CommandParse(format!(
                     "command send-keys: unknown flag {flag}"
                 )))
+            );
+        }
+    }
+
+    #[test]
+    fn send_keys_repeat_count_uses_the_copy_mode_action_policy() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+
+        for arguments in [
+            &["-N", "3", "-X", "next-space-end"][..],
+            &["-N", "3", "-X", "jump-forward", "x"][..],
+            &["-N", "3", "-X", "next-matching-bracket"][..],
+            &["-N", "3", "-X", "select-line"][..],
+            &["-N", "3", "-X", "other-end"][..],
+            &["-N", "3", "-X", "copy-pipe-end-of-line-and-cancel"][..],
+        ] {
+            let execution = engine
+                .execute(&mut context, &command("send-keys", arguments))
+                .expect("counted copy action");
+            assert!(
+                matches!(
+                    execution.effects.as_slice(),
+                    [MuxEffect::TerminalView {
+                        action: TerminalViewAction::CopyModeCounted { count: 3, .. },
+                        ..
+                    }]
+                ),
+                "{arguments:?}"
+            );
+        }
+
+        for action in [
+            "rectangle-toggle",
+            "begin-selection",
+            "clear-selection",
+            "copy-pipe-and-cancel",
+            "cancel",
+        ] {
+            let execution = engine
+                .execute(
+                    &mut context,
+                    &command("send-keys", &["-N", "2", "-X", action]),
+                )
+                .expect("nonrepeating copy action");
+            assert!(
+                matches!(
+                    execution.effects.as_slice(),
+                    [MuxEffect::TerminalView {
+                        action: TerminalViewAction::CopyMode(_),
+                        ..
+                    }]
+                ),
+                "{action}"
+            );
+        }
+    }
+
+    #[test]
+    fn send_keys_repeat_count_matches_pinned_bounds_duplicates_and_clusters() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+
+        for arguments in [
+            &["-N2", "-X", "cursor-right"][..],
+            &["-XN2", "cursor-right"][..],
+            &["-FXN2", "cursor-right"][..],
+            &["-XN", "2", "cursor-right"][..],
+            &["-N", "0", "-N", "2", "-X", "cursor-right"][..],
+        ] {
+            let execution = engine
+                .execute(&mut context, &command("send-keys", arguments))
+                .expect("valid repeat spelling");
+            assert!(
+                matches!(
+                    execution.effects.as_slice(),
+                    [MuxEffect::TerminalView {
+                        action: TerminalViewAction::CopyModeCounted {
+                            action,
+                            count: 2,
+                        },
+                        ..
+                    }] if matches!(action, CopyModeAction::Right)
+                ),
+                "{arguments:?}"
+            );
+        }
+
+        for name in ["send", "send-k"] {
+            let execution = engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(name, ["-XN2", "cursor-right"]),
+                )
+                .expect("alias or unique prefix");
+            assert!(matches!(
+                execution.effects.as_slice(),
+                [MuxEffect::TerminalView {
+                    action: TerminalViewAction::CopyModeCounted { count: 2, .. },
+                    ..
+                }]
+            ));
+        }
+
+        let expanded = engine
+            .execute(
+                &mut context,
+                &command(
+                    "send-keys",
+                    &["-N", "#{window_width}", "-X", "cursor-right"],
+                ),
+            )
+            .expect("formatted repeat count");
+        assert!(matches!(
+            expanded.effects.as_slice(),
+            [MuxEffect::TerminalView {
+                action: TerminalViewAction::CopyModeCounted { count: 80, .. },
+                ..
+            }]
+        ));
+
+        for (arguments, expected) in [
+            (
+                &["-N", "0", "-X", "cursor-right"][..],
+                "repeat count too small",
+            ),
+            (
+                &["-N", "4294967296", "-X", "cursor-right"][..],
+                "repeat count too large",
+            ),
+            (&["-NX2", "cursor-right"][..], "repeat count invalid"),
+            (
+                &["-N", "2", "-N", "0", "-X", "cursor-right"][..],
+                "repeat count too small",
+            ),
+        ] {
+            assert_eq!(
+                engine.execute(&mut context, &command("send-keys", arguments)),
+                Err(ServerError::InvalidCommand(expected.to_owned())),
+                "{arguments:?}"
+            );
+        }
+
+        let maximum = engine
+            .execute(
+                &mut context,
+                &command(
+                    "send-keys",
+                    &["-N", "4294967295", "-X", "next-matching-bracket"],
+                ),
+            )
+            .expect("maximum copy repeat");
+        assert!(matches!(
+            maximum.effects.as_slice(),
+            [MuxEffect::TerminalView {
+                action: TerminalViewAction::CopyModeCounted {
+                    count: u32::MAX,
+                    ..
+                },
+                ..
+            }]
+        ));
+
+        let raw = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-N", "4294967295", "x"]),
+            )
+            .expect("maximum raw repeat");
+        assert!(matches!(
+            raw.effects.as_slice(),
+            [MuxEffect::SendKeys {
+                keys,
+                repeat: u32::MAX,
+                ..
+            }] if keys == &[KeyToken::Literal("x".to_owned())]
+        ));
+
+        let clear = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-N", "4294967295", "-X", "clear-selection"]),
+            )
+            .expect("maximum ignored repeat");
+        assert!(matches!(
+            clear.effects.as_slice(),
+            [MuxEffect::TerminalView {
+                action: TerminalViewAction::CopyMode(CopyModeAction::ClearSelection),
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn read_only_send_keys_accepts_only_typed_safe_copy_actions() {
+        let args = |values: &[&str]| values.iter().map(ToString::to_string).collect::<Vec<_>>();
+
+        assert!(!send_keys_is_read_only_safe(&args(&["literal", "Enter"])).unwrap());
+        assert_eq!(
+            send_keys_is_read_only_safe(&args(&["-N", "bogus"])),
+            Ok(false)
+        );
+        assert_eq!(send_keys_is_read_only_safe(&args(&["-M"])), Ok(false));
+        assert!(send_keys_is_read_only_safe(&args(&["-X"])).unwrap());
+        assert!(send_keys_is_read_only_safe(&args(&["-X", "unknown-action"])).unwrap());
+        assert!(send_keys_is_read_only_safe(&args(&["-X", "cursor-left", "extra"])).unwrap());
+        assert!(send_keys_is_read_only_safe(&args(&["-X", "goto-line"])).unwrap());
+        assert!(!send_keys_is_read_only_safe(&args(&["-X", "begin-selection", "extra"])).unwrap());
+        assert!(!send_keys_is_read_only_safe(&args(&["-X", "jump-forward"])).unwrap());
+        for arguments in [
+            &["-X", "cursor-left"][..],
+            &["-X", "page-down"][..],
+            &["-X", "history-top"][..],
+            &["-X", "top-line"][..],
+            &["-X", "next-word"][..],
+            &["-X", "next-prompt", "-o"][..],
+            &["-X", "set-mark"][..],
+            &["-X", "jump-to-mark"][..],
+            &["-X", "cancel"][..],
+            &["-X", "next-matching-bracket"][..],
+            &["-X", "goto-line", "12"][..],
+        ] {
+            assert!(
+                send_keys_is_read_only_safe(&args(arguments)).unwrap(),
+                "{arguments:?}"
+            );
+        }
+        for arguments in [
+            &["-X", "begin-selection"][..],
+            &["-X", "copy-selection"][..],
+            &["-X", "search-again"][..],
+            &["-X", "jump-forward", "x"][..],
+            &["-X", "rectangle-toggle"][..],
+            &["-X", "clear-selection"][..],
+            &["-X", "search-forward-cursor-word"][..],
+            &["-X", "append-selection"][..],
+        ] {
+            assert!(
+                !send_keys_is_read_only_safe(&args(arguments)).unwrap(),
+                "{arguments:?}"
+            );
+        }
+        for command in PINNED_UNSAFE_COPY_MODE_COMMANDS {
+            assert!(
+                !send_keys_is_read_only_safe(&args(&["-X", command])).unwrap(),
+                "{command}"
             );
         }
     }
@@ -17615,6 +19195,116 @@ mod tests {
     }
 
     #[test]
+    fn emacs_copy_mode_navigation_actions_produce_native_terminal_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+        let terminal = context.pane.expect("terminal");
+
+        for (name, expected) in [
+            ("scroll-down", CopyModeAction::ScrollDown),
+            ("next-prompt", CopyModeAction::NextPrompt { output: false }),
+            (
+                "previous-prompt",
+                CopyModeAction::PreviousPrompt { output: false },
+            ),
+            ("next-matching-bracket", CopyModeAction::NextMatchingBracket),
+            ("scroll-up", CopyModeAction::ScrollUp),
+            ("end-of-line", CopyModeAction::EndOfLine),
+            ("start-of-line", CopyModeAction::StartOfLine),
+            ("history-top", CopyModeAction::Top),
+            ("history-bottom", CopyModeAction::Bottom),
+            ("halfpage-down", CopyModeAction::HalfPageDown),
+            ("top-line", CopyModeAction::TopLine),
+            ("halfpage-up", CopyModeAction::HalfPageUp),
+            ("page-down", CopyModeAction::PageDown),
+        ] {
+            let execution = engine
+                .execute(
+                    &mut context,
+                    &command("send-keys", &["-t", &terminal.to_string(), "-X", name]),
+                )
+                .unwrap_or_else(|error| panic!("execute {name}: {error}"));
+            assert!(matches!(
+                execution.effects.as_slice(),
+                [MuxEffect::TerminalView {
+                    action: TerminalViewAction::CopyMode(action),
+                    ..
+                }] if action == &expected
+            ));
+        }
+    }
+
+    #[test]
+    fn emacs_copy_mode_non_navigation_actions_produce_native_terminal_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+        let terminal = context.pane.expect("terminal");
+
+        for (name, expected) in [
+            ("cancel", CopyModeAction::Cancel),
+            (
+                "search-reverse",
+                CopyModeAction::SearchAgain { reverse: true },
+            ),
+            ("rectangle-toggle", CopyModeAction::ToggleRectangle),
+            (
+                "search-again",
+                CopyModeAction::SearchAgain { reverse: false },
+            ),
+        ] {
+            let execution = engine
+                .execute(
+                    &mut context,
+                    &command("send-keys", &["-t", &terminal.to_string(), "-X", name]),
+                )
+                .unwrap_or_else(|error| panic!("execute {name}: {error}"));
+            assert!(matches!(
+                execution.effects.as_slice(),
+                [MuxEffect::TerminalView {
+                    action: TerminalViewAction::CopyMode(action),
+                    ..
+                }] if action == &expected
+            ));
+        }
+
+        for (name, end_of_line) in [
+            ("copy-pipe-and-cancel", false),
+            ("copy-pipe-end-of-line-and-cancel", true),
+        ] {
+            let execution = engine
+                .execute(
+                    &mut context,
+                    &command("send-keys", &["-t", &terminal.to_string(), "-X", name]),
+                )
+                .unwrap_or_else(|error| panic!("execute {name}: {error}"));
+            let action = match execution.effects.as_slice() {
+                [
+                    MuxEffect::TerminalView {
+                        action: TerminalViewAction::CopyMode(action),
+                        ..
+                    },
+                ] => action,
+                effects => panic!("unexpected {name} effects: {effects:?}"),
+            };
+            let copy = match action {
+                CopyModeAction::CopySelection(copy) if !end_of_line => copy,
+                CopyModeAction::CopyEndOfLine(copy) if end_of_line => copy,
+                action => panic!("unexpected {name} action: {action:?}"),
+            };
+            assert!(copy.clear_selection);
+            assert!(copy.cancel);
+            assert!(copy.buffer.is_some());
+            assert!(copy.pipe.is_none());
+        }
+    }
+
+    #[test]
     fn vi_copy_mode_actions_parse_to_native_terminal_effects() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -17948,7 +19638,7 @@ mod tests {
 
         assert!(matches!(
             parse_options(&["-t".to_owned()], &["-t"], &[]),
-            Err(ServerError::InvalidCommand(message)) if message == "-t requires an argument"
+            Err(ServerError::CommandParse(message)) if message == "-t requires an argument"
         ));
 
         let (options, positional) = parse_options(
@@ -17979,7 +19669,7 @@ mod tests {
     }
 
     #[test]
-    fn new_session_attach_prediction_uses_current_state_and_client_context() {
+    fn new_session_attach_preflight_defers_every_detached_attach_or_create() {
         let args = |args: &[&str]| {
             args.iter()
                 .map(|argument| (*argument).to_owned())
@@ -17990,17 +19680,20 @@ mod tests {
 
         assert!(
             engine
-                .new_session_will_attach(&context, &args(&[]))
+                .new_session_needs_attach_preflight(&context, &args(&[]))
                 .unwrap()
         );
         assert!(
             !engine
-                .new_session_will_attach(&context, &args(&["-d", "-s", "detached"]))
+                .new_session_needs_attach_preflight(&context, &args(&["-d", "-s", "detached"]))
                 .unwrap()
         );
         assert!(
             !engine
-                .new_session_will_attach(&context, &args(&["-A", "-d", "-s", "missing"]))
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &args(&["-A", "-d", "-s", "missing"]),
+                )
                 .unwrap()
         );
 
@@ -18011,21 +19704,29 @@ mod tests {
             )
             .unwrap();
         assert!(
+            !engine
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &args(&["-A", "-d", "-s", "existing"]),
+                )
+                .unwrap()
+        );
+        assert!(
             engine
-                .new_session_will_attach(&context, &args(&["-A", "-d", "-s", "existing"]))
+                .new_session_needs_attach_preflight(&context, &args(&["-A", "-s", "existing"]),)
                 .unwrap()
         );
 
         context.set_client_terminal(false);
         assert!(
             !engine
-                .new_session_will_attach(&context, &args(&["-A", "-s", "existing"]))
+                .new_session_needs_attach_preflight(&context, &args(&["-A", "-s", "existing"]),)
                 .unwrap()
         );
         context.set_no_client();
         assert!(
             !engine
-                .new_session_will_attach(&context, &args(&["-A", "-s", "existing"]))
+                .new_session_needs_attach_preflight(&context, &args(&["-A", "-s", "existing"]),)
                 .unwrap()
         );
     }
@@ -18580,13 +20281,13 @@ mod tests {
         );
         assert_eq!(
             error(&mut engine, &mut context, &["a", "-F", "#{key_string}"],),
-            ServerError::InvalidCommand(
+            ServerError::CommandParse(
                 "command list-keys: too many arguments (need at most 1)".to_owned()
             )
         );
         assert_eq!(
             error(&mut engine, &mut context, &["-O"]),
-            ServerError::InvalidCommand("command list-keys: -O expects an argument".to_owned())
+            ServerError::CommandParse("command list-keys: -O expects an argument".to_owned())
         );
     }
 
@@ -18842,7 +20543,7 @@ mod tests {
             engine
                 .execute(&mut context, &command("list-keys", &["-N", "-P"]))
                 .unwrap_err(),
-            ServerError::InvalidCommand("-P requires an argument".to_owned())
+            ServerError::CommandParse("-P requires an argument".to_owned())
         );
         assert_eq!(
             engine
@@ -19244,6 +20945,178 @@ mod tests {
     }
 
     #[test]
+    fn rename_names_validate_clean_collide_and_expand_once() {
+        struct RenameHooks {
+            calls: usize,
+        }
+
+        impl StatusHooks for RenameHooks {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                match name {
+                    "once" => {
+                        self.calls += 1;
+                        Some(if self.calls == 1 {
+                            "value-#{late}".to_owned()
+                        } else {
+                            "twice".to_owned()
+                        })
+                    }
+                    "invalid_name" => Some("line\nname".to_owned()),
+                    _ => None,
+                }
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "target", "-n", "target-window"],
+                ),
+            )
+            .unwrap();
+        let target_session = context.session.unwrap();
+        let target_window = context.window.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", r"collision\rename-session"]),
+            )
+            .unwrap();
+
+        let mut hooks = RenameHooks { calls: 0 };
+        engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "rename-session",
+                    &[
+                        "-t",
+                        &target_session.to_string(),
+                        r"renamed\#{command}-#{once}",
+                    ],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert_eq!(hooks.calls, 1);
+        assert_eq!(
+            engine.state.sessions[&target_session].name,
+            r"renamed\\rename-session-value-#{late}"
+        );
+
+        hooks.calls = 0;
+        engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "rename-window",
+                    &[
+                        "-t",
+                        &target_window.to_string(),
+                        r"renamed\#{command}-#{once}",
+                    ],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert_eq!(hooks.calls, 1);
+        assert_eq!(
+            engine.state.windows[&target_window].name,
+            r"renamed\\rename-window-value-#{late}"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "rename-session",
+                    &["-t", &target_session.to_string(), "sessão-日本語"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "rename-window",
+                    &["-t", &target_window.to_string(), "janela-日本語"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.state.sessions[&target_session].name, "sessão-日本語");
+        assert_eq!(engine.state.windows[&target_window].name, "janela-日本語");
+
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command(
+                    "rename-session",
+                    &[
+                        "-t",
+                        &target_session.to_string(),
+                        r"collision\rename-session",
+                    ],
+                ),
+            ),
+            Err(ServerError::InvalidCommand(message))
+                if message == r"duplicate session: collision\\rename-session"
+        ));
+        assert_eq!(engine.state.sessions[&target_session].name, "sessão-日本語");
+
+        for command_name in ["rename-session", "rename-window"] {
+            let (target, kind) = if command_name == "rename-session" {
+                (target_session.to_string(), "session")
+            } else {
+                (target_window.to_string(), "window")
+            };
+            assert!(matches!(
+                engine.execute_with_format_hooks(
+                    &mut context,
+                    &command(command_name, &["-t", &target, "#{invalid_name}"]),
+                    &mut hooks,
+                ),
+                Err(ServerError::InvalidCommand(message))
+                    if message == format!("invalid {kind} name: line\nname")
+            ));
+        }
+        assert_eq!(engine.state.sessions[&target_session].name, "sessão-日本語");
+        assert_eq!(engine.state.windows[&target_window].name, "janela-日本語");
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "rename-session",
+                    &["-t", &target_session.to_string(), "#{missing}"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "rename-window",
+                    &["-t", &target_window.to_string(), "#{missing}"],
+                ),
+            )
+            .unwrap();
+        assert!(engine.state.sessions[&target_session].name.is_empty());
+        assert!(engine.state.windows[&target_window].name.is_empty());
+    }
+
+    #[test]
     fn missing_show_options_target_uses_an_empty_argument_format_context() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -19638,7 +21511,7 @@ mod tests {
                     &command("bind-key", &["F9", "agent-send", "--bogus"]),
                 )
                 .unwrap_err(),
-            ServerError::InvalidCommand("agent-send does not support --bogus".to_owned())
+            ServerError::CommandParse("agent-send does not support --bogus".to_owned())
         );
     }
 
@@ -20020,11 +21893,7 @@ mod tests {
             .execute(&mut context, &command("show-options", &["-g"]))
             .unwrap()
             .output;
-        assert!(
-            plain
-                .lines()
-                .all(|line| !HOOK_NAMES.contains(&line))
-        );
+        assert!(plain.lines().all(|line| !HOOK_NAMES.contains(&line)));
 
         for (args, target, count, inherited) in [
             (
@@ -20101,17 +21970,13 @@ mod tests {
             .execute(&mut context, &command("show-options", &["-s", "-H"]))
             .unwrap()
             .output;
-        assert!(
-            server
-                .lines()
-                .all(|line| !HOOK_NAMES.contains(&line))
-        );
+        assert!(server.lines().all(|line| !HOOK_NAMES.contains(&line)));
         assert!(matches!(
             engine.execute(
                 &mut context,
                 &command("show-window-options", &["-H"]),
             ),
-            Err(ServerError::InvalidCommand(message))
+            Err(ServerError::CommandParse(message))
                 if message == "show-window-options does not support -H"
         ));
         assert_eq!(
@@ -20481,16 +22346,17 @@ mod tests {
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
 
-        for (args, expected) in [
-            (&[] as &[&str], "missing argument"),
-            (&["not-a-hook"], "invalid option: not-a-hook"),
-            (&["after-"], "ambiguous option: after-"),
-            (&["-B", "name:what:format"], "invalid flag -B"),
+        for (args, expected, parse) in [
+            (&[] as &[&str], "missing argument", true),
+            (&["not-a-hook"], "invalid option: not-a-hook", false),
+            (&["after-"], "ambiguous option: after-", false),
+            (&["-B", "name:what:format"], "invalid flag -B", true),
         ] {
-            assert!(matches!(
-                engine.execute(&mut context, &command("set-hook", args)),
-                Err(ServerError::InvalidCommand(message)) if message == expected
-            ));
+            let error = engine
+                .execute(&mut context, &command("set-hook", args))
+                .expect_err("invalid hook");
+            assert_eq!(error.tmux_message(), expected);
+            assert_eq!(error.is_command_parse(), parse);
         }
         assert!(matches!(
             engine.execute(
@@ -20502,7 +22368,7 @@ mod tests {
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("show-hooks", &["-B"])),
-            Err(ServerError::InvalidCommand(message)) if message == "invalid flag -B"
+            Err(ServerError::CommandParse(message)) if message == "invalid flag -B"
         ));
 
         let invalid = "display-message '";
@@ -21338,6 +23204,7 @@ mod tests {
             [MuxEffect::SendKeys {
                 pane: context.pane.unwrap(),
                 keys: vec![KeyToken::Named("C-a".to_owned())],
+                repeat: 1,
             }]
         );
 
@@ -25146,7 +27013,7 @@ mod tests {
         assert!(
             matches!(
                 &error,
-                ServerError::InvalidCommand(message) if message == "unknown command: chain2"
+                ServerError::CommandParse(message) if message == "unknown command: chain2"
             ),
             "{error:?}"
         );
@@ -25177,10 +27044,239 @@ mod tests {
             assert!(
                 matches!(
                     &error,
-                    ServerError::InvalidCommand(message)
+                    ServerError::CommandParse(message)
                         if message == &format!("unknown command: {name}")
                 ),
                 "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_command_alias_bodies_never_fall_through() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "victim"]),
+            )
+            .expect("victim session");
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F9", "display-message", "-p", "preserved"]),
+            )
+            .expect("baseline binding");
+        let binding_before = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-keys",
+                    &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                ),
+            )
+            .unwrap()
+            .output
+            .lines()
+            .find(|line| line.starts_with("F9="))
+            .expect("baseline binding row")
+            .to_owned();
+        let option_before = engine
+            .execute(
+                &mut context,
+                &command("show-options", &["-sv", "default-client-command"]),
+            )
+            .unwrap()
+            .output;
+
+        for (index, value) in [
+            ("20", "kill-server="),
+            ("21", "list-windows=list-sessions ; kill-server"),
+            ("22", "lsw=list-sessions ; kill-server"),
+            ("23", "kill-session=display-message 'unterminated"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-option",
+                        &["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("alias write");
+        }
+
+        for (name, args, reason) in [
+            (
+                "kill-server",
+                Vec::<&str>::new(),
+                CommandAliasBodyError::Empty,
+            ),
+            (
+                "list-windows",
+                Vec::<&str>::new(),
+                CommandAliasBodyError::Multiple,
+            ),
+            ("lsw", Vec::<&str>::new(), CommandAliasBodyError::Multiple),
+            (
+                "kill-session",
+                vec!["-t", "=victim"],
+                CommandAliasBodyError::Unparsable,
+            ),
+        ] {
+            let invocation = command(name, &args);
+            assert_eq!(
+                engine.resolve_command_alias(&invocation),
+                CommandAliasResolution::MatchedUnsupported(reason)
+            );
+            let generation = engine.state.generation();
+            assert_eq!(
+                engine.execute(&mut context, &invocation).unwrap_err(),
+                ServerError::CommandParse(format!("unknown command: {name}"))
+            );
+            assert_eq!(engine.state.generation(), generation);
+        }
+        assert!(session_named(&engine.state, "victim").is_some());
+
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("bind-key", &["F9", "kill-server"]))
+                .unwrap_err(),
+            ServerError::CommandParse("unknown command: kill-server".to_owned())
+        );
+        let binding_after = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-keys",
+                    &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                ),
+            )
+            .unwrap()
+            .output
+            .lines()
+            .find(|line| line.starts_with("F9="))
+            .expect("preserved binding row")
+            .to_owned();
+        assert_eq!(binding_after, binding_before);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-hook", &["-g", "session-created", "kill-server"]),
+                )
+                .unwrap_err(),
+            ServerError::CommandParse("unknown command: kill-server".to_owned())
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-option",
+                        &["-s", "default-client-command", "kill-server"],
+                    ),
+                )
+                .unwrap_err(),
+            ServerError::CommandParse("unknown command: kill-server".to_owned())
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-client-command"]),
+                )
+                .unwrap()
+                .output,
+            option_before
+        );
+    }
+
+    #[test]
+    fn command_error_phase_separates_parse_shapes_from_runtime_failures() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "phase"]),
+            )
+            .expect("session");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[30]",
+                        "multiple=list-sessions ; list-windows",
+                    ],
+                ),
+            )
+            .expect("multiple alias");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[31]",
+                        "unparsed=display-message 'unterminated",
+                    ],
+                ),
+            )
+            .expect("unparsable alias");
+
+        for (name, reason) in [
+            ("multiple", CommandAliasBodyError::Multiple),
+            ("unparsed", CommandAliasBodyError::Unparsable),
+        ] {
+            let invocation = command(name, &[]);
+            assert_eq!(
+                engine.resolve_command_alias(&invocation),
+                CommandAliasResolution::MatchedUnsupported(reason)
+            );
+        }
+
+        for invocation in [
+            command("bogus-command", &[]),
+            command("set-option", &["-Z", "@one", "two"]),
+            command("new-session", &["-t"]),
+            command("break-pane", &["unexpected"]),
+            command("rename-session", &[]),
+            command("find-window", &[]),
+            command("set-browser-profile", &[]),
+            command("reload-config", &["extra"]),
+            command("multiple", &[]),
+            command("unparsed", &[]),
+        ] {
+            let error = engine
+                .execute(&mut context, &invocation)
+                .expect_err("syntax failure");
+            assert!(
+                error.is_command_parse(),
+                "{invocation:?} returned {error:?}"
+            );
+        }
+
+        for invocation in [
+            command("set-option", &["-g", "nonexistent-option", "value"]),
+            command("set-environment", &["-g", "", "value"]),
+            command("new-session", &["-d", "-s", "phase"]),
+            command("kill-session", &["-t", "=missing"]),
+        ] {
+            let error = engine
+                .execute(&mut context, &invocation)
+                .expect_err("runtime failure");
+            assert!(
+                !error.is_command_parse(),
+                "{invocation:?} returned {error:?}"
             );
         }
     }
@@ -25325,7 +27421,7 @@ mod tests {
                 engine
                     .execute(&mut context, &command("unbind-key", args))
                     .unwrap_err(),
-                ServerError::InvalidCommand(
+                ServerError::CommandParse(
                     "command unbind-key: too many arguments (need at most 1)".to_owned()
                 )
             );
@@ -26645,7 +28741,7 @@ mod tests {
                 .unwrap()
                 .effects
                 .as_slice(),
-            [MuxEffect::DisplayMessage { text, duration_ms: 1200, .. }] if text == "hello"
+            [MuxEffect::DisplayMessage { text, duration_ms: None, .. }] if text == "hello"
         ));
         engine
             .execute(
@@ -27204,16 +29300,20 @@ mod tests {
             (vec!["-x", "10001"], "width too large"),
             (vec!["bad"], "adjustment invalid"),
             (vec!["0"], "adjustment too small"),
-            (
-                vec!["one", "two"],
-                "resize-window accepts at most one adjustment",
-            ),
         ] {
             assert!(matches!(
                 engine.execute(&mut context, &command("resize-window", &args)),
                 Err(ServerError::InvalidCommand(message)) if message == expected
             ));
         }
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("resize-window", &["one", "two"]),
+            ),
+            Err(ServerError::CommandParse(message))
+                if message == "resize-window accepts at most one adjustment"
+        ));
         assert!(matches!(
             engine.execute(
                 &mut context,
@@ -27808,7 +29908,7 @@ mod tests {
                     ],
                 ),
             ),
-            Err(ServerError::InvalidCommand(message)) if message == "move-pane does not support -p"
+            Err(ServerError::CommandParse(message)) if message == "move-pane does not support -p"
         ));
         assert!(engine.state.validate().is_ok());
     }
@@ -28054,7 +30154,7 @@ mod tests {
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("next-layout", &["-n"])),
-            Err(ServerError::InvalidCommand(message))
+            Err(ServerError::CommandParse(message))
                 if message == "next-layout does not support -n"
         ));
     }
@@ -28948,7 +31048,7 @@ mod tests {
 
         assert!(matches!(
             engine.execute(&mut context, &command("rotate-window", &["-d"])),
-            Err(ServerError::InvalidCommand(message))
+            Err(ServerError::CommandParse(message))
                 if message == "rotate-window does not support -d"
         ));
         assert!(matches!(

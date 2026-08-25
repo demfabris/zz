@@ -4,6 +4,7 @@
 # pinned here: acceptance, exit class, and -p output.
 display-message hello
 display-message -C hello
+display-message -N -d 500 hello
 display-message -d 500 hello
 display-message -d 0 hello
 display-message -C -d 500 hello
@@ -17,5 +18,14 @@ display-message -d 4294967296 hello
 display-message -d 99999999999999999999999999 hello
 display-message -p -d abc hello
 out: display-message -p -C hello
+out: display-message -p -N hello
 out: display-message -p -d 500 hello
 out: display-message -p -d 0 hello
+display-message -t =missing: quiet
+display-message -c missing-client -t =missing: quiet
+out: display-message -p -t =missing: #{session_name}:#{window_name}:#{pane_id}:#{client_name}
+out: display-message -p -c missing-client -t =missing: #{session_name}:#{window_name}:#{pane_id}:#{client_name}
+new-window -d -n canfail-window
+out: display-message -p -t =w:missing #{session_name}:#{window_name}:#{pane_index}:#{client_name}
+out: display-message -p -t =w:canfail-window.999 #{session_name}:#{window_name}:#{pane_index}:#{client_name}
+out: display-message -p -c missing-client -t =w:missing #{session_name}:#{window_name}:#{pane_index}:#{client_name}

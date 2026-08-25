@@ -1,0 +1,36 @@
+select-pane -t =w:0.0 -T buffer-pane
+set-buffer -b seed buffer-path-payload
+run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-canonical-load-buffer"
+load-buffer -b canonical "/tmp/zz-buffer-path-#{pid}-canonical-#{command}"
+out: list-buffers -f #{==:#{buffer_name},canonical} -F #{buffer_name}:#{buffer_sample}
+run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-alias-load-buffer"
+loadb -b alias "/tmp/zz-buffer-path-#{pid}-alias-#{command}"
+out: list-buffers -f #{==:#{buffer_name},alias} -F #{buffer_name}:#{buffer_sample}
+run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-prefix-load-buffer"
+loa -b prefix "/tmp/zz-buffer-path-#{pid}-prefix-#{command}"
+out: list-buffers -f #{==:#{buffer_name},prefix} -F #{buffer_name}:#{buffer_sample}
+set-option -s command-alias[50] zzload=load-buffer
+run-shell -C "save-buffer -b seed /tmp/zz-buffer-path-#{pid}-user-load-buffer"
+zzload -b user-alias "/tmp/zz-buffer-path-#{pid}-user-#{command}"
+out: list-buffers -f #{==:#{buffer_name},user-alias} -F #{buffer_name}:#{buffer_sample}
+run-shell "cp /etc/hosts /tmp/zz-buffer-path-#{pid}-##{session_name}"
+load-buffer -b one-pass "/tmp/zz-buffer-path-#{pid}-##{session_name}"
+out: list-buffers -f #{==:#{buffer_name},one-pass} -F #{buffer_name}
+run-shell -C "save-buffer -b seed ~/zz-buffer-path-#{pid}-tilde-load-buffer"
+load-buffer -b tilde '#{?session_name,~/zz-buffer-path-#{pid}-tilde-#{command},/tmp/missing}'
+out: list-buffers -f #{==:#{buffer_name},tilde} -F #{buffer_name}:#{buffer_sample}
+run-shell "rm -f ~/zz-buffer-path-#{pid}-tilde-load-buffer"
+save-buffer -b seed "/tmp/zz-buffer-path-#{pid}-canonical-#{command}"
+run-shell -C "load-buffer -b saved-canonical /tmp/zz-buffer-path-#{pid}-canonical-save-buffer"
+out: list-buffers -f #{==:#{buffer_name},saved-canonical} -F #{buffer_name}:#{buffer_sample}
+saveb -b seed "/tmp/zz-buffer-path-#{pid}-alias-#{command}"
+run-shell -C "load-buffer -b saved-alias /tmp/zz-buffer-path-#{pid}-alias-save-buffer"
+out: list-buffers -f #{==:#{buffer_name},saved-alias} -F #{buffer_name}:#{buffer_sample}
+sa -b seed "/tmp/zz-buffer-path-#{pid}-prefix-#{command}"
+run-shell -C "load-buffer -b saved-prefix /tmp/zz-buffer-path-#{pid}-prefix-save-buffer"
+out: list-buffers -f #{==:#{buffer_name},saved-prefix} -F #{buffer_name}:#{buffer_sample}
+set-option -s command-alias[51] zzsave=save-buffer
+zzsave -b seed "/tmp/zz-buffer-path-#{pid}-user-#{command}"
+run-shell -C "load-buffer -b saved-user /tmp/zz-buffer-path-#{pid}-user-save-buffer"
+out: list-buffers -f #{==:#{buffer_name},saved-user} -F #{buffer_name}:#{buffer_sample}
+run-shell "rm -f /tmp/zz-buffer-path-#{pid}-*"

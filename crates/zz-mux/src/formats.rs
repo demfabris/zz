@@ -79,6 +79,7 @@ pub struct StatusContext {
     pub session_attached: usize,
     pub session_attached_list: String,
     pub session_bell: bool,
+    pub session_activity: Option<i64>,
     pub session_created: Option<i64>,
     pub session_id: String,
     pub session_many_attached: bool,
@@ -117,6 +118,8 @@ pub struct StatusContext {
     pub window_zoomed: bool,
     #[doc(hidden)]
     pub format_now: Option<i64>,
+    #[doc(hidden)]
+    pub session_sort_activity: u64,
     #[doc(hidden)]
     pub format_universe: Arc<FormatUniverse>,
 }
@@ -175,6 +178,7 @@ enum FormatKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FormatBacking {
     Empty,
+    StatusHook,
     Zero,
     One,
     ActiveWindowIndex,
@@ -226,6 +230,7 @@ enum FormatBacking {
     SessionAttached,
     SessionAttachedList,
     SessionBell,
+    SessionActivity,
     SessionCreated,
     SessionFormat,
     SessionId,
@@ -302,12 +307,12 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("alternate_saved_x", Terminal, Zero),
     variable!("alternate_saved_y", Terminal, Zero),
     variable!("bracket_paste_flag", Terminal, Zero),
-    variable!("buffer_created", Buffer, Time, Empty),
-    variable!("buffer_full", Buffer, Empty),
+    variable!("buffer_created", Buffer, Time, StatusHook),
+    variable!("buffer_full", Buffer, StatusHook),
     variable!("buffer_mode_format", Buffer, Empty),
-    variable!("buffer_name", Buffer, Empty),
-    variable!("buffer_sample", Buffer, Empty),
-    variable!("buffer_size", Buffer, Empty),
+    variable!("buffer_name", Buffer, StatusHook),
+    variable!("buffer_sample", Buffer, StatusHook),
+    variable!("buffer_size", Buffer, StatusHook),
     variable!("client_activity", Client, Time, Empty),
     variable!("client_cell_height", Client, Empty),
     variable!("client_cell_width", Client, Empty),
@@ -425,7 +430,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("scroll_region_upper", Terminal, Zero),
     variable!("server_sessions", Server, ServerSessions),
     variable!("session_active", Session, Empty),
-    variable!("session_activity", Session, Time, Empty),
+    variable!("session_activity", Session, Time, SessionActivity),
     variable!("session_activity_flag", Session, WindowActivityFlag),
     variable!("session_alert", Session, SessionAlert),
     variable!("session_alerts", Session, SessionAlerts),
@@ -551,7 +556,7 @@ impl StatusContext {
             return Cow::Borrowed("");
         }
         match spec.backing {
-            FormatBacking::Empty => Cow::Borrowed(""),
+            FormatBacking::Empty | FormatBacking::StatusHook => Cow::Borrowed(""),
             FormatBacking::Zero => Cow::Borrowed("0"),
             FormatBacking::One => Cow::Borrowed("1"),
             FormatBacking::ActiveWindowIndex => optional_display(self.active_window_index),
@@ -613,6 +618,7 @@ impl StatusContext {
                 Cow::Borrowed(self.session_attached_list.as_str())
             }
             FormatBacking::SessionBell => Cow::Borrowed(bool_string(self.session_bell)),
+            FormatBacking::SessionActivity => optional_display(self.session_activity),
             FormatBacking::SessionCreated => optional_display(self.session_created),
             FormatBacking::SessionFormat => {
                 Cow::Borrowed(bool_string(format_type == FormatType::Session))
@@ -841,7 +847,9 @@ impl MuxEngine {
         };
         context.session_id = session.id.to_string();
         context.session_name.clone_from(&session.name);
+        context.session_activity = session.activity;
         context.session_created = session.created;
+        context.session_sort_activity = session.sort_activity;
         context.session_windows = session.windows.len();
         context.session_active = active_session.map(|active| active == session.id);
         context.active_window_index = self
@@ -1154,10 +1162,6 @@ pub trait StatusHooks {
 
     fn variable(&mut self, _name: &str, _context: &StatusContext) -> Option<String> {
         None
-    }
-
-    fn session_activity(&mut self, _session: SessionId) -> u64 {
-        0
     }
 
     fn window_activity(&mut self, _window: WindowId) -> u64 {
@@ -2278,13 +2282,11 @@ fn sort_loop_items(items: &mut [FormatLoopItem], target: LoopTarget, sort: Optio
                 })
         }),
         (LoopTarget::Sessions, Some(LoopSort::Activity)) => items.sort_by(|left, right| {
-            left.context
-                .session_created
-                .cmp(&right.context.session_created)
-                .then_with(|| {
-                    session_number(&left.context.session_id)
-                        .cmp(&session_number(&right.context.session_id))
-                })
+            right
+                .context
+                .session_sort_activity
+                .cmp(&left.context.session_sort_activity)
+                .then_with(|| left.context.session_name.cmp(&right.context.session_name))
         }),
         (LoopTarget::Sessions, _) => {
             items.sort_by_key(|item| session_number(&item.context.session_id));
@@ -3307,6 +3309,7 @@ mod tests {
             pid: 42,
             server_sessions: 2,
             session_active: Some(true),
+            session_activity: Some(1_700_000_000),
             session_attached: 1,
             session_attached_list: "client".to_owned(),
             session_id: "$4".to_owned(),
@@ -3372,6 +3375,18 @@ mod tests {
                 "window_activity",
             ]
         );
+        for name in [
+            "buffer_created",
+            "buffer_full",
+            "buffer_name",
+            "buffer_sample",
+            "buffer_size",
+        ] {
+            assert_eq!(
+                format_variable(name).map(|variable| variable.backing),
+                Some(FormatBacking::StatusHook),
+            );
+        }
         let context = context();
         for variable in &FORMAT_VARIABLES {
             let value = context
@@ -3424,6 +3439,18 @@ mod tests {
         ] {
             assert_eq!(context.variable(name).as_deref(), Some(""), "{name}");
         }
+    }
+
+    #[test]
+    fn session_activity_expands_as_seconds_and_time() {
+        assert_eq!(expand("#{session_activity}"), "1700000000");
+        assert_eq!(
+            expand_format_values("#{t/f/%Y:session_activity}", &context(), &mut Stub),
+            "2023"
+        );
+        assert!(
+            expand_format_values("#{t:session_activity}", &context(), &mut Stub).ends_with(" 2023")
+        );
     }
 
     #[test]

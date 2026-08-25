@@ -612,6 +612,11 @@ impl AppView {
         cx: &mut Context<Self>,
     ) -> Self {
         agent_controller.update(cx, |controller, _| controller.attach_mux(mux.clone()));
+        if window.is_window_active() {
+            mux.update(cx, |mux, _| {
+                mux.set_client_window_focused(true);
+            });
+        }
         let mut observed_revision = AppRevision::for_mux(mux.read(cx));
         let mut observed_snapshot = mux.read(cx).snapshot();
         cx.observe(&mux, move |view, mux, cx| {
@@ -638,8 +643,12 @@ impl AppView {
         let keystroke_listener = cx.listener(Self::intercept_keystroke);
         cx.intercept_keystrokes(keystroke_listener).detach();
         cx.observe_window_activation(window, |view, window, cx| {
+            let window_active = window.is_window_active();
+            view.mux.update(cx, |mux, _| {
+                mux.set_client_window_focused(window_active);
+            });
             view.prefix_claim.clear();
-            if !window.is_window_active() && view.pane_drag.take().is_some() {
+            if !window_active && view.pane_drag.take().is_some() {
                 cx.stop_active_drag(window);
                 cx.notify();
             }
@@ -4048,6 +4057,112 @@ mod tests {
                 viewers: Vec::new(),
             }],
         }
+    }
+
+    #[gpui::test]
+    fn window_activation_is_the_only_workspace_client_focus_source(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let input_slot = Rc::new(RefCell::new(None));
+        let initial_active_slot = Rc::new(Cell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let captured_input = Rc::clone(&input_slot);
+        let captured_initial_active = Rc::clone(&initial_active_slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let input = mux.update(cx, |mux, _| mux.record_input_for_test());
+            captured_mux.replace(Some(mux.clone()));
+            captured_input.replace(Some(input));
+            captured_initial_active.set(Some(window.is_window_active()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux = mux_slot.borrow().clone().expect("captured mux");
+        let input = input_slot.borrow().clone().expect("captured input");
+        let initial_active = initial_active_slot.get().expect("initial activation state");
+        assert!(!initial_active);
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Attached {
+                    session: SessionId(0),
+                    snapshot: two_pane_snapshot_of(PaneId(0), PaneKindSnapshot::Terminal),
+                },
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .filter_map(|message| match message {
+                    InputMessage::ClientFocus { focused } => Some(*focused),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .is_empty()
+        );
+
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: zz_protocol::EventPayload::Snapshot(two_pane_snapshot_of(
+                        PaneId(2),
+                        PaneKindSnapshot::Terminal,
+                    )),
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        assert!(
+            input
+                .borrow()
+                .iter()
+                .all(|message| !matches!(message, InputMessage::ClientFocus { .. }))
+        );
+
+        input.borrow_mut().clear();
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        assert_eq!(
+            input
+                .borrow()
+                .iter()
+                .filter_map(|message| match message {
+                    InputMessage::ClientFocus { focused } => Some(*focused),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [true]
+        );
+
+        input.borrow_mut().clear();
+        cx.deactivate_window();
+        assert_eq!(
+            input
+                .borrow()
+                .iter()
+                .filter_map(|message| match message {
+                    InputMessage::ClientFocus { focused } => Some(*focused),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [false]
+        );
     }
 
     #[gpui::test]

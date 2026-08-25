@@ -1,0 +1,26 @@
+# Daemon-owned format surfaces inherit the canonical queue-item command without
+# leaking it into delayed or child items.
+run-shell "tmux set-option -g @daemon-shell '#{command}'"
+out: show-options -gv @daemon-shell
+run-shell -C "set-option -g @daemon-c '#{command}'"
+out: show-options -gv @daemon-c
+run -C "set-option -g @daemon-alias '#{command}'"
+out: show-options -gv @daemon-alias
+run-s -C "set-option -g @daemon-prefix '#{command}'"
+out: show-options -gv @daemon-prefix
+set-option -s command-alias[31] zzrun=run-shell
+zzrun -C "set-option -g @daemon-user-alias '#{command}'"
+out: show-options -gv @daemon-user-alias
+source-file compat/scenarios/daemon-command-item-format.conf
+out: show-options -gv @daemon-block
+if-shell "test '#{command}' = if-shell" "set-option -g @daemon-if-shell true" "set-option -g @daemon-if-shell false"
+out: show-options -gv @daemon-if-shell
+if -F "#{==:#{command},if-shell}" "set-option -g @daemon-if-format true" "set-option -g @daemon-if-format false"
+out: show-options -gv @daemon-if-format
+if-shell -F 1 "set-option -gF @daemon-if-child '#{command}'"
+out: show-options -gv @daemon-if-child
+set-hook -g after-set-buffer "list-buffers -F '#{hook}:#{command}'"
+out: set-buffer -b daemon-command-item buffer
+out: list-buffers -f #{==:#{command},list-buffers} -F #{command}:#{buffer_name}
+out: new-window -dP -n daemon-item -F #{command}
+out: split-window -dP -F #{command}

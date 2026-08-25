@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -39,9 +39,9 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | Own each agent pane's ACP adapter child | `Shared.agent: Mutex<Option<Arc<AgentRuntime>>>` → `agent::host::AgentHost`, one thread per pane |
 | Bind + guard the owner-only endpoint | `Daemon::run_foreground`, `LocalListener`, `SocketGuard`, `restrict_socket_permissions` |
 | Accept connections, one thread per client | `run_foreground` accept loop → `handle_connection` |
-| Serialize + execute commands | `Shared::execute` / `execute_command_request` (mux engine under one lock) |
+| Prepare + execute commands | `Shared::prepare_command_list` / `execute_command_request_with_prepared` / `Shared::execute` (mux engine under one lock) |
 | Fan terminal frames + persist live pane titles | `watch_terminal` → `synchronize_pane_title` / `publish_terminal_for_pane` → mux snapshots + per-client `OutboundMailbox` |
-| Route interactive input + `send-keys` | `input` / `input_text` / `input_key`, `execute_key_commands`, `resolve_input_sinks`, `send_tokens`; stored bindings execute exactly as written |
+| Route interactive input + `send-keys` | `input` / `input_text` / `input_key`, `execute_key_commands`, `resolve_input_sinks`, `send_tokens`; stored bindings keep their commands, except a vi numeric-count path may inject `-N <count>` into the first qualifying copy action |
 | Attach/detach interactive clients | `attach` / `attach_target` / `detach`, `register` / `unregister`, `evict_other_clients` for `attach-session -d` |
 | Serve repair requests after a coalesced drop | `send_full` (`RequestFull`), `send_history` (`HistoryRequest` → `HistoryChunk`), `AgentRuntime::replay` (`AgentReplay` → `AgentUpdates`) |
 | Journal and fan out agent transcripts | `agent::journal::AgentJournal` under `<data>/zz/daemon/agent-journal`, `agent::fanout::AgentFanout` → the mailbox's `agent` lane |
@@ -54,7 +54,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | `lib.rs` | re-exports `Daemon`, `DaemonError`, `CommandClient`, `InteractiveClient`, `short_device_name`, `agent_send_reads_stdin`, `default_socket_path`, `default_mux_config`, `mux_config_candidates`, `mux_config_write_path`, `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon`, `daemon_identity_protocol_version`, `classify_local_connect_error`, `Endpoint`, `EndpointError`, `SshEndpoint`, `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper`, the `user_data` module, and (feature `agent`) the agent stream vocabulary a client deserializes against . `AgentStreamItem`, `AgentStreamPayload`, `AgentPrompt`, `AgentPromptOutcome`, `AgentSessionSummary`, `AgentSessionCapabilities`, and `AgentAuthMethod` | Crate root; the whole public API |
 | `daemon.rs` | `Daemon`, `DaemonError`, `agent_send_reads_stdin` | The server itself: local accept loop, `Shared`/`ServerState`, command execution, `OutboundMailbox` fan-out, terminal watching, attach/detach, input routing. It binds exactly one endpoint . the owner-only local socket |
 | `transport.rs` | `default_socket_path` | Platform IPC: wraps `interprocess` into `LocalListener`/`LocalStream`, per-platform endpoint paths, peer-credential capture |
-| `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
+| `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), endpoint-scoped cwd/tty/size/nested hello facts, framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
 | `paths.rs` | `default_mux_config`, `mux_config_candidates`, `mux_config_write_path` | Platform discovery of the zz-owned `zz/mux.conf` (the daemon sources this file and no external tmux config) |
 | `endpoint.rs` | `Endpoint`, `SshEndpoint`, `EndpointError` | Client-half endpoint abstraction: `unix://`/bare-path/`ssh://` URI parsing (a `quic://` string is rejected with a pointer at `ssh://`), the probe → auto-start → forward ssh sequence below, a managed `ssh -N -L` child with an RAII tunnel guard, and `EndpointError::ssh_reason` turning each failure into advice for the host row |
 | `askpass.rs` | `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper` | ssh's password and host-key prompts: the per-connect Unix socket the GUI answers on, the prompt classifier, and the helper mode `zz` re-enters when ssh runs it as `SSH_ASKPASS` |
@@ -316,24 +316,68 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   `attach_view`/`detach_view` follow session moves, and each view keeps its own scroll, selection,
   copy mode, and search state.
 - **PTY size.** `terminal_resize_for_pane` uses the viewing client with the highest daemon-global
-  terminal-input sequence; absent/equal sequences tie on the lowest `ClientId`, and a viewer without
-  a geometry report falls through to the next-ranked viewer. Columns, rows, and both cell-pixel
-  dimensions come from that one owner. Input only resizes panes when the computed owner changes.
-- **Aggressive window size.** The inherited window flag `aggressive-resize` defaults off. ON takes
-  the componentwise smallest columns and rows reported by clients whose focused window is the pane's
-  window; cell pixels still come from the latest-input eligible viewer. Focus, attach, detach, and
-  option changes feed the result through the existing guarded window-extent write-back and resize
-  the PTY. A window with one viewer is unchanged.
+  geometry-owner sequence. Terminal input advances it. Client FocusIn also advances it when the
+  server `focus-events` option is on. Absent or equal sequences tie on the lowest
+  `ClientId`, and a viewer without a geometry report falls through to the next-ranked viewer.
+  `window-size latest` takes the owner's complete geometry. Manual, largest, and smallest retain
+  their fixed or aggregated rows and columns while taking the owner's cell metrics. Owner changes
+  therefore resize every mode when cell metrics change.
+- **Client focus.** Protocol v73 focus notifications are events, not retained presence state. The
+  daemon consumes them for session and client activity, and FocusIn for geometry ownership, but does
+  not keep a current focused boolean for `client_flags`.
+- **Aggressive window size.** The inherited window flag `aggressive-resize` defaults off. ON
+  restricts geometry candidates to clients whose focused window contains the pane; OFF uses the
+  ordinary viewer set. The separate `window-size` policy combines those candidates. Focus, attach,
+  detach, and option changes feed the result through the existing guarded window-extent write-back.
+  A window with one viewer is unchanged.
 - **Window focus.** `focused_windows: BTreeMap<ClientId, WindowId>` is a daemon-side overlay; pane
   focus and zoom stay shared. `stamp_snapshot_for_client` writes each subscriber's own
   `focused_window` and the session's `viewers` list into the copy it sends, so one snapshot
   computation serves every client.
 - **Presence.** `snapshot_presence` turns the attached set into `SessionViewer` rows carrying the
   device name from `ClientHello` (falling back to `device-{id}`) and that viewer's focused window.
+- **Client selectors.** Every implemented tmux flag that selects an attached client reaches
+  `find_attached_client_with_aliases`. The common matcher accepts an exact name, full tty, or tty
+  after removing exactly one leading `/dev/` prefix, with exactly one optional trailing colon. It
+  does not accept a final pathname basename. Collisions choose the globally oldest attached
+  `ClientId`, regardless of session. The shared `device-N` alias remains, while popup, menu,
+  confirm, refresh, and lock also retain numeric `N` and `client-N` native aliases. Eligible local
+  terminal surfaces and Command clients retain their tty internally. A local Control client does
+  too only when stdin has a discoverable tty; remote clients and piped local Control omit it.
+  `ClientFormatFacts` does not expose the retained value as `#{client_tty}`.
+- **Local Control identity.** `connect_control` publishes the bounded cwd, an stdin-only
+  `client-tty-v1:` token when available, and `client-nested-v1` only for a nonempty `$TMUX`. It
+  never samples terminal size, sends `client-size-v1:`, or emits `ClientTerminalSize`; explicit
+  `refresh-client -C` remains its only geometry path. TERM and terminal-name format facts remain
+  absent. The established `attach-session`, `new-session -A`, and `new-session -Ad` refusal paths
+  require both the marker and an exact pane-tty match when they would attach an existing session.
+  Fresh `new-session` and `new-session -A` misses still create and attach. Duplicate and validation
+  errors retain their existing precedence. Registration and unregister already store and clear the
+  additive facts, so this behavior needed no protocol-version change.
+- **Display-message format client.** `best_display_message_format_client` first checks the retained
+  target session. When that valid session has no attached client, it widens to every attached client
+  and selects the highest `client_activity`, breaking an equal-activity tie with the oldest
+  `ClientId`. Absent, cross-session, and missing `-c` values all take that global path for an
+  unattached target. `client_format_facts` receives the selected client's actual attached session,
+  while the command keeps session, window, and pane facts on its `-t` target. Zero attached clients
+  and a missing target session produce empty client facts. An attached target without `-c` still
+  injects none under `clients.context-formats`. This helper does not select delivery, duration,
+  printing, buffer-path context, or Command-client context.
 - **Caller cwd.** Protocol v72 retains each local client's bounded absolute UTF-8 working directory
   when representable. Top-level relative `source-file` paths use that client fact after format
-  expansion and before globbing; SSH clients omit it. Nested sources still use the containing
-  config's directory, a tracked divergence from the pin's repeated client/session cwd lookup.
+  expansion and before globbing; SSH clients omit it. Registered-client replay snapshots the selected
+  source base and carries it through nested loads, including after a sentinel replay command clears
+  its mutable context cwd and when runtime `source-file` reaches the active default `zz/mux.conf`
+  through the ordinary loader. Direct `reload-config` uses the same registered-client base through
+  its separate native reset path. Startup, deferred event hooks, hooks raised during sentinel
+  replay, and exact attached session-cwd selection retain their tracker groups.
+- **Runtime source versus native reload.** Runtime `source-file` loads every declared match through
+  `load_config_file_with_report_for_terminal_and_options` in declared path and glob order, including
+  the active default `zz/mux.conf`. A loud miss marks failure without stopping later matches, and a
+  repeated default, after, default list applies as `DAD`. Only explicit `reload-config` rediscovers
+  the current default candidate, replaces `config_files`, resets `KeyTables`, rebuilds appearance,
+  and reapplies stored mux overrides. Startup retains first-existing default discovery or the
+  ordered explicit `-f` roots. Parse-only and nested source paths keep the ordinary loader contract.
 - **Steal.** `attach-session -d` runs `evict_other_clients`: every other client of the target session
   gets `EventPayload::Detached { by: Some(stealer's device name) }` and loses its attachment. A
   command-only client cannot attach but can still evict. Session teardown sends the same event with
@@ -374,7 +418,38 @@ composer input the client owns, and its prompts arrive as `AgentPrompt`, not as 
 `EventPayload::PrefixArmed` transitions of that cursor to the owning client, which uses them to
 claim in-flight sequence keys from focus contexts that never reach the daemon.
 
-`execute_key_commands` executes stored `Binding`s exactly as written — a key-bound
+Input accounting uses two terminal-input seams. `note_terminal_input` updates retained activity,
+advances the latest geometry owner, and clears the pane bell. `note_terminal_input_without_bell`
+keeps the same activity and geometry accounting while preserving alerts; native chooser input,
+rejected read-only input, and allowed local view navigation use it. Read-only raw keys bypass chooser,
+command-prompt, and display-panes consumption so allowed root-table commands can still run.
+Read-only-safe local view actions also bypass retained chooser and display-panes surfaces, reach the
+pane, and account once without dismissing the modal. Direct and bound command authorization
+preflights the pin's read-only roster. `send-keys` decides absence of `-X` before full option parsing,
+then allows only typed safe copy-mode actions; pin-recognized unsafe but unimplemented names reject,
+while empty and genuinely unknown `-X` names reach their later no-op or no-mode path. A direct
+request authorizes its single invocation. The daemon expands one alias layer and rejects a whole
+stored binding list before its first effect when any item is unsafe, matching the pin's
+all-or-nothing command-list check. Read-only pane Focus never reaches application focus reporting;
+v73 `ClientFocus` owns the client-window transition.
+
+Committed text uses `pending_committed_text`, one 32-entry ordered queue per client. Every validated
+press or repeat key whose `text_follows` bit is set appends an entry carrying its pane and Terminal
+or BrowserSurface lane. Matching text scans forward to the first same-pane, same-lane entry, retires
+the skipped prefix, consumes that match, and preserves the suffix. It inherits the key's activity
+and modal result, so a pair contributes at most one update; writable prompt or display-panes
+consumption may contribute zero. Empty matching text also retires its linked dispatch suppression.
+A no-match packet leaves the queue unchanged and handles nonempty text as standalone. Standalone
+read-only terminal text updates activity and latest geometry without clearing a bell or writing the
+PTY; read-only browser text remains
+dropped. Detach, unregister or reconnect, and successful wire attach clear the queue. A synchronous
+binding-driven switch preserves it until the trailing text arrives. `attach_collect_event_hooks`
+also advances the latest geometry client and writes back affected terminal sizes on every attach or
+switch, independent of `focus-events`; `ClientFocus` uses that geometry seam only for FocusIn when
+the option is enabled.
+
+`execute_key_commands` executes the commands stored in each `Binding`, except a vi numeric-count
+path may inject `-N <count>` into the first qualifying copy action. A key-bound
 `split-window`/`splitw` creates a terminal like tmux, from defaults and imported configs alike.
 The pane-kind picker is reached only through the zz-native `split-picker` verb, which zz's default
 `%`/`"` bindings name directly.
@@ -387,6 +462,52 @@ nonempty-but-unattached intermediate client state. `ServerHello` advertises this
 same-protocol persistent daemons. Startup and short-lived command clients still create sessions
 only when they explicitly execute `new-session`. A default Interactive attach materializes the
 next numeric session when the daemon is empty.
+
+Protocol v74 adds a side-effect-free command preparation round trip for Control and local ordinary
+CLI preprocessing. A nonzero
+`PrepareCommandList.request_id` covers the whole input vector, and the daemon resolves one live
+alias layer plus canonical command identity under one `ServerState` lock. Preparation does not
+authorize, resolve targets or formats, run hooks, publish messages, or mutate mux state. Each
+`PreparedCommand` returns an immutable invocation and either `Ready` or a typed command error. The
+Control client waits for the matching `PreparedCommandList`, preserving interleaved notifications,
+before it allocates frames for that input unit. The local CLI uses the same canonical identity and
+alias-match state for attach, new-session, stdin, and kill routing. Command mode reuses its prepared
+connection; an attaching command carries the immutable vector into the TUI's second connection.
+Remote `--host` intentionally skips this round trip until discovery can inspect an existing remote
+daemon without starting SSH.
+
+Prepared execution sets `CommandRequest.prepared` so the daemon skips only another alias lookup.
+Read-only authorization and the full ordinary execution path still run. The flag is an internal
+snapshot contract, not an authority grant; a forged prepared destructive request from a read-only
+client is rejected. All client kinds answer the preparation RPC so a caller cannot deadlock on a
+kind-specific server branch.
+
+Protocol v76 appends `ServerError::CommandParse` at tail tag 12. Mux and daemon handlers use it for
+command-name, flag, arity, and preparation failures, while target and runtime failures keep their
+existing variants. Callers can abort a parse failure before effects without changing runtime queue
+ordering. Cold CLI preparation and full config or source prevalidation remain under
+`mux.chain-parse-abort`.
+
+The same protocol version appends `EventPayload::SourcedCommandGuard` at tail tag 47 for Control
+replay. `load_config_file_with_report_for_terminal_and_options` emits one guard for each replayed
+command that survives command-name resolution before it recurses to later commands. Unknown or
+ambiguous command names and malformed alias names publish a located Warning that Control renders as
+`%config-error`, without a guard. Ordinary success and quiet misses carry an
+empty success guard. A partial source match carries its misses but still ends `%end`; an all-miss,
+flag or arity failure, runtime failure, or depth refusal ends `%error`. Runtime failures set the separate
+`client_failure` bit so a later clean Control detach cannot reset exit 1. Successful command output
+is captured for that Control guard, but Command stdout, the attached-client view, and ordering
+against the collected `source-file -v` batch remain open under `config.replayed-command-output`.
+Matched child read failures follow the parent guard as typed Error events. Generic config and lexer
+warnings still use the Control client's prose classifier under `control-mode.diagnostic-typing`, and
+the existing loader preflights all paths for one source command before recursion. A focused regression,
+the 601-test daemon suite, and the strict six-step Control differential prove that a three-level replay
+publishes the root missing-path guard, the middle missing-path guard, and the leaf output guard in that
+order, each once. No production change was required for that closure. A matched outer source with a
+failed replay already returns a completed nonzero `CommandResponse::Success`, but the Control front
+end does not retain that result through every EOF and detach ordering. The client-owned
+`control-mode.source-file-exit-status` group tracks that process-state gap without making source
+diagnostics globally sticky.
 
 # Examples
 

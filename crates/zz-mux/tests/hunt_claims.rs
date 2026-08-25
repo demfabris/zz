@@ -1,6 +1,8 @@
+use std::path::PathBuf;
+
 use zz_mux::{
-    COMMAND_SPECS, DetachScope, ExecutionContext, MuxEffect, MuxEngine, TmuxSort, TmuxSortOrder,
-    parse_config,
+    COMMAND_SPECS, DetachRequest, DetachScope, ExecutionContext, MuxEffect, MuxEngine, TmuxSort,
+    TmuxSortOrder, parse_config,
 };
 use zz_protocol::{
     Axis, ChooseTreeKind, CommandInvocation, KeyToken, LayoutNode, PaneId, ServerError,
@@ -123,6 +125,21 @@ fn catalog_covers_the_options_the_handlers_read() {
     }
     assert!(spec("detach-client").option("-a").is_some());
     assert!(spec("detach-client").option("-s").unwrap().value.is_some());
+    for flag in ["-D", "-L", "-R", "-U"] {
+        let option = spec("resize-pane").option(flag).expect(flag);
+        assert!(
+            option.optional_value,
+            "resize-pane {flag} is optional-valued"
+        );
+        assert!(
+            option.attached_value,
+            "resize-pane {flag} accepts attached values"
+        );
+        assert!(
+            option.value.is_none(),
+            "resize-pane {flag} is not required-valued"
+        );
+    }
     for flag in ["-n", "-p", "-T"] {
         assert!(
             spec("select-window").option(flag).is_some(),
@@ -136,7 +153,7 @@ fn catalog_covers_the_options_the_handlers_read() {
             "{name} is missing -t"
         );
     }
-    for flag in ["-F", "-q"] {
+    for flag in ["-F", "-n", "-q", "-t", "-v"] {
         assert!(spec("source-file").option(flag).is_some());
     }
     assert!(
@@ -277,7 +294,7 @@ fn bind_key_validates_payloads_before_storing_them() {
     let error = engine
         .execute(&mut context, &command("bind-key", &["x", "not-a-command"]))
         .unwrap_err();
-    assert!(matches!(error, ServerError::InvalidCommand(message)
+    assert!(matches!(error, ServerError::CommandParse(message)
         if message == "unknown command: not-a-command"));
     assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
 
@@ -287,7 +304,7 @@ fn bind_key_validates_payloads_before_storing_them() {
             &command("bind-key", &["x", "split-window", "-Q"]),
         )
         .unwrap_err();
-    assert!(matches!(error, ServerError::InvalidCommand(message)
+    assert!(matches!(error, ServerError::CommandParse(message)
         if message == "split-window does not support -Q"));
     assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
 
@@ -759,7 +776,7 @@ fn kill_commands_refuse_positional_targets_like_tmux() {
             .execute(&mut context, &command(name, &["other"]))
             .unwrap_err();
         assert!(
-            matches!(error, ServerError::InvalidCommand(ref message)
+            matches!(error, ServerError::CommandParse(ref message)
                 if message.contains("positional")),
             "{name} accepted a positional target"
         );
@@ -783,9 +800,7 @@ fn select_window_refuses_positional_targets_like_tmux() {
     let error = engine
         .execute(&mut context, &command("select-window", &["0"]))
         .unwrap_err();
-    assert!(
-        matches!(error, ServerError::InvalidCommand(message) if message.contains("positional"))
-    );
+    assert!(matches!(error, ServerError::CommandParse(message) if message.contains("positional")));
     assert_eq!(context.window, selected);
 }
 
@@ -803,9 +818,7 @@ fn split_picker_rejects_positional_arguments() {
             &command("split-picker", &["printf", "not-a-shell-command"]),
         )
         .unwrap_err();
-    assert!(
-        matches!(error, ServerError::InvalidCommand(message) if message.contains("positional"))
-    );
+    assert!(matches!(error, ServerError::CommandParse(message) if message.contains("positional")));
     assert_eq!(
         engine.state.windows.values().next().unwrap().panes.len(),
         pane_count
@@ -1107,7 +1120,7 @@ fn active_window_name(engine: &MuxEngine, session_name: &str) -> String {
 }
 
 #[test]
-fn send_keys_dash_n_repeats_the_keys_instead_of_typing_the_count() {
+fn send_keys_dash_n_carries_one_key_list_and_a_repeat_count() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -1117,12 +1130,14 @@ fn send_keys_dash_n_repeats_the_keys_instead_of_typing_the_count() {
         .execute(&mut context, &command("send-keys", &["-N", "3", "x"]))
         .unwrap();
     assert!(
-        matches!(sent.effects.first(), Some(MuxEffect::SendKeys { keys, .. })
-        if keys == &vec![
-            KeyToken::Literal("x".to_owned()),
-            KeyToken::Literal("x".to_owned()),
-            KeyToken::Literal("x".to_owned()),
-        ]),
+        matches!(
+            sent.effects.first(),
+            Some(MuxEffect::SendKeys {
+                keys,
+                repeat: 3,
+                ..
+            }) if keys == &[KeyToken::Literal("x".to_owned())]
+        ),
         "{:?}",
         sent.effects
     );
@@ -1131,7 +1146,7 @@ fn send_keys_dash_n_repeats_the_keys_instead_of_typing_the_count() {
         .execute(&mut context, &command("send-keys", &["-N", "0", "x"]))
         .unwrap_err();
     assert!(matches!(error, ServerError::InvalidCommand(message)
-            if message == "send-keys -N needs a positive repeat count: 0"));
+            if message == "repeat count too small"));
 }
 
 #[test]
@@ -1152,7 +1167,7 @@ fn send_keys_dash_n_without_keys_arms_the_copy_mode_repeat() {
 }
 
 #[test]
-fn send_keys_dash_n_repeats_copy_mode_movement_but_never_a_copy() {
+fn send_keys_dash_n_carries_movement_count_but_runs_copy_once() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -1164,14 +1179,31 @@ fn send_keys_dash_n_repeats_copy_mode_movement_but_never_a_copy() {
             &command("send-keys", &["-X", "-N", "4", "cursor-up"]),
         )
         .unwrap();
-    assert_eq!(moved.effects.len(), 4);
+    assert!(matches!(
+        moved.effects.as_slice(),
+        [MuxEffect::TerminalView {
+            action: zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: zz_terminal::CopyModeAction::Up,
+                count: 4,
+            },
+            ..
+        }]
+    ));
     let copied = engine
         .execute(
             &mut context,
             &command("send-keys", &["-X", "-N", "4", "copy-selection"]),
         )
         .unwrap();
-    assert_eq!(copied.effects.len(), 1);
+    assert!(matches!(
+        copied.effects.as_slice(),
+        [MuxEffect::TerminalView {
+            action: zz_terminal::TerminalViewAction::CopyMode(
+                zz_terminal::CopyModeAction::CopySelection(_)
+            ),
+            ..
+        }]
+    ));
 }
 
 #[test]
@@ -1453,35 +1485,37 @@ fn detach_client_dash_a_leaves_the_caller_attached() {
     let mine = engine
         .execute(&mut context, &command("detach-client", &[]))
         .unwrap();
-    assert_eq!(mine.effects, [MuxEffect::Detach(DetachScope::Client)]);
+    assert_eq!(
+        mine.effects,
+        [MuxEffect::Detach(DetachRequest {
+            target_client: None,
+            scope: DetachScope::Client,
+        })]
+    );
 
     let others = engine
         .execute(&mut context, &command("detach-client", &["-a"]))
         .unwrap();
-    assert_eq!(others.effects, [MuxEffect::Detach(DetachScope::Others)]);
+    assert_eq!(
+        others.effects,
+        [MuxEffect::Detach(DetachRequest {
+            target_client: None,
+            scope: DetachScope::Others,
+        })]
+    );
 
-    let session = engine
-        .state
-        .sessions
-        .values()
-        .find(|session| session.name == "work")
-        .expect("session exists")
-        .id;
     let by_session = engine
-        .execute(&mut context, &command("detach-client", &["-s", "work"]))
+        .execute(
+            &mut context,
+            &command("detach-client", &["-a", "-s", "work", "-t", "target:"]),
+        )
         .unwrap();
     assert_eq!(
         by_session.effects,
-        [MuxEffect::Detach(DetachScope::Session(session))]
-    );
-
-    let error = engine
-        .execute(&mut context, &command("detach-client", &["-t", "0"]))
-        .unwrap_err();
-    assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message)
-            if message == "detach-client -t"),
-        "{error:?}"
+        [MuxEffect::Detach(DetachRequest {
+            target_client: Some("target:".to_owned()),
+            scope: DetachScope::Session("work".to_owned()),
+        })]
     );
 }
 
@@ -1660,7 +1694,7 @@ fn list_keys_remaining_selectors_share_the_catalog_and_runtime_contract() {
         .execute(&mut context, &command("list-keys", &["-n"]))
         .unwrap_err();
     assert!(
-        matches!(&error, ServerError::InvalidCommand(message)
+        matches!(&error, ServerError::CommandParse(message)
             if message == "list-keys does not support -n"),
         "{error:?}"
     );
@@ -1763,10 +1797,16 @@ fn source_file_keeps_every_path_in_order() {
             MuxEffect::SourceFile {
                 path: "first".to_owned(),
                 quiet: false,
+                parse_only: false,
+                verbose: false,
+                context: context.clone(),
             },
             MuxEffect::SourceFile {
                 path: "second".to_owned(),
                 quiet: false,
+                parse_only: false,
+                verbose: false,
+                context: context.clone(),
             },
         ]
     );
@@ -1778,6 +1818,9 @@ fn source_file_keeps_every_path_in_order() {
         [MuxEffect::SourceFile {
             path: "maybe".to_owned(),
             quiet: true,
+            parse_only: false,
+            verbose: false,
+            context: context.clone(),
         }]
     );
     let formatted = engine
@@ -1799,10 +1842,16 @@ fn source_file_keeps_every_path_in_order() {
             MuxEffect::SourceFile {
                 path: "work-0-0-first.conf".to_owned(),
                 quiet: false,
+                parse_only: false,
+                verbose: false,
+                context: context.clone(),
             },
             MuxEffect::SourceFile {
                 path: "work-0-0-second.conf".to_owned(),
                 quiet: false,
+                parse_only: false,
+                verbose: false,
+                context: context.clone(),
             },
         ]
     );
@@ -1814,23 +1863,87 @@ fn source_file_keeps_every_path_in_order() {
         [MuxEffect::SourceFile {
             path: "-".to_owned(),
             quiet: false,
+            parse_only: false,
+            verbose: false,
+            context: context.clone(),
         }]
     );
-    let error = engine
-        .execute(&mut context, &command("source-file", &["-v", "loud"]))
-        .unwrap_err();
-    assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message)
-            if message == "source-file -v"),
-        "{error:?}"
+    let flags = engine
+        .execute(
+            &mut context,
+            &command("source-file", &["-nqv", "flags.conf"]),
+        )
+        .unwrap();
+    assert_eq!(
+        flags.effects,
+        [MuxEffect::SourceFile {
+            path: "flags.conf".to_owned(),
+            quiet: true,
+            parse_only: true,
+            verbose: true,
+            context: context.clone(),
+        }]
     );
-    let error = engine
-        .execute(&mut context, &command("source-file", &["-F", "-n"]))
-        .unwrap_err();
-    assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message)
-            if message == "source-file -n"),
-        "{error:?}"
+
+    let work_pane = context.pane.unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command("new-session", &["-d", "-s", "other"]),
+        )
+        .unwrap();
+    context.set_client_working_directory(Some(PathBuf::from("/tmp/source caller")));
+    let targeted = engine
+        .execute(
+            &mut context,
+            &command(
+                "source-file",
+                &[
+                    "-Fv",
+                    "-t",
+                    "work:0",
+                    "#{session_name}-#{window_index}-#{pane_index}.conf",
+                ],
+            ),
+        )
+        .unwrap();
+    let mut target_context = context.clone();
+    target_context.retarget(&ExecutionContext::for_pane(&engine.state, work_pane).unwrap());
+    assert_eq!(
+        targeted.effects,
+        [MuxEffect::SourceFile {
+            path: "work-0-0.conf".to_owned(),
+            quiet: false,
+            parse_only: false,
+            verbose: true,
+            context: target_context,
+        }]
+    );
+
+    let targetless = engine
+        .execute(
+            &mut context,
+            &command("source-file", &["-t", "missing:0", "still-load.conf"]),
+        )
+        .unwrap();
+    let [
+        MuxEffect::SourceFile {
+            path,
+            context: targetless_context,
+            ..
+        },
+    ] = targetless.effects.as_slice()
+    else {
+        panic!("expected one source-file effect");
+    };
+    assert_eq!(path, "still-load.conf");
+    assert_eq!(
+        (
+            targetless_context.session,
+            targetless_context.window,
+            targetless_context.pane,
+        ),
+        (None, None, None)
     );
 }
 
@@ -1944,6 +2057,50 @@ fn resize_pane_takes_attached_adjustments_and_rejects_unknown_flags() {
 }
 
 #[test]
+fn resize_pane_direction_flags_accept_bare_attached_and_separated_amounts() {
+    let run = |flag: &str, amount: Option<&str>, attached: bool| {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let split = if matches!(flag, "-L" | "-R") {
+            ["-h"].as_slice()
+        } else {
+            [].as_slice()
+        };
+        engine
+            .execute(&mut context, &command("split-window", split))
+            .unwrap();
+        let window = context.window.unwrap();
+        let panes = engine.state.windows[&window].pane_order().to_vec();
+        let before = panes
+            .iter()
+            .map(|pane| pane_size(&engine, *pane))
+            .collect::<Vec<_>>();
+        let args = match (amount, attached) {
+            (None, _) => vec![flag.to_owned()],
+            (Some(amount), true) => vec![format!("{flag}{amount}")],
+            (Some(amount), false) => vec![flag.to_owned(), amount.to_owned()],
+        };
+        engine
+            .execute(&mut context, &CommandInvocation::new("resize-pane", args))
+            .unwrap();
+        let after = panes
+            .iter()
+            .map(|pane| pane_size(&engine, *pane))
+            .collect::<Vec<_>>();
+        assert_ne!(after, before, "resize-pane {flag} must change the layout");
+        after
+    };
+
+    for flag in ["-D", "-L", "-R", "-U"] {
+        assert_eq!(run(flag, None, false), run(flag, Some("1"), true));
+        assert_eq!(run(flag, Some("2"), true), run(flag, Some("2"), false));
+    }
+}
+
+#[test]
 fn send_keys_dash_h_is_bytewise_ascii_like_tmux() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
@@ -1963,6 +2120,7 @@ fn send_keys_dash_h_is_bytewise_ascii_like_tmux() {
                 KeyToken::Literal("A".to_owned()),
                 KeyToken::Literal("\n".to_owned()),
             ],
+            repeat: 1,
         }]
     );
 
@@ -1994,6 +2152,7 @@ fn send_keys_dash_l_concatenates_arguments_without_separators() {
         [MuxEffect::SendKeys {
             pane,
             keys: vec![KeyToken::Literal("foobar".to_owned())],
+            repeat: 1,
         }]
     );
 }

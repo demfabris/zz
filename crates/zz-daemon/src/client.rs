@@ -13,8 +13,8 @@ use zz_protocol::{
     AgentImage, AgentSessionOpKind, ClientHello, ClientInstanceId, ClientKind, CommandInvocation,
     CommandRequest, CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage,
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
-    PasteUploadPurpose, ProtocolMessage, ServerError, ServerHello, encode_protocol_message_into,
-    read_protocol_message_into,
+    PasteUploadPurpose, PreparedCommand, ProtocolMessage, ServerError, ServerHello,
+    encode_protocol_message_into, read_protocol_message_into,
 };
 
 static CLIENT_INSTANCE_ID: OnceLock<ClientInstanceId> = OnceLock::new();
@@ -216,11 +216,27 @@ impl CommandClient {
         &mut self,
         command: CommandInvocation,
     ) -> Result<CommandOutcome, DaemonError> {
+        self.execute_streams_with_prepared(command, false)
+    }
+
+    pub fn execute_prepared_streams(
+        &mut self,
+        command: CommandInvocation,
+    ) -> Result<CommandOutcome, DaemonError> {
+        self.execute_streams_with_prepared(command, true)
+    }
+
+    fn execute_streams_with_prepared(
+        &mut self,
+        command: CommandInvocation,
+        prepared: bool,
+    ) -> Result<CommandOutcome, DaemonError> {
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.writer
             .send(&ProtocolMessage::CommandRequest(CommandRequest {
                 request_id,
                 command,
+                prepared,
             }))?;
         loop {
             match self.reader.recv()? {
@@ -255,6 +271,34 @@ impl CommandClient {
             }
         }
     }
+
+    pub fn prepare_commands(
+        &mut self,
+        commands: Vec<CommandInvocation>,
+    ) -> Result<Vec<PreparedCommand>, DaemonError> {
+        let command_count = commands.len();
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        self.writer.send(&ProtocolMessage::PrepareCommandList {
+            request_id,
+            commands,
+        })?;
+        loop {
+            if let ProtocolMessage::PreparedCommandList {
+                request_id: response_id,
+                commands,
+            } = self.reader.recv()?
+                && response_id == request_id
+            {
+                if commands.len() != command_count {
+                    return Err(DaemonError::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "daemon returned the wrong prepared-command count",
+                    )));
+                }
+                return Ok(commands);
+            }
+        }
+    }
 }
 
 pub struct InteractiveClient {
@@ -282,7 +326,7 @@ impl InteractiveClient {
             None,
             false,
             false,
-            EndpointFactsScope::LocalHostWorkingDirectory,
+            EndpointFactsScope::LocalControlTerminalIdentity,
         )?;
         Ok(Self::from_connected(connected))
     }
@@ -314,8 +358,6 @@ impl InteractiveClient {
         )
     }
 
-    /// Connect a raw-terminal attach surface: the hello carries the caller's
-    /// terminal size, and the caller's tty when `$TMUX` marks a nested run.
     pub fn connect_terminal_surface(
         path: &Path,
         color_scheme: TerminalColorScheme,
@@ -511,6 +553,7 @@ impl InteractiveClient {
                         working_directory.to_string_lossy().into_owned(),
                     ],
                 ),
+                prepared: false,
             }))?;
         }
         self.attach("")
@@ -539,6 +582,7 @@ impl InteractiveClient {
         self.send(&ProtocolMessage::CommandRequest(CommandRequest {
             request_id: 0,
             command: CommandInvocation::new("attach-session", args),
+            prepared: false,
         }))
     }
 
@@ -620,11 +664,33 @@ impl InteractiveClient {
     }
 
     pub fn execute(&self, command: CommandInvocation) -> Result<u64, DaemonError> {
+        self.execute_with_prepared(command, false)
+    }
+
+    pub fn execute_prepared(&self, command: CommandInvocation) -> Result<u64, DaemonError> {
+        self.execute_with_prepared(command, true)
+    }
+
+    fn execute_with_prepared(
+        &self,
+        command: CommandInvocation,
+        prepared: bool,
+    ) -> Result<u64, DaemonError> {
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.send(&ProtocolMessage::CommandRequest(CommandRequest {
             request_id,
             command,
+            prepared,
         }))?;
+        Ok(request_id)
+    }
+
+    pub fn prepare_commands(&self, commands: Vec<CommandInvocation>) -> Result<u64, DaemonError> {
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        self.send(&ProtocolMessage::PrepareCommandList {
+            request_id,
+            commands,
+        })?;
         Ok(request_id)
     }
 
@@ -848,6 +914,7 @@ impl<S: TransportStream> ProtocolSender<S> {
 enum EndpointFactsScope {
     None,
     LocalHostWorkingDirectory,
+    LocalControlTerminalIdentity,
     PortableTerminalSize,
     LocalHostWorkingDirectoryAndTerminal,
 }
@@ -856,7 +923,9 @@ impl EndpointFactsScope {
     fn includes_working_directory(self) -> bool {
         matches!(
             self,
-            Self::LocalHostWorkingDirectory | Self::LocalHostWorkingDirectoryAndTerminal
+            Self::LocalHostWorkingDirectory
+                | Self::LocalControlTerminalIdentity
+                | Self::LocalHostWorkingDirectoryAndTerminal
         )
     }
 
@@ -868,8 +937,25 @@ impl EndpointFactsScope {
     }
 
     fn includes_tty(self) -> bool {
-        self == Self::LocalHostWorkingDirectoryAndTerminal
+        matches!(
+            self,
+            Self::LocalControlTerminalIdentity | Self::LocalHostWorkingDirectoryAndTerminal
+        )
     }
+
+    fn tty_scope(self) -> Option<CallerTtyScope> {
+        match self {
+            Self::LocalControlTerminalIdentity => Some(CallerTtyScope::StandardInput),
+            Self::LocalHostWorkingDirectoryAndTerminal => Some(CallerTtyScope::StandardStreams),
+            Self::None | Self::LocalHostWorkingDirectory | Self::PortableTerminalSize => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CallerTtyScope {
+    StandardInput,
+    StandardStreams,
 }
 
 #[cfg(unix)]
@@ -884,10 +970,16 @@ fn caller_terminal_size() -> Option<(u16, u16)> {
 }
 
 #[cfg(unix)]
-fn caller_tty() -> Option<String> {
+fn caller_tty(scope: CallerTtyScope) -> Option<String> {
     use std::os::fd::AsFd as _;
 
     let stdin = std::io::stdin();
+    if scope == CallerTtyScope::StandardInput {
+        return rustix::termios::ttyname(stdin.as_fd(), Vec::new())
+            .ok()?
+            .into_string()
+            .ok();
+    }
     let stdout = std::io::stdout();
     let stderr = std::io::stderr();
     for fd in [stdin.as_fd(), stdout.as_fd(), stderr.as_fd()] {
@@ -899,28 +991,49 @@ fn caller_tty() -> Option<String> {
 }
 
 #[cfg(not(unix))]
-fn caller_tty() -> Option<String> {
+fn caller_tty(_scope: CallerTtyScope) -> Option<String> {
     None
 }
 
-fn terminal_facts_capabilities(scope: EndpointFactsScope, capabilities: &mut Vec<String>) {
-    if !scope.includes_terminal_size() {
-        return;
-    }
-    if let Some((columns, rows)) = caller_terminal_size() {
+fn terminal_facts_capabilities(
+    scope: EndpointFactsScope,
+    nested: bool,
+    capabilities: &mut Vec<String>,
+) {
+    terminal_facts_capabilities_with(
+        scope,
+        nested,
+        caller_terminal_size,
+        caller_tty,
+        capabilities,
+    );
+}
+
+fn terminal_facts_capabilities_with(
+    scope: EndpointFactsScope,
+    nested: bool,
+    terminal_size: impl FnOnce() -> Option<(u16, u16)>,
+    tty: impl FnOnce(CallerTtyScope) -> Option<String>,
+    capabilities: &mut Vec<String>,
+) {
+    if scope.includes_terminal_size()
+        && let Some((columns, rows)) = terminal_size()
+    {
         capabilities.push(format!(
             "{}{columns}x{rows}",
             ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX
         ));
     }
-    if scope.includes_tty()
-        && std::env::var("TMUX").is_ok_and(|value| !value.is_empty())
-        && let Some(tty) = caller_tty()
+    if let Some(tty_scope) = scope.tty_scope()
+        && let Some(tty) = tty(tty_scope)
     {
         capabilities.push(format!(
             "{}{tty}",
             ClientHello::CLIENT_TTY_CAPABILITY_PREFIX
         ));
+    }
+    if scope.includes_tty() && nested {
+        capabilities.push(ClientHello::CLIENT_NESTED_CAPABILITY.to_owned());
     }
 }
 
@@ -994,7 +1107,11 @@ fn connect_stream<S: TransportStream>(
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
     }
-    terminal_facts_capabilities(client_facts, &mut capabilities);
+    terminal_facts_capabilities(
+        client_facts,
+        std::env::var_os("TMUX").is_some_and(|value| !value.is_empty()),
+        &mut capabilities,
+    );
     writer.send(&ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: client_instance_id(),
@@ -1042,13 +1159,17 @@ mod tests {
 
     use zz_protocol::MAX_CLIENT_WORKING_DIRECTORY_BYTES;
 
-    use super::{EndpointFactsScope, client_working_directory};
+    use super::{
+        CallerTtyScope, EndpointFactsScope, client_working_directory, terminal_facts_capabilities,
+        terminal_facts_capabilities_with,
+    };
 
     #[test]
     fn local_client_fact_scopes_publish_the_supplied_working_directory() {
         let fixture = PathBuf::from("/tmp/zz-client-cwd-fixture");
         for scope in [
             EndpointFactsScope::LocalHostWorkingDirectory,
+            EndpointFactsScope::LocalControlTerminalIdentity,
             EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
         ] {
             assert_eq!(
@@ -1097,7 +1218,61 @@ mod tests {
     fn portable_terminal_facts_never_include_a_local_tty() {
         assert!(EndpointFactsScope::PortableTerminalSize.includes_terminal_size());
         assert!(!EndpointFactsScope::PortableTerminalSize.includes_tty());
+        assert!(!EndpointFactsScope::LocalControlTerminalIdentity.includes_terminal_size());
+        assert!(EndpointFactsScope::LocalControlTerminalIdentity.includes_tty());
         assert!(EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal.includes_terminal_size());
         assert!(EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal.includes_tty());
+    }
+
+    #[test]
+    fn local_control_facts_use_only_stdin_identity() {
+        let mut capabilities = Vec::new();
+        terminal_facts_capabilities_with(
+            EndpointFactsScope::LocalControlTerminalIdentity,
+            true,
+            || panic!("control facts must not inspect terminal size"),
+            |scope| {
+                assert_eq!(scope, CallerTtyScope::StandardInput);
+                Some("/dev/ttys007".to_owned())
+            },
+            &mut capabilities,
+        );
+        assert_eq!(
+            capabilities,
+            ["client-tty-v1:/dev/ttys007", "client-nested-v1"]
+        );
+    }
+
+    #[test]
+    fn nested_capability_requires_local_terminal_facts_and_a_nonempty_environment() {
+        for (scope, nested, expected) in [
+            (EndpointFactsScope::None, true, false),
+            (EndpointFactsScope::PortableTerminalSize, true, false),
+            (
+                EndpointFactsScope::LocalControlTerminalIdentity,
+                false,
+                false,
+            ),
+            (EndpointFactsScope::LocalControlTerminalIdentity, true, true),
+            (
+                EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+                false,
+                false,
+            ),
+            (
+                EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+                true,
+                true,
+            ),
+        ] {
+            let mut capabilities = Vec::new();
+            terminal_facts_capabilities(scope, nested, &mut capabilities);
+            assert_eq!(
+                capabilities.iter().any(|capability| {
+                    capability == zz_protocol::ClientHello::CLIENT_NESTED_CAPABILITY
+                }),
+                expected
+            );
+        }
     }
 }

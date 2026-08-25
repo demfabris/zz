@@ -339,8 +339,6 @@ pub enum CopyModeAction {
     },
     CopySelection(Box<CopyModeCopy>),
     Cancel,
-    // Keep new variants after `Cancel`: postcard encodes this protocol enum by
-    // discriminant, so additions are append-only even when the protocol bumps.
     NextSpace,
     PreviousSpace,
     NextSpaceEnd,
@@ -356,17 +354,80 @@ pub enum CopyModeAction {
     PageDownScrollExit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyModeCountPolicy {
+    Repeat,
+    OtherEnd,
+    SelectLine,
+    CopyEndOfLine,
+    Once,
+}
+
 impl CopyModeAction {
-    /// Boxed constructor for [`Self::CopySelection`].
     #[must_use]
     pub fn copy_selection(copy: CopyModeCopy) -> Self {
         Self::CopySelection(Box::new(copy))
     }
 
-    /// Boxed constructor for [`Self::CopyEndOfLine`].
     #[must_use]
     pub fn copy_end_of_line(copy: CopyModeCopy) -> Self {
         Self::CopyEndOfLine(Box::new(copy))
+    }
+
+    #[must_use]
+    pub fn count_policy(&self) -> CopyModeCountPolicy {
+        match self {
+            Self::Left
+            | Self::Right
+            | Self::Up
+            | Self::Down
+            | Self::PageUp
+            | Self::PageDown
+            | Self::PageDownScrollExit
+            | Self::HalfPageUp
+            | Self::HalfPageDown
+            | Self::ScrollUp
+            | Self::ScrollDown
+            | Self::NextWord
+            | Self::PreviousWord
+            | Self::NextWordEnd
+            | Self::NextSpace
+            | Self::PreviousSpace
+            | Self::NextSpaceEnd
+            | Self::NextParagraph
+            | Self::PreviousParagraph
+            | Self::NextMatchingBracket
+            | Self::Jump(_)
+            | Self::RepeatJump { .. }
+            | Self::SearchAgain { .. } => CopyModeCountPolicy::Repeat,
+            Self::OtherEnd => CopyModeCountPolicy::OtherEnd,
+            Self::SelectLine => CopyModeCountPolicy::SelectLine,
+            Self::CopyEndOfLine(_) => CopyModeCountPolicy::CopyEndOfLine,
+            Self::Top
+            | Self::Bottom
+            | Self::TopLine
+            | Self::MiddleLine
+            | Self::BottomLine
+            | Self::StartOfLine
+            | Self::BackToIndentation
+            | Self::EndOfLine
+            | Self::NextPrompt { .. }
+            | Self::PreviousPrompt { .. }
+            | Self::StartSelection
+            | Self::SelectWord
+            | Self::ClearSelection
+            | Self::ClearSelectionOrCancel
+            | Self::ToggleRectangle
+            | Self::RectangleOn
+            | Self::RectangleOff
+            | Self::SetMark
+            | Self::JumpToMark
+            | Self::CopySelection(_)
+            | Self::Cancel
+            | Self::ScrollMiddle
+            | Self::SearchCursorWord { .. }
+            | Self::GotoLine(_) => CopyModeCountPolicy::Once,
+        }
     }
 }
 
@@ -419,6 +480,10 @@ pub enum TerminalViewAction {
     EnterCopyModeWith {
         scroll_exit: bool,
         hide_position: bool,
+    },
+    CopyModeCounted {
+        action: CopyModeAction,
+        count: u32,
     },
 }
 

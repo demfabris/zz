@@ -36,7 +36,7 @@ use zz_browser::{
 use zz_client::{BROWSER_TABLE, ChromeAction};
 use zz_protocol::{
     BrowserCommand, BrowserDescriptor, ClientMessageKind, CommandInvocation, GuiResponse,
-    InputMessage, KeyToken, PaneId,
+    InputMessage, KeyToken, MAX_BROWSER_KEY_REPEAT, PaneId,
 };
 use zz_terminal::{
     KeyAction as TerminalKeyAction, KeyCode as TerminalKeyCode, KeyInput as TerminalKeyInput,
@@ -898,6 +898,26 @@ impl BrowserView {
                                 self.controller.update(cx, |controller, cx| {
                                     controller.send_key(self.pane, self.active_tab, input, cx);
                                 });
+                            }
+                        }
+                    }
+                }
+            }
+            BrowserCommand::SendKeysRepeated { keys, count } => {
+                for _ in 0..count.min(MAX_BROWSER_KEY_REPEAT) {
+                    for token in &keys {
+                        match token {
+                            KeyToken::Literal(text) => {
+                                self.controller.update(cx, |controller, cx| {
+                                    controller.send_text(self.pane, self.active_tab, text, cx);
+                                });
+                            }
+                            KeyToken::Named(name) => {
+                                if let Some(input) = browser_named_key(name) {
+                                    self.controller.update(cx, |controller, cx| {
+                                        controller.send_key(self.pane, self.active_tab, input, cx);
+                                    });
+                                }
                             }
                         }
                     }
@@ -2748,22 +2768,16 @@ impl BrowserView {
     }
 
     fn on_page_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let key = browser_key(&event.keystroke.key);
-        let allow_text_input = allows_text_input(key, event.keystroke.modifiers);
-        self.mux
-            .read(cx)
-            .send_input(InputMessage::BrowserSurfaceKey {
-                pane: self.pane,
-                input: terminal_key_input(
-                    &event.keystroke,
-                    if event.is_held {
-                        TerminalKeyAction::Repeat
-                    } else {
-                        TerminalKeyAction::Press
-                    },
-                ),
-                text_follows: allow_text_input,
-            });
+        let (input, allow_text_input) = browser_surface_key_input(
+            self.pane,
+            &event.keystroke,
+            if event.is_held {
+                TerminalKeyAction::Repeat
+            } else {
+                TerminalKeyAction::Press
+            },
+        );
+        self.mux.read(cx).send_input(input);
         if !allow_text_input {
             cx.stop_propagation();
         }
@@ -2979,10 +2993,7 @@ impl EntityInputHandler for BrowserView {
             if !text.is_empty() {
                 self.mux
                     .read(cx)
-                    .send_input(InputMessage::BrowserSurfaceText {
-                        pane: self.pane,
-                        text: text.to_owned(),
-                    });
+                    .send_input(browser_surface_text_input(self.pane, text));
             }
         } else if was_composing {
             self.controller.update(cx, |controller, cx| {
@@ -2991,10 +3002,7 @@ impl EntityInputHandler for BrowserView {
         } else if !text.is_empty() {
             self.mux
                 .read(cx)
-                .send_input(InputMessage::BrowserSurfaceText {
-                    pane: self.pane,
-                    text: text.to_owned(),
-                });
+                .send_input(browser_surface_text_input(self.pane, text));
         }
         window.invalidate_character_coordinates();
         cx.notify();
@@ -3854,6 +3862,29 @@ fn allows_text_input(key: BrowserKey, modifiers: gpui::Modifiers) -> bool {
         )
 }
 
+fn browser_surface_key_input(
+    pane: PaneId,
+    keystroke: &gpui::Keystroke,
+    action: TerminalKeyAction,
+) -> (InputMessage, bool) {
+    let text_follows = allows_text_input(browser_key(&keystroke.key), keystroke.modifiers);
+    (
+        InputMessage::BrowserSurfaceKey {
+            pane,
+            input: terminal_key_input(keystroke, action),
+            text_follows,
+        },
+        text_follows,
+    )
+}
+
+fn browser_surface_text_input(pane: PaneId, text: &str) -> InputMessage {
+    InputMessage::BrowserSurfaceText {
+        pane,
+        text: text.to_owned(),
+    }
+}
+
 fn cursor_style(cursor: BrowserCursor) -> CursorStyle {
     match cursor {
         BrowserCursor::Arrow | BrowserCursor::Wait | BrowserCursor::Help | BrowserCursor::None => {
@@ -4642,6 +4673,36 @@ mod tests {
             BrowserKey::Unidentified,
             gpui::Modifiers::default()
         ));
+    }
+
+    #[test]
+    fn gpui_browser_emits_one_correlatable_key_and_text_pair() {
+        let keystroke = Keystroke {
+            key: "x".to_owned(),
+            key_char: Some("x".to_owned()),
+            modifiers: gpui::Modifiers::default(),
+        };
+        let (key, text_follows) =
+            browser_surface_key_input(PaneId(7), &keystroke, TerminalKeyAction::Press);
+        assert!(text_follows);
+        assert!(matches!(
+            key,
+            InputMessage::BrowserSurfaceKey {
+                pane: PaneId(7),
+                input: TerminalKeyInput {
+                    action: TerminalKeyAction::Press,
+                    ..
+                },
+                text_follows: true,
+            }
+        ));
+        assert_eq!(
+            browser_surface_text_input(PaneId(7), "x"),
+            InputMessage::BrowserSurfaceText {
+                pane: PaneId(7),
+                text: "x".to_owned(),
+            }
+        );
     }
 
     #[test]

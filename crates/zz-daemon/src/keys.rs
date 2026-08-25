@@ -87,13 +87,17 @@ pub(crate) fn choose_buffer_key_action(
     }
 }
 
-pub(crate) fn send_tokens(sessions: &[Arc<TerminalSession>], tokens: &[KeyToken]) {
+pub(crate) fn send_tokens(sessions: &[Arc<TerminalSession>], tokens: &[KeyToken]) -> bool {
+    let mut sent = false;
     for token in tokens {
         match token {
             KeyToken::Literal(text) => {
                 let text = Arc::<str>::from(text.as_str());
                 for session in sessions {
-                    session.send_text(Arc::clone(&text));
+                    if !session.try_send_text(Arc::clone(&text)) {
+                        return false;
+                    }
+                    sent = true;
                 }
             }
             KeyToken::Named(name) => {
@@ -108,12 +112,16 @@ pub(crate) fn send_tokens(sessions: &[Arc<TerminalSession>], tokens: &[KeyToken]
                                 .expect("key input is retained until the last terminal")
                                 .clone()
                         };
-                        session.send_key(session_input);
+                        if !session.try_send_key(session_input) {
+                            return false;
+                        }
+                        sent = true;
                     }
                 }
             }
         }
     }
+    sent
 }
 
 fn named_key(name: &str) -> Option<KeyInput> {

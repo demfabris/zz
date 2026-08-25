@@ -264,6 +264,44 @@ wait_for_client_state() {
   fixture_failure "$side client state did not become $expected within 10 seconds; last state: ${LAST_CLIENT_STATE:-<empty>}"
 }
 
+attached_client_count() {
+  local side="$1"
+
+  side_command "$side" list-clients -F '#{client_session}' 2>/dev/null |
+    awk -v session="$INNER_SESSION" '$0 == session { count++ } END { print count + 0 }'
+}
+
+wait_for_attached_client_count() {
+  local side="$1"
+  local expected="$2"
+  local attempt
+  local count
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    count="$(attached_client_count "$side" || true)"
+    if [ "$count" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side attached client count did not become $expected within 10 seconds; last count: ${count:-0}"
+}
+
+assert_attached_client_count_stays() {
+  local side="$1"
+  local expected="$2"
+  local attempt
+  local count
+
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    count="$(attached_client_count "$side" || true)"
+    if [ "$count" != "$expected" ]; then
+      fixture_failure "$side attached client count changed during settle; expected $expected, got ${count:-0}"
+    fi
+    sleep 0.05
+  done
+}
+
 LAST_MODE_STATE=""
 wait_for_mode_state() {
   local side="$1"
@@ -401,20 +439,60 @@ wait_for_pane_marker() {
   fixture_failure "$side pane did not contain $marker within 10 seconds"
 }
 
-wait_for_terminal_ready() {
+pane_flattened_substring_count() {
   local side="$1"
-  local attempt
+  local marker="$2"
   local captured
 
+  captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_SESSION:0.0" 2>/dev/null || true)"
+  awk -v marker="$marker" '
+    { text = text (NR == 1 ? "" : " ") $0 }
+    END {
+      gsub(/[[:space:]]+/, "", text)
+      gsub(/[[:space:]]+/, "", marker)
+      while ((position = index(text, marker)) != 0) {
+        count++
+        text = substr(text, position + length(marker))
+      }
+      print count + 0
+    }
+  ' <<<"$captured"
+}
+
+wait_for_new_pane_flattened_substring() {
+  local side="$1"
+  local marker="$2"
+  local baseline="$3"
+  local attempt
+  local count
+
   for ((attempt = 0; attempt < 200; attempt++)); do
-    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-u F12 Enter
-    captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_SESSION:0.0" 2>/dev/null || true)"
-    if grep -Fq -- ATTACHED_TERMINAL_READY <<<"$captured"; then
+    count="$(pane_flattened_substring_count "$side" "$marker")"
+    if [ "$count" -gt "$baseline" ]; then
       return 0
     fi
     sleep 0.05
   done
-  fixture_failure "$side terminal did not resume after closing the buffer chooser"
+  fixture_failure "$side pane did not add flattened text containing $marker within 10 seconds"
+}
+
+wait_for_terminal_ready() {
+  local side="$1"
+  local attempt
+  local baseline
+  local count
+
+  baseline="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-u F12 Enter
+    count="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
+    if [ "$count" -gt "$baseline" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side terminal did not accept a fresh readiness binding within 10 seconds"
 }
 
 assert_buffer_parity() {
@@ -539,6 +617,8 @@ probe_choose_buffer_delete() {
 probe_nested_attach() {
   local side="$1"
   local nested_command
+  local refusal_count
+  local refusal_text="sessions should be nested with care, unset \$TMUX to force"
 
   if [ "$side" = "zz" ]; then
     printf -v nested_command '%q --socket %q attach-session -t %q' \
@@ -547,21 +627,168 @@ probe_nested_attach() {
     printf -v nested_command '%q -L %q attach-session -t %q' \
       "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION"
   fi
+  refusal_count="$(pane_flattened_substring_count "$side" "$refusal_text")"
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$nested_command"
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
-  wait_for_pane_marker "$side" "sessions should be nested with care, unset \$TMUX to force"
+  wait_for_new_pane_flattened_substring "$side" "$refusal_text" "$refusal_count"
+  assert_attached_client_count_stays "$side" 1
   wait_for_client_state "$side" root
+  wait_for_terminal_ready "$side"
+
+  if [ "$side" = "zz" ]; then
+    printf -v nested_command '%q --socket %q new-session -A -s %q' \
+      "$ZZ_BIN" "$ZZ_SOCKET" "$INNER_SESSION"
+  else
+    printf -v nested_command '%q -L %q new-session -A -s %q' \
+      "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION"
+  fi
+  refusal_count="$(pane_flattened_substring_count "$side" "$refusal_text")"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$nested_command"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_new_pane_flattened_substring "$side" "$refusal_text" "$refusal_count"
+  assert_attached_client_count_stays "$side" 1
+  wait_for_client_state "$side" root
+  wait_for_terminal_ready "$side"
+}
+
+probe_control_nested_terminal_facts() {
+  local side="$1"
+  local mode
+  local nested_command
+  local refusal_count
+  local refusal_text="sessions should be nested with care, unset \$TMUX to force"
+  local exit_count
+  local fresh_session="control-fresh-$side"
+  local attempt
+  local fresh_clients
+
+  for mode in attach new; do
+    if [ "$side" = "zz" ]; then
+      if [ "$mode" = "attach" ]; then
+        printf -v nested_command '%q --socket %q -C attach-session -t %q' \
+          "$ZZ_BIN" "$ZZ_SOCKET" "$INNER_SESSION"
+      else
+        printf -v nested_command '%q --socket %q -C new-session -A -s %q' \
+          "$ZZ_BIN" "$ZZ_SOCKET" "$INNER_SESSION"
+      fi
+    elif [ "$mode" = "attach" ]; then
+      printf -v nested_command '%q -L %q -C attach-session -t %q' \
+        "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION"
+    else
+      printf -v nested_command '%q -L %q -C new-session -A -s %q' \
+        "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION"
+    fi
+    refusal_count="$(pane_flattened_substring_count "$side" "$refusal_text")"
+    exit_count="$(pane_flattened_substring_count "$side" "%exit")"
+    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$nested_command"
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+    wait_for_new_pane_flattened_substring "$side" "$refusal_text" "$refusal_count"
+    wait_for_new_pane_flattened_substring "$side" "%exit" "$exit_count"
+    assert_attached_client_count_stays "$side" 1
+    wait_for_client_state "$side" root
+    wait_for_terminal_ready "$side"
+  done
+
+  if [ "$side" = "zz" ]; then
+    printf -v nested_command '%q --socket %q -C new-session -A -s %q' \
+      "$ZZ_BIN" "$ZZ_SOCKET" "$fresh_session"
+  else
+    printf -v nested_command '%q -L %q -C new-session -A -s %q' \
+      "$TMUX_BIN" "$INNER_SOCKET_NAME" "$fresh_session"
+  fi
+  exit_count="$(pane_flattened_substring_count "$side" "%exit")"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$nested_command"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    fresh_clients="$(side_command "$side" list-clients -F '#{client_session}' 2>/dev/null |
+      awk -v session="$fresh_session" '$0 == session { count++ } END { print count + 0 }')"
+    if [ "$fresh_clients" = 1 ]; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [ "$fresh_clients" != 1 ]; then
+    fixture_failure "$side Control new-session -A miss did not create and attach $fresh_session"
+  fi
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" detach-client
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_new_pane_flattened_substring "$side" "%exit" "$exit_count"
+  side_command "$side" kill-session -t "=$fresh_session" ||
+    fixture_failure "$side could not clean up $fresh_session"
+  wait_for_client_state "$side" root
+  wait_for_terminal_ready "$side"
+
+  if [ "$side" = "zz" ]; then
+    printf -v nested_command "printf 'detach-client\\n' | %q --socket %q -C attach-session -t %q" \
+      "$ZZ_BIN" "$ZZ_SOCKET" "$INNER_SESSION"
+  else
+    printf -v nested_command "printf 'detach-client\\n' | %q -L %q -C attach-session -t %q" \
+      "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION"
+  fi
+  refusal_count="$(pane_flattened_substring_count "$side" "$refusal_text")"
+  exit_count="$(pane_flattened_substring_count "$side" "%exit")"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$nested_command"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_new_pane_flattened_substring "$side" "%exit" "$exit_count"
+  if [ "$(pane_flattened_substring_count "$side" "$refusal_text")" != "$refusal_count" ]; then
+    fixture_failure "$side treated piped Control stdin as a nested tty"
+  fi
+  assert_attached_client_count_stays "$side" 1
+  wait_for_client_state "$side" root
+}
+
+probe_forced_nested_attaches() {
+  local side="$1"
+  local mode
+  local nested_command
+  local root_tty
+
+  for mode in attach new; do
+    if [ "$side" = "zz" ]; then
+      if [ "$mode" = "attach" ]; then
+        printf -v nested_command 'env -u TMUX %q --socket %q attach-session -t %q' \
+          "$ZZ_BIN" "$ZZ_SOCKET" "$INNER_SESSION"
+      else
+        printf -v nested_command 'env -u TMUX %q --socket %q new-session -A -s %q' \
+          "$ZZ_BIN" "$ZZ_SOCKET" "$INNER_SESSION"
+      fi
+    elif [ "$mode" = "attach" ]; then
+      printf -v nested_command 'env -u TMUX %q -L %q attach-session -t %q' \
+        "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION"
+    else
+      printf -v nested_command 'env -u TMUX %q -L %q new-session -A -s %q' \
+        "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION"
+    fi
+    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$nested_command"
+    tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+    wait_for_attached_client_count "$side" 2
+    root_tty="$(tmux_outer_command display-message -p -t "$OUTER_SESSION:$side" '#{pane_tty}')"
+    [ -n "$root_tty" ] || fixture_failure "$side root attach did not publish a tty"
+    side_command "$side" detach-client -a -t "$root_tty"
+    wait_for_attached_client_count "$side" 1
+    wait_for_client_state "$side" root
+  done
+  wait_for_terminal_ready "$side"
 }
 
 probe_display_panes_target_no_select() {
   local side="$1"
   local client_name
+  local client_tty
   local error
+  local linux_basename
+  local stripped_tty
+  local target
 
   client_name="$(side_command "$side" list-clients -F '#{client_name}')"
   if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
     fixture_failure "$side did not report exactly one target client name"
   fi
+  client_tty="$(tmux_outer_command display-message -p -t "$OUTER_SESSION:$side" '#{pane_tty}')"
+  if [[ "$client_tty" != /dev/* ]]; then
+    fixture_failure "$side outer pane did not expose an attached client tty"
+  fi
+  stripped_tty="${client_tty#/dev/}"
   if error="$(side_command "$side" display-panes -t missing -d not-a-delay 2>&1)"; then
     fixture_failure "$side accepted a missing display-panes target"
   fi
@@ -569,10 +796,65 @@ probe_display_panes_target_no_select() {
   if [[ "$error" != *"can't find client: missing"* ]] || [[ "$error" == *"delay"* ]]; then
     fixture_failure "$side resolved display-panes delay before target; got: ${error:-<empty>}"
   fi
+  for target in "$client_tty" "$client_tty:" "$stripped_tty" "$stripped_tty:"; do
+    if error="$(side_command "$side" display-panes -t "$target" -d not-a-delay 2>&1)"; then
+      fixture_failure "$side accepted an invalid display-panes delay for tty target $target"
+    fi
+    error="${error//$'\r'/}"
+    if [[ "$error" == *"can't find client"* ]] || [[ "$error" != *"delay"* ]]; then
+      fixture_failure "$side did not resolve tty target $target before delay validation; got: ${error:-<empty>}"
+    fi
+  done
+  linux_basename="${stripped_tty##*/}"
+  if [ "$linux_basename" = "$stripped_tty" ]; then
+    linux_basename=3
+  fi
+  if [ "$linux_basename" = "$client_name" ]; then
+    if error="$(side_command "$side" display-panes -t "$linux_basename" -d not-a-delay 2>&1)"; then
+      fixture_failure "$side accepted an invalid display-panes delay for exact client name $linux_basename"
+    fi
+    error="${error//$'\r'/}"
+    if [[ "$error" == *"can't find client"* ]] || [[ "$error" != *"delay"* ]]; then
+      fixture_failure "$side did not preserve exact client-name precedence for $linux_basename; got: ${error:-<empty>}"
+    fi
+  else
+    if error="$(side_command "$side" display-panes -t "$linux_basename" -d not-a-delay 2>&1)"; then
+      fixture_failure "$side accepted Linux tty basename target $linux_basename"
+    fi
+    error="${error//$'\r'/}"
+    if [[ "$error" != *"can't find client: $linux_basename"* ]] || [[ "$error" == *"delay"* ]]; then
+      fixture_failure "$side did not reject Linux tty basename before delay validation; got: ${error:-<empty>}"
+    fi
+  fi
   side_command "$side" display-panes -bN -t "$client_name:" -d 0 || \
     fixture_failure "$side could not target a non-selectable pane overlay"
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F11
   wait_for_marker "$side" 5a5a5a5a
+}
+
+probe_display_message_unattached_target() {
+  local side="$1"
+  local client_name
+  local target_client
+  local output
+  local -a command
+
+  client_name="$(side_command "$side" list-clients -F '#{client_name}')"
+  if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
+    fixture_failure "$side did not report exactly one display-message fallback client"
+  fi
+  for target_client in '' "$client_name" missing-client; do
+    command=(display-message -p -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}')
+    if [ -n "$target_client" ]; then
+      command=(display-message -p -c "$target_client" -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}')
+    fi
+    output="$(side_command "$side" "${command[@]}")" ||
+      fixture_failure "$side could not expand unattached-target client facts"
+    output="${output//$'\r'/}"
+    if [ "$output" != "$client_name|$INNER_SESSION|$CHOOSER_SESSION" ]; then
+      fixture_failure "$side selected the wrong unattached-target client facts for ${target_client:-omitted -c}; got: ${output:-<empty>}"
+    fi
+  done
 }
 
 probe_source_file_cwd() {
@@ -652,6 +934,26 @@ probe_list_keys_single() {
   wait_for_pane_marker "$side" ATTACHED_LIST_KEYS_RESUMED
 }
 
+probe_detach_client_tty() {
+  local side="$1"
+  local client_tty
+  local output
+
+  client_tty="$(tmux_outer_command display-message -p -t "$OUTER_SESSION:$side" '#{pane_tty}')"
+  if [[ "$client_tty" != /dev/* ]]; then
+    fixture_failure "$side outer pane did not expose an attached client tty"
+  fi
+  side_command "$side" detach-client -t "$client_tty" ||
+    fixture_failure "$side could not detach its tty-targeted client"
+  wait_for_attached_client_count "$side" 0
+  output="$(side_command "$side" display-message -p -c missing-client -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}')" ||
+    fixture_failure "$side could not print display-message facts without attached clients"
+  output="${output//$'\r'/}"
+  if [ "$output" != "||$CHOOSER_SESSION" ]; then
+    fixture_failure "$side did not leave client facts empty without attached clients; got: ${output:-<empty>}"
+  fi
+}
+
 zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 ZZ_PID=$!
 wait_for_socket
@@ -695,13 +997,21 @@ probe_choose_buffer_delete tmux
 assert_buffer_parity keep
 probe_display_panes_target_no_select zz
 probe_display_panes_target_no_select tmux
+probe_display_message_unattached_target zz
+probe_display_message_unattached_target tmux
 probe_list_keys_single zz
 probe_list_keys_single tmux
 probe_nested_attach zz
 probe_nested_attach tmux
+probe_control_nested_terminal_facts zz
+probe_control_nested_terminal_facts tmux
+probe_forced_nested_attaches zz
+probe_forced_nested_attaches tmux
 probe_source_file_cwd zz
 probe_source_file_cwd tmux
 probe_source_file_depth zz
 probe_source_file_depth tmux
+probe_detach_client_tty zz
+probe_detach_client_tty tmux
 
 printf 'attached-client compatibility: PASS\n'

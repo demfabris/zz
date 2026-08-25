@@ -15,3 +15,26 @@ out: show-options -gv @source_file_double_star_shallow
 out: show-options -gv @source_file_double_star_deep
 source-file 'compat/scenarios/source-file-glob/prefix-siblings/zz*/match.conf'
 out: show-options -gv @source_file_prefix_order
+source-file 'compat/scenarios/source-file-nested-client-cwd/a/entry.conf'
+out: show-options -gv @source_file_nested_replay_started
+out: show-options -gv @source_file_nested_client_cwd
+set-option -g @source_file_parse_only baseline
+set-environment -g SOURCE_FILE_PARSE_ASSIGN baseline
+set-environment -g SOURCE_FILE_PARSE_COMMAND baseline
+out: source-file -nv compat/scenarios/source-file-flags-parse-only.conf
+out: show-options -gqv @source_file_parse_only
+out: show-environment -g SOURCE_FILE_PARSE_ASSIGN
+out: show-environment -g SOURCE_FILE_PARSE_COMMAND
+new-session -d -s source-target
+set-environment -t w SOURCE_FILE_TARGET invoking
+set-environment -t source-target SOURCE_FILE_TARGET target-before
+source-file -t source-target:0 compat/scenarios/source-file-flags-target.conf
+out: show-environment -t source-target SOURCE_FILE_TARGET
+out: show-environment -t w SOURCE_FILE_TARGET
+set-environment -t source-target SOURCE_FILE_FORMAT_TARGET target-before
+source-file -F -t source-target:0 compat/scenarios/source-file-flags-#{session_name}.conf
+out: show-environment -t source-target SOURCE_FILE_FORMAT_TARGET
+source-file -t missing:0 compat/scenarios/source-file-flags-targetless.conf
+out: show-options -gqv @source_file_targetless
+out: source-file -v compat/scenarios/source-file-flags-beta.conf compat/scenarios/source-file-flags-alpha.conf
+out: show-options -gqv @source_file_verbose_order

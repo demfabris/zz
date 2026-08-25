@@ -20,11 +20,12 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
-    CellLayout, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution,
-    ExecutionContext, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
+    CellLayout, CommandAliasResolution, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope,
+    Execution, ExecutionContext, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
     PaneRuntimeFacts, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
-    canonical_command, command_block_body, display_width, expand_format_values, expand_status,
-    format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
+    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, display_width,
+    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
+    if_shell_truthy, parse_tmux_colour, send_keys_is_read_only_safe,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -32,16 +33,17 @@ use zz_protocol::{
     ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientHello, ClientId,
     ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
     CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
-    CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState, DisplayPanesAction,
-    DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES,
-    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState,
-    MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose,
-    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, ProtocolError, ProtocolMessage,
-    SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer, SplitId, StatusLine,
-    WindowId, canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into,
-    is_key_name, read_protocol_message_into,
+    CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
+    DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
+    MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES,
+    MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
+    MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource,
+    MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
+    PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
+    PopupBorderLines, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer,
+    SourceSpan, SplitId, StatusLine, WindowId, canonical_key, encode_protocol_message_into,
+    encode_terminal_viewport_event_into, is_key_name, read_protocol_message_into, resolve_command,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -70,7 +72,7 @@ use crate::{
     DaemonError, diagnostic_elapsed_us, diagnostic_timer,
     keys::{choose_buffer_key_action, choose_tree_key_action, input_key_name, send_tokens},
     lifecycle::DaemonIdentityGuard,
-    paths::{default_mux_config, home_directory, is_default_mux_config},
+    paths::{default_mux_config, home_directory},
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, DaemonFormatHooks, FormatHookFacts,
@@ -93,6 +95,7 @@ const MAX_SOURCE_INVOCATIONS: usize = 50;
 const MAX_RELIABLE_MESSAGES: usize = 256;
 const MAX_KITTY_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
 const MAX_PENDING_TERMINALS: usize = 128;
+const MAX_PENDING_COMMITTED_TEXT: usize = 32;
 /// What one pane's agent lane may hold before it is cleared in favour of a
 /// lag marker. A slow client degrades to replay instead of being closed.
 #[cfg(feature = "agent")]
@@ -3103,6 +3106,7 @@ impl Shared {
                 0,
                 &mut ConfigLoadReport::default(),
                 ClientTerminal::NoClient,
+                None,
                 &mut source_invocations,
             )?;
         }
@@ -3655,6 +3659,7 @@ impl Shared {
             copy_sessions,
             swallowed_keys,
             suppressed_text,
+            pending_committed_text,
             command_prompts,
             choose_trees,
             choose_buffers,
@@ -3666,7 +3671,7 @@ impl Shared {
         let attachment_count = attached.values().map(BTreeSet::len).sum::<usize>();
         log::info!(
             target: "zz_daemon::diagnostics::state",
-            "snapshot reason={reason} server_id={} stopping={} mux_generation={} sessions={} terminals={} command_outputs={} subscribers={} attachments={} visible_terminal_clients={} key_clients={} copy_sessions={} swallowed_key_clients={} suppressed_text_clients={} command_prompts={} choose_trees={} choose_buffers={} display_panes={} command_history={} paste_buffers={} active_copy_pipes={}",
+            "snapshot reason={reason} server_id={} stopping={} mux_generation={} sessions={} terminals={} command_outputs={} subscribers={} attachments={} visible_terminal_clients={} key_clients={} copy_sessions={} swallowed_key_clients={} suppressed_text_clients={} pending_committed_text_clients={} command_prompts={} choose_trees={} choose_buffers={} display_panes={} command_history={} paste_buffers={} active_copy_pipes={}",
             self.server_id,
             self.stopping.load(Ordering::Acquire),
             mux.generation,
@@ -3680,6 +3685,7 @@ impl Shared {
             copy_sessions.len(),
             swallowed_keys.len(),
             suppressed_text.len(),
+            pending_committed_text.len(),
             command_prompts.len(),
             choose_trees.len(),
             choose_buffers.len(),
@@ -3690,7 +3696,7 @@ impl Shared {
         );
         log::trace!(
             target: "zz_daemon::diagnostics::state",
-            "snapshot reason={reason} mux={mux:#?} attached={attached:#?} visible_terminals={visible_terminals:#?} key_clients={key_clients:#?} copy_sessions={copy_sessions:#?} swallowed_keys={swallowed_keys:#?} suppressed_text={suppressed_text:#?} command_prompt_clients={command_prompts:#?} choose_tree_clients={choose_trees:#?} choose_buffer_clients={choose_buffers:#?} display_panes_clients={display_panes:#?} command_history={command_history:#?} paste_buffers={paste_buffers:#?}",
+            "snapshot reason={reason} mux={mux:#?} attached={attached:#?} visible_terminals={visible_terminals:#?} key_clients={key_clients:#?} copy_sessions={copy_sessions:#?} swallowed_keys={swallowed_keys:#?} suppressed_text={suppressed_text:#?} pending_committed_text={pending_committed_text:#?} command_prompt_clients={command_prompts:#?} choose_tree_clients={choose_trees:#?} choose_buffer_clients={choose_buffers:#?} display_panes_clients={display_panes:#?} command_history={command_history:#?} paste_buffers={paste_buffers:#?}",
         );
         for (pane, terminal) in terminals {
             let viewport = terminal.latest_viewport();
@@ -3859,6 +3865,7 @@ impl Shared {
             inner.client_instances.remove(&client);
             inner.client_kinds.remove(&client);
             inner.client_terminals.remove(&client);
+            inner.nested_clients.remove(&client);
             inner.client_ttys.remove(&client);
             inner.client_sizes.remove(&client);
             inner.client_working_directories.remove(&client);
@@ -3874,9 +3881,11 @@ impl Shared {
             inner.prefix_armed.remove(&client);
             inner.swallowed_keys.remove(&client);
             inner.suppressed_text.remove(&client);
+            inner.pending_committed_text.remove(&client);
             inner.command_prompts.remove(&client);
             inner.choose_trees.remove(&client);
             inner.choose_buffers.remove(&client);
+            inner.message_ignore_keys.remove(&client);
             let _ = take_display_panes(&mut inner, client);
             inner.focused_windows.remove(&client);
             inner.client_terminal_input_sequences.remove(&client);
@@ -3956,6 +3965,7 @@ impl Shared {
         }
     }
 
+    #[cfg(test)]
     fn execute_command_request(
         self: &Arc<Self>,
         client: ClientId,
@@ -3964,7 +3974,30 @@ impl Shared {
         request_id: u64,
         command: &CommandInvocation,
     ) -> CommandResponse {
-        let (command, blocked) = self.prepare_command_request(client, command);
+        self.execute_command_request_with_prepared(
+            client, kind, context, request_id, command, false,
+        )
+    }
+
+    fn execute_command_request_with_prepared(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+    ) -> CommandResponse {
+        let (command, blocked) = match self.prepare_command_request(client, command, prepared) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return CommandResponse::Error {
+                    request_id,
+                    error,
+                    output: String::new(),
+                };
+            }
+        };
         if blocked {
             return CommandResponse::Error {
                 request_id,
@@ -4061,15 +4094,75 @@ impl Shared {
         &self,
         client: ClientId,
         command: &CommandInvocation,
-    ) -> (CommandInvocation, bool) {
+        prepared: bool,
+    ) -> Result<(CommandInvocation, bool), ServerError> {
         let inner = self.inner.lock();
-        let command = inner
-            .engine
-            .expand_command_alias(command)
-            .unwrap_or_else(|| command.clone());
+        let command = if prepared {
+            command.clone()
+        } else {
+            inner
+                .engine
+                .resolve_command_alias(command)
+                .into_command(command)?
+        };
         let blocked =
             inner.read_only_clients.contains(&client) && !command_is_read_only_safe(&command);
-        (command, blocked)
+        Ok((command, blocked))
+    }
+
+    fn prepare_command_list(&self, commands: Vec<CommandInvocation>) -> Vec<PreparedCommand> {
+        let inner = self.inner.lock();
+        commands
+            .into_iter()
+            .map(|typed| {
+                let (invocation, alias_matched, alias_error) =
+                    match inner.engine.resolve_command_alias(&typed) {
+                        CommandAliasResolution::Miss => (typed, false, None),
+                        CommandAliasResolution::Expanded(invocation) => (invocation, true, None),
+                        CommandAliasResolution::MatchedUnsupported(_) => (
+                            typed.clone(),
+                            true,
+                            Some(ServerError::CommandParse(format!(
+                                "unknown command: {}",
+                                typed.name
+                            ))),
+                        ),
+                    };
+                if let Some(error) = alias_error {
+                    return PreparedCommand {
+                        invocation,
+                        canonical_name: None,
+                        alias_matched,
+                        result: PreparedCommandResult::Error(error),
+                    };
+                }
+                match resolve_command(&invocation.name) {
+                    CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
+                        PreparedCommand {
+                            invocation,
+                            canonical_name: Some(name.to_owned()),
+                            alias_matched,
+                            result: PreparedCommandResult::Ready,
+                        }
+                    }
+                    CommandResolution::Ambiguous(message) => PreparedCommand {
+                        invocation,
+                        canonical_name: None,
+                        alias_matched,
+                        result: PreparedCommandResult::Error(ServerError::CommandParse(message)),
+                    },
+                    CommandResolution::Unknown => PreparedCommand {
+                        result: PreparedCommandResult::Error(ServerError::CommandParse(format!(
+                            "unknown command: {}",
+                            invocation.name
+                        ))),
+                        invocation,
+                        canonical_name: None,
+                        alias_matched,
+                    },
+                }
+            })
+            .collect()
     }
 
     fn execute(
@@ -4100,8 +4193,8 @@ impl Shared {
             .inner
             .lock()
             .engine
-            .expand_command_alias(command)
-            .unwrap_or_else(|| command.clone());
+            .resolve_command_alias(command)
+            .into_command(command)?;
         self.execute_with_mux_source_routed(client, kind, context, &routed, mux_source)
     }
 
@@ -4141,8 +4234,8 @@ impl Shared {
             .inner
             .lock()
             .engine
-            .expand_command_alias(command)
-            .unwrap_or_else(|| command.clone());
+            .resolve_command_alias(command)
+            .into_command(command)?;
         self.execute_with_mux_source_routed_for_terminal(
             client,
             kind,
@@ -4166,7 +4259,19 @@ impl Shared {
         let original_context = context.clone();
         let name = canonical_command(&command.name).to_owned();
         let previous_client_terminal = context_client_terminal(context);
+        let client_attached_context = if client_terminal == ClientTerminal::Present {
+            let inner = self.inner.lock();
+            client_attached_session(&inner, client).and_then(|session| {
+                let session_state = inner.engine.state.sessions.get(&session)?;
+                let window = client_focused_window(&inner, client, session_state);
+                let pane = inner.engine.state.windows.get(&window)?.active_pane;
+                Some((session, window, pane))
+            })
+        } else {
+            None
+        };
         set_context_client_terminal(context, client_terminal);
+        context.set_attached_client_context(client_attached_context);
         let result = self.execute_with_mux_source_raw(
             client,
             kind,
@@ -4176,6 +4281,7 @@ impl Shared {
             client_terminal,
         );
         set_context_client_terminal(context, previous_client_terminal);
+        context.copy_client_attachment(&original_context);
         let suppress_after_hook = matches!(
             &result,
             Ok(execution) if execution.effects.contains(&MuxEffect::SuppressAfterHook)
@@ -4243,12 +4349,14 @@ impl Shared {
                 match daemon_command_dispatch(canonical)
                     .expect("daemon command catalog and dispatch must agree")
                 {
-                    DaemonCommandDispatch::CapturePane => self.capture_pane(context, &command.args),
+                    DaemonCommandDispatch::CapturePane => {
+                        self.capture_pane(context, canonical, &command.args)
+                    }
                     DaemonCommandDispatch::RunShell => {
-                        self.run_shell(client, kind, context, &command.args)
+                        self.run_shell(client, kind, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::IfShell => {
-                        self.if_shell(client, kind, context, &command.args)
+                        self.if_shell(client, kind, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::AgentSend => self.agent_send(context, &command.args),
                     DaemonCommandDispatch::SendLastOutput => {
@@ -4261,9 +4369,12 @@ impl Shared {
                         Ok(debug_marker(client, context, &command.args))
                     }
                     DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
-                    DaemonCommandDispatch::Buffer => {
-                        self.buffer_command(context, canonical, &command.args)
-                    }
+                    DaemonCommandDispatch::Buffer => self.buffer_command_for_client(
+                        Some(client),
+                        context,
+                        canonical,
+                        &command.args,
+                    ),
                     DaemonCommandDispatch::ListClients => {
                         self.list_clients(context, canonical, &command.args)
                     }
@@ -4277,15 +4388,17 @@ impl Shared {
                         self.refresh_client(client, kind, canonical, &command.args)
                     }
                     DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &command.args),
-                    DaemonCommandDispatch::PipePane => self.pipe_pane(context, &command.args),
+                    DaemonCommandDispatch::PipePane => {
+                        self.pipe_pane(context, canonical, &command.args)
+                    }
                     DaemonCommandDispatch::DisplayPopup => {
-                        self.display_popup(client, kind, context, &command.args)
+                        self.display_popup(client, kind, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::DisplayMenu => {
-                        self.display_menu(client, kind, context, &command.args)
+                        self.display_menu(client, kind, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::ConfirmBefore => {
-                        self.confirm_before(client, kind, context, &command.args)
+                        self.confirm_before(client, kind, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::Lock => {
                         self.lock_command(client, context, canonical, &command.args)
@@ -4518,6 +4631,7 @@ impl Shared {
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
         let mut direct_events = Vec::new();
+        let mut targeted_events = Vec::new();
         let mut source_files = Vec::new();
         let mut removed_panes = Vec::new();
         let mut agent_panes_opened = Vec::new();
@@ -4542,7 +4656,6 @@ impl Shared {
         let mut monitor_silence_changed = false;
         let mut attach = None;
         let mut detach = None;
-        let mut detached_session = None;
         let mut reload_config = false;
         let mut snapshot_changed = false;
         let mut mux_options_changed = false;
@@ -4596,7 +4709,36 @@ impl Shared {
                     );
                 }
             }
-            let facts = format_hook_facts(&inner);
+            let mut facts = format_hook_facts(&inner);
+            if command_name == "display-message" {
+                let (target, target_client) = inner
+                    .engine
+                    .display_message_format_target(context, &command.args)?;
+                let target_session = target.and_then(|target| target.session);
+                let destination = target_client
+                    .as_deref()
+                    .and_then(|target| resolve_display_message_client(&inner, target));
+                facts.client = target_session.and_then(|session| {
+                    let target_is_attached = inner
+                        .attached
+                        .get(&session)
+                        .is_some_and(|clients| !clients.is_empty());
+                    (target_client.is_some() || !target_is_attached)
+                        .then(|| {
+                            destination
+                                .filter(|client| {
+                                    client_attached_session(&inner, *client) == Some(session)
+                                })
+                                .or_else(|| best_display_message_format_client(&inner, session))
+                        })
+                        .flatten()
+                        .and_then(|client| {
+                            client_attached_session(&inner, client).map(|client_session| {
+                                client_format_facts(&inner, client, client_session)
+                            })
+                        })
+                });
+            }
             let status_options = inner.engine.status_row_variables_for_session(None);
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
@@ -4606,14 +4748,29 @@ impl Shared {
             inner.engine.set_format_now(unix_timestamp());
             let mut prospective_context = context.clone();
             set_context_client_terminal(&mut prospective_context, client_terminal);
-            let command_will_attach = command_name == "attach-session"
-                || (command_name == "new-session"
-                    && inner
+            let nested_attach_guard = match (command_name, nested_attach_refusal(&inner, client)) {
+                ("attach-session", Some(refusal)) => return Err(refusal.into()),
+                ("new-session", Some(refusal))
+                    if kind != ClientKind::Control
+                        && inner.engine.new_session_needs_attach_preflight(
+                            &prospective_context,
+                            &command.args,
+                        )? =>
+                {
+                    return Err(refusal.into());
+                }
+                (_, Some(refusal)) => Some((
+                    refusal,
+                    inner
                         .engine
-                        .new_session_will_attach(&prospective_context, &command.args)?);
-            if command_will_attach && let Some(refusal) = nested_attach_refusal(&inner, client) {
-                return Err(refusal.into());
-            }
+                        .state
+                        .sessions
+                        .keys()
+                        .copied()
+                        .collect::<BTreeSet<_>>(),
+                )),
+                (_, None) => None,
+            };
             context.set_client_size(inner.client_sizes.get(&client).copied());
             context.set_client_working_directory(
                 inner.client_working_directories.get(&client).cloned(),
@@ -4628,6 +4785,17 @@ impl Shared {
             );
             set_context_client_terminal(context, previous_client_terminal);
             let mut execution = execution?;
+            if let Some((refusal, existing_sessions)) = nested_attach_guard
+                && execution.effects.iter().any(|effect| {
+                    matches!(
+                        effect,
+                        MuxEffect::Attach { session, .. } if existing_sessions.contains(session)
+                    )
+                })
+            {
+                context.retarget(&prospective_context);
+                return Err(refusal.into());
+            }
             if !inner.engine.state.sessions.is_empty() {
                 self.exit_empty_armed.store(true, Ordering::Release);
             }
@@ -5194,7 +5362,7 @@ impl Shared {
                             );
                         }
                     }
-                    MuxEffect::SendKeys { pane, keys } => {
+                    MuxEffect::SendKeys { pane, keys, repeat } => {
                         let sinks = resolve_input_sinks(&inner, *pane)?;
                         let mut terminals = Vec::new();
                         for sink in sinks {
@@ -5205,7 +5373,14 @@ impl Shared {
                                 PaneSink::Browser(target) => {
                                     client_events.push(EventPayload::BrowserCommand {
                                         pane: target,
-                                        command: BrowserCommand::SendKeys(keys.clone()),
+                                        command: if *repeat == 1 {
+                                            BrowserCommand::SendKeys(keys.clone())
+                                        } else {
+                                            BrowserCommand::SendKeysRepeated {
+                                                keys: keys.clone(),
+                                                count: (*repeat).min(MAX_BROWSER_KEY_REPEAT),
+                                            }
+                                        },
                                     });
                                 }
                             }
@@ -5214,6 +5389,7 @@ impl Shared {
                             deferred_terminal_commands.push(DeferredTerminalCommand::SendTokens {
                                 terminals,
                                 keys: keys.clone(),
+                                repeat: *repeat,
                             });
                         }
                     }
@@ -5248,14 +5424,20 @@ impl Shared {
                             .get(pane)
                             .cloned()
                             .ok_or(ServerError::PaneExited(*pane))?;
-                        let targets: Vec<ClientId> =
-                            if client_is_attached_to_pane(&inner, client, *pane) {
-                                vec![client]
-                            } else {
-                                attached_clients_for_pane(&inner, *pane)
-                                    .map(|clients| clients.iter().copied().collect())
-                                    .unwrap_or_default()
-                            };
+                        let caller_attached = client_is_attached_to_pane(&inner, client, *pane);
+                        if inner.read_only_clients.contains(&client) && !caller_attached {
+                            return Err(ServerError::InvalidCommand(
+                                "client is read-only".to_owned(),
+                            )
+                            .into());
+                        }
+                        let targets: Vec<ClientId> = if caller_attached {
+                            vec![client]
+                        } else {
+                            attached_clients_for_pane(&inner, *pane)
+                                .map(|clients| clients.iter().copied().collect())
+                                .unwrap_or_default()
+                        };
                         if targets.is_empty() {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -5408,7 +5590,6 @@ impl Shared {
                             &mut resume_client_terminals,
                         );
                         inner.swallowed_keys.remove(&client);
-                        inner.suppressed_text.remove(&client);
                         let state = chooser.rendered.clone();
                         inner.choose_trees.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseTree { state: Some(state) });
@@ -5455,7 +5636,6 @@ impl Shared {
                             &mut resume_client_terminals,
                         );
                         inner.swallowed_keys.remove(&client);
-                        inner.suppressed_text.remove(&client);
                         let state = chooser.rendered.clone();
                         inner.choose_buffers.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseBuffer { state: Some(state) });
@@ -5495,7 +5675,6 @@ impl Shared {
                         );
                         let _ = take_display_panes(&mut inner, client);
                         inner.swallowed_keys.remove(&client);
-                        inner.suppressed_text.remove(&client);
                         inner.next_display_panes_token =
                             inner.next_display_panes_token.wrapping_add(1).max(1);
                         let token = inner.next_display_panes_token;
@@ -5526,28 +5705,58 @@ impl Shared {
                     }
                     MuxEffect::DisplayMessage {
                         pane,
+                        target_client,
                         text,
                         duration_ms,
                         freeze,
+                        ignore_keys,
                     } => {
+                        let message_client = match target_client.as_deref() {
+                            Some(target) => resolve_display_message_client(&inner, target),
+                            None => Some(client),
+                        };
+                        let Some(message_client) = message_client else {
+                            continue;
+                        };
+                        let duration_ms =
+                            duration_ms.unwrap_or_else(|| {
+                                inner.engine.display_time_for_client_session(
+                                    client_attached_session(&inner, message_client),
+                                )
+                            });
                         push_server_message(&mut inner, text.clone());
                         let message_id = next_timed_message_id(&mut inner);
-                        direct_events.push(EventPayload::TimedClientMessage {
+                        let event = EventPayload::TimedClientMessage {
                             pane: *pane,
                             kind: ClientMessageKind::Info,
                             text: text.clone(),
-                            duration_ms: *duration_ms,
+                            duration_ms,
                             message_id,
-                        });
-                        if inner.client_kinds.get(&client) == Some(&ClientKind::Interactive) {
+                        };
+                        if message_client == client {
+                            direct_events.push(event);
+                        } else {
+                            targeted_events.push((message_client, event));
+                        }
+                        if inner.client_kinds.get(&message_client) == Some(&ClientKind::Interactive)
+                        {
+                            if duration_ms != 0 {
+                                if *ignore_keys {
+                                    inner.message_ignore_keys.insert(message_client);
+                                } else {
+                                    inner.message_ignore_keys.remove(&message_client);
+                                }
+                            }
                             let (previous, schedule) = arm_client_message(
                                 &mut inner,
-                                client,
+                                message_client,
                                 message_id,
-                                *duration_ms,
+                                duration_ms,
                                 *freeze,
                             );
-                            client_message_retires.extend(previous);
+                            if let Some(previous) = previous {
+                                client_message_retires.push((message_client, previous));
+                            }
                             client_message_schedule = schedule;
                         }
                     }
@@ -5567,6 +5776,9 @@ impl Shared {
                                 duration_ms: *duration_ms,
                                 message_id,
                             });
+                            if *duration_ms != 0 {
+                                inner.message_ignore_keys.remove(&client);
+                            }
                             let (previous, schedule) = arm_client_message(
                                 &mut inner,
                                 client,
@@ -5574,7 +5786,9 @@ impl Shared {
                                 *duration_ms,
                                 *freeze,
                             );
-                            client_message_retires.extend(previous);
+                            if let Some(previous) = previous {
+                                client_message_retires.push((client, previous));
+                            }
                             client_message_schedule = schedule;
                         } else {
                             append_inserted_output(&mut execution.output, text);
@@ -5732,13 +5946,49 @@ impl Shared {
                         detach_others,
                         read_only,
                     } => attach = Some((*session, *detach_others, *read_only)),
-                    MuxEffect::Detach(scope) => {
-                        detach = Some(*scope);
-                        detached_session = client_attached_session(&inner, client);
+                    MuxEffect::Detach(request) => {
+                        let target_client = resolve_client_target(
+                            &inner,
+                            client,
+                            kind,
+                            request.target_client.as_deref(),
+                        )?;
+                        if inner.read_only_clients.contains(&client)
+                            && (!matches!(request.scope, DetachScope::Client)
+                                || target_client != client)
+                        {
+                            return Err(ServerError::InvalidCommand(
+                                "client is read-only".to_owned(),
+                            )
+                            .into());
+                        }
+                        detach = match &request.scope {
+                            DetachScope::Client => Some(ResolvedDetach::Client(target_client)),
+                            DetachScope::Others => Some(ResolvedDetach::Others(target_client)),
+                            DetachScope::Session(target) => match inner
+                                .engine
+                                .state
+                                .resolve_session(Some(target), context.session)
+                            {
+                                Ok(session) => Some(ResolvedDetach::Session(session)),
+                                Err(ServerError::SessionNotFound(_)) => None,
+                                Err(error) => return Err(error.into()),
+                            },
+                        };
                     }
-                    MuxEffect::SourceFile { path, quiet } => {
-                        source_files.push((path.clone(), *quiet));
-                    }
+                    MuxEffect::SourceFile {
+                        path,
+                        quiet,
+                        parse_only,
+                        verbose,
+                        context,
+                    } => source_files.push(SourceFileRequest {
+                        path: path.clone(),
+                        quiet: *quiet,
+                        parse_only: *parse_only,
+                        verbose: *verbose,
+                        context: context.clone(),
+                    }),
                     MuxEffect::RunHook {
                         name,
                         commands,
@@ -5753,7 +6003,9 @@ impl Shared {
                     } => {
                         pane_format_output = Some((*pane, format.clone(), *active_session));
                     }
-                    MuxEffect::ReloadConfig => reload_config = true,
+                    MuxEffect::ReloadConfig => {
+                        reload_config = true;
+                    }
                     MuxEffect::KillServer => shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
                     MuxEffect::ModeStylesChanged => mode_styles_changed = true,
@@ -5794,7 +6046,8 @@ impl Shared {
                     &facts,
                     (!format_variables.is_empty()).then_some(&format_variables),
                 )
-                .with_status_options(&status_options);
+                .with_status_options(&status_options)
+                .with_command_item(command_name);
                 let mut output =
                     inner
                         .engine
@@ -5910,20 +6163,11 @@ impl Shared {
         }
         match detach {
             None => {}
-            Some(DetachScope::Client) => {
-                if let Some(session) = detached_session {
-                    self.publish_to_client(client, EventPayload::detached_evicted(session, None));
-                }
-                self.detach_with_event_hooks(client, event_hooks_enabled);
-            }
-            Some(DetachScope::Others) => {
-                self.evict_clients_with_event_hooks(None, client, event_hooks_enabled);
-            }
-            Some(DetachScope::Session(session)) => {
-                self.evict_clients_with_event_hooks(Some(session), client, event_hooks_enabled);
-                if detached_session == Some(session) {
-                    self.publish_to_client(client, EventPayload::detached_evicted(session, None));
-                    self.detach_with_event_hooks(client, event_hooks_enabled);
+            Some(detach) => {
+                let victims = requested_detach_victims(&self.inner.lock(), detach);
+                for (session, victim) in victims {
+                    self.publish_to_client(victim, EventPayload::detached_requested(session, None));
+                    self.detach_with_event_hooks(victim, event_hooks_enabled);
                 }
             }
         }
@@ -5972,8 +6216,11 @@ impl Shared {
         for event in direct_events {
             self.publish_to_client(client, event);
         }
-        for retired in client_message_retires {
-            self.retire_client_message(client, retired, false);
+        for (target, event) in targeted_events {
+            self.publish_to_client(target, event);
+        }
+        for (target, retired) in client_message_retires {
+            self.retire_client_message(target, retired, false);
         }
         if let Some(retired) = prompt_cleared_message {
             self.retire_client_message(client, retired, true);
@@ -6035,23 +6282,34 @@ impl Shared {
         } else if !status_refresh_sessions.is_empty() {
             self.refresh_status_for_sessions(false, Some(&status_refresh_sessions));
         }
-        let source_working_directory = (!source_files.is_empty()).then(|| {
+        let source_working_directory = (reload_config || !source_files.is_empty()).then(|| {
             context
                 .client_working_directory()
                 .map(Path::to_owned)
                 .or_else(home_directory)
                 .unwrap_or_else(|| PathBuf::from("/"))
         });
+        let source_client_base = if client == ClientId(u64::MAX) {
+            None
+        } else {
+            let inner = self.inner.lock();
+            inner
+                .client_kinds
+                .contains_key(&client)
+                .then(|| source_working_directory.clone())
+                .flatten()
+        };
         let mut source_file_error = None;
         let mut control_source_errors = Vec::new();
         let mut control_source_matched = false;
         let mut source_invocations = SourceInvocationAccounting::default();
-        for (path, quiet) in source_files {
+        for request in source_files {
+            let path = request.path;
             if path == "-" {
                 self.publish_to_client(
                     client,
                     EventPayload::ClientMessage {
-                        pane: context.pane,
+                        pane: request.context.pane,
                         kind: ClientMessageKind::Warning,
                         text: STANDARD_INPUT_SOURCE_WARNING.to_owned(),
                     },
@@ -6070,16 +6328,16 @@ impl Shared {
                 if kind == ClientKind::Control {
                     control_source_errors.push(text);
                 } else {
-                    self.route_source_error(client, kind, context.pane, &text);
+                    self.route_source_error(client, kind, request.context.pane, &text);
                 }
             }
             if matches.paths.is_empty() && matches.errors.is_empty() {
-                if !quiet {
+                if !request.quiet {
                     let error = missing_source_error(&declared_path);
                     if kind == ClientKind::Control {
                         control_source_errors.push(error);
                     } else {
-                        self.route_source_error(client, kind, context.pane, &error);
+                        self.route_source_error(client, kind, request.context.pane, &error);
                     }
                 }
                 continue;
@@ -6088,46 +6346,84 @@ impl Shared {
                 control_source_matched = true;
             }
             for path in matches.paths {
-                if is_default_mux_config(&path) {
-                    reload_config = true;
-                } else {
-                    let mut report = ConfigLoadReport::default();
-                    if let Err(error) = self.load_config_file_with_report_for_terminal(
-                        &path,
-                        context,
-                        0,
-                        &mut report,
-                        client_terminal,
-                        &mut source_invocations,
-                    ) {
-                        if source_file_error.is_none() {
-                            source_file_error = Some(error);
-                        }
-                        continue;
-                    }
-                    self.apply_stored_mux_config_overrides("source-file-replay");
-                    if kind == ClientKind::Command {
-                        for diagnostic in report.diagnostics() {
-                            self.record_command_stdout(client, diagnostic);
-                            self.record_command_failure(client);
-                        }
-                    }
-                    self.route_config_source_errors(client, kind, context.pane, &report);
-                    if kind == ClientKind::Command
-                        && let Some(skipped) = report.skipped_summary()
+                let options = SourceFileLoadOptions {
+                    parse_only: request.parse_only,
+                    verbose: request.verbose && kind != ClientKind::Control,
+                    suppress_verbose: kind == ClientKind::Control,
+                    control_client: (kind == ClientKind::Control).then_some(client),
+                };
+                let mut source_context = request.context.clone();
+                let mut report = ConfigLoadReport::default();
+                if let Err(error) = self.load_config_file_with_report_for_terminal_and_options(
+                    &path,
+                    &mut source_context,
+                    0,
+                    &mut report,
+                    client_terminal,
+                    source_client_base.as_deref(),
+                    &mut source_invocations,
+                    options,
+                ) {
+                    if kind == ClientKind::Control
+                        && let DaemonError::Io(error) = error
                     {
-                        self.record_command_stderr(client, &skipped);
-                    }
-                    if let Some(summary) = report.message() {
+                        let warning = source_glob_error_warning(&path, &error.to_string());
+                        self.inner
+                            .lock()
+                            .command_streams
+                            .entry(client)
+                            .or_default()
+                            .exit_code = 1;
                         self.publish_to_client(
                             client,
                             EventPayload::ClientMessage {
-                                pane: context.pane,
-                                kind: ClientMessageKind::Warning,
-                                text: summary,
+                                pane: request.context.pane,
+                                kind: ClientMessageKind::Error,
+                                text: warning,
                             },
                         );
+                        continue;
                     }
+                    if source_file_error.is_none() {
+                        source_file_error = Some(error);
+                    }
+                    continue;
+                }
+                if !request.parse_only {
+                    self.apply_stored_mux_config_overrides("source-file-replay");
+                }
+                self.route_source_verbose(
+                    client,
+                    kind,
+                    request.context.pane,
+                    report.verbose_lines(),
+                );
+                if kind == ClientKind::Command {
+                    for diagnostic in report.diagnostics() {
+                        self.record_command_stdout(client, diagnostic);
+                        self.record_command_failure(client);
+                    }
+                }
+                self.route_config_replay_errors(client, kind, request.context.pane, &report);
+                if kind == ClientKind::Command
+                    && let Some(skipped) = report.skipped_summary()
+                {
+                    self.record_command_stderr(client, &skipped);
+                }
+                let summary = if kind == ClientKind::Control && report.control_guarded {
+                    report.skipped_summary()
+                } else {
+                    report.message()
+                };
+                if let Some(summary) = summary {
+                    self.publish_to_client(
+                        client,
+                        EventPayload::ClientMessage {
+                            pane: request.context.pane,
+                            kind: ClientMessageKind::Warning,
+                            text: summary,
+                        },
+                    );
                 }
             }
         }
@@ -6145,7 +6441,12 @@ impl Shared {
             }
         }
         if reload_config
-            && let Err(error) = self.reload_user_config(client, context)
+            && let Err(error) = self.reload_user_config_with_source_base(
+                client,
+                context,
+                source_client_base.as_deref(),
+                SourceFileLoadOptions::default(),
+            )
             && source_file_error.is_none()
         {
             source_file_error = Some(error);
@@ -6225,6 +6526,7 @@ impl Shared {
     fn capture_pane(
         self: &Arc<Self>,
         context: &ExecutionContext,
+        command_name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let mut parsed = parse_capture_pane_args(args)?;
@@ -6242,7 +6544,8 @@ impl Shared {
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 context.format_variables(),
-            );
+            )
+            .with_command_item(command_name);
             let start = resolve_capture_boundary(
                 &inner.engine,
                 parsed.start.as_deref(),
@@ -6347,7 +6650,7 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args("wait-for", args, &[], &['L', 'S', 'U'])?;
         let [name] = parsed.positional.as_slice() else {
-            return Err(ServerError::InvalidCommand(WAIT_FOR_USAGE.to_owned()).into());
+            return Err(ServerError::CommandParse(WAIT_FOR_USAGE.to_owned()).into());
         };
         if parsed.has('S') {
             let wakes = {
@@ -6459,11 +6762,12 @@ impl Shared {
     fn pipe_pane(
         self: &Arc<Self>,
         context: &ExecutionContext,
+        command_name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args("pipe-pane", args, &['t'], &['I', 'O', 'o'])?;
         if parsed.positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(PIPE_PANE_USAGE.to_owned()).into());
+            return Err(ServerError::CommandParse(PIPE_PANE_USAGE.to_owned()).into());
         }
         let _serial = self.pipe_effects.lock();
         let (pane, terminal, old_pipe) = {
@@ -6514,7 +6818,8 @@ impl Shared {
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 context.format_variables(),
-            );
+            )
+            .with_command_item(command_name);
             let command =
                 inner
                     .engine
@@ -7065,6 +7370,7 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
+        command_name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_run_shell_args(args)?;
@@ -7106,7 +7412,8 @@ impl Shared {
                             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                                 &facts,
                                 command_context.format_variables(),
-                            );
+                            )
+                            .with_command_item(command_name);
                             InsertedCommandSource::String(expand_format_values(
                                 command,
                                 &format_context,
@@ -7127,7 +7434,8 @@ impl Shared {
                             .enumerate()
                             .map(|(index, value)| ((index + 1).to_string(), value.clone())),
                     );
-                    let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables);
+                    let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables)
+                        .with_command_item(command_name);
                     InsertedCommandSource::Shell(expand_format_values(
                         command,
                         &format_context,
@@ -7142,7 +7450,7 @@ impl Shared {
         };
 
         if matches!(&command, Some(InsertedCommandSource::Block(_))) && !parsed.command_mode {
-            return Err(ServerError::InvalidCommand(RUN_SHELL_USAGE.to_owned()).into());
+            return Err(ServerError::CommandParse(RUN_SHELL_USAGE.to_owned()).into());
         }
 
         let route = RunShellRoute {
@@ -7297,6 +7605,7 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
+        command_name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_if_shell_args(args)?;
@@ -7324,7 +7633,8 @@ impl Shared {
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 command_context.format_variables(),
-            );
+            )
+            .with_command_item(command_name);
             let condition =
                 expand_format_values(&parsed.positional[0], &format_context, &mut hooks);
             let cwd = job_working_directory(&inner, &command_context, None);
@@ -7471,7 +7781,7 @@ impl Shared {
             inner.engine.parse_config(label, input)
         };
         if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
-            return Err(ServerError::InvalidCommand(diagnostic.message).into());
+            return Err(ServerError::CommandParse(diagnostic.message).into());
         }
         let mut result = InsertedCommandResult::default();
         for command in parsed.commands {
@@ -7620,7 +7930,9 @@ impl Shared {
         uppercase: bool,
     ) {
         let mut message = daemon_error_text(error);
-        if uppercase {
+        if uppercase
+            && self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Interactive)
+        {
             uppercase_first(&mut message);
         }
         push_server_message(&mut self.inner.lock(), message.clone());
@@ -7784,7 +8096,7 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_capture_browser_args(args)?;
         let output = parsed.output.ok_or_else(|| {
-            ServerError::InvalidCommand("capture-browser needs an output path (-o)".to_owned())
+            ServerError::CommandParse("capture-browser needs an output path (-o)".to_owned())
         })?;
         let path = expand_path(&output);
         if !path.is_absolute() {
@@ -8009,13 +8321,15 @@ impl Shared {
             );
             if let Some(filter) = parsed.value('f') {
                 let mut hooks =
-                    DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables));
+                    DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables))
+                        .with_command_item(name);
                 if !format_true(&expand_format_values(filter, &format_context, &mut hooks)) {
                     continue;
                 }
             }
             let mut hooks =
-                DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables));
+                DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables))
+                    .with_command_item(name);
             output.push(expand_format_values(format, &format_context, &mut hooks));
         }
         Ok(Execution {
@@ -8040,7 +8354,7 @@ impl Shared {
         require_no_positionals("switch-client", &parsed)?;
         let target_client = {
             let inner = self.inner.lock();
-            resolve_switch_client_target(&inner, invoking_client, kind, parsed.value('c'))?
+            resolve_client_target(&inner, invoking_client, kind, parsed.value('c'))?
         };
         let (walk_session, mut target_session, target_window, target_pane) = {
             let inner = self.inner.lock();
@@ -8434,7 +8748,7 @@ impl Shared {
             &['c', 'D', 'l', 'L', 'R', 'S', 'U'],
         )?;
         if parsed.positional.len() > 1 {
-            return Err(ServerError::InvalidCommand(
+            return Err(ServerError::CommandParse(
                 "refresh-client accepts at most one adjustment".to_owned(),
             )
             .into());
@@ -8512,6 +8826,7 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &ExecutionContext,
+        command_name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_popup_args(args)?;
@@ -8572,7 +8887,7 @@ impl Shared {
             let (title, border_lines) = {
                 let inner = self.inner.lock();
                 let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                    expand_popup_value(&inner, &target, context.session, title)
+                    expand_popup_value(&inner, &target, context.session, Some(command_name), title)
                 });
                 let border_lines = if parsed.borderless {
                     Some(PopupBorderLines::None)
@@ -8690,15 +9005,22 @@ impl Shared {
                 geometry.rows,
                 width,
                 height,
-                |value| expand_popup_value(&inner, &target, context.session, value),
+                |value| {
+                    expand_popup_value(&inner, &target, context.session, Some(command_name), value)
+                },
             );
             let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                expand_popup_value(&inner, &target, context.session, title)
+                expand_popup_value(&inner, &target, context.session, Some(command_name), title)
             });
-            let requested_cwd = parsed
-                .start_directory
-                .as_deref()
-                .map(|directory| expand_popup_value(&inner, &target, context.session, directory));
+            let requested_cwd = parsed.start_directory.as_deref().map(|directory| {
+                expand_popup_value(
+                    &inner,
+                    &target,
+                    context.session,
+                    Some(command_name),
+                    directory,
+                )
+            });
             let working_directory =
                 job_working_directory(&inner, &target, requested_cwd.as_deref());
             let shell = terminal_shell_for_session(&inner.engine, session)?;
@@ -8850,6 +9172,7 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &ExecutionContext,
+        command_name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_menu_args(args)?;
@@ -8886,7 +9209,7 @@ impl Shared {
                 .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
             let defaults = inner.engine.menu_options_for_window(window)?;
             let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                expand_popup_value(&inner, &target, context.session, title)
+                expand_popup_value(&inner, &target, context.session, Some(command_name), title)
             });
             let mut items = Vec::new();
             let mut commands = Vec::new();
@@ -8902,14 +9225,13 @@ impl Shared {
                     continue;
                 }
                 if parsed.items.len().saturating_sub(index) < 2 {
-                    return Err(
-                        ServerError::InvalidCommand("not enough arguments".to_owned()).into(),
-                    );
+                    return Err(ServerError::CommandParse("not enough arguments".to_owned()).into());
                 }
                 let key = &parsed.items[index];
                 let command = &parsed.items[index.saturating_add(1)];
                 index = index.saturating_add(2);
-                let name = expand_popup_value(&inner, &target, context.session, name);
+                let name =
+                    expand_popup_value(&inner, &target, context.session, Some(command_name), name);
                 if name.is_empty() {
                     continue;
                 }
@@ -8920,7 +9242,13 @@ impl Shared {
                     name.strip_prefix('-').unwrap_or_default().to_owned()
                 };
                 let key = enabled.then(|| menu_shortcut(key)).flatten();
-                let command = expand_popup_value(&inner, &target, context.session, command);
+                let command = expand_popup_value(
+                    &inner,
+                    &target,
+                    context.session,
+                    Some(command_name),
+                    command,
+                );
                 items.push(Some(MenuItem { name, key, enabled }));
                 commands.push(Some(command));
             }
@@ -8977,7 +9305,9 @@ impl Shared {
                 geometry.rows,
                 width,
                 height,
-                |value| expand_popup_value(&inner, &target, context.session, value),
+                |value| {
+                    expand_popup_value(&inner, &target, context.session, Some(command_name), value)
+                },
             );
             (
                 MenuState {
@@ -9030,6 +9360,7 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &ExecutionContext,
+        command_name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_confirm_before_args(args)?;
@@ -9048,16 +9379,26 @@ impl Shared {
                 .command
                 .as_deref()
                 .expect("confirm command was required");
-            let command = command_block_body(command).unwrap_or(command);
-            let command = expand_popup_value(&inner, &target, context.session, command);
+            let command = command_block_body(command).map_or_else(
+                || {
+                    expand_popup_value(
+                        &inner,
+                        &target,
+                        context.session,
+                        Some(command_name),
+                        command,
+                    )
+                },
+                str::to_owned,
+            );
             let parsed_commands = inner.engine.parse_config("<confirm-before>", &command);
             if let Some(diagnostic) = parsed_commands.diagnostics.first() {
-                return Err(ServerError::InvalidCommand(diagnostic.message.clone()).into());
+                return Err(ServerError::CommandParse(diagnostic.message.clone()).into());
             }
             let first = parsed_commands
                 .commands
                 .first()
-                .ok_or_else(|| ServerError::InvalidCommand("empty command".to_owned()))?;
+                .ok_or_else(|| ServerError::CommandParse("empty command".to_owned()))?;
             let prompt = parsed.prompt.as_deref().map_or_else(
                 || {
                     format!(
@@ -9074,15 +9415,13 @@ impl Shared {
         if bytes.len() != 1 || !(32..=126).contains(&bytes[0]) {
             return Err(ServerError::InvalidCommand("invalid confirm key".to_owned()).into());
         }
-        let prompt = {
-            let inner = self.inner.lock();
-            let prompt = if parsed.prompt.is_some() {
-                prompt
-            } else {
-                prompt.replace("{confirm-key}", confirm_key)
-            };
-            expand_popup_value(&inner, &target, context.session, &prompt)
+        let prompt = if parsed.prompt.is_some() {
+            prompt
+        } else {
+            prompt.replace("{confirm-key}", confirm_key)
         };
+        let prompt =
+            expand_popup_value(&self.inner.lock(), &target, context.session, None, &prompt);
         let state = ConfirmState {
             prompt,
             confirm_key: bytes[0],
@@ -9188,8 +9527,19 @@ impl Shared {
         Ok(Execution::default())
     }
 
+    #[cfg(test)]
     fn buffer_command(
         self: &Arc<Self>,
+        context: &ExecutionContext,
+        name: &str,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        self.buffer_command_for_client(None, context, canonical_command(name), args)
+    }
+
+    fn buffer_command_for_client(
+        self: &Arc<Self>,
+        invoking_client: Option<ClientId>,
         context: &ExecutionContext,
         name: &str,
         args: &[String],
@@ -9209,7 +9559,7 @@ impl Shared {
                     return Ok(Execution::default());
                 }
                 let [data] = parsed.positional.as_slice() else {
-                    return Err(ServerError::InvalidCommand(
+                    return Err(ServerError::CommandParse(
                         "set-buffer requires exactly one data argument".to_owned(),
                     )
                     .into());
@@ -9304,7 +9654,8 @@ impl Shared {
                         let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                             &facts,
                             context.format_variables(),
-                        );
+                        )
+                        .with_command_item(name);
                         if !format_true(&expand_format_values(filter, &format_context, &mut hooks))
                         {
                             continue;
@@ -9313,7 +9664,8 @@ impl Shared {
                     let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                         &facts,
                         context.format_variables(),
-                    );
+                    )
+                    .with_command_item(name);
                     output.push(expand_format_values(format, &format_context, &mut hooks));
                 }
                 Ok(Execution {
@@ -9324,13 +9676,24 @@ impl Shared {
             "load-buffer" | "loadb" => {
                 let parsed = parse_buffer_command_args(name, args, &['b', 't'], &[])?;
                 let path = require_one_positional(name, &parsed)?;
+                let path = {
+                    let mut inner = self.inner.lock();
+                    expand_buffer_path(
+                        &mut inner,
+                        invoking_client,
+                        context,
+                        parsed.value('t'),
+                        name,
+                        path,
+                    )
+                };
                 if path == "-" {
                     return Err(ServerError::UnsupportedCommand(
                         "load-buffer from standard input".to_owned(),
                     )
                     .into());
                 }
-                let path = expand_path(path);
+                let path = expand_path(&path);
                 let data = read_paste_buffer_file(&path)?;
                 if data.is_empty() {
                     return Ok(Execution::default());
@@ -9351,17 +9714,20 @@ impl Shared {
             "save-buffer" | "saveb" => {
                 let parsed = parse_buffer_command_args(name, args, &['b'], &['a'])?;
                 let path = require_one_positional(name, &parsed)?;
+                let (data, path) = {
+                    let mut inner = self.inner.lock();
+                    let data = Arc::clone(&resolve_buffer(&inner, parsed.value('b'))?.data);
+                    let path =
+                        expand_buffer_path(&mut inner, invoking_client, context, None, name, path);
+                    (data, path)
+                };
                 if path == "-" {
                     return Err(ServerError::UnsupportedCommand(
                         "save-buffer to standard output".to_owned(),
                     )
                     .into());
                 }
-                let data = {
-                    let inner = self.inner.lock();
-                    Arc::clone(&resolve_buffer(&inner, parsed.value('b'))?.data)
-                };
-                write_paste_buffer_file(&expand_path(path), &data, parsed.has('a'))?;
+                write_paste_buffer_file(&expand_path(&path), &data, parsed.has('a'))?;
                 Ok(Execution::default())
             }
             "delete-buffer" | "deleteb" => {
@@ -9603,11 +9969,10 @@ impl Shared {
         {
             inner.last_sessions.insert(client, previous_session);
         }
+        let now = unix_timestamp();
         inner.activity_sequence = inner.activity_sequence.saturating_add(1);
         let activity = inner.activity_sequence;
         inner.client_activity.insert(client, activity);
-        inner.session_activity.insert(session, activity);
-        let now = unix_timestamp();
         inner.client_activity_times.insert(client, now);
         inner.session_last_attached.insert(session, now);
         if let Some(output) = inner.control_outputs.get_mut(&client) {
@@ -9615,7 +9980,7 @@ impl Shared {
                 pane.pending.clear();
             }
         }
-        inner.engine.mark_session_active(session);
+        inner.engine.mark_session_active_at(session, now);
         if let Some(active_window) = inner
             .engine
             .state
@@ -9646,6 +10011,7 @@ impl Shared {
         let visible = visible_terminal_panes(&inner, client, session);
         affected_panes.extend(visible.iter().copied());
         inner.visible_terminals.insert(client, visible);
+        mark_client_terminal_latest(&mut inner, client);
         affected_panes.extend(control_client_sized_panes(&inner, client));
         #[cfg(feature = "agent")]
         {
@@ -9654,7 +10020,7 @@ impl Shared {
         }
         let terminals = session_terminals(&inner, session);
         let unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
-        write_back_terminal_geometries(&mut inner, &affected_panes, true);
+        write_back_terminal_geometries(&mut inner, &affected_panes, false);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
         let mut snapshot = inner.engine.state.snapshot();
         let presence = snapshot_presence(&inner);
@@ -9981,6 +10347,7 @@ impl Shared {
         let prefix_was_armed = inner.prefix_armed.remove(&client);
         inner.swallowed_keys.remove(&client);
         inner.suppressed_text.remove(&client);
+        inner.pending_committed_text.remove(&client);
         inner.command_prompts.remove(&client);
         inner.choose_trees.remove(&client);
         inner.choose_buffers.remove(&client);
@@ -10075,18 +10442,136 @@ impl Shared {
             target: "zz_daemon::diagnostics::input",
             "dispatch begin client={client} kind={kind:?} context={context:#?} input={input:#?}"
         );
-        let dismisses_message = {
-            let inner = self.inner.lock();
-            if inner.read_only_clients.contains(&client) && read_only_blocks_input(&input) {
-                return Ok(());
+        let (
+            ignores_message_input,
+            dismisses_message,
+            early_input_activity,
+            input_rejected,
+            read_only,
+            dismiss_display_panes,
+        ) = {
+            let mut inner = self.inner.lock();
+            let read_only = inner.read_only_clients.contains(&client);
+            let read_only_rejected = read_only && read_only_blocks_input(&input);
+            let mouse_rejected = terminal_mouse_rejected(&inner, client, &input);
+            let chooser_pane = inner
+                .choose_trees
+                .get(&client)
+                .map(|chooser| chooser.source_pane)
+                .or_else(|| {
+                    inner
+                        .choose_buffers
+                        .get(&client)
+                        .map(|chooser| chooser.source_pane)
+                });
+            let display_pane = inner
+                .display_panes
+                .get(&client)
+                .map(|overlay| overlay.source_pane);
+            let early_input_activity = match &input {
+                InputMessage::TerminalView { action, .. }
+                    if chooser_pane.is_some()
+                        && terminal_view_action_is_modal_input(action)
+                        && (!read_only || read_only_rejected) =>
+                {
+                    chooser_pane.map(EarlyInputActivity::WithoutBell)
+                }
+                InputMessage::TerminalView { action, .. }
+                    if read_only_rejected
+                        && display_pane.is_some()
+                        && terminal_view_action_is_modal_input(action) =>
+                {
+                    display_pane.map(EarlyInputActivity::WithoutBell)
+                }
+                InputMessage::TerminalView { pane, action }
+                    if read_only_rejected && terminal_view_action_is_modal_input(action) =>
+                {
+                    Some(EarlyInputActivity::WithoutBell(*pane))
+                }
+                InputMessage::TerminalView { pane, action }
+                    if mouse_rejected && terminal_view_action_is_input(action) =>
+                {
+                    Some(EarlyInputActivity::Full(*pane))
+                }
+                _ => None,
+            };
+            let ignores_message_input = !read_only
+                && inner.client_messages.contains_key(&client)
+                && inner.message_ignore_keys.contains(&client)
+                && input_is_ignored_by_client_message(&input);
+            if ignores_message_input
+                && let InputMessage::Key {
+                    pane,
+                    input,
+                    text_follows,
+                } = &input
+                && *text_follows
+                && matches!(
+                    input.action,
+                    zz_terminal::KeyAction::Press | zz_terminal::KeyAction::Repeat
+                )
+            {
+                let character = committed_character(input, *text_follows);
+                enqueue_pending_committed_text_locked(
+                    &mut inner,
+                    client,
+                    *pane,
+                    CommittedTextLane::Terminal,
+                    character,
+                );
             }
-            if terminal_mouse_rejected(&inner, client, &input) {
-                return Ok(());
-            }
-            inner.client_messages.contains_key(&client)
-                && !inner.read_only_clients.contains(&client)
-                && input_dismisses_client_message(&input)
+            (
+                ignores_message_input,
+                inner.client_messages.contains_key(&client)
+                    && !inner.read_only_clients.contains(&client)
+                    && input_dismisses_client_message(&input),
+                early_input_activity,
+                read_only_rejected || mouse_rejected,
+                read_only,
+                !read_only
+                    && display_pane.is_some()
+                    && matches!(
+                        &input,
+                        InputMessage::TerminalView { action, .. }
+                            if terminal_view_action_dismisses_display_panes(action)
+                    ),
+            )
         };
+        if ignores_message_input {
+            if let InputMessage::Text { pane, text } = &input {
+                let matched = self.match_pending_committed_text(
+                    client,
+                    *pane,
+                    CommittedTextLane::Terminal,
+                    text.is_empty(),
+                );
+                if !text.is_empty() {
+                    let _ = self.filter_suppressed_text(client, text, matched);
+                }
+            }
+            if let InputMessage::Key { input, .. } = &input
+                && input.action == zz_terminal::KeyAction::Release
+            {
+                let _ = self.key_decision(client, &input_key_name(input), true);
+            }
+            return Ok(());
+        }
+        if dismiss_display_panes && take_display_panes(&mut self.inner.lock(), client).is_some() {
+            self.publish_to_client(client, EventPayload::DisplayPanes { state: None });
+        }
+        if let Some(activity) = early_input_activity {
+            match activity {
+                EarlyInputActivity::WithoutBell(pane) => {
+                    self.note_terminal_input_without_bell(client, pane);
+                }
+                EarlyInputActivity::Full(pane) => {
+                    self.note_terminal_input(client, pane);
+                }
+            }
+        }
+        if input_rejected {
+            return Ok(());
+        }
         if dismisses_message {
             self.dismiss_client_message(client);
         }
@@ -10111,9 +10596,30 @@ impl Shared {
         let result = (|| -> Result<(), DaemonError> {
             match input {
                 InputMessage::Text { pane, text } => {
-                    self.reject_unattached_input(client, pane)?;
-                    self.note_terminal_input(client, pane);
-                    self.input_text(client, kind, context, pane, &text)?;
+                    let matched = self.match_pending_committed_text(
+                        client,
+                        pane,
+                        CommittedTextLane::Terminal,
+                        text.is_empty(),
+                    );
+                    if matched.is_none() {
+                        self.reject_unattached_input(client, pane)?;
+                    }
+                    if text.is_empty() {
+                        return Ok(());
+                    }
+                    let filtered_text = self.filter_suppressed_text(client, &text, matched);
+                    let text = filtered_text.as_ref();
+                    if text.is_empty() {
+                        return Ok(());
+                    }
+                    if read_only {
+                        if matched.is_none() {
+                            self.note_terminal_input_without_bell(client, pane);
+                        }
+                        return Ok(());
+                    }
+                    self.input_text(client, kind, context, pane, text, matched.is_none())?;
                 }
                 InputMessage::Key {
                     pane,
@@ -10121,13 +10627,44 @@ impl Shared {
                     text_follows,
                 } => {
                     self.reject_unattached_input(client, pane)?;
-                    self.note_terminal_input(client, pane);
+                    self.enqueue_pending_committed_text(
+                        client,
+                        pane,
+                        CommittedTextLane::Terminal,
+                        &input,
+                        text_follows,
+                    );
                     self.input_key(client, kind, context, pane, input, text_follows)?;
                 }
                 InputMessage::BrowserSurfaceText { pane, text } => {
-                    self.reject_invalid_browser_surface_input(client, pane)?;
-                    self.note_terminal_input(client, pane);
-                    self.input_browser_surface_text(client, kind, context, pane, &text)?;
+                    let matched = self.match_pending_committed_text(
+                        client,
+                        pane,
+                        CommittedTextLane::BrowserSurface,
+                        text.is_empty(),
+                    );
+                    if matched.is_none() {
+                        self.reject_invalid_browser_surface_input(client, pane)?;
+                    }
+                    if text.is_empty() {
+                        return Ok(());
+                    }
+                    let filtered_text = self.filter_suppressed_text(client, &text, matched);
+                    let text = filtered_text.as_ref();
+                    if text.is_empty() {
+                        return Ok(());
+                    }
+                    if read_only {
+                        return Ok(());
+                    }
+                    self.input_browser_surface_text(
+                        client,
+                        kind,
+                        context,
+                        pane,
+                        text,
+                        matched.is_none(),
+                    )?;
                 }
                 InputMessage::BrowserSurfaceKey {
                     pane,
@@ -10135,7 +10672,16 @@ impl Shared {
                     text_follows,
                 } => {
                     self.reject_invalid_browser_surface_input(client, pane)?;
-                    self.note_terminal_input(client, pane);
+                    self.enqueue_pending_committed_text(
+                        client,
+                        pane,
+                        CommittedTextLane::BrowserSurface,
+                        &input,
+                        text_follows,
+                    );
+                    if read_only {
+                        return Ok(());
+                    }
                     self.input_browser_surface_key(
                         client,
                         kind,
@@ -10205,9 +10751,10 @@ impl Shared {
                 InputMessage::TerminalView { pane, action } => {
                     let terminal = {
                         let inner = self.inner.lock();
-                        if inner.choose_trees.contains_key(&client)
-                            || inner.choose_buffers.contains_key(&client)
-                            || inner.display_panes.contains_key(&client)
+                        if !read_only
+                            && (inner.choose_trees.contains_key(&client)
+                                || inner.choose_buffers.contains_key(&client)
+                                || inner.display_panes.contains_key(&client))
                         {
                             None
                         } else {
@@ -10231,7 +10778,11 @@ impl Shared {
                     };
                     if let Some(terminal) = terminal {
                         if terminal_view_action_is_input(&action) {
-                            self.note_terminal_input(client, pane);
+                            if read_only {
+                                self.note_terminal_input_without_bell(client, pane);
+                            } else {
+                                self.note_terminal_input(client, pane);
+                            }
                         }
                         sync_copy_session_for_view_action(
                             &mut self.inner.lock(),
@@ -10241,6 +10792,9 @@ impl Shared {
                         )?;
                         terminal.view_action(TerminalViewId(client.0), action);
                     }
+                }
+                InputMessage::ClientFocus { focused } => {
+                    self.input_client_focus(client, kind, context, focused)?;
                 }
                 InputMessage::ResizeCommandOutput {
                     columns,
@@ -10276,7 +10830,7 @@ impl Shared {
                     self.input_choose_buffer(client, kind, action)?;
                 }
                 InputMessage::DisplayPanes { action } => {
-                    self.input_display_panes(client, kind, context, action)?;
+                    self.input_display_panes(client, kind, context, action, false)?;
                 }
                 InputMessage::CommandPrompt { action } => {
                     self.input_command_prompt_action(client, kind, context, action)?;
@@ -10585,34 +11139,167 @@ impl Shared {
     }
 
     fn note_terminal_input(&self, client: ClientId, pane: PaneId) {
-        let (resizes, refresh_activity_choosers) = {
+        self.note_terminal_input_accounting(client, pane, true);
+    }
+
+    fn note_terminal_input_without_bell(&self, client: ClientId, pane: PaneId) {
+        self.note_terminal_input_accounting(client, pane, false);
+    }
+
+    fn note_terminal_input_accounting(&self, client: ClientId, pane: PaneId, clear_bell: bool) {
+        let (resizes, layout_changed, refresh_activity_choosers) = {
             let mut inner = self.inner.lock();
-            let session = client_is_attached_to_pane(&inner, client, pane)
-                .then(|| inner.engine.state.window_for_pane(pane))
-                .flatten()
-                .and_then(|window| inner.engine.state.windows.get(&window))
-                .map(|window| window.session);
-            if let Some(session) = session {
-                inner.engine.mark_session_active(session);
-                inner.activity_sequence = inner.activity_sequence.saturating_add(1);
-                let activity = inner.activity_sequence;
-                inner.client_activity.insert(client, activity);
-                inner.session_activity.insert(session, activity);
-                inner.client_activity_times.insert(client, unix_timestamp());
-            }
-            let refresh_activity_choosers = inner
-                .choose_trees
-                .values()
-                .any(|chooser| chooser.sort.order() == Some(TmuxSortOrder::Activity));
-            (
-                terminal_resizes_after_client_input(&mut inner, client, pane),
-                refresh_activity_choosers,
-            )
+            let refresh_activity_choosers = note_terminal_activity_locked(&mut inner, client, pane);
+            let (resizes, layout_changed) =
+                terminal_resizes_after_client_input(&mut inner, client, pane);
+            (resizes, layout_changed, refresh_activity_choosers)
         };
         apply_terminal_resizes(resizes);
-        if self.clear_pane_bell(pane) {
+        let bell_cleared = clear_bell && self.clear_pane_bell(pane);
+        if layout_changed || bell_cleared {
             self.publish_snapshot();
         } else if refresh_activity_choosers {
+            self.refresh_choose_trees();
+        }
+    }
+
+    fn input_client_focus(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        focused: bool,
+    ) -> Result<(), DaemonError> {
+        let read_only = {
+            let inner = self.inner.lock();
+            if !inner.engine.focus_events() || client_attached_session(&inner, client).is_none() {
+                return Ok(());
+            }
+            inner.read_only_clients.contains(&client)
+        };
+        if !read_only {
+            self.dismiss_client_message(client);
+        }
+        let display_panes =
+            !read_only && take_display_panes(&mut self.inner.lock(), client).is_some();
+        if display_panes {
+            self.publish_to_client(client, EventPayload::DisplayPanes { state: None });
+        }
+        if !read_only && self.input_command_prompt_focus(client, kind, context, focused) {
+            self.sync_prefix_armed(client);
+            return Ok(());
+        }
+        self.note_enabled_client_focus(client, focused);
+
+        let (pane, decision, repeat_binding) = {
+            let mut inner = self.inner.lock();
+            let Some(session) = client_attached_session(&inner, client) else {
+                drop(inner);
+                self.sync_prefix_armed(client);
+                return Ok(());
+            };
+            let Some(session_state) = inner.engine.state.sessions.get(&session) else {
+                drop(inner);
+                self.sync_prefix_armed(client);
+                return Ok(());
+            };
+            let window = client_focused_window(&inner, client, session_state);
+            let Some(pane) = inner
+                .engine
+                .state
+                .windows
+                .get(&window)
+                .map(|window| window.active_pane)
+            else {
+                drop(inner);
+                self.sync_prefix_armed(client);
+                return Ok(());
+            };
+            context.retarget(&ExecutionContext::new(
+                Some(session),
+                Some(window),
+                Some(pane),
+            ));
+
+            let root_table = inner.engine.key_table_for_session(session).clone();
+            let mut key_engine = inner.key_engines.remove(&client).unwrap_or_default();
+            let transient_table = if inner.choose_trees.contains_key(&client) {
+                Some("choose-tree".to_owned())
+            } else if inner.choose_buffers.contains_key(&client) {
+                Some("choose-buffer".to_owned())
+            } else {
+                let copy_mode_active = inner
+                    .copy_sessions
+                    .get(&client)
+                    .is_some_and(|copy| copy.pane == pane && !copy.exiting)
+                    || inner.command_outputs.contains_key(&client);
+                if copy_mode_active {
+                    key_engine
+                        .active_table()
+                        .filter(|table| matches!(*table, "copy-mode" | "copy-mode-vi"))
+                        .map(str::to_owned)
+                        .or_else(|| {
+                            inner
+                                .engine
+                                .copy_mode_table_for_pane(pane)
+                                .ok()
+                                .map(str::to_owned)
+                        })
+                } else {
+                    None
+                }
+            };
+            let repeat_time_ms = inner.engine.repeat_time_for_session(session);
+            let initial_repeat_time_ms = inner.engine.initial_repeat_time_for_session(session);
+            let (decision, repeat_binding) = if let Some(table) = transient_table {
+                key_engine.handle_transient_mode_synthetic_any(
+                    &inner.engine.keys,
+                    &table,
+                    &root_table,
+                )
+            } else {
+                key_engine.handle_synthetic_any_with_repeat_metadata(
+                    &inner.engine.keys,
+                    Instant::now(),
+                    Duration::from_millis(u64::from(repeat_time_ms)),
+                    Duration::from_millis(u64::from(initial_repeat_time_ms)),
+                    &root_table,
+                )
+            };
+            inner.key_engines.insert(client, key_engine);
+            (pane, decision, repeat_binding)
+        };
+
+        let result = match decision {
+            KeyDecision::Commands(commands) => {
+                self.execute_key_commands(client, kind, context, pane, &commands, repeat_binding)
+            }
+            KeyDecision::Pass | KeyDecision::Prefix | KeyDecision::Ignore => Ok(()),
+        };
+        self.sync_prefix_armed(client);
+        result
+    }
+
+    fn note_enabled_client_focus(&self, client: ClientId, focused: bool) {
+        let (resizes, layout_changed, refresh_activity_choosers) = {
+            let mut inner = self.inner.lock();
+            let Some(session) = client_attached_session(&inner, client) else {
+                return;
+            };
+            let refresh_activity_choosers =
+                note_client_activity_locked(&mut inner, client, session);
+            let (resizes, layout_changed) = if focused {
+                terminal_resizes_after_client_focus(&mut inner, client)
+            } else {
+                (Vec::new(), false)
+            };
+            (resizes, layout_changed, refresh_activity_choosers)
+        };
+        apply_terminal_resizes(resizes);
+        if layout_changed {
+            self.publish_snapshot();
+        }
+        if refresh_activity_choosers {
             self.refresh_choose_trees();
         }
     }
@@ -10694,12 +11381,8 @@ impl Shared {
         context: &mut ExecutionContext,
         pane: PaneId,
         text: &str,
+        account_activity: bool,
     ) -> Result<(), DaemonError> {
-        let filtered_text = self.filter_suppressed_text(client, text);
-        let text = filtered_text.as_ref();
-        if text.is_empty() {
-            return Ok(());
-        }
         self.dismiss_client_message(client);
         {
             let inner = self.inner.lock();
@@ -10712,6 +11395,9 @@ impl Shared {
         }
         if self.input_command_prompt_text(client, kind, context, text) {
             return Ok(());
+        }
+        if account_activity {
+            self.note_terminal_input(client, pane);
         }
         let command_output_active = self.inner.lock().command_outputs.contains_key(&client);
         let mut sinks = None;
@@ -10781,6 +11467,7 @@ impl Shared {
         context: &mut ExecutionContext,
         pane: PaneId,
         text: &str,
+        account_activity: bool,
     ) -> Result<(), DaemonError> {
         let blocked = {
             let inner = self.inner.lock();
@@ -10789,9 +11476,11 @@ impl Shared {
                 || inner.display_panes.contains_key(&client)
                 || inner.command_outputs.contains_key(&client)
         };
-        if blocked || text.is_empty() || self.input_command_prompt_text(client, kind, context, text)
-        {
+        if blocked || self.input_command_prompt_text(client, kind, context, text) {
             return Ok(());
+        }
+        if account_activity {
+            self.note_terminal_input(client, pane);
         }
         self.dispatch_input_text(client, pane, &mut None, text)
             .map_err(Into::into)
@@ -10849,22 +11538,60 @@ impl Shared {
         input: zz_terminal::KeyInput,
         text_follows: bool,
     ) -> Result<(), DaemonError> {
-        let (modal_active, read_only) = {
+        let (choose_tree, choose_buffer, display_panes, read_only) = {
             let inner = self.inner.lock();
             (
-                inner.choose_trees.contains_key(&client)
-                    || inner.choose_buffers.contains_key(&client)
-                    || inner.display_panes.contains_key(&client),
+                inner.choose_trees.contains_key(&client),
+                inner.choose_buffers.contains_key(&client),
+                inner.display_panes.contains_key(&client),
                 inner.read_only_clients.contains(&client),
             )
         };
-        if modal_active {
+        if choose_tree || choose_buffer || display_panes {
             if input.action == zz_terminal::KeyAction::Release {
                 let _ = self.key_decision(client, &input_key_name(&input), true);
+                return Ok(());
             }
-            return Ok(());
+            if choose_tree && !read_only {
+                self.suppress_committed_character(
+                    client,
+                    pane,
+                    CommittedTextLane::Terminal,
+                    &input,
+                    text_follows,
+                );
+                return self.input_choose_tree(client, kind, context, ChooseTreeAction::Key(input));
+            }
+            if choose_buffer && !read_only {
+                self.suppress_committed_character(
+                    client,
+                    pane,
+                    CommittedTextLane::Terminal,
+                    &input,
+                    text_follows,
+                );
+                return self.input_choose_buffer(client, kind, ChooseBufferAction::Key(input));
+            }
+            if !read_only {
+                return self.input_display_panes(
+                    client,
+                    kind,
+                    context,
+                    DisplayPanesAction::Key(input),
+                    text_follows,
+                );
+            }
         }
-        if !read_only && self.input_command_prompt_key(client, kind, context, &input, text_follows)
+        if !read_only
+            && self.input_command_prompt_key(
+                client,
+                kind,
+                context,
+                pane,
+                CommittedTextLane::Terminal,
+                &input,
+                text_follows,
+            )
         {
             return Ok(());
         }
@@ -10882,30 +11609,38 @@ impl Shared {
             )?;
             return Ok(());
         }
+        if read_only {
+            self.note_terminal_input_without_bell(client, pane);
+        } else {
+            self.note_terminal_input(client, pane);
+        }
         let key = input_key_name(&input);
         let (decision, repeat_binding) = self.key_decision_with_repeat(
             client,
             &key,
             input.action == zz_terminal::KeyAction::Release,
         );
-        if decision != KeyDecision::Pass
-            && input.action != zz_terminal::KeyAction::Release
-            && text_follows
-            && input.modifiers == zz_terminal::Modifiers::default()
-            && let zz_terminal::KeyCode::Character(character) = input.key
-        {
-            *self
-                .inner
-                .lock()
-                .suppressed_text
-                .entry(client)
-                .or_default()
-                .entry(character)
-                .or_default() += 1;
+        if decision != KeyDecision::Pass && input.modifiers == zz_terminal::Modifiers::default() {
+            self.suppress_committed_character(
+                client,
+                pane,
+                CommittedTextLane::Terminal,
+                &input,
+                text_follows,
+            );
         }
         let result = match decision {
             KeyDecision::Pass => {
                 if read_only || self.inner.lock().command_outputs.contains_key(&client) {
+                    if !read_only {
+                        self.suppress_committed_character(
+                            client,
+                            pane,
+                            CommittedTextLane::Terminal,
+                            &input,
+                            text_follows,
+                        );
+                    }
                     return Ok(());
                 }
                 self.dispatch_input_key(client, pane, input)
@@ -10935,12 +11670,38 @@ impl Shared {
                 || inner.choose_buffers.contains_key(&client)
                 || inner.display_panes.contains_key(&client)
         };
-        if blocked || self.input_command_prompt_key(client, kind, context, &input, text_follows) {
+        if blocked {
+            self.suppress_committed_character(
+                client,
+                pane,
+                CommittedTextLane::BrowserSurface,
+                &input,
+                text_follows,
+            );
+            return Ok(());
+        }
+        if self.input_command_prompt_key(
+            client,
+            kind,
+            context,
+            pane,
+            CommittedTextLane::BrowserSurface,
+            &input,
+            text_follows,
+        ) {
             return Ok(());
         }
         if self.inner.lock().command_outputs.contains_key(&client) {
+            self.suppress_committed_character(
+                client,
+                pane,
+                CommittedTextLane::BrowserSurface,
+                &input,
+                text_follows,
+            );
             return Ok(());
         }
+        self.note_terminal_input(client, pane);
         self.dispatch_input_key(client, pane, input)
             .map_err(Into::into)
     }
@@ -10990,6 +11751,26 @@ impl Shared {
                 "choose-tree input requires an interactive client".to_owned(),
             )
             .into());
+        }
+        if matches!(
+            &action,
+            ChooseTreeAction::Key(input) if input.action == zz_terminal::KeyAction::Release
+        ) {
+            return Ok(());
+        }
+        let (source_pane, read_only) = {
+            let inner = self.inner.lock();
+            let Some(chooser) = inner.choose_trees.get(&client) else {
+                return Ok(());
+            };
+            (
+                chooser.source_pane,
+                inner.read_only_clients.contains(&client),
+            )
+        };
+        self.note_terminal_input_without_bell(client, source_pane);
+        if read_only {
+            return Ok(());
         }
         let (result, state, delta) = {
             let mut inner = self.inner.lock();
@@ -11065,6 +11846,26 @@ impl Shared {
                 "choose-buffer input requires an interactive client".to_owned(),
             )
             .into());
+        }
+        if matches!(
+            &action,
+            ChooseBufferAction::Key(input) if input.action == zz_terminal::KeyAction::Release
+        ) {
+            return Ok(());
+        }
+        let (source_pane, read_only) = {
+            let inner = self.inner.lock();
+            let Some(chooser) = inner.choose_buffers.get(&client) else {
+                return Ok(());
+            };
+            (
+                chooser.source_pane,
+                inner.read_only_clients.contains(&client),
+            )
+        };
+        self.note_terminal_input_without_bell(client, source_pane);
+        if read_only {
+            return Ok(());
         }
 
         let (outcome, deleted) = {
@@ -11193,6 +11994,7 @@ impl Shared {
         kind: ClientKind,
         context: &mut ExecutionContext,
         action: DisplayPanesAction,
+        text_follows: bool,
     ) -> Result<(), DaemonError> {
         if kind != ClientKind::Interactive {
             return Err(ServerError::InvalidCommand(
@@ -11204,6 +12006,44 @@ impl Shared {
             &action,
             DisplayPanesAction::Key(input) if input.action == zz_terminal::KeyAction::Release
         ) {
+            return Ok(());
+        }
+
+        let (source_pane, read_only, source_alive) = {
+            let inner = self.inner.lock();
+            let Some(overlay) = inner.display_panes.get(&client) else {
+                return Ok(());
+            };
+            (
+                overlay.source_pane,
+                inner.read_only_clients.contains(&client),
+                inner
+                    .engine
+                    .state
+                    .window_for_pane(overlay.source_pane)
+                    .is_some(),
+            )
+        };
+        if read_only {
+            match action {
+                DisplayPanesAction::Key(input) if source_alive => {
+                    self.input_key(client, kind, context, source_pane, input, text_follows)?;
+                }
+                DisplayPanesAction::Close if source_alive => {
+                    self.input_key(
+                        client,
+                        kind,
+                        context,
+                        source_pane,
+                        display_panes_escape_key(),
+                        false,
+                    )?;
+                }
+                DisplayPanesAction::Select(_) => {
+                    self.note_terminal_input_without_bell(client, source_pane);
+                }
+                DisplayPanesAction::Key(_) | DisplayPanesAction::Close => {}
+            }
             return Ok(());
         }
 
@@ -11221,12 +12061,14 @@ impl Shared {
         }
         match action {
             DisplayPanesAction::Close => {
-                self.inner
-                    .lock()
-                    .swallowed_keys
-                    .entry(client)
-                    .or_default()
-                    .insert("Escape".to_owned());
+                self.input_key(
+                    client,
+                    kind,
+                    context,
+                    overlay.source_pane,
+                    display_panes_escape_key(),
+                    false,
+                )?;
             }
             DisplayPanesAction::Select(pane) => {
                 if overlay.selectable
@@ -11254,6 +12096,13 @@ impl Shared {
                     })
                     .flatten();
                 if let Some(pane) = selected {
+                    self.suppress_committed_character(
+                        client,
+                        overlay.source_pane,
+                        CommittedTextLane::Terminal,
+                        &input,
+                        text_follows,
+                    );
                     self.inner
                         .lock()
                         .swallowed_keys
@@ -11269,7 +12118,14 @@ impl Shared {
                     .window_for_pane(overlay.source_pane)
                     .is_some()
                 {
-                    self.input_key(client, kind, context, overlay.source_pane, input, false)?;
+                    self.input_key(
+                        client,
+                        kind,
+                        context,
+                        overlay.source_pane,
+                        input,
+                        text_follows,
+                    )?;
                 }
             }
         }
@@ -11445,47 +12301,73 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         let mut output = String::new();
         let mut output_truncated = false;
-        for original in commands {
-            let (command, blocked) = {
-                let mut inner = self.inner.lock();
-                let command = inner
-                    .engine
-                    .expand_command_alias(original)
-                    .unwrap_or_else(|| original.clone());
-                let blocked = (inner.read_only_clients.contains(&client)
-                    && !command_is_read_only_safe(&command))
-                .then(|| {
-                    let duration_ms = client_attached_session(&inner, client)
-                        .map_or(750, |session| {
-                            inner.engine.display_time_for_session(session)
-                        });
-                    (duration_ms, next_timed_message_id(&mut inner))
-                });
-                (command, blocked)
-            };
-            if let Some((duration_ms, message_id)) = blocked {
-                self.publish_to_client(
-                    client,
-                    EventPayload::TimedClientMessage {
-                        pane: Some(pane),
-                        kind: ClientMessageKind::Error,
-                        text: "client is read-only".to_owned(),
-                        duration_ms,
-                        message_id,
-                    },
-                );
-                return Ok(());
+        let (read_only_commands, blocked) = {
+            let mut inner = self.inner.lock();
+            if inner.read_only_clients.contains(&client) {
+                let commands = commands
+                    .iter()
+                    .map(|command| {
+                        inner
+                            .engine
+                            .resolve_command_alias(command)
+                            .into_command(command)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let blocked = commands
+                    .iter()
+                    .any(|command| !command_is_read_only_safe(command))
+                    .then(|| {
+                        let duration_ms = client_attached_session(&inner, client)
+                            .map_or(750, |session| {
+                                inner.engine.display_time_for_session(session)
+                            });
+                        (duration_ms, next_timed_message_id(&mut inner))
+                    });
+                (Some(commands), blocked)
+            } else {
+                (None, None)
             }
-            let previous_repeat_binding = context.repeat_binding();
-            context.set_repeat_binding(repeat_binding);
-            let execution = self.execute_with_mux_source_routed(
+        };
+        if let Some((duration_ms, message_id)) = blocked {
+            self.publish_to_client(
                 client,
-                kind,
-                context,
-                &command,
-                MuxOptionSource::RuntimeCommand,
+                EventPayload::TimedClientMessage {
+                    pane: Some(pane),
+                    kind: ClientMessageKind::Error,
+                    text: "client is read-only".to_owned(),
+                    duration_ms,
+                    message_id,
+                },
             );
-            context.set_repeat_binding(previous_repeat_binding);
+            return Ok(());
+        }
+        for (index, original) in commands.iter().enumerate() {
+            let command = if let Some(commands) = &read_only_commands {
+                Ok(commands[index].clone())
+            } else {
+                let inner = self.inner.lock();
+                inner
+                    .engine
+                    .resolve_command_alias(original)
+                    .into_command(original)
+                    .map_err(DaemonError::from)
+            };
+            let (command, execution) = match command {
+                Ok(command) => {
+                    let previous_repeat_binding = context.repeat_binding();
+                    context.set_repeat_binding(repeat_binding);
+                    let execution = self.execute_with_mux_source_routed(
+                        client,
+                        kind,
+                        context,
+                        &command,
+                        MuxOptionSource::RuntimeCommand,
+                    );
+                    context.set_repeat_binding(previous_repeat_binding);
+                    (command, execution)
+                }
+                Err(error) => (original.clone(), Err(error)),
+            };
             let execution = match execution {
                 Ok(execution) => execution,
                 Err(error) => {
@@ -11606,6 +12488,8 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
+        pane: PaneId,
+        lane: CommittedTextLane,
         input: &zz_terminal::KeyInput,
         text_follows: bool,
     ) -> bool {
@@ -11616,8 +12500,6 @@ impl Shared {
             };
             let raw_mode = prompt.reads_raw_keys();
             let prompt_type = prompt.prompt_type;
-            // The history borrow has to end before an arm can put the prompt
-            // back, so the republished state is built while it is still live.
             let (action, state) = {
                 let history = prompt_history(&inner, prompt_type);
                 let action = command_prompt_key(&mut prompt, input, text_follows, history);
@@ -11628,95 +12510,43 @@ impl Shared {
                 .then(|| prompt.state(history));
                 (action, state)
             };
-            let consumed_character = raw_mode
-                && text_follows
-                && matches!(input.key, zz_terminal::KeyCode::Character(_))
-                && action != PromptKeyAction::SubmitAndPass;
-            let outcome = match action {
-                PromptKeyAction::Handled => {
-                    inner.command_prompts.insert(client, prompt);
-                    PromptKeyOutcome::default()
-                }
-                PromptKeyAction::Updated => {
-                    inner.command_prompts.insert(client, prompt);
-                    PromptKeyOutcome {
-                        event: PromptWireUpdate::Republish(Box::new(
-                            state.expect("an updated prompt built its state"),
-                        )),
-                        ..PromptKeyOutcome::default()
-                    }
-                }
-                PromptKeyAction::LimitExceeded => {
-                    inner.command_prompts.insert(client, prompt);
-                    PromptKeyOutcome {
-                        limit_exceeded: true,
-                        ..PromptKeyOutcome::default()
-                    }
-                }
-                PromptKeyAction::Incremental(prefix) => {
-                    let fired = CommandPromptSubmission {
-                        input: format!("{prefix}{}", prompt.input),
-                        template: prompt.template.clone(),
-                    };
-                    inner.command_prompts.insert(client, prompt);
-                    PromptKeyOutcome {
-                        event: PromptWireUpdate::Republish(Box::new(
-                            state.expect("an incremental edit built its state"),
-                        )),
-                        submission: Some(fired),
-                        ..PromptKeyOutcome::default()
-                    }
-                }
-                PromptKeyAction::Close => PromptKeyOutcome {
-                    event: PromptWireUpdate::Retire,
-                    retired: prompt.freezes(),
-                    ..PromptKeyOutcome::default()
-                },
-                PromptKeyAction::SubmitIncremental => PromptKeyOutcome {
-                    event: PromptWireUpdate::Retire,
-                    retired: prompt.freezes(),
-                    remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
-                    ..PromptKeyOutcome::default()
-                },
-                PromptKeyAction::SubmitAnswer(answer) => PromptKeyOutcome {
-                    event: PromptWireUpdate::Retire,
-                    retired: prompt.freezes(),
-                    submission: Some(CommandPromptSubmission {
-                        input: answer,
-                        template: prompt.template,
-                    }),
-                    ..PromptKeyOutcome::default()
-                },
-                PromptKeyAction::Submit | PromptKeyAction::SubmitAndPass => {
-                    let retired = prompt.freezes();
-                    let submission =
-                        (!prompt.input.is_empty() || prompt.template.is_some()).then(|| {
-                            CommandPromptSubmission {
-                                input: prompt.input.clone(),
-                                template: prompt.template.clone(),
-                            }
-                        });
-                    PromptKeyOutcome {
-                        event: PromptWireUpdate::Retire,
-                        retired,
-                        remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
-                        submission,
-                        pass: action == PromptKeyAction::SubmitAndPass,
-                        limit_exceeded: false,
-                    }
-                }
-            };
-            if consumed_character && let zz_terminal::KeyCode::Character(character) = input.key {
-                *inner
-                    .suppressed_text
-                    .entry(client)
-                    .or_default()
-                    .entry(character)
-                    .or_default() += 1;
+            let consumed_character = (raw_mode && action != PromptKeyAction::SubmitAndPass)
+                .then(|| committed_character(input, text_follows))
+                .flatten();
+            let outcome = command_prompt_outcome(&mut inner, client, prompt, action, state);
+            if let Some(character) = consumed_character {
+                suppress_committed_character_locked(&mut inner, client, pane, lane, character);
             }
             outcome
         };
+        self.finish_command_prompt_outcome(client, kind, context, outcome)
+    }
 
+    fn input_command_prompt_focus(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        focused: bool,
+    ) -> bool {
+        let outcome = {
+            let mut inner = self.inner.lock();
+            let Some(prompt) = inner.command_prompts.remove(&client) else {
+                return false;
+            };
+            let action = command_prompt_focus_action(prompt.mode, focused);
+            command_prompt_outcome(&mut inner, client, prompt, action, None)
+        };
+        self.finish_command_prompt_outcome(client, kind, context, outcome)
+    }
+
+    fn finish_command_prompt_outcome(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        outcome: PromptKeyOutcome,
+    ) -> bool {
         match outcome.event {
             PromptWireUpdate::Silent => {}
             PromptWireUpdate::Republish(state) => self.publish_to_client(
@@ -11790,6 +12620,22 @@ impl Shared {
                 "command prompt actions require an interactive client".to_owned(),
             )
             .into());
+        }
+        let (read_only, read_only_pane) = {
+            let inner = self.inner.lock();
+            let read_only = inner.read_only_clients.contains(&client);
+            (
+                read_only,
+                read_only
+                    .then(|| client_input_pane(&inner, client, context.pane))
+                    .flatten(),
+            )
+        };
+        if let Some(pane) = read_only_pane {
+            self.note_terminal_input_without_bell(client, pane);
+        }
+        if read_only {
+            return Ok(());
         }
 
         match action {
@@ -12480,27 +13326,110 @@ impl Shared {
         (decision, repeat_binding)
     }
 
-    fn filter_suppressed_text<'a>(&self, client: ClientId, text: &'a str) -> Cow<'a, str> {
-        let mut inner = self.inner.lock();
-        let Some(characters) = inner.suppressed_text.get_mut(&client) else {
+    fn filter_suppressed_text<'a>(
+        &self,
+        client: ClientId,
+        text: &'a str,
+        matched: Option<PendingCommittedText>,
+    ) -> Cow<'a, str> {
+        let Some(character) = matched.and_then(|matched| matched.suppressed_character) else {
             return Cow::Borrowed(text);
         };
-        let mut filtered = String::with_capacity(text.len());
-        let mut unrepaid = false;
-        for character in text.chars() {
-            match characters.get_mut(&character) {
-                Some(count) if *count > 0 => *count -= 1,
-                _ => {
-                    unrepaid = true;
-                    filtered.push(character);
-                }
+        let mut inner = self.inner.lock();
+        let remove_client = if let Some(characters) = inner.suppressed_text.get_mut(&client) {
+            if let Some(count) = characters.get_mut(&character) {
+                *count = count.saturating_sub(1);
             }
-        }
-        characters.retain(|_, count| *count != 0);
-        if unrepaid || characters.is_empty() {
+            characters.retain(|_, count| *count != 0);
+            characters.is_empty()
+        } else {
+            false
+        };
+        if remove_client {
             inner.suppressed_text.remove(&client);
         }
+        let Some(offset) = text.find(character) else {
+            return Cow::Borrowed(text);
+        };
+        let mut filtered = String::with_capacity(text.len() - character.len_utf8());
+        filtered.push_str(&text[..offset]);
+        filtered.push_str(&text[offset + character.len_utf8()..]);
         Cow::Owned(filtered)
+    }
+
+    fn enqueue_pending_committed_text(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        lane: CommittedTextLane,
+        input: &zz_terminal::KeyInput,
+        text_follows: bool,
+    ) {
+        if !text_follows
+            || !matches!(
+                input.action,
+                zz_terminal::KeyAction::Press | zz_terminal::KeyAction::Repeat
+            )
+        {
+            return;
+        }
+        let mut inner = self.inner.lock();
+        enqueue_pending_committed_text_locked(&mut inner, client, pane, lane, None);
+    }
+
+    fn match_pending_committed_text(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        lane: CommittedTextLane,
+        empty: bool,
+    ) -> Option<PendingCommittedText> {
+        let mut inner = self.inner.lock();
+        let mut pending = inner.pending_committed_text.remove(&client)?;
+        let Some(index) = pending
+            .iter()
+            .position(|entry| entry.pane == pane && entry.lane == lane)
+        else {
+            inner.pending_committed_text.insert(client, pending);
+            return None;
+        };
+        for _ in 0..index {
+            let stale = pending.pop_front().expect("committed-text prefix");
+            retire_pending_committed_text_locked(&mut inner, client, stale);
+        }
+        let matched = pending.pop_front().expect("matched committed text");
+        if !pending.is_empty() {
+            inner.pending_committed_text.insert(client, pending);
+        }
+        if empty {
+            retire_pending_committed_text_locked(&mut inner, client, matched);
+        }
+        Some(matched)
+    }
+
+    fn suppress_committed_character(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        lane: CommittedTextLane,
+        input: &zz_terminal::KeyInput,
+        text_follows: bool,
+    ) {
+        let Some(character) = committed_character(input, text_follows) else {
+            return;
+        };
+        let mut inner = self.inner.lock();
+        suppress_committed_character_locked(&mut inner, client, pane, lane, character);
+    }
+
+    fn clear_pending_committed_text(&self, client: ClientId) {
+        let mut inner = self.inner.lock();
+        let Some(pending) = inner.pending_committed_text.remove(&client) else {
+            return;
+        };
+        for stale in pending {
+            retire_pending_committed_text_locked(&mut inner, client, stale);
+        }
     }
 
     fn kitty_image_frames(
@@ -13840,7 +14769,6 @@ impl Shared {
                     inner.last_sessions.retain(|_, last| *last != session);
                     let clients = inner.attached.get(&session).cloned().unwrap_or_default();
                     let survivor = destroyed_session_survivor(&inner, &name, &policy);
-                    inner.session_activity.remove(&session);
                     inner.session_last_attached.remove(&session);
                     (session, clients, survivor)
                 })
@@ -14159,6 +15087,60 @@ impl Shared {
         }
     }
 
+    fn publish_sourced_command_guard(
+        &self,
+        client: Option<ClientId>,
+        output: String,
+        error: bool,
+        client_failure: bool,
+    ) {
+        if let Some(client) = client {
+            self.publish_to_client(
+                client,
+                EventPayload::SourcedCommandGuard {
+                    output,
+                    error,
+                    client_failure,
+                },
+            );
+        }
+    }
+
+    fn sourced_command_name_error(&self, command: &CommandInvocation) -> Option<String> {
+        let inner = self.inner.lock();
+        let name = match inner.engine.resolve_command_alias(command) {
+            CommandAliasResolution::Miss => command.name.clone(),
+            CommandAliasResolution::Expanded(expanded) => expanded.name,
+            CommandAliasResolution::MatchedUnsupported(_) => {
+                return Some(format!("unknown command: {}", command.name));
+            }
+        };
+        match resolve_command(&name) {
+            CommandResolution::Ambiguous(message) => Some(message),
+            CommandResolution::Unknown => Some(format!("unknown command: {name}")),
+            CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => None,
+        }
+    }
+
+    fn publish_sourced_config_warning(
+        &self,
+        client: Option<ClientId>,
+        pane: Option<PaneId>,
+        command: &CommandInvocation,
+        message: &str,
+    ) {
+        if let Some(client) = client {
+            self.publish_to_client(
+                client,
+                EventPayload::ClientMessage {
+                    pane,
+                    kind: ClientMessageKind::Warning,
+                    text: config_command_error(command, message),
+                },
+            );
+        }
+    }
+
     fn record_command_stdout(&self, client: ClientId, line: &str) {
         if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
             streams.stdout.push_str(line);
@@ -14217,27 +15199,98 @@ impl Shared {
         }
     }
 
-    fn route_config_source_errors(
+    fn route_source_verbose(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        pane: Option<PaneId>,
+        lines: &[String],
+    ) {
+        match kind {
+            ClientKind::Interactive => {
+                for line in lines {
+                    self.publish_to_client(
+                        client,
+                        EventPayload::ClientMessage {
+                            pane,
+                            kind: ClientMessageKind::Info,
+                            text: line.clone(),
+                        },
+                    );
+                }
+            }
+            ClientKind::Command => {
+                for line in lines {
+                    self.record_command_stdout(client, line);
+                }
+            }
+            ClientKind::Control => {}
+        }
+    }
+
+    fn route_config_replay_errors(
         &self,
         client: ClientId,
         kind: ClientKind,
         pane: Option<PaneId>,
         report: &ConfigLoadReport,
     ) {
-        if kind == ClientKind::Control {
-            for errors in report.source_error_groups() {
-                self.publish_to_client(
-                    client,
-                    EventPayload::ClientMessage {
-                        pane,
-                        kind: ClientMessageKind::Warning,
-                        text: errors.join("\n"),
-                    },
-                );
-            }
-        } else {
-            for error in report.source_errors() {
-                self.route_source_error(client, kind, pane, error);
+        for issue in report.replay_issues() {
+            match issue {
+                ConfigReplayIssue::SourceErrors(index) => {
+                    let errors = &report.source_error_groups()[*index];
+                    if kind == ClientKind::Control {
+                        self.inner
+                            .lock()
+                            .command_streams
+                            .entry(client)
+                            .or_default()
+                            .exit_code = 1;
+                        if !report.control_guarded {
+                            self.publish_to_client(
+                                client,
+                                EventPayload::ClientMessage {
+                                    pane,
+                                    kind: ClientMessageKind::Error,
+                                    text: errors.join("\n"),
+                                },
+                            );
+                        }
+                    } else {
+                        for error in errors {
+                            self.route_source_error(client, kind, pane, error);
+                        }
+                    }
+                }
+                ConfigReplayIssue::CommandError { source, message } => {
+                    if let Some(source) = source {
+                        log::debug!(
+                            "routing sourced command error from {}:{}",
+                            source.source,
+                            source.line
+                        );
+                    }
+                    if kind == ClientKind::Control {
+                        self.inner
+                            .lock()
+                            .command_streams
+                            .entry(client)
+                            .or_default()
+                            .exit_code = 1;
+                        if !report.control_guarded {
+                            self.publish_to_client(
+                                client,
+                                EventPayload::ClientMessage {
+                                    pane,
+                                    kind: ClientMessageKind::Error,
+                                    text: message.clone(),
+                                },
+                            );
+                        }
+                    } else {
+                        self.route_source_error(client, kind, pane, message);
+                    }
+                }
             }
         }
     }
@@ -14933,7 +15986,12 @@ impl Shared {
         command: String,
         data: String,
     ) {
-        let subscriber = self.inner.lock().subscribers.get(&client).cloned();
+        let subscriber = {
+            let inner = self.inner.lock();
+            (inner.client_kinds.get(&client) == Some(&ClientKind::Interactive))
+                .then(|| inner.subscribers.get(&client).cloned())
+                .flatten()
+        };
         let rejection = if command.is_empty() {
             Some("copy-pipe command is empty".to_owned())
         } else if command.len() > MAX_COPY_PIPE_COMMAND_BYTES {
@@ -15002,7 +16060,20 @@ impl Shared {
         if let Some(subscriber) = subscriber {
             Self::send_event(subscriber, payload);
         } else {
-            self.publish_for_pane(pane, &payload);
+            let subscribers = {
+                let inner = self.inner.lock();
+                attached_clients_for_pane(&inner, pane)
+                    .into_iter()
+                    .flatten()
+                    .filter(|client| {
+                        inner.client_kinds.get(client) == Some(&ClientKind::Interactive)
+                    })
+                    .filter_map(|client| inner.subscribers.get(client).cloned())
+                    .collect::<Vec<_>>()
+            };
+            for subscriber in subscribers {
+                Self::send_event(&subscriber, payload.clone());
+            }
         }
     }
 
@@ -15246,24 +16317,50 @@ impl Shared {
         });
     }
 
-    fn reload_user_config(
+    fn reload_user_config_with_source_base(
         self: &Arc<Self>,
         client: ClientId,
         context: &mut ExecutionContext,
+        source_client_base: Option<&Path>,
+        options: SourceFileLoadOptions,
     ) -> Result<(), DaemonError> {
         let mux_config = self
             .load_user_config
             .then(default_mux_config)
             .flatten()
             .filter(|path| path.is_file());
-        self.reload_user_config_with_mux_file(client, context, mux_config.as_deref())
+        self.reload_user_config_with_mux_file_and_source_base(
+            client,
+            context,
+            mux_config.as_deref(),
+            source_client_base,
+            options,
+        )
     }
 
+    #[cfg(test)]
     fn reload_user_config_with_mux_file(
         self: &Arc<Self>,
         client: ClientId,
         context: &mut ExecutionContext,
         mux_config: Option<&Path>,
+    ) -> Result<(), DaemonError> {
+        self.reload_user_config_with_mux_file_and_source_base(
+            client,
+            context,
+            mux_config,
+            None,
+            SourceFileLoadOptions::default(),
+        )
+    }
+
+    fn reload_user_config_with_mux_file_and_source_base(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        mux_config: Option<&Path>,
+        source_client_base: Option<&Path>,
+        options: SourceFileLoadOptions,
     ) -> Result<(), DaemonError> {
         self.inner.lock().config_files =
             mux_config.map_or_else(String::new, |path| path.to_string_lossy().into_owned());
@@ -15291,16 +16388,19 @@ impl Shared {
         let mut report = ConfigLoadReport::default();
         let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
         if let Some(config) = mux_config {
-            self.load_config_file_with_report_for_terminal(
+            self.load_config_file_with_report_for_terminal_and_options(
                 config,
                 context,
                 0,
                 &mut report,
                 config_client_terminal,
+                source_client_base,
                 &mut source_invocations,
+                options,
             )?;
         }
         self.apply_stored_mux_config_overrides("reload-mux-replay");
+        self.route_source_verbose(client, kind, context.pane, report.verbose_lines());
 
         let appearance = Arc::new(load.appearance);
         let provenance = load.provenance;
@@ -15323,25 +16423,38 @@ impl Shared {
             appearance: Box::new((*published).clone()),
             provenance,
         });
-        self.route_config_source_errors(client, kind, context.pane, &report);
-        let (kind, text) = match report.summary() {
-            Some(summary) => (
-                ClientMessageKind::Warning,
-                format!("Reloaded zz configuration; {summary}"),
-            ),
-            None => (
-                ClientMessageKind::Success,
-                "Reloaded zz configuration".to_owned(),
-            ),
-        };
-        self.publish_to_client(
-            client,
-            EventPayload::ClientMessage {
-                pane: context.pane,
-                kind,
-                text,
-            },
-        );
+        self.route_config_replay_errors(client, kind, context.pane, &report);
+        if kind == ClientKind::Control && report.control_guarded {
+            if let Some(text) = report.skipped_summary() {
+                self.publish_to_client(
+                    client,
+                    EventPayload::ClientMessage {
+                        pane: context.pane,
+                        kind: ClientMessageKind::Warning,
+                        text,
+                    },
+                );
+            }
+        } else {
+            let (kind, text) = match report.summary() {
+                Some(summary) => (
+                    ClientMessageKind::Warning,
+                    format!("Reloaded zz configuration; {summary}"),
+                ),
+                None => (
+                    ClientMessageKind::Success,
+                    "Reloaded zz configuration".to_owned(),
+                ),
+            };
+            self.publish_to_client(
+                client,
+                EventPayload::ClientMessage {
+                    pane: context.pane,
+                    kind,
+                    text,
+                },
+            );
+        }
         self.publish_key_tables_if_changed();
         Ok(())
     }
@@ -15360,6 +16473,7 @@ impl Shared {
             depth,
             &mut ConfigLoadReport::default(),
             ClientTerminal::NoClient,
+            None,
             &mut source_invocations,
         )
     }
@@ -15379,6 +16493,7 @@ impl Shared {
             depth,
             report,
             ClientTerminal::NoClient,
+            None,
             &mut source_invocations,
         )
     }
@@ -15390,8 +16505,33 @@ impl Shared {
         depth: usize,
         report: &mut ConfigLoadReport,
         client_terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
         source_invocations: &mut SourceInvocationAccounting,
     ) -> Result<(), DaemonError> {
+        self.load_config_file_with_report_for_terminal_and_options(
+            path,
+            context,
+            depth,
+            report,
+            client_terminal,
+            source_client_base,
+            source_invocations,
+            SourceFileLoadOptions::default(),
+        )
+    }
+
+    fn load_config_file_with_report_for_terminal_and_options(
+        self: &Arc<Self>,
+        path: &Path,
+        context: &mut ExecutionContext,
+        depth: usize,
+        report: &mut ConfigLoadReport,
+        client_terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
+        source_invocations: &mut SourceInvocationAccounting,
+        options: SourceFileLoadOptions,
+    ) -> Result<(), DaemonError> {
+        report.control_guarded |= options.control_client.is_some();
         let input = match fs::read_to_string(path) {
             Ok(input) => input,
             Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -15417,6 +16557,12 @@ impl Shared {
             );
             report.note_invalid_at(&diagnostic.source, diagnostic.line, &diagnostic.message);
         }
+        if options.verbose {
+            report.note_verbose_commands(&parsed.commands);
+        }
+        if options.parse_only {
+            return Ok(());
+        }
         for assignment in parsed.environment {
             self.inner.lock().engine.set_config_environment(
                 assignment.name,
@@ -15440,6 +16586,12 @@ impl Shared {
                     "{}: ignoring reload-config while loading configuration",
                     path.display()
                 );
+                self.publish_sourced_command_guard(
+                    options.control_client,
+                    String::new(),
+                    false,
+                    false,
+                );
                 continue;
             }
             if matches!(command.name.as_str(), "source" | "source-file") {
@@ -15452,7 +16604,19 @@ impl Shared {
                         .effects
                         .into_iter()
                         .filter_map(|effect| match effect {
-                            MuxEffect::SourceFile { path, quiet } => Some((path, quiet)),
+                            MuxEffect::SourceFile {
+                                path,
+                                quiet,
+                                parse_only,
+                                verbose,
+                                context,
+                            } => Some(SourceFileRequest {
+                                path,
+                                quiet,
+                                parse_only,
+                                verbose,
+                                context,
+                            }),
                             _ => None,
                         })
                         .collect::<Vec<_>>(),
@@ -15462,20 +16626,51 @@ impl Shared {
                             path.display()
                         );
                         report.note_skip(&command);
-                        failed_group = group;
+                        self.publish_sourced_command_guard(
+                            options.control_client,
+                            String::new(),
+                            false,
+                            false,
+                        );
                         continue;
                     }
-                    Err(ServerError::InvalidCommand(message)) => {
+                    Err(ServerError::CommandParse(message)) => {
                         log::warn!(
                             "{}: ignoring invalid tmux command: {message}",
                             path.display()
                         );
                         report.note_invalid_command(&command, &message);
+                        if options.control_client.is_some()
+                            && let Some(name_error) = self.sourced_command_name_error(&command)
+                        {
+                            self.publish_sourced_config_warning(
+                                options.control_client,
+                                context.pane,
+                                &command,
+                                &name_error,
+                            );
+                            failed_group = group;
+                            continue;
+                        }
+                        self.publish_sourced_command_guard(
+                            options.control_client,
+                            config_command_error(&command, &message),
+                            true,
+                            false,
+                        );
                         failed_group = group;
                         continue;
                     }
                     Err(error) => {
-                        log::warn!("{}: ignoring tmux command error: {error}", path.display());
+                        let message = error.tmux_message();
+                        log::warn!("{}: tmux command error: {message}", path.display());
+                        report.note_command_error(&command, &message);
+                        self.publish_sourced_command_guard(
+                            options.control_client,
+                            message,
+                            true,
+                            true,
+                        );
                         failed_group = group;
                         continue;
                     }
@@ -15489,6 +16684,7 @@ impl Shared {
                     };
                     log::warn!("{error}");
                     report.note_source_error(&mut None, &error);
+                    self.publish_sourced_command_guard(options.control_client, error, true, false);
                     failed_group = group;
                     continue;
                 }
@@ -15499,43 +16695,91 @@ impl Shared {
                 let mut source_error_group = None;
                 let mut source_has_file = false;
                 let mut source_command_error = false;
-                for (source, quiet) in source_effects {
-                    if source == "-" {
+                let mut source_parse_error = false;
+                let mut source_diagnostics = String::new();
+                let mut prepared_sources = Vec::new();
+                for source_request in source_effects {
+                    if source_request.path == "-" {
                         source_has_file = true;
                         log::warn!("{STANDARD_INPUT_SOURCE_WARNING}");
                         report.note_invalid_command(&command, STANDARD_INPUT_SOURCE_WARNING);
+                        append_inserted_output(
+                            &mut source_diagnostics,
+                            &config_command_error(&command, STANDARD_INPUT_SOURCE_WARNING),
+                        );
+                        source_parse_error = true;
                         continue;
                     }
-                    let declared_path = PathBuf::from(&source);
-                    let pattern = expand_relative(path, &source);
+                    let declared_path = PathBuf::from(&source_request.path);
+                    let pattern = source_client_base.map_or_else(
+                        || expand_relative(path, &source_request.path),
+                        |base| resolve_source_path(&source_request.path, Some(base)),
+                    );
                     let matches = source_glob_matches(&pattern);
                     for error in &matches.errors {
                         let warning = source_glob_error_warning(&declared_path, error);
                         log::warn!("{warning}");
                         report.note_source_error(&mut source_error_group, &warning);
+                        append_inserted_output(&mut source_diagnostics, &warning);
                         source_command_error = true;
                     }
                     if matches.paths.is_empty() && matches.errors.is_empty() {
-                        if !quiet {
+                        if !source_request.quiet {
                             let error = missing_source_error(&declared_path);
                             log::warn!("{error}");
                             report.note_source_error(&mut source_error_group, &error);
+                            append_inserted_output(&mut source_diagnostics, &error);
                             source_command_error = true;
                         }
                         continue;
                     }
-                    source_has_file = true;
-                    for source in matches.paths {
-                        if let Err(error) = self.load_config_file_with_report_for_terminal(
+                    source_has_file |= !matches.paths.is_empty();
+                    prepared_sources.push((source_request, matches.paths));
+                }
+                self.publish_sourced_command_guard(
+                    options.control_client,
+                    source_diagnostics,
+                    source_parse_error || source_command_error && !source_has_file,
+                    false,
+                );
+                for (source_request, sources) in prepared_sources {
+                    let nested_options = SourceFileLoadOptions {
+                        parse_only: source_request.parse_only,
+                        verbose: !options.suppress_verbose
+                            && (options.verbose || source_request.verbose),
+                        suppress_verbose: options.suppress_verbose,
+                        control_client: options.control_client,
+                    };
+                    for source in sources {
+                        let mut source_context = source_request.context.clone();
+                        match self.load_config_file_with_report_for_terminal_and_options(
                             &source,
-                            context,
+                            &mut source_context,
                             depth + 1,
                             report,
                             client_terminal,
+                            source_client_base,
                             source_invocations,
-                        ) && source_error.is_none()
-                        {
-                            source_error = Some(error);
+                            nested_options,
+                        ) {
+                            Err(DaemonError::Io(error)) => {
+                                let warning =
+                                    source_glob_error_warning(&source, &error.to_string());
+                                log::warn!("{warning}");
+                                report.note_source_error(&mut source_error_group, &warning);
+                                if let Some(client) = options.control_client {
+                                    self.publish_to_client(
+                                        client,
+                                        EventPayload::ClientMessage {
+                                            pane: source_request.context.pane,
+                                            kind: ClientMessageKind::Error,
+                                            text: warning,
+                                        },
+                                    );
+                                }
+                            }
+                            Err(error) if source_error.is_none() => source_error = Some(error),
+                            Ok(()) | Err(_) => {}
                         }
                     }
                 }
@@ -15547,39 +16791,91 @@ impl Shared {
                 }
                 continue;
             }
-            match self
-                .execute_with_mux_source_for_terminal(
-                    ClientId(u64::MAX),
-                    ClientKind::Command,
-                    context,
-                    &command,
-                    MuxOptionSource::TmuxConfig,
-                    client_terminal,
-                )
-                .map_err(discard_command_output)
-            {
-                Ok(_) => {}
+            let result = self.execute_with_mux_source_for_terminal(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                context,
+                &command,
+                MuxOptionSource::TmuxConfig,
+                client_terminal,
+            );
+            let mut captured_output = result.as_ref().map_or_else(
+                |error| daemon_error_output(error).unwrap_or_default().to_owned(),
+                |execution| execution.output.clone(),
+            );
+            match result.map_err(discard_command_output) {
+                Ok(_) => self.publish_sourced_command_guard(
+                    options.control_client,
+                    captured_output,
+                    false,
+                    false,
+                ),
                 Err(DaemonError::Server(ServerError::UnsupportedCommand(command))) => {
                     log::warn!(
                         "{}: ignoring unsupported tmux command: {command}",
                         path.display()
                     );
                     report.note_skip(&command);
-                    failed_group = group;
+                    self.publish_sourced_command_guard(
+                        options.control_client,
+                        captured_output,
+                        false,
+                        false,
+                    );
                 }
-                Err(DaemonError::Server(ServerError::InvalidCommand(message))) => {
+                Err(DaemonError::Server(ServerError::CommandParse(message))) => {
                     log::warn!(
                         "{}: ignoring invalid tmux command: {message}",
                         path.display()
                     );
                     report.note_invalid_command(&command, &message);
+                    if options.control_client.is_some()
+                        && let Some(name_error) = self.sourced_command_name_error(&command)
+                    {
+                        self.publish_sourced_config_warning(
+                            options.control_client,
+                            context.pane,
+                            &command,
+                            &name_error,
+                        );
+                        failed_group = group;
+                        continue;
+                    }
+                    append_inserted_output(
+                        &mut captured_output,
+                        &config_command_error(&command, &message),
+                    );
+                    self.publish_sourced_command_guard(
+                        options.control_client,
+                        captured_output,
+                        true,
+                        false,
+                    );
                     failed_group = group;
                 }
                 Err(DaemonError::Server(error)) => {
-                    log::warn!("{}: ignoring tmux command error: {error}", path.display());
+                    let message = error.tmux_message();
+                    log::warn!("{}: tmux command error: {message}", path.display());
+                    report.note_command_error(&command, &message);
+                    append_inserted_output(&mut captured_output, &message);
+                    self.publish_sourced_command_guard(
+                        options.control_client,
+                        captured_output,
+                        true,
+                        true,
+                    );
                     failed_group = group;
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    append_inserted_output(&mut captured_output, &daemon_error_text(&error));
+                    self.publish_sourced_command_guard(
+                        options.control_client,
+                        captured_output,
+                        true,
+                        true,
+                    );
+                    return Err(error);
+                }
             }
         }
         Ok(())
@@ -16196,6 +17492,23 @@ enum SourceInvocationAccounting {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceFileRequest {
+    path: String,
+    quiet: bool,
+    parse_only: bool,
+    verbose: bool,
+    context: ExecutionContext,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SourceFileLoadOptions {
+    parse_only: bool,
+    verbose: bool,
+    suppress_verbose: bool,
+    control_client: Option<ClientId>,
+}
+
 impl SourceInvocationAccounting {
     fn is_startup(&self) -> bool {
         matches!(self, Self::Startup { .. })
@@ -16220,6 +17533,14 @@ fn config_command_error(command: &CommandInvocation, message: &str) -> String {
     )
 }
 
+enum ConfigReplayIssue {
+    SourceErrors(usize),
+    CommandError {
+        source: Option<SourceSpan>,
+        message: String,
+    },
+}
+
 #[derive(Default)]
 struct ConfigLoadReport {
     skipped_count: usize,
@@ -16227,8 +17548,12 @@ struct ConfigLoadReport {
     invalid_count: usize,
     invalid: Vec<String>,
     diagnostics: Vec<String>,
+    verbose_lines: Vec<String>,
+    #[cfg(test)]
     source_errors: Vec<String>,
     source_error_groups: Vec<Vec<String>>,
+    replay_issues: Vec<ConfigReplayIssue>,
+    control_guarded: bool,
 }
 
 impl ConfigLoadReport {
@@ -16266,25 +17591,67 @@ impl ConfigLoadReport {
         &self.diagnostics
     }
 
+    fn note_verbose_commands(&mut self, commands: &[CommandInvocation]) {
+        for group in commands.chunk_by(|left, right| {
+            left.source
+                .as_ref()
+                .map(|source| (&source.source, source.line))
+                == right
+                    .source
+                    .as_ref()
+                    .map(|source| (&source.source, source.line))
+        }) {
+            let Some(source) = group.first().and_then(|command| command.source.as_ref()) else {
+                continue;
+            };
+            let commands = group
+                .iter()
+                .map(format_command)
+                .collect::<Vec<_>>()
+                .join(" ; ");
+            self.verbose_lines
+                .push(format!("{}:{}: {commands}", source.source, source.line));
+        }
+    }
+
+    fn verbose_lines(&self) -> &[String] {
+        &self.verbose_lines
+    }
+
     fn note_source_error(&mut self, group: &mut Option<usize>, error: &str) {
+        #[cfg(test)]
         self.source_errors.push(error.to_owned());
         let index = if let Some(index) = *group {
             index
         } else {
             let index = self.source_error_groups.len();
             self.source_error_groups.push(Vec::new());
+            self.replay_issues
+                .push(ConfigReplayIssue::SourceErrors(index));
             *group = Some(index);
             index
         };
         self.source_error_groups[index].push(error.to_owned());
     }
 
+    fn note_command_error(&mut self, command: &CommandInvocation, message: &str) {
+        self.replay_issues.push(ConfigReplayIssue::CommandError {
+            source: command.source.clone(),
+            message: message.to_owned(),
+        });
+    }
+
+    #[cfg(test)]
     fn source_errors(&self) -> &[String] {
         &self.source_errors
     }
 
     fn source_error_groups(&self) -> &[Vec<String>] {
         &self.source_error_groups
+    }
+
+    fn replay_issues(&self) -> &[ConfigReplayIssue] {
+        &self.replay_issues
     }
 
     fn message(&self) -> Option<String> {
@@ -16367,6 +17734,13 @@ enum ClientTerminal {
     Present,
 }
 
+#[derive(Clone, Copy)]
+enum ResolvedDetach {
+    Client(ClientId),
+    Others(ClientId),
+    Session(SessionId),
+}
+
 fn context_client_terminal(context: &ExecutionContext) -> ClientTerminal {
     if context.has_no_client() {
         ClientTerminal::NoClient
@@ -16395,6 +17769,19 @@ fn client_terminal(inner: &ServerState, client: ClientId, kind: ClientKind) -> C
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommittedTextLane {
+    Terminal,
+    BrowserSurface,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingCommittedText {
+    pane: PaneId,
+    lane: CommittedTextLane,
+    suppressed_character: Option<char>,
+}
+
 #[derive(Default)]
 struct ServerState {
     engine: MuxEngine,
@@ -16415,6 +17802,7 @@ struct ServerState {
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
+    nested_clients: BTreeSet<ClientId>,
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
     client_working_directories: BTreeMap<ClientId, PathBuf>,
@@ -16423,7 +17811,6 @@ struct ServerState {
     read_only_clients: BTreeSet<ClientId>,
     client_activity: BTreeMap<ClientId, u64>,
     client_activity_times: BTreeMap<ClientId, u64>,
-    session_activity: BTreeMap<SessionId, u64>,
     session_last_attached: BTreeMap<SessionId, u64>,
     activity_sequence: u64,
     deferred_event_hooks: Vec<PendingHookEvent>,
@@ -16445,6 +17832,7 @@ struct ServerState {
     prefix_armed: BTreeSet<ClientId>,
     swallowed_keys: BTreeMap<ClientId, BTreeSet<String>>,
     suppressed_text: BTreeMap<ClientId, BTreeMap<char, u32>>,
+    pending_committed_text: BTreeMap<ClientId, VecDeque<PendingCommittedText>>,
     command_prompts: BTreeMap<ClientId, CommandPrompt>,
     choose_trees: BTreeMap<ClientId, ChooseTreeSession>,
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
@@ -16452,6 +17840,7 @@ struct ServerState {
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
     next_silence_token: u64,
     client_messages: BTreeMap<ClientId, ActiveClientMessage>,
+    message_ignore_keys: BTreeSet<ClientId>,
     popups: BTreeMap<ClientId, PopupSession>,
     menus: BTreeMap<ClientId, MenuSession>,
     confirms: BTreeMap<ClientId, ConfirmSession>,
@@ -16593,6 +17982,7 @@ struct DiagnosticSample {
     copy_sessions: BTreeMap<ClientId, CopySession>,
     swallowed_keys: BTreeMap<ClientId, BTreeSet<String>>,
     suppressed_text: BTreeMap<ClientId, BTreeMap<char, u32>>,
+    pending_committed_text: BTreeMap<ClientId, VecDeque<PendingCommittedText>>,
     command_prompts: Vec<ClientId>,
     choose_trees: Vec<ClientId>,
     choose_buffers: Vec<ClientId>,
@@ -16627,6 +18017,7 @@ impl DiagnosticSample {
             copy_sessions: inner.copy_sessions.clone(),
             swallowed_keys: inner.swallowed_keys.clone(),
             suppressed_text: inner.suppressed_text.clone(),
+            pending_committed_text: inner.pending_committed_text.clone(),
             command_prompts: inner.command_prompts.keys().copied().collect(),
             choose_trees: inner.choose_trees.keys().copied().collect(),
             choose_buffers: inner.choose_buffers.keys().copied().collect(),
@@ -16782,6 +18173,16 @@ fn display_panes_selection_key(input: &zz_terminal::KeyInput) -> Option<u8> {
     character
         .is_ascii()
         .then(|| u8::try_from(u32::from(character)).expect("ASCII character fits in u8"))
+}
+
+fn display_panes_escape_key() -> zz_terminal::KeyInput {
+    zz_terminal::KeyInput {
+        action: zz_terminal::KeyAction::Press,
+        key: zz_terminal::KeyCode::Escape,
+        modifiers: zz_terminal::Modifiers::default(),
+        text: None,
+        unshifted_codepoint: None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18376,6 +19777,119 @@ struct PromptKeyOutcome {
     limit_exceeded: bool,
 }
 
+fn command_prompt_focus_action(mode: CommandPromptMode, focused: bool) -> PromptKeyAction {
+    match mode {
+        CommandPromptMode::Key => {
+            PromptKeyAction::SubmitAnswer(if focused { "FocusIn" } else { "FocusOut" }.to_owned())
+        }
+        CommandPromptMode::Numeric => PromptKeyAction::SubmitAndPass,
+        CommandPromptMode::Text
+        | CommandPromptMode::Single
+        | CommandPromptMode::Incremental
+        | CommandPromptMode::BackspaceExit => PromptKeyAction::Handled,
+    }
+}
+
+fn command_prompt_outcome(
+    inner: &mut ServerState,
+    client: ClientId,
+    prompt: CommandPrompt,
+    action: PromptKeyAction,
+    state: Option<CommandPromptState>,
+) -> PromptKeyOutcome {
+    let prompt_type = prompt.prompt_type;
+    match action {
+        PromptKeyAction::Handled => {
+            inner.command_prompts.insert(client, prompt);
+            PromptKeyOutcome::default()
+        }
+        PromptKeyAction::Updated => {
+            inner.command_prompts.insert(client, prompt);
+            PromptKeyOutcome {
+                event: PromptWireUpdate::Republish(Box::new(
+                    state.expect("an updated prompt built its state"),
+                )),
+                ..PromptKeyOutcome::default()
+            }
+        }
+        PromptKeyAction::LimitExceeded => {
+            inner.command_prompts.insert(client, prompt);
+            PromptKeyOutcome {
+                limit_exceeded: true,
+                ..PromptKeyOutcome::default()
+            }
+        }
+        PromptKeyAction::Incremental(prefix) => {
+            let fired = CommandPromptSubmission {
+                input: format!("{prefix}{}", prompt.input),
+                template: prompt.template.clone(),
+            };
+            inner.command_prompts.insert(client, prompt);
+            PromptKeyOutcome {
+                event: PromptWireUpdate::Republish(Box::new(
+                    state.expect("an incremental edit built its state"),
+                )),
+                submission: Some(fired),
+                ..PromptKeyOutcome::default()
+            }
+        }
+        PromptKeyAction::Close => PromptKeyOutcome {
+            event: PromptWireUpdate::Retire,
+            retired: prompt.freezes(),
+            ..PromptKeyOutcome::default()
+        },
+        PromptKeyAction::SubmitIncremental => PromptKeyOutcome {
+            event: PromptWireUpdate::Retire,
+            retired: prompt.freezes(),
+            remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
+            ..PromptKeyOutcome::default()
+        },
+        PromptKeyAction::SubmitAnswer(answer) => PromptKeyOutcome {
+            event: PromptWireUpdate::Retire,
+            retired: prompt.freezes(),
+            submission: Some(CommandPromptSubmission {
+                input: answer,
+                template: prompt.template,
+            }),
+            ..PromptKeyOutcome::default()
+        },
+        PromptKeyAction::Submit => {
+            let retired = prompt.freezes();
+            let submission = (!prompt.input.is_empty() || prompt.template.is_some()).then(|| {
+                CommandPromptSubmission {
+                    input: prompt.input.clone(),
+                    template: prompt.template.clone(),
+                }
+            });
+            PromptKeyOutcome {
+                event: PromptWireUpdate::Retire,
+                retired,
+                remember: (!prompt.input.is_empty()).then_some((prompt_type, prompt.input)),
+                submission,
+                pass: false,
+                limit_exceeded: false,
+            }
+        }
+        PromptKeyAction::SubmitAndPass => {
+            let retired = prompt.freezes();
+            let submission = (!prompt.input.is_empty() || prompt.template.is_some()).then_some({
+                CommandPromptSubmission {
+                    input: prompt.input,
+                    template: prompt.template,
+                }
+            });
+            PromptKeyOutcome {
+                event: PromptWireUpdate::Retire,
+                retired,
+                remember: None,
+                submission,
+                pass: true,
+                limit_exceeded: false,
+            }
+        }
+    }
+}
+
 fn append_command_prompt_output(output: &mut String, piece: &str) -> bool {
     let content_limit =
         MAX_COMMAND_PROMPT_OUTPUT_BYTES.saturating_sub(COMMAND_PROMPT_OUTPUT_TRUNCATED.len() + 1);
@@ -18496,6 +20010,10 @@ fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewActio
     matches!(
         action,
         zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::PageDownScrollExit)
+            | zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: zz_terminal::CopyModeAction::PageDownScrollExit,
+                ..
+            }
     )
 }
 
@@ -18559,11 +20077,21 @@ fn terminal_view_action_enters_copy_mode(action: &zz_terminal::TerminalViewActio
 fn terminal_view_action_exits_copy_mode(action: &zz_terminal::TerminalViewAction) -> bool {
     match action {
         zz_terminal::TerminalViewAction::ClearHistory
-        | zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel) => true,
+        | zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel)
+        | zz_terminal::TerminalViewAction::CopyModeCounted {
+            action: zz_terminal::CopyModeAction::Cancel,
+            ..
+        } => true,
         zz_terminal::TerminalViewAction::CopyMode(
             zz_terminal::CopyModeAction::CopySelection(copy)
             | zz_terminal::CopyModeAction::CopyEndOfLine(copy),
-        ) => copy.cancel,
+        )
+        | zz_terminal::TerminalViewAction::CopyModeCounted {
+            action:
+                zz_terminal::CopyModeAction::CopySelection(copy)
+                | zz_terminal::CopyModeAction::CopyEndOfLine(copy),
+            ..
+        } => copy.cancel,
         _ => false,
     }
 }
@@ -18650,6 +20178,12 @@ fn client_tty_fact(capabilities: &[String]) -> Option<String> {
     })
 }
 
+fn client_nested_fact(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == ClientHello::CLIENT_NESTED_CAPABILITY)
+}
+
 fn client_size_fact(capabilities: &[String]) -> Option<(u16, u16)> {
     capabilities.iter().find_map(|capability| {
         let value = capability.strip_prefix(ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX)?;
@@ -18698,6 +20232,29 @@ fn best_client_on_session(inner: &ServerState, session: SessionId) -> Option<Cli
                 client.0,
             )
         })
+}
+
+fn best_display_message_format_client(
+    inner: &ServerState,
+    target_session: SessionId,
+) -> Option<ClientId> {
+    best_client_on_session(inner, target_session).or_else(|| {
+        inner
+            .attached
+            .values()
+            .flatten()
+            .copied()
+            .max_by_key(|client| {
+                (
+                    inner
+                        .client_activity
+                        .get(client)
+                        .copied()
+                        .unwrap_or_default(),
+                    Reverse(client.0),
+                )
+            })
+    })
 }
 
 fn best_attached_session(inner: &ServerState) -> Option<SessionId> {
@@ -18765,27 +20322,14 @@ fn destroyed_session_survivor(
     }
 }
 
-fn resolve_switch_client_target(
+fn resolve_client_target(
     inner: &ServerState,
     invoking_client: ClientId,
     kind: ClientKind,
     target: Option<&str>,
 ) -> Result<ClientId, ServerError> {
     if let Some(target) = target {
-        let target = target.strip_suffix(':').unwrap_or(target);
-        return inner
-            .attached
-            .values()
-            .flatten()
-            .copied()
-            .find(|client| {
-                inner
-                    .client_names
-                    .get(client)
-                    .is_some_and(|name| name == target)
-                    || format!("device-{}", client.0) == target
-            })
-            .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")));
+        return find_attached_client(inner, target).ok_or_else(|| client_target_error(target));
     }
     if matches!(kind, ClientKind::Interactive | ClientKind::Control)
         && client_attached_session(inner, invoking_client).is_some()
@@ -18807,36 +20351,100 @@ fn resolve_switch_client_target(
         .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
 }
 
-fn resolve_display_panes_client(
+fn normalized_client_target(target: &str) -> &str {
+    target.strip_suffix(':').unwrap_or(target)
+}
+
+fn attached_client_matches(
+    inner: &ServerState,
+    client: ClientId,
+    target: &str,
+    native_aliases: bool,
+) -> bool {
+    inner
+        .client_names
+        .get(&client)
+        .is_some_and(|name| name == target)
+        || format!("device-{}", client.0) == target
+        || inner.client_ttys.get(&client).is_some_and(|tty| {
+            tty == target
+                || tty
+                    .strip_prefix("/dev/")
+                    .is_some_and(|device| device == target)
+        })
+        || native_aliases
+            && (target == client.0.to_string() || target == format!("client-{}", client.0))
+}
+
+fn find_attached_client_with_aliases(
     inner: &ServerState,
     target: &str,
-) -> Result<ClientId, ServerError> {
-    let target = target.strip_suffix(':').unwrap_or(target);
+    native_aliases: bool,
+) -> Option<ClientId> {
+    let target = normalized_client_target(target);
     inner
         .attached
         .values()
         .flatten()
         .copied()
-        .find(|client| {
-            inner
-                .client_names
-                .get(client)
-                .is_some_and(|name| name == target)
-                || format!("device-{}", client.0) == target
-                || inner.client_ttys.get(client).is_some_and(|tty| {
-                    tty == target
-                        || tty
-                            .strip_prefix("/dev/")
-                            .is_some_and(|device| device == target)
-                        || Path::new(tty)
-                            .file_name()
-                            .is_some_and(|name| name == target)
-                })
-        })
-        .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")))
+        .filter(|client| attached_client_matches(inner, *client, target, native_aliases))
+        .min()
+}
+
+fn find_attached_client(inner: &ServerState, target: &str) -> Option<ClientId> {
+    find_attached_client_with_aliases(inner, target, false)
+}
+
+fn client_target_error(target: &str) -> ServerError {
+    ServerError::InvalidCommand(format!(
+        "can't find client: {}",
+        normalized_client_target(target)
+    ))
+}
+
+fn requested_detach_victims(
+    inner: &ServerState,
+    detach: ResolvedDetach,
+) -> Vec<(SessionId, ClientId)> {
+    match detach {
+        ResolvedDetach::Client(target) => client_attached_session(inner, target)
+            .map(|session| vec![(session, target)])
+            .unwrap_or_default(),
+        ResolvedDetach::Others(target) => inner
+            .attached
+            .iter()
+            .flat_map(|(session, clients)| {
+                clients
+                    .iter()
+                    .filter(move |client| **client != target)
+                    .map(|client| (*session, *client))
+            })
+            .collect(),
+        ResolvedDetach::Session(session) => inner
+            .attached
+            .get(&session)
+            .into_iter()
+            .flatten()
+            .map(|client| (session, *client))
+            .collect(),
+    }
+}
+
+fn resolve_display_panes_client(
+    inner: &ServerState,
+    target: &str,
+) -> Result<ClientId, ServerError> {
+    find_attached_client(inner, target).ok_or_else(|| client_target_error(target))
+}
+
+fn resolve_display_message_client(inner: &ServerState, target: &str) -> Option<ClientId> {
+    find_attached_client(inner, target)
 }
 
 fn nested_attach_refusal(inner: &ServerState, client: ClientId) -> Option<ServerError> {
+    if !inner.nested_clients.contains(&client) {
+        return None;
+    }
     let tty = inner.client_ttys.get(&client)?;
     if inner.engine.state.sessions.is_empty() {
         return None;
@@ -18975,6 +20583,20 @@ fn client_focused_window_for_attachment(inner: &ServerState, client: ClientId) -
         .map(|session| client_focused_window(inner, client, session))
 }
 
+fn client_input_pane(
+    inner: &ServerState,
+    client: ClientId,
+    preferred: Option<PaneId>,
+) -> Option<PaneId> {
+    preferred
+        .filter(|pane| client_is_attached_to_pane(inner, client, *pane))
+        .or_else(|| {
+            client_focused_window_for_attachment(inner, client)
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .map(|window| window.active_pane)
+        })
+}
+
 fn status_request(
     inner: &ServerState,
     client: ClientId,
@@ -19020,18 +20642,8 @@ fn resolve_popup_client(
         .filter(|client| client_attached_session(inner, *client).is_some())
         .collect::<Vec<_>>();
     if let Some(target) = target {
-        return eligible
-            .into_iter()
-            .find(|client| {
-                inner
-                    .client_names
-                    .get(client)
-                    .is_some_and(|name| name == target)
-                    || target == client.0.to_string()
-                    || target == format!("client-{}", client.0)
-                    || target == format!("device-{}", client.0)
-            })
-            .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")));
+        return find_attached_client_with_aliases(inner, target, true)
+            .ok_or_else(|| client_target_error(target));
     }
     if eligible.contains(&invoking_client) {
         return Ok(invoking_client);
@@ -19061,18 +20673,8 @@ fn resolve_attached_client(
         .copied()
         .collect::<BTreeSet<_>>();
     if let Some(target) = target {
-        return attached
-            .into_iter()
-            .find(|client| {
-                inner
-                    .client_names
-                    .get(client)
-                    .is_some_and(|name| name == target)
-                    || target == client.0.to_string()
-                    || target == format!("client-{}", client.0)
-                    || target == format!("device-{}", client.0)
-            })
-            .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")));
+        return find_attached_client_with_aliases(inner, target, true)
+            .ok_or_else(|| client_target_error(target));
     }
     attached
         .contains(&invoking_client)
@@ -20297,6 +21899,7 @@ enum DeferredTerminalCommand {
     SendTokens {
         terminals: Vec<Arc<TerminalSession>>,
         keys: Vec<zz_protocol::KeyToken>,
+        repeat: u32,
     },
 }
 
@@ -20335,8 +21938,18 @@ impl DeferredTerminalCommand {
                 view,
                 action,
             } => terminal.view_action(view, action),
-            Self::SendTokens { terminals, keys } => send_tokens(&terminals, &keys),
+            Self::SendTokens {
+                terminals,
+                keys,
+                repeat,
+            } => repeat_until_rejected(repeat, || send_tokens(&terminals, &keys)),
         }
+    }
+}
+
+fn repeat_until_rejected(mut repeat: u32, mut send: impl FnMut() -> bool) {
+    while repeat > 0 && send() {
+        repeat -= 1;
     }
 }
 
@@ -20663,22 +22276,103 @@ fn panes_for_windows(inner: &ServerState, windows: &BTreeSet<WindowId>) -> BTree
         .collect()
 }
 
+fn note_terminal_activity_locked(inner: &mut ServerState, client: ClientId, pane: PaneId) -> bool {
+    let Some(session) = client_is_attached_to_pane(inner, client, pane)
+        .then(|| inner.engine.state.window_for_pane(pane))
+        .flatten()
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .map(|window| window.session)
+    else {
+        return false;
+    };
+    note_client_activity_locked(inner, client, session)
+}
+
+fn note_client_activity_locked(
+    inner: &mut ServerState,
+    client: ClientId,
+    session: SessionId,
+) -> bool {
+    let now = unix_timestamp();
+    inner.engine.mark_session_active_at(session, now);
+    inner.activity_sequence = inner.activity_sequence.saturating_add(1);
+    let activity = inner.activity_sequence;
+    inner.client_activity.insert(client, activity);
+    inner.client_activity_times.insert(client, now);
+    inner
+        .choose_trees
+        .values()
+        .any(|chooser| chooser.sort.order() == Some(TmuxSortOrder::Activity))
+}
+
+fn terminal_resizes_after_client_focus(
+    inner: &mut ServerState,
+    client: ClientId,
+) -> (Vec<(Arc<TerminalSession>, TerminalGeometry)>, bool) {
+    let visible_panes = inner
+        .visible_terminals
+        .get(&client)
+        .cloned()
+        .unwrap_or_default();
+    terminal_resizes_after_client_sequence(inner, client, &visible_panes)
+}
+
 fn terminal_resizes_after_client_input(
     inner: &mut ServerState,
     client: ClientId,
     source_pane: PaneId,
-) -> Vec<(Arc<TerminalSession>, TerminalGeometry)> {
-    let Some(visible_panes) = inner.visible_terminals.get(&client) else {
-        return Vec::new();
+) -> (Vec<(Arc<TerminalSession>, TerminalGeometry)>, bool) {
+    let Some(visible_panes) = inner.visible_terminals.get(&client).cloned() else {
+        return (Vec::new(), false);
     };
     if !visible_panes.contains(&source_pane) || !inner.terminals.contains_key(&source_pane) {
-        return Vec::new();
+        return (Vec::new(), false);
     }
+    terminal_resizes_after_client_sequence(inner, client, &visible_panes)
+}
+
+fn terminal_resizes_after_client_sequence(
+    inner: &mut ServerState,
+    client: ClientId,
+    visible_panes: &BTreeSet<PaneId>,
+) -> (Vec<(Arc<TerminalSession>, TerminalGeometry)>, bool) {
     let previous_owners = visible_panes
         .iter()
         .map(|pane| (*pane, terminal_geometry_owner(inner, *pane)))
         .collect::<Vec<_>>();
+    let previous_geometries = visible_panes
+        .iter()
+        .map(|pane| {
+            (
+                *pane,
+                terminal_resize_for_pane(inner, *pane).map(|(_, geometry)| geometry),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
 
+    mark_client_terminal_latest(inner, client);
+
+    let owner_changed_panes = previous_owners
+        .into_iter()
+        .filter_map(|(pane, previous)| {
+            (terminal_geometry_owner(inner, pane) != previous).then_some(pane)
+        })
+        .collect::<BTreeSet<_>>();
+    if owner_changed_panes.is_empty() {
+        return (Vec::new(), false);
+    }
+    let layout_changed = write_back_terminal_geometries(inner, &owner_changed_panes, false);
+    let resizes = visible_panes
+        .iter()
+        .filter_map(|pane| {
+            let resize = terminal_resize_for_pane(inner, *pane)?;
+            (previous_geometries.get(pane).copied().flatten() != Some(resize.1)).then_some(resize)
+        })
+        .collect();
+    (resizes, layout_changed)
+}
+
+fn mark_client_terminal_latest(inner: &mut ServerState, client: ClientId) {
     let sequence = inner
         .terminal_input_sequence
         .checked_add(1)
@@ -20687,12 +22381,6 @@ fn terminal_resizes_after_client_input(
     inner
         .client_terminal_input_sequences
         .insert(client, sequence);
-
-    previous_owners
-        .into_iter()
-        .filter(|(pane, previous)| terminal_geometry_owner(inner, *pane) != *previous)
-        .filter_map(|(pane, _)| terminal_resize_for_pane(inner, pane))
-        .collect()
 }
 
 fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bool {
@@ -20700,7 +22388,7 @@ fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bo
 
     match action {
         Action::Focus(_) | Action::ClearLinkHover => false,
-        Action::Mouse(input) => input.phase() != zz_terminal::TerminalMousePhase::Motion,
+        Action::Mouse(input) => !terminal_mouse_is_bare_hover(*input),
         Action::ScrollLines(_)
         | Action::ScrollPages(_)
         | Action::ScrollTop
@@ -20719,6 +22407,7 @@ fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bo
         | Action::EnterCopyModeScrollExit
         | Action::EnterCopyModeWith { .. }
         | Action::CopyMode(_)
+        | Action::CopyModeCounted { .. }
         | Action::CopySelection { .. }
         | Action::SearchBegin(_)
         | Action::SearchUpdate(_)
@@ -20729,52 +22418,240 @@ fn terminal_view_action_is_input(action: &zz_terminal::TerminalViewAction) -> bo
     }
 }
 
-/// The pin's `CMD_READONLY` roster: the commands a read-only client may still
-/// run, from key bindings or its command channel.
+fn terminal_view_action_dismisses_display_panes(action: &zz_terminal::TerminalViewAction) -> bool {
+    match action {
+        zz_terminal::TerminalViewAction::Mouse(input) => !terminal_mouse_is_bare_hover(*input),
+        zz_terminal::TerminalViewAction::ScrollWheel { .. } => true,
+        _ => false,
+    }
+}
+
+fn terminal_mouse_is_bare_hover(input: zz_terminal::TerminalMouseInput) -> bool {
+    input.phase() == zz_terminal::TerminalMousePhase::Motion && input.button().is_none()
+}
+
+fn terminal_view_action_is_modal_input(action: &zz_terminal::TerminalViewAction) -> bool {
+    !matches!(
+        action,
+        zz_terminal::TerminalViewAction::Focus(_) | zz_terminal::TerminalViewAction::ClearLinkHover
+    )
+}
+
+#[derive(Clone, Copy)]
+enum EarlyInputActivity {
+    WithoutBell(PaneId),
+    Full(PaneId),
+}
+
 const READ_ONLY_SAFE_COMMANDS: &[&str] = &[
     "attach-session",
     "copy-mode",
     "detach-client",
     "list-clients",
-    "send-keys",
     "switch-client",
 ];
 
 fn command_is_read_only_safe(command: &CommandInvocation) -> bool {
-    READ_ONLY_SAFE_COMMANDS.contains(&canonical_command(&command.name))
+    let name = canonical_command(&command.name);
+    if name == "send-keys" {
+        return send_keys_is_read_only_safe(&command.args).unwrap_or(true);
+    }
+    READ_ONLY_SAFE_COMMANDS.contains(&name)
 }
 
 fn input_dismisses_client_message(input: &InputMessage) -> bool {
     match input {
         InputMessage::Key { input, .. } => input.action != zz_terminal::KeyAction::Release,
+        InputMessage::TerminalView { action, .. } => {
+            terminal_view_action_dismisses_display_panes(action)
+        }
         _ => false,
+    }
+}
+
+fn input_is_ignored_by_client_message(input: &InputMessage) -> bool {
+    match input {
+        InputMessage::Key { .. }
+        | InputMessage::Text { .. }
+        | InputMessage::TerminalView {
+            action: zz_terminal::TerminalViewAction::Paste(_),
+            ..
+        }
+        | InputMessage::ClientFocus { .. } => true,
+        InputMessage::TerminalView { action, .. } => {
+            terminal_view_action_dismisses_display_panes(action)
+        }
+        _ => false,
+    }
+}
+
+fn committed_character(input: &zz_terminal::KeyInput, text_follows: bool) -> Option<char> {
+    if !text_follows
+        || !matches!(
+            input.action,
+            zz_terminal::KeyAction::Press | zz_terminal::KeyAction::Repeat
+        )
+    {
+        return None;
+    }
+    if let Some(text) = input.text.as_deref() {
+        let mut characters = text.chars();
+        if let Some(character) = characters.next()
+            && characters.next().is_none()
+        {
+            return Some(character);
+        }
+    }
+    match input.key {
+        zz_terminal::KeyCode::Character(character) => Some(character),
+        _ => None,
+    }
+}
+
+fn enqueue_pending_committed_text_locked(
+    inner: &mut ServerState,
+    client: ClientId,
+    pane: PaneId,
+    lane: CommittedTextLane,
+    suppressed_character: Option<char>,
+) {
+    let stale = {
+        let pending = inner.pending_committed_text.entry(client).or_default();
+        let stale = (pending.len() >= MAX_PENDING_COMMITTED_TEXT)
+            .then(|| pending.pop_front())
+            .flatten();
+        pending.push_back(PendingCommittedText {
+            pane,
+            lane,
+            suppressed_character,
+        });
+        stale
+    };
+    if let Some(character) = suppressed_character {
+        *inner
+            .suppressed_text
+            .entry(client)
+            .or_default()
+            .entry(character)
+            .or_default() += 1;
+    }
+    if let Some(stale) = stale {
+        retire_pending_committed_text_locked(inner, client, stale);
+    }
+}
+
+fn suppress_committed_character_locked(
+    inner: &mut ServerState,
+    client: ClientId,
+    pane: PaneId,
+    lane: CommittedTextLane,
+    character: char,
+) {
+    let tagged = if let Some(pending) = inner
+        .pending_committed_text
+        .get_mut(&client)
+        .and_then(VecDeque::back_mut)
+        .filter(|pending| {
+            pending.pane == pane && pending.lane == lane && pending.suppressed_character.is_none()
+        }) {
+        pending.suppressed_character = Some(character);
+        true
+    } else {
+        false
+    };
+    if !tagged {
+        return;
+    }
+    *inner
+        .suppressed_text
+        .entry(client)
+        .or_default()
+        .entry(character)
+        .or_default() += 1;
+}
+
+fn retire_pending_committed_text_locked(
+    inner: &mut ServerState,
+    client: ClientId,
+    pending: PendingCommittedText,
+) {
+    let Some(character) = pending.suppressed_character else {
+        return;
+    };
+    let remove_client = if let Some(characters) = inner.suppressed_text.get_mut(&client) {
+        if let Some(count) = characters.get_mut(&character) {
+            *count = count.saturating_sub(1);
+        }
+        characters.retain(|_, count| *count != 0);
+        characters.is_empty()
+    } else {
+        false
+    };
+    if remove_client {
+        inner.suppressed_text.remove(&client);
     }
 }
 
 fn read_only_blocks_input(input: &InputMessage) -> bool {
     match input {
+        InputMessage::ResizeSplit { .. }
+        | InputMessage::Popup { .. }
+        | InputMessage::Menu { .. }
+        | InputMessage::Confirm { .. } => true,
+        InputMessage::TerminalView { action, .. } => {
+            !terminal_view_action_is_read_only_safe(action)
+        }
         InputMessage::Text { .. }
+        | InputMessage::Key { .. }
         | InputMessage::BrowserSurfaceText { .. }
         | InputMessage::BrowserSurfaceKey { .. }
         | InputMessage::ChooseTree { .. }
         | InputMessage::ChooseBuffer { .. }
         | InputMessage::DisplayPanes { .. }
         | InputMessage::CommandPrompt { .. }
-        | InputMessage::ResizeSplit { .. }
-        | InputMessage::Popup { .. }
-        | InputMessage::Menu { .. }
-        | InputMessage::Confirm { .. } => true,
-        InputMessage::TerminalView { action, .. } => !matches!(
-            action,
-            zz_terminal::TerminalViewAction::Focus(_)
-                | zz_terminal::TerminalViewAction::ClearLinkHover
-        ),
-        InputMessage::Key { .. }
         | InputMessage::ResizeTerminal { .. }
         | InputMessage::ResizeCommandOutput { .. }
         | InputMessage::CommandOutputView { .. }
         | InputMessage::CancelPrefix { .. }
-        | InputMessage::ClientTerminalSize { .. } => false,
+        | InputMessage::ClientTerminalSize { .. }
+        | InputMessage::ClientFocus { .. } => false,
+    }
+}
+
+fn terminal_view_action_is_read_only_safe(action: &zz_terminal::TerminalViewAction) -> bool {
+    use zz_terminal::TerminalViewAction as Action;
+
+    match action {
+        Action::ScrollLines(_)
+        | Action::ScrollPages(_)
+        | Action::ScrollTop
+        | Action::ScrollBottom
+        | Action::ScrollToFraction(_)
+        | Action::ScrollToOffset(_)
+        | Action::ClearLinkHover
+        | Action::EnterCopyMode
+        | Action::EnterCopyModeScrollExit
+        | Action::EnterCopyModeWith { .. } => true,
+        Action::CopyMode(action) | Action::CopyModeCounted { action, .. } => {
+            copy_mode_action_is_read_only_safe(action)
+        }
+        Action::SelectionPress(_)
+        | Action::SelectionDrag(_)
+        | Action::SelectionAutoscroll { .. }
+        | Action::SelectionRelease(_)
+        | Action::Mouse(_)
+        | Action::ScrollWheel { .. }
+        | Action::SelectAll
+        | Action::ClearHistory
+        | Action::ClearSelection
+        | Action::SearchBegin(_)
+        | Action::SearchUpdate(_)
+        | Action::SearchNext
+        | Action::SearchPrevious
+        | Action::SearchClose
+        | Action::CopySelection { .. }
+        | Action::Focus(_)
+        | Action::Paste(_) => false,
     }
 }
 
@@ -20916,13 +22793,6 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
 }
 
 fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
-    let session_activity = inner
-        .engine
-        .state
-        .sessions
-        .iter()
-        .map(|(session, state)| (*session, state.sort_activity))
-        .collect();
     FormatHookFacts {
         terminals: Arc::new(inner.terminals.clone()),
         pane_pipes: Arc::new(
@@ -20947,7 +22817,6 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
                 })
                 .collect(),
         ),
-        session_activity: Arc::new(session_activity),
         buffer: inner
             .paste_buffers
             .iter()
@@ -20955,6 +22824,75 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
             .map(buffer_format_facts),
         ..FormatHookFacts::default()
     }
+}
+
+fn current_buffer_path_client(inner: &ServerState, invoking_client: ClientId) -> Option<ClientId> {
+    if client_attached_session(inner, invoking_client).is_some() {
+        return Some(invoking_client);
+    }
+    inner
+        .client_origins
+        .get(&invoking_client)
+        .and_then(|pane| inner.engine.state.window_for_pane(*pane))
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .and_then(|window| best_client_on_session(inner, window.session))
+        .or_else(|| {
+            best_attached_session(inner).and_then(|session| best_client_on_session(inner, session))
+        })
+}
+
+fn buffer_path_client_context(
+    inner: &ServerState,
+    client: ClientId,
+) -> Option<(SessionId, WindowId, PaneId)> {
+    let session = client_attached_session(inner, client)?;
+    let session_state = inner.engine.state.sessions.get(&session)?;
+    let window = client_focused_window(inner, client, session_state);
+    let pane = inner.engine.state.windows.get(&window)?.active_pane;
+    Some((session, window, pane))
+}
+
+fn buffer_path_format_target(
+    inner: &ServerState,
+    invoking_client: Option<ClientId>,
+    context: &ExecutionContext,
+    target_client: Option<&str>,
+) -> (Option<SessionId>, Option<WindowId>, Option<PaneId>) {
+    let client = match target_client {
+        Some(target) => resolve_display_panes_client(inner, target).ok(),
+        None => invoking_client.and_then(|client| current_buffer_path_client(inner, client)),
+    };
+    let target = client
+        .and_then(|client| buffer_path_client_context(inner, client))
+        .or_else(|| {
+            invoking_client
+                .is_none()
+                .then_some((context.session?, context.window?, context.pane?))
+        })
+        .or_else(|| inner.engine.state.most_recent_context());
+    target.map_or((None, None, None), |(session, window, pane)| {
+        (Some(session), Some(window), Some(pane))
+    })
+}
+
+fn expand_buffer_path(
+    inner: &mut ServerState,
+    invoking_client: Option<ClientId>,
+    context: &ExecutionContext,
+    target_client: Option<&str>,
+    command_name: &str,
+    path: &str,
+) -> String {
+    let (session, window, pane) =
+        buffer_path_format_target(inner, invoking_client, context, target_client);
+    inner.engine.set_format_now(unix_timestamp());
+    let format_context =
+        server_format_context(&inner.engine, &inner.config_files, session, window, pane);
+    let facts = format_hook_facts(inner);
+    let mut hooks =
+        DaemonFormatHooks::command_with_optional_variables(&facts, context.format_variables())
+            .with_command_item(command_name);
+    expand_format_values(path, &format_context, &mut hooks)
 }
 
 fn resolve_buffer<'a>(
@@ -21079,7 +23017,7 @@ fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerErr
 fn parse_if_shell_args(args: &[String]) -> Result<ParsedIfShellArgs, ServerError> {
     let parsed = parse_buffer_command_args("if-shell", args, &['t'], &['b', 'F'])?;
     if !(2..=3).contains(&parsed.positional.len()) {
-        return Err(ServerError::InvalidCommand(IF_SHELL_USAGE.to_owned()));
+        return Err(ServerError::CommandParse(IF_SHELL_USAGE.to_owned()));
     }
     Ok(ParsedIfShellArgs {
         background: parsed.has('b'),
@@ -21278,10 +23216,7 @@ fn daemon_error_text(error: &DaemonError) -> String {
 }
 
 fn server_error_text(error: &ServerError) -> String {
-    match error {
-        ServerError::InvalidCommand(message) => message.clone(),
-        error => error.to_string(),
-    }
+    error.tmux_message()
 }
 
 fn discard_command_output(error: DaemonError) -> DaemonError {
@@ -21572,7 +23507,7 @@ fn parse_buffer_command_args(
                 } else {
                     consumed_next = true;
                     args.get(index + 1).cloned().ok_or_else(|| {
-                        ServerError::InvalidCommand(format!("{command} -{option} requires a value"))
+                        ServerError::CommandParse(format!("{command} -{option} requires a value"))
                     })?
                 };
                 parsed.values.insert(option, value.clone());
@@ -21586,8 +23521,8 @@ fn parse_buffer_command_args(
             if flags.contains(&option) {
                 parsed.flags.insert(option);
             } else {
-                return Err(ServerError::UnsupportedCommand(format!(
-                    "{command} -{option}"
+                return Err(ServerError::CommandParse(format!(
+                    "unsupported command: {command} -{option}"
                 )));
             }
         }
@@ -21603,7 +23538,7 @@ fn require_no_positionals(
     if parsed.positional.is_empty() {
         Ok(())
     } else {
-        Err(ServerError::InvalidCommand(format!(
+        Err(ServerError::CommandParse(format!(
             "{command} does not accept positional arguments"
         )))
     }
@@ -21614,7 +23549,7 @@ fn require_one_positional<'a>(
     parsed: &'a ParsedBufferCommandArgs,
 ) -> Result<&'a str, ServerError> {
     let [value] = parsed.positional.as_slice() else {
-        return Err(ServerError::InvalidCommand(format!(
+        return Err(ServerError::CommandParse(format!(
             "{command} requires exactly one path"
         )));
     };
@@ -22054,7 +23989,7 @@ fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, Serve
                     } else {
                         index = index.saturating_add(1);
                         args.get(index).cloned().ok_or_else(|| {
-                            ServerError::InvalidCommand(format!(
+                            ServerError::CommandParse(format!(
                                 "display-popup -{flag} requires a value"
                             ))
                         })?
@@ -22077,8 +24012,8 @@ fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, Serve
                     break;
                 }
                 _ => {
-                    return Err(ServerError::UnsupportedCommand(format!(
-                        "display-popup -{flag}"
+                    return Err(ServerError::CommandParse(format!(
+                        "unsupported command: display-popup -{flag}"
                     )));
                 }
             }
@@ -22116,7 +24051,7 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
                     } else {
                         index = index.saturating_add(1);
                         args.get(index).cloned().ok_or_else(|| {
-                            ServerError::InvalidCommand(format!(
+                            ServerError::CommandParse(format!(
                                 "display-menu -{flag} requires a value"
                             ))
                         })?
@@ -22137,8 +24072,8 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
                     break;
                 }
                 _ => {
-                    return Err(ServerError::UnsupportedCommand(format!(
-                        "display-menu -{flag}"
+                    return Err(ServerError::CommandParse(format!(
+                        "unsupported command: display-menu -{flag}"
                     )));
                 }
             }
@@ -22146,7 +24081,7 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
         index = index.saturating_add(1);
     }
     if parsed.items.is_empty() {
-        return Err(ServerError::InvalidCommand(
+        return Err(ServerError::CommandParse(
             "display-menu requires at least one argument".to_owned(),
         ));
     }
@@ -22161,7 +24096,7 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
         if argument == "--" {
             let positional = &args[index.saturating_add(1)..];
             if positional.len() != 1 {
-                return Err(ServerError::InvalidCommand(
+                return Err(ServerError::CommandParse(
                     "confirm-before requires exactly one command".to_owned(),
                 ));
             }
@@ -22171,7 +24106,7 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
         if !argument.starts_with('-') || argument == "-" {
             let positional = &args[index..];
             if positional.len() != 1 {
-                return Err(ServerError::InvalidCommand(
+                return Err(ServerError::CommandParse(
                     "confirm-before requires exactly one command".to_owned(),
                 ));
             }
@@ -22191,7 +24126,7 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
                     } else {
                         index = index.saturating_add(1);
                         args.get(index).cloned().ok_or_else(|| {
-                            ServerError::InvalidCommand(format!(
+                            ServerError::CommandParse(format!(
                                 "confirm-before -{flag} requires a value"
                             ))
                         })?
@@ -22205,8 +24140,8 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
                     break;
                 }
                 _ => {
-                    return Err(ServerError::UnsupportedCommand(format!(
-                        "confirm-before -{flag}"
+                    return Err(ServerError::CommandParse(format!(
+                        "unsupported command: confirm-before -{flag}"
                     )));
                 }
             }
@@ -22214,7 +24149,7 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
         index = index.saturating_add(1);
     }
     if parsed.command.is_none() {
-        return Err(ServerError::InvalidCommand(
+        return Err(ServerError::CommandParse(
             "confirm-before requires exactly one command".to_owned(),
         ));
     }
@@ -22400,12 +24335,16 @@ fn expand_popup_value(
     inner: &ServerState,
     target: &ExecutionContext,
     active_session: Option<SessionId>,
+    command_name: Option<&str>,
     value: &str,
 ) -> String {
     let facts = format_hook_facts(inner);
     let mut variables = target.format_variables.clone();
     variables.insert("config_files".to_owned(), inner.config_files.clone());
     let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables);
+    if let Some(command_name) = command_name {
+        hooks = hooks.with_command_item(command_name);
+    }
     inner
         .engine
         .expand_pane_format_time(value, target, active_session, &mut hooks)
@@ -22522,8 +24461,8 @@ fn parse_agent_send_args(args: &[String]) -> Result<ParsedAgentSend, ServerError
             continue;
         }
         if argument.starts_with('-') && argument != "-" {
-            return Err(ServerError::UnsupportedCommand(format!(
-                "agent-send {argument}"
+            return Err(ServerError::CommandParse(format!(
+                "unsupported command: agent-send {argument}"
             )));
         }
         parsed.text.push(argument.clone());
@@ -22544,7 +24483,7 @@ fn parse_capture_browser_args(args: &[String]) -> Result<ParsedCaptureBrowser, S
     while let Some(argument) = args.get(index) {
         if argument == "--" {
             if index.saturating_add(1) != args.len() {
-                return Err(ServerError::InvalidCommand(
+                return Err(ServerError::CommandParse(
                     "capture-browser does not accept positional arguments".to_owned(),
                 ));
             }
@@ -22560,7 +24499,7 @@ fn parse_capture_browser_args(args: &[String]) -> Result<ParsedCaptureBrowser, S
             index += value.consumed;
             continue;
         }
-        return Err(ServerError::InvalidCommand(format!(
+        return Err(ServerError::CommandParse(format!(
             "unexpected capture-browser argument: {argument}"
         )));
     }
@@ -22573,7 +24512,7 @@ fn parse_target_only_args(command: &str, args: &[String]) -> Result<Option<Strin
     while let Some(argument) = args.get(index) {
         if argument == "--" {
             if index.saturating_add(1) != args.len() {
-                return Err(ServerError::InvalidCommand(format!(
+                return Err(ServerError::CommandParse(format!(
                     "{command} does not accept positional arguments"
                 )));
             }
@@ -22584,7 +24523,7 @@ fn parse_target_only_args(command: &str, args: &[String]) -> Result<Option<Strin
             index += value.consumed;
             continue;
         }
-        return Err(ServerError::InvalidCommand(format!(
+        return Err(ServerError::CommandParse(format!(
             "unexpected {command} argument: {argument}"
         )));
     }
@@ -22606,7 +24545,7 @@ fn option_value(
     for name in names {
         if argument == name {
             let value = args.get(index.saturating_add(1)).ok_or_else(|| {
-                ServerError::InvalidCommand(format!("{command} {name} requires a value"))
+                ServerError::CommandParse(format!("{command} {name} requires a value"))
             })?;
             return Ok(Some(OptionValue {
                 value: value.clone(),
@@ -22775,6 +24714,9 @@ fn handle_connection<S: TransportStream>(
         if let Some(origin) = hello.origin {
             inner.client_origins.insert(client, origin);
         }
+        if client_nested_fact(&hello.capabilities) {
+            inner.nested_clients.insert(client);
+        }
         if let Some(tty) = client_tty_fact(&hello.capabilities) {
             inner.client_ttys.insert(client, tty);
         }
@@ -22834,14 +24776,16 @@ fn handle_connection<S: TransportStream>(
                 while let Ok(CommandRequest {
                     request_id,
                     command,
+                    prepared,
                 }) = receiver.recv()
                 {
-                    let response = worker_shared.execute_command_request(
+                    let response = worker_shared.execute_command_request_with_prepared(
                         client,
                         ClientKind::Command,
                         &mut context,
                         request_id,
                         &command,
+                        prepared,
                     );
                     let _ = worker_outbound
                         .enqueue_reliable(&ProtocolMessage::CommandResponse(response));
@@ -22883,6 +24827,7 @@ fn handle_connection<S: TransportStream>(
             ProtocolMessage::CommandRequest(CommandRequest {
                 request_id,
                 command,
+                prepared,
             }) => {
                 if let Some(context) = context.as_mut() {
                     sync_context_with_attachment(&shared.inner.lock(), client, context);
@@ -22892,6 +24837,7 @@ fn handle_connection<S: TransportStream>(
                         .send(CommandRequest {
                             request_id,
                             command,
+                            prepared,
                         })
                         .is_err()
                     {
@@ -22900,15 +24846,26 @@ fn handle_connection<S: TransportStream>(
                         ));
                     }
                 } else {
-                    let response = shared.execute_command_request(
+                    let response = shared.execute_command_request_with_prepared(
                         client,
                         hello.kind,
                         context.as_mut().expect("interactive client owns context"),
                         request_id,
                         &command,
+                        prepared,
                     );
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
                 }
+            }
+            ProtocolMessage::PrepareCommandList {
+                request_id,
+                commands,
+            } => {
+                let commands = shared.prepare_command_list(commands);
+                let _ = outbound.enqueue_reliable(&ProtocolMessage::PreparedCommandList {
+                    request_id,
+                    commands,
+                });
             }
             ProtocolMessage::Attach { session } => {
                 let Some(context) = context.as_mut() else {
@@ -22925,6 +24882,7 @@ fn handle_connection<S: TransportStream>(
                 };
                 match shared.attach_target(client, hello.kind, context, &session) {
                     Ok((session, snapshot)) => {
+                        shared.clear_pending_committed_text(client);
                         outbound.reset_kitty_images();
                         outbound.reset_pasted_images();
                         let _ = outbound
@@ -23464,6 +25422,66 @@ mod tests {
     use super::*;
     use crate::{CommandClient, InteractiveClient};
 
+    #[test]
+    fn repeated_terminal_input_stops_at_the_first_rejection() {
+        let mut attempts = 0;
+        repeat_until_rejected(u32::MAX, || {
+            attempts += 1;
+            attempts < 3
+        });
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
+    fn repeated_browser_input_is_capped_before_it_reaches_the_client() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "browser-repeat-cap", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("terminal context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["about:blank"]),
+            )
+            .expect("create browser");
+        let browser = context.pane.expect("browser pane");
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "send-keys",
+                    ["-t", &browser.to_string(), "-l", "-N", "4294967295", "x"],
+                ),
+            )
+            .expect("send repeated browser input");
+
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::BrowserCommand {
+                            pane,
+                            command: BrowserCommand::SendKeysRepeated { keys, count },
+                        },
+                        ..
+                    }) if *pane == browser
+                        && *count == MAX_BROWSER_KEY_REPEAT
+                        && keys == &[zz_protocol::KeyToken::Literal("x".to_owned())]
+                ))
+        );
+    }
+
     #[cfg(unix)]
     impl TransportStream for std::os::unix::net::UnixStream {
         fn try_clone(&self) -> std::io::Result<Self> {
@@ -23606,12 +25624,13 @@ mod tests {
         );
         assert!(matches!(
             parse_display_popup_args(&["-T".to_owned()]),
-            Err(ServerError::InvalidCommand(message))
+            Err(ServerError::CommandParse(message))
                 if message == "display-popup -T requires a value"
         ));
         assert!(matches!(
             parse_display_popup_args(&["-Z".to_owned()]),
-            Err(ServerError::UnsupportedCommand(message)) if message == "display-popup -Z"
+            Err(ServerError::CommandParse(message))
+                if message == "unsupported command: display-popup -Z"
         ));
     }
 
@@ -24109,6 +26128,7 @@ mod tests {
                 0,
                 &mut report,
                 ClientTerminal::NoClient,
+                None,
                 &mut source_invocations,
             )
             .expect("load startup config");
@@ -24120,6 +26140,22 @@ mod tests {
                 root.display()
             )]
         );
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        shared.route_config_replay_errors(control, ClientKind::Control, None, &report);
+        assert!(matches!(
+            take_reliable_messages(&mailbox).as_slice(),
+            [ProtocolMessage::Event(Event {
+                payload: EventPayload::ClientMessage {
+                    kind: ClientMessageKind::Error,
+                    text,
+                    ..
+                },
+                ..
+            })] if text == &format!("{}:51: {NESTED_SOURCE_LIMIT_ERROR}", root.display())
+        ));
         assert!(read_global_option(&shared, "@startup-present").is_empty());
         assert_eq!(read_global_option(&shared, "@startup-continued"), "yes");
     }
@@ -24132,6 +26168,8 @@ mod tests {
         let nested_failure = directory.path().join("nested-failure.conf");
         let nested_parser_failure = directory.path().join("nested-parser-failure.conf");
         let mixed_match = directory.path().join("mixed-match.conf");
+        let matched_read_failure = directory.path().join("matched-read-failure");
+        let matched_read_parent = directory.path().join("matched-read-parent.conf");
         let source_identity = directory.path().join("source-identity.conf");
         fs::write(&leaf, "set-option -g @depth-leaf yes\n").expect("depth leaf");
         fs::write(
@@ -24141,13 +26179,19 @@ mod tests {
         )
         .expect("nested failure config");
         fs::write(&nested_parser_failure, "set 'oops\n").expect("nested parser failure config");
-        fs::write(&mixed_match, "set-option -g @mixed-loaded yes\n")
-            .expect("mixed source match");
+        fs::write(&mixed_match, "set-option -g @mixed-loaded yes\n").expect("mixed source match");
+        fs::create_dir(&matched_read_failure).expect("matched read failure directory");
         fs::write(
-            &source_identity,
-            "set-option -g @source-identity yes\n",
+            &matched_read_parent,
+            format!(
+                "source-file '{}' ; set-option -g @read-same yes\n\
+                 set-option -g @read-next yes\n",
+                matched_read_failure.display()
+            ),
         )
-        .expect("source identity config");
+        .expect("matched read failure parent");
+        fs::write(&source_identity, "set-option -g @source-identity yes\n")
+            .expect("source identity config");
 
         for level in (1..=49).rev() {
             let body = if level == 49 {
@@ -24159,21 +26203,32 @@ mod tests {
             } else {
                 format!(
                     "source-file '{}'\n",
-                    directory.path().join(format!("f{}.conf", level + 1)).display()
+                    directory
+                        .path()
+                        .join(format!("f{}.conf", level + 1))
+                        .display()
                 )
             };
-            fs::write(directory.path().join(format!("f{level}.conf")), body)
-                .expect("depth config");
+            fs::write(directory.path().join(format!("f{level}.conf")), body).expect("depth config");
         }
 
+        let glob_error_probe = if cfg!(unix) {
+            "source-file 'invalid\0pattern.conf' ; set-option -g @glob-same yes\n\
+             set-option -g @glob-next yes\n"
+        } else {
+            ""
+        };
         fs::write(
             &root,
             format!(
                 "source-file '{}'\n\
                  source-file missing-loud.conf ; set-option -g @loud-same yes\n\
                  set-option -g @loud-next yes\n\
+                 {glob_error_probe}\
                  source-file -q missing-quiet.conf ; set-option -g @quiet-same yes\n\
                  set-option -g @quiet-next yes\n\
+                 new-pane ; set-option -g @unsupported-command-same yes\n\
+                 set-option -g @unsupported-command-next yes\n\
                  kill-session -t =missing ; set-option -g @runtime-same yes\n\
                  set-option -g @runtime-next yes\n\
                  source-file '{}' ; set-option -g @nested-parent-same yes\n\
@@ -24200,6 +26255,25 @@ mod tests {
         shared
             .load_config_file(&root, &mut ExecutionContext::default(), 0)
             .expect("replay config");
+        let mut read_report = ConfigLoadReport::default();
+        shared
+            .load_config_file_with_report(
+                &matched_read_parent,
+                &mut ExecutionContext::default(),
+                0,
+                &mut read_report,
+            )
+            .expect("replay matched read failure");
+
+        let matched_read_suffix = format!(": {}", matched_read_failure.display());
+        assert!(
+            read_report
+                .source_errors()
+                .iter()
+                .any(|error| error.ends_with(&matched_read_suffix)),
+            "{:?}",
+            read_report.source_errors()
+        );
 
         for marker in [
             "@depth-leaf",
@@ -24210,11 +26284,18 @@ mod tests {
         ] {
             assert!(read_global_option(&shared, marker).is_empty(), "{marker}");
         }
+        #[cfg(unix)]
+        {
+            assert!(read_global_option(&shared, "@glob-same").is_empty());
+            assert_eq!(read_global_option(&shared, "@glob-next"), "yes");
+        }
         for marker in [
             "@depth-next",
             "@loud-next",
             "@quiet-same",
             "@quiet-next",
+            "@unsupported-command-same",
+            "@unsupported-command-next",
             "@runtime-next",
             "@nested-next",
             "@nested-parent-same",
@@ -24228,6 +26309,8 @@ mod tests {
             "@stdin-next",
             "@async-same",
             "@async-next",
+            "@read-same",
+            "@read-next",
             "@source-identity",
         ] {
             assert_eq!(read_global_option(&shared, marker), "yes", "{marker}");
@@ -24695,7 +26778,7 @@ mod tests {
     }
 
     #[test]
-    fn attach_and_attached_key_input_update_session_activity() {
+    fn attach_and_terminal_input_update_only_their_activity_boundaries() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (client, _) = shared.register_subscribed(ClientKind::Interactive, None, None, mailbox);
@@ -24730,17 +26813,74 @@ mod tests {
             Some(second)
         );
 
-        shared.attach(client, first).unwrap();
-        assert_eq!(
-            shared
-                .inner
-                .lock()
+        let first_sort = {
+            let mut inner = shared.inner.lock();
+            inner
                 .engine
                 .state
-                .most_recent_context()
-                .map(|context| context.0),
-            Some(first)
-        );
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(1);
+            inner.engine.state.sessions[&first].sort_activity
+        };
+        shared.attach(client, first).unwrap();
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&first].sort_activity > first_sort);
+            assert_ne!(inner.engine.state.sessions[&first].activity, Some(1));
+            assert_eq!(
+                inner
+                    .engine
+                    .state
+                    .most_recent_context()
+                    .map(|context| context.0),
+                Some(first)
+            );
+        }
+        let same_sort = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(2);
+            inner.engine.state.sessions[&first].sort_activity
+        };
+        shared.attach(client, first).unwrap();
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&first].sort_activity > same_sort);
+            assert_ne!(inner.engine.state.sessions[&first].activity, Some(2));
+        }
+        let second_sort = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&second)
+                .unwrap()
+                .activity = Some(3);
+            inner.engine.state.sessions[&second].sort_activity
+        };
+        shared.attach(client, second).unwrap();
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&second].sort_activity > second_sort);
+            assert_ne!(inner.engine.state.sessions[&second].activity, Some(3));
+            assert_eq!(
+                inner
+                    .engine
+                    .state
+                    .most_recent_context()
+                    .map(|context| context.0),
+                Some(second)
+            );
+        }
+        shared.attach(client, first).unwrap();
         shared
             .execute(
                 ClientId(7),
@@ -24761,6 +26901,17 @@ mod tests {
             Some(third)
         );
 
+        let ordinary_sort = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(4);
+            inner.engine.state.sessions[&first].sort_activity
+        };
         shared
             .input(
                 client,
@@ -24773,16 +26924,3658 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(
-            shared
-                .inner
-                .lock()
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&first].sort_activity > ordinary_sort);
+            assert_ne!(inner.engine.state.sessions[&first].activity, Some(4));
+            assert_eq!(
+                inner
+                    .engine
+                    .state
+                    .most_recent_context()
+                    .map(|context| context.0),
+                Some(first)
+            );
+        }
+
+        let read_only_sort = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            inner
                 .engine
                 .state
-                .most_recent_context()
-                .map(|context| context.0),
-            Some(first)
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(5);
+            inner.engine.state.sessions[&first].sort_activity
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Key {
+                    pane: first_pane,
+                    input: test_key(KeyCode::Character('y'), Modifiers::default(), Some("y")),
+                    text_follows: false,
+                },
+            )
+            .unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&first].sort_activity > read_only_sort);
+            assert_ne!(inner.engine.state.sessions[&first].activity, Some(5));
+            inner.read_only_clients.remove(&client);
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("choose-tree", [] as [&str; 0]),
+            )
+            .unwrap();
+        let consumed_sort = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(6);
+            inner.engine.state.sessions[&first].sort_activity
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Key {
+                    pane: first_pane,
+                    input: test_key(KeyCode::Character('z'), Modifiers::default(), Some("z")),
+                    text_follows: false,
+                },
+            )
+            .unwrap();
+        let chooser_activity = {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&first].sort_activity > consumed_sort);
+            assert_ne!(inner.engine.state.sessions[&first].activity, Some(6));
+            (
+                inner.engine.state.sessions[&first].sort_activity,
+                inner.engine.state.sessions[&first].activity,
+            )
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Text {
+                    pane: first_pane,
+                    text: "overlay".to_owned(),
+                },
+            )
+            .unwrap();
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                (
+                    inner.engine.state.sessions[&first].sort_activity,
+                    inner.engine.state.sessions[&first].activity,
+                ),
+                chooser_activity
+            );
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ChooseTree {
+                    action: ChooseTreeAction::Close,
+                },
+            )
+            .unwrap();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("command-prompt", ["-p", "activity"]),
+            )
+            .unwrap();
+        let prompt_sort = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(7);
+            inner.engine.state.sessions[&first].sort_activity
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Key {
+                    pane: first_pane,
+                    input: test_key(KeyCode::Character('p'), Modifiers::default(), Some("p")),
+                    text_follows: false,
+                },
+            )
+            .unwrap();
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.state.sessions[&first].sort_activity,
+                prompt_sort
+            );
+            assert_eq!(inner.engine.state.sessions[&first].activity, Some(7));
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Text {
+                    pane: first_pane,
+                    text: "typed".to_owned(),
+                },
+            )
+            .unwrap();
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.state.sessions[&first].sort_activity,
+                prompt_sort
+            );
+            assert_eq!(inner.engine.state.sessions[&first].activity, Some(7));
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::CommandPrompt {
+                    action: CommandPromptAction::Close,
+                },
+            )
+            .unwrap();
+
+        let theme_sort = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(8);
+            inner.engine.state.sessions[&first].sort_activity
+        };
+        shared.set_client_color_scheme(client, TerminalColorScheme::Light);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.state.sessions[&first].sort_activity,
+                theme_sort
+            );
+            assert_eq!(inner.engine.state.sessions[&first].activity, Some(8));
+        }
+
+        let untouched_sort = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&first)
+                .unwrap()
+                .activity = Some(9);
+            inner.engine.state.sessions[&first].sort_activity
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ResizeTerminal {
+                    pane: first_pane,
+                    columns: 81,
+                    rows: 25,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .unwrap();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("switch-client", ["-T", "root"]),
+            )
+            .unwrap();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            )
+            .unwrap();
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner.engine.state.sessions[&first].sort_activity,
+            untouched_sort
         );
+        assert_eq!(inner.engine.state.sessions[&first].activity, Some(9));
+    }
+
+    fn bind_focus_any(shared: &Shared, table: &str, command: CommandInvocation) {
+        shared.inner.lock().engine.keys.bind(
+            table,
+            "Any",
+            zz_mux::Binding {
+                commands: vec![command],
+                repeat: false,
+                note: None,
+            },
+        );
+    }
+
+    #[test]
+    fn client_focus_updates_activity_and_focus_in_owns_latest_geometry() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, terminal) =
+            output_view_session_fixture(&shared, "client-focus", "focus");
+        let first_mailbox = OutboundMailbox::new();
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("focus window");
+        let window_target = window.to_string();
+        let (first, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("first-focus-client".to_owned()),
+            None,
+            Arc::clone(&first_mailbox),
+        );
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("second-focus-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(first, session).expect("attach first client");
+        shared
+            .attach(second, session)
+            .expect("attach second client");
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 100,
+                    rows: 30,
+                    cell_width_px: 10,
+                    cell_height_px: 20,
+                },
+            )
+            .expect("store first geometry");
+        shared
+            .input(
+                second,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 80,
+                    rows: 20,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("store second geometry");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-t", window_target.as_str(), "window-size", "latest"],
+                ),
+            )
+            .expect("select latest geometry");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        shared
+            .attach(first, session)
+            .expect("make first attached client latest");
+        let mut chooser_context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+                .expect("activity chooser context");
+        shared
+            .execute(
+                first,
+                ClientKind::Interactive,
+                &mut chooser_context,
+                &CommandInvocation::new("choose-tree", ["-O", "activity"]),
+            )
+            .expect("open activity chooser");
+        {
+            let mut inner = shared.inner.lock();
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .unwrap()
+                .activity = Some(-10);
+        }
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(first.0),
+            "first client geometry was not selected",
+            |viewport| viewport.columns == 100 && viewport.rows == 30,
+        );
+        take_reliable_messages(&first_mailbox);
+        let (activity_sequence, terminal_input_sequence, sort_activity, mux_generation) = {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.pane_geometry(pane), Some((100, 30)));
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.engine.state.generation(),
+            )
+        };
+        shared
+            .input(
+                second,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("focus second client");
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(second.0),
+            "focused client did not become latest geometry",
+            |viewport| viewport.columns == 80 && viewport.rows == 20,
+        );
+        {
+            let inner = shared.inner.lock();
+            let retained = inner.engine.state.sessions[&session]
+                .activity
+                .expect("retained activity");
+            assert_ne!(retained, -10);
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                sort_activity + 1
+            );
+            assert_eq!(inner.activity_sequence, activity_sequence + 1);
+            assert_eq!(inner.client_activity[&second], activity_sequence + 1);
+            assert_eq!(
+                i64::try_from(inner.client_activity_times[&second]).ok(),
+                Some(retained)
+            );
+            assert_eq!(inner.terminal_input_sequence, terminal_input_sequence + 1);
+            assert_eq!(terminal_geometry_owner(&inner, pane), Some(second));
+            assert_eq!(inner.engine.pane_geometry(pane), Some((80, 20)));
+            assert!(inner.engine.state.generation() > mux_generation);
+            assert!(inner.last_published_mux_generation > mux_generation);
+            assert!(inner.engine.state.pane(pane).expect("focus pane").bell);
+        }
+        let peer_messages = take_reliable_messages(&first_mailbox);
+        assert_eq!(
+            peer_messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ChooseTree { state: Some(_) },
+                        ..
+                    })
+                ))
+                .count(),
+            2
+        );
+        let peer_snapshot = peer_messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) => Some(snapshot),
+                _ => None,
+            })
+            .find(|snapshot| {
+                snapshot.generation > mux_generation
+                    && snapshot
+                        .sessions
+                        .iter()
+                        .flat_map(|session| &session.windows)
+                        .find(|candidate| candidate.id == window)
+                        .is_some_and(|window| {
+                            window
+                                .layout_dump
+                                .ends_with(&format!("80x20,0,0,{}", pane.0))
+                                && window.panes.get(&pane).is_some_and(|pane| pane.bell)
+                        })
+            })
+            .expect("peer focus geometry snapshot");
+        let peer_window = peer_snapshot.sessions[0]
+            .windows
+            .iter()
+            .find(|candidate| candidate.id == window)
+            .expect("peer focus window");
+        assert!(
+            peer_window
+                .layout_dump
+                .ends_with(&format!("80x20,0,0,{}", pane.0)),
+            "{}",
+            peer_window.layout_dump
+        );
+        assert!(peer_window.panes[&pane].bell);
+
+        let paired_state = {
+            let inner = shared.inner.lock();
+            (
+                inner.engine.state.sessions[&session].activity,
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.client_activity[&second],
+                terminal_geometry_owner(&inner, pane),
+            )
+        };
+        shared
+            .input(
+                second,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::Focus(true),
+                },
+            )
+            .expect("forward paired pane focus");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                (
+                    inner.engine.state.sessions[&session].activity,
+                    inner.engine.state.sessions[&session].sort_activity,
+                    inner.activity_sequence,
+                    inner.terminal_input_sequence,
+                    inner.client_activity[&second],
+                    terminal_geometry_owner(&inner, pane),
+                ),
+                paired_state
+            );
+            assert!(inner.engine.state.pane(pane).expect("focus pane").bell);
+        }
+
+        let focus_out_state = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .unwrap()
+                .activity = Some(-11);
+            (
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                terminal_geometry_owner(&inner, pane),
+            )
+        };
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("blur first client");
+        {
+            let inner = shared.inner.lock();
+            assert_ne!(inner.engine.state.sessions[&session].activity, Some(-11));
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                focus_out_state.0 + 1
+            );
+            assert_eq!(inner.activity_sequence, focus_out_state.1 + 1);
+            assert_eq!(inner.client_activity[&first], focus_out_state.1 + 1);
+            assert_eq!(inner.terminal_input_sequence, focus_out_state.2);
+            assert_eq!(terminal_geometry_owner(&inner, pane), focus_out_state.3);
+            assert!(inner.engine.state.pane(pane).expect("focus pane").bell);
+        }
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "off"]),
+            )
+            .expect("disable focus events");
+        let inactive = {
+            let mut inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .unwrap()
+                .activity = Some(-12);
+            (
+                inner.engine.state.sessions[&session].activity,
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.client_activity[&second],
+                terminal_geometry_owner(&inner, pane),
+            )
+        };
+        for focused in [true, false] {
+            shared
+                .input(
+                    second,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    InputMessage::ClientFocus { focused },
+                )
+                .expect("ignore disabled client focus");
+        }
+        let inner = shared.inner.lock();
+        assert_eq!(
+            (
+                inner.engine.state.sessions[&session].activity,
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.client_activity[&second],
+                terminal_geometry_owner(&inner, pane),
+            ),
+            inactive
+        );
+        assert!(inner.engine.state.pane(pane).expect("focus pane").bell);
+    }
+
+    #[test]
+    fn client_focus_dispatches_any_after_writable_prequeue_and_latest_accounting() {
+        let shared = Arc::new(Shared::new(1));
+        let first_mailbox = OutboundMailbox::new();
+        let (session, pane, _) = output_view_session_fixture(&shared, "focus-any-order", "focus");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("focus window");
+        let (first, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("focus-any-first".to_owned()),
+            None,
+            Arc::clone(&first_mailbox),
+        );
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("focus-any-second".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(first, session).expect("attach first client");
+        shared
+            .attach(second, session)
+            .expect("attach second client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("focus context");
+        for (client, columns, rows) in [(first, 100, 30), (second, 80, 20)] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns,
+                        rows,
+                        cell_width_px: 8,
+                        cell_height_px: 18,
+                    },
+                )
+                .expect("store client geometry");
+        }
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-t", &window.to_string(), "window-size", "latest"],
+                ),
+            )
+            .expect("select latest geometry");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        shared
+            .attach(second, session)
+            .expect("make second client latest");
+        shared
+            .execute(
+                first,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "60000"]),
+            )
+            .expect("open display overlay");
+        shared
+            .execute(
+                first,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "5000", "focus message"]),
+            )
+            .expect("open focus message");
+        shared.inner.lock().command_prompts.insert(
+            first,
+            CommandPrompt::new(
+                "prompt".to_owned(),
+                "7".to_owned(),
+                Some("rename-session -- 'prompt-before-any'".to_owned()),
+                CommandPromptType::Command,
+                CommandPromptMode::Numeric,
+                false,
+            ),
+        );
+        bind_focus_any(
+            &shared,
+            "root",
+            CommandInvocation::new("rename-session", ["--", "any-after-accounting"]),
+        );
+        take_reliable_messages(&first_mailbox);
+        let activity = shared.inner.lock().activity_sequence;
+
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("dispatch focused Any binding");
+
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner.engine.state.sessions[&session].name,
+            "any-after-accounting"
+        );
+        assert_eq!(inner.activity_sequence, activity + 1);
+        assert_eq!(terminal_geometry_owner(&inner, pane), Some(first));
+        assert_eq!(inner.engine.pane_geometry(pane), Some((100, 30)));
+        assert!(!inner.client_messages.contains_key(&first));
+        assert!(!inner.display_panes.contains_key(&first));
+        assert!(!inner.command_prompts.contains_key(&first));
+    }
+
+    #[test]
+    fn client_focus_any_prefers_chooser_and_copy_modes_then_falls_back_to_root() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "focus-any-modes", "focus");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("focus-any-modes-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach focus client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("focus context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        bind_focus_any(
+            &shared,
+            "root",
+            CommandInvocation::new("rename-session", ["--", "root-focus-any"]),
+        );
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-tree", [] as [&str; 0]),
+            )
+            .expect("open tree chooser");
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("fall back from chooser to root Any");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.state.sessions[&session].name, "root-focus-any");
+            assert!(inner.choose_trees.contains_key(&client));
+        }
+
+        bind_focus_any(
+            &shared,
+            "choose-tree",
+            CommandInvocation::new("rename-session", ["--", "chooser-focus-any"]),
+        );
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("dispatch chooser Any");
+        {
+            let mut inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.state.sessions[&session].name,
+                "chooser-focus-any"
+            );
+            inner.choose_trees.remove(&client);
+        }
+
+        let copy_window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("copy window");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-t", &copy_window.to_string(), "mode-keys", "vi"],
+                ),
+            )
+            .expect("select vi copy keys");
+        let copy_table = {
+            let mut inner = shared.inner.lock();
+            enter_copy_session(&mut inner, client, pane).expect("enter copy session");
+            inner
+                .engine
+                .copy_mode_table_for_pane(pane)
+                .expect("copy table")
+                .to_owned()
+        };
+        assert_eq!(copy_table, "copy-mode-vi");
+        bind_focus_any(
+            &shared,
+            &copy_table,
+            CommandInvocation::new("rename-session", ["--", "copy-focus-any"]),
+        );
+        assert_eq!(shared.key_decision(client, "f", false), KeyDecision::Ignore);
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("dispatch copy-mode Any");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.state.sessions[&session].name, "copy-focus-any");
+            assert_eq!(
+                inner
+                    .key_engines
+                    .get(&client)
+                    .and_then(KeyEngine::active_table),
+                Some("copy-mode-vi")
+            );
+        }
+        assert_eq!(
+            shared.key_decision(client, "x", false),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "jump-forward", "x"],
+            )])
+        );
+
+        shared.inner.lock().engine.keys.unbind(&copy_table, "Any");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("fall back from copy mode to root Any");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.engine.state.sessions[&session].name, "root-focus-any");
+        assert_eq!(
+            inner
+                .key_engines
+                .get(&client)
+                .and_then(KeyEngine::active_table),
+            Some("copy-mode-vi")
+        );
+    }
+
+    #[test]
+    fn read_only_client_focus_any_uses_authorization_and_isolates_key_state() {
+        let shared = Arc::new(Shared::new(1));
+        let first_mailbox = OutboundMailbox::new();
+        let (session, _, _) = output_view_session_fixture(&shared, "read-only-focus-any", "focus");
+        let (first, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-focus-any-first".to_owned()),
+            None,
+            Arc::clone(&first_mailbox),
+        );
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-focus-any-second".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(first, session).expect("attach first client");
+        shared
+            .attach(second, session)
+            .expect("attach second client");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        bind_focus_any(
+            &shared,
+            "root",
+            CommandInvocation::new("switch-client", ["-T", "prefix"]),
+        );
+        let (original_name, activity) = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(first);
+            (
+                inner.engine.state.sessions[&session].name.clone(),
+                inner.activity_sequence,
+            )
+        };
+
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("dispatch safe read-only Any");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, activity + 1);
+            assert_eq!(
+                inner
+                    .key_engines
+                    .get(&first)
+                    .and_then(KeyEngine::active_table),
+                Some("prefix")
+            );
+            assert_eq!(
+                inner
+                    .key_engines
+                    .get(&second)
+                    .and_then(KeyEngine::active_table),
+                None
+            );
+            assert!(inner.prefix_armed.contains(&first));
+            assert!(!inner.prefix_armed.contains(&second));
+        }
+
+        bind_focus_any(
+            &shared,
+            "root",
+            CommandInvocation::new("rename-session", ["--", "blocked-focus-any"]),
+        );
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("authorize unsafe read-only Any");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, activity + 2);
+            assert_eq!(inner.engine.state.sessions[&session].name, original_name);
+            assert_eq!(
+                inner
+                    .key_engines
+                    .get(&first)
+                    .and_then(KeyEngine::active_table),
+                None
+            );
+            assert_eq!(
+                inner
+                    .key_engines
+                    .get(&second)
+                    .and_then(KeyEngine::active_table),
+                None
+            );
+            assert!(!inner.prefix_armed.contains(&first));
+            assert!(!inner.prefix_armed.contains(&second));
+        }
+        assert!(
+            take_reliable_messages(&first_mailbox)
+                .iter()
+                .any(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::TimedClientMessage { text, .. },
+                            ..
+                        }) if text == "client is read-only"
+                    )
+                })
+        );
+    }
+
+    #[test]
+    fn client_focus_obeys_writable_command_prompt_prequeue() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (session, pane, _) = output_view_session_fixture(&shared, "focus-prompt", "prompt");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("focus-prompt-client".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared
+            .attach(client, session)
+            .expect("attach prompt client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("prompt context");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 80,
+                    rows: 24,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            )
+            .expect("store prompt client geometry");
+        let open_prompt = |mode, input: &str, template: Option<&str>| {
+            shared.inner.lock().command_prompts.insert(
+                client,
+                CommandPrompt::new(
+                    "prompt".to_owned(),
+                    input.to_owned(),
+                    template.map(str::to_owned),
+                    CommandPromptType::Command,
+                    mode,
+                    false,
+                ),
+            );
+        };
+        let focus_state = || {
+            let inner = shared.inner.lock();
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.engine.state.sessions[&session].sort_activity,
+                terminal_geometry_owner(&inner, pane),
+            )
+        };
+
+        open_prompt(CommandPromptMode::Text, "", None);
+        let disabled = focus_state();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("ignore disabled prompt focus");
+        assert_eq!(focus_state(), disabled);
+        assert!(shared.inner.lock().command_prompts.contains_key(&client));
+        shared.inner.lock().command_prompts.remove(&client);
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        shared.inner.lock().engine.state.set_pane_bell(pane, true);
+
+        open_prompt(CommandPromptMode::Text, "kept", None);
+        let consumed = focus_state();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("consume text prompt focus");
+        assert_eq!(focus_state(), consumed);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.command_prompts[&client].input, "kept");
+            assert!(inner.engine.state.pane(pane).expect("prompt pane").bell);
+        }
+        shared.inner.lock().command_prompts.remove(&client);
+
+        for (focused, answer) in [(true, "FocusIn"), (false, "FocusOut")] {
+            open_prompt(CommandPromptMode::Key, "", Some("rename-session -- '%%'"));
+            let before = focus_state();
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ClientFocus { focused },
+                )
+                .expect("submit key prompt focus");
+            assert_eq!(focus_state(), before);
+            let inner = shared.inner.lock();
+            assert!(!inner.command_prompts.contains_key(&client));
+            assert_eq!(inner.engine.state.sessions[&session].name, answer);
+            assert!(inner.engine.state.pane(pane).expect("key prompt pane").bell);
+        }
+
+        for (focused, input) in [(false, "7"), (true, "8")] {
+            open_prompt(
+                CommandPromptMode::Numeric,
+                input,
+                Some("rename-session -- 'numeric-%%'"),
+            );
+            let before = focus_state();
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ClientFocus { focused },
+                )
+                .expect("pass numeric prompt focus");
+            let after = focus_state();
+            assert_eq!(after.0, before.0 + 1);
+            assert_eq!(after.1, before.1 + u64::from(focused));
+            assert_eq!(after.2, before.2 + 1);
+            assert_eq!(after.3, if focused { Some(client) } else { before.3 });
+            let inner = shared.inner.lock();
+            assert!(!inner.command_prompts.contains_key(&client));
+            assert_eq!(
+                inner.engine.state.sessions[&session].name,
+                format!("numeric-{input}")
+            );
+            assert!(
+                inner
+                    .engine
+                    .state
+                    .pane(pane)
+                    .expect("numeric prompt pane")
+                    .bell
+            );
+            assert!(inner.command_history.is_empty());
+        }
+        open_prompt(
+            CommandPromptMode::Numeric,
+            "9",
+            Some("set-option -g focus-events off"),
+        );
+        let before = focus_state();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("account accepted focus after numeric submission");
+        let after = focus_state();
+        assert_eq!(after.0, before.0 + 1);
+        assert_eq!(after.1, before.1);
+        assert_eq!(after.2, before.2 + 1);
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.engine.focus_events());
+            assert!(inner.command_history.is_empty());
+        }
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::CommandPrompt { state: None },
+                ..
+            })
+        )));
+    }
+
+    #[test]
+    fn client_focus_closes_display_panes_and_preserves_chooser_modes() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (session, pane, _) = output_view_session_fixture(&shared, "focus-modal", "modal");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("focus-modal-client".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach modal client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("modal context");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 80,
+                    rows: 24,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            )
+            .expect("store modal client geometry");
+        let focus_state = || {
+            let inner = shared.inner.lock();
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.engine.state.sessions[&session].sort_activity,
+                terminal_geometry_owner(&inner, pane),
+            )
+        };
+        let open_display = |context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new("display-panes", args.iter().copied()),
+                )
+                .expect("open display overlay");
+            take_reliable_messages(&mailbox);
+        };
+
+        open_display(&mut context, &["-d", "0"]);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "5000", "disabled focus"]),
+            )
+            .expect("arm disabled-focus message");
+        let disabled_message = armed_client_message(&shared, client);
+        assert!(disabled_message.freeze);
+        take_reliable_messages(&mailbox);
+        drain_terminal_lane(&mailbox);
+        let disabled = focus_state();
+        let disabled_token = shared.inner.lock().display_panes[&client].token;
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("ignore disabled display focus");
+        assert_eq!(focus_state(), disabled);
+        assert_eq!(
+            shared.inner.lock().display_panes[&client].token,
+            disabled_token
+        );
+        assert_eq!(armed_client_message(&shared, client), disabled_message);
+        assert!(client_terminal_publication_frozen(
+            &shared.inner.lock(),
+            client
+        ));
+        assert!(take_reliable_messages(&mailbox).is_empty());
+        assert!(mailbox.state.lock().terminals.is_empty());
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        open_display(&mut context, &["-d", "60000"]);
+        let scheduled = {
+            let mut inner = shared.inner.lock();
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            let overlay = &inner.display_panes[&client];
+            DisplayPanesDeadline {
+                client,
+                token: overlay.token,
+                deadline: overlay.deadline.expect("display deadline"),
+            }
+        };
+        drain_terminal_lane(&mailbox);
+        let before = focus_state();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("close selectable display overlay");
+        let after = focus_state();
+        assert_eq!(after.0, before.0 + 1);
+        assert_eq!(after.1, before.1);
+        assert_eq!(after.2, before.2 + 1);
+        assert_eq!(after.3, before.3);
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert!(!inner.client_messages.contains_key(&client));
+            assert!(!client_terminal_publication_frozen(&inner, client));
+        }
+        assert!(!shared.expire_display_panes(scheduled, scheduled.deadline));
+        let messages = take_reliable_messages(&mailbox);
+        assert_eq!(cleared_message_ids(&messages), [disabled_message.token]);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::DisplayPanes { state: None },
+                ..
+            })
+        )));
+        assert!(mailbox.state.lock().terminals.contains_key(&pane));
+
+        open_display(&mut context, &["-N", "-d", "0"]);
+        let before = focus_state();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("close no-select display overlay");
+        let after = focus_state();
+        assert_eq!(after.0, before.0 + 1);
+        assert_eq!(after.1, before.1 + 1);
+        assert_eq!(after.2, before.2 + 1);
+        assert_eq!(after.3, Some(client));
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert!(inner.engine.state.pane(pane).expect("display pane").bell);
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-tree", [] as [&str; 0]),
+            )
+            .expect("open tree chooser");
+        let before = focus_state();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("pass tree chooser focus");
+        let after = focus_state();
+        assert_eq!(after.0, before.0 + 1);
+        assert_eq!(after.1, before.1);
+        assert_eq!(after.2, before.2 + 1);
+        assert!(shared.inner.lock().choose_trees.contains_key(&client));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "focus", "value"]),
+            )
+            .expect("create chooser buffer");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-buffer", [] as [&str; 0]),
+            )
+            .expect("open buffer chooser");
+        let before = focus_state();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("pass buffer chooser focus");
+        let after = focus_state();
+        assert_eq!(after.0, before.0 + 1);
+        assert_eq!(after.1, before.1 + 1);
+        assert_eq!(after.2, before.2 + 1);
+        assert_eq!(after.3, Some(client));
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert!(inner.engine.state.pane(pane).expect("chooser pane").bell);
+        }
+    }
+
+    #[test]
+    fn read_only_client_focus_updates_activity_and_focus_in_owns_stored_geometry() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) =
+            output_view_session_fixture(&shared, "read-only-client-focus", "focus");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("focus window");
+        let writable_mailbox = OutboundMailbox::new();
+        let read_only_mailbox = OutboundMailbox::new();
+        let (writable, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("writable-focus-client".to_owned()),
+            None,
+            Arc::clone(&writable_mailbox),
+        );
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-focus-client".to_owned()),
+            None,
+            Arc::clone(&read_only_mailbox),
+        );
+        shared
+            .attach(writable, session)
+            .expect("attach writable client");
+        shared
+            .attach(client, session)
+            .expect("attach read-only client");
+        shared
+            .input(
+                writable,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 100,
+                    rows: 30,
+                    cell_width_px: 10,
+                    cell_height_px: 20,
+                },
+            )
+            .expect("store writable geometry");
+        shared.inner.lock().read_only_clients.insert(client);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 80,
+                    rows: 20,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("store read-only geometry");
+        shared
+            .attach(writable, session)
+            .expect("make writable client latest");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        let mut modal_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("read-only modal context");
+        shared.inner.lock().read_only_clients.remove(&client);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut modal_context,
+                &CommandInvocation::new("display-panes", ["-d", "0"]),
+            )
+            .expect("open read-only display overlay");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut modal_context,
+                &CommandInvocation::new("display-message", ["-d", "5000", "read-only focus"]),
+            )
+            .expect("arm read-only focus message");
+        let retained_message = armed_client_message(&shared, client);
+        take_reliable_messages(&read_only_mailbox);
+        drain_terminal_lane(&read_only_mailbox);
+        let focus_out_before = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .expect("focus session")
+                .activity = Some(-10);
+            assert!(inner.read_only_clients.contains(&client));
+            assert_eq!(
+                inner.terminal_geometries[&pane][&client],
+                TerminalGeometry {
+                    columns: 80,
+                    rows: 20,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                }
+            );
+            assert_eq!(terminal_geometry_owner(&inner, pane), Some(writable));
+            assert_eq!(inner.engine.pane_geometry(pane), Some((100, 30)));
+            (
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.display_panes[&client].token,
+            )
+        };
+        take_reliable_messages(&writable_mailbox);
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("accept read-only client focus out");
+        {
+            let inner = shared.inner.lock();
+            let retained = inner.engine.state.sessions[&session]
+                .activity
+                .expect("retained focus-out activity");
+            assert_ne!(retained, -10);
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                focus_out_before.0 + 1
+            );
+            assert_eq!(inner.activity_sequence, focus_out_before.1 + 1);
+            assert_eq!(inner.client_activity[&client], focus_out_before.1 + 1);
+            assert_eq!(
+                i64::try_from(inner.client_activity_times[&client]).ok(),
+                Some(retained)
+            );
+            assert_eq!(inner.terminal_input_sequence, focus_out_before.2);
+            assert_eq!(inner.display_panes[&client].token, focus_out_before.3);
+            assert_eq!(inner.client_messages[&client], retained_message);
+            assert!(client_terminal_publication_frozen(&inner, client));
+            assert_eq!(terminal_geometry_owner(&inner, pane), Some(writable));
+            assert_eq!(inner.engine.pane_geometry(pane), Some((100, 30)));
+            assert!(inner.engine.state.pane(pane).expect("focus pane").bell);
+        }
+        assert!(cleared_message_ids(&take_reliable_messages(&read_only_mailbox)).is_empty());
+        assert!(read_only_mailbox.state.lock().terminals.is_empty());
+        take_reliable_messages(&writable_mailbox);
+
+        let focus_in_before = {
+            let mut inner = shared.inner.lock();
+            take_display_panes(&mut inner, client).expect("retire display overlay");
+            inner.command_prompts.insert(
+                client,
+                CommandPrompt::new(
+                    "prompt".to_owned(),
+                    "kept".to_owned(),
+                    None,
+                    CommandPromptType::Command,
+                    CommandPromptMode::Text,
+                    false,
+                ),
+            );
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .expect("focus session")
+                .activity = Some(-11);
+            (
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.engine.state.generation(),
+            )
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("accept read-only client focus in");
+        {
+            let inner = shared.inner.lock();
+            let retained = inner.engine.state.sessions[&session]
+                .activity
+                .expect("retained focus-in activity");
+            assert_ne!(retained, -11);
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                focus_in_before.0 + 1
+            );
+            assert_eq!(inner.activity_sequence, focus_in_before.1 + 1);
+            assert_eq!(inner.client_activity[&client], focus_in_before.1 + 1);
+            assert_eq!(
+                i64::try_from(inner.client_activity_times[&client]).ok(),
+                Some(retained)
+            );
+            assert_eq!(inner.terminal_input_sequence, focus_in_before.2 + 1);
+            assert_eq!(inner.command_prompts[&client].input, "kept");
+            assert_eq!(inner.client_messages[&client], retained_message);
+            assert!(client_terminal_publication_frozen(&inner, client));
+            assert_eq!(terminal_geometry_owner(&inner, pane), Some(client));
+            assert_eq!(inner.engine.pane_geometry(pane), Some((80, 20)));
+            assert!(inner.engine.state.generation() > focus_in_before.3);
+            assert!(inner.last_published_mux_generation > focus_in_before.3);
+            assert!(inner.engine.state.pane(pane).expect("focus pane").bell);
+        }
+        let peer_messages = take_reliable_messages(&writable_mailbox);
+        let peer_snapshot = peer_messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Snapshot(snapshot),
+                    ..
+                }) => Some(snapshot),
+                _ => None,
+            })
+            .find(|snapshot| {
+                snapshot.generation > focus_in_before.3
+                    && snapshot
+                        .sessions
+                        .iter()
+                        .flat_map(|session| &session.windows)
+                        .find(|candidate| candidate.id == window)
+                        .is_some_and(|window| {
+                            window
+                                .layout_dump
+                                .ends_with(&format!("80x20,0,0,{}", pane.0))
+                                && window.panes.get(&pane).is_some_and(|pane| pane.bell)
+                        })
+            })
+            .expect("peer read-only focus geometry snapshot");
+        let peer_window = peer_snapshot.sessions[0]
+            .windows
+            .iter()
+            .find(|candidate| candidate.id == window)
+            .expect("peer focus window");
+        assert!(
+            peer_window
+                .layout_dump
+                .ends_with(&format!("80x20,0,0,{}", pane.0)),
+            "{}",
+            peer_window.layout_dump
+        );
+        assert!(peer_window.panes[&pane].bell);
+    }
+
+    #[test]
+    fn client_focus_resizes_unchanged_owner_siblings_after_layout_write_back() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, active, active_terminal) =
+            output_view_session_fixture(&shared, "client-focus-sibling", "active");
+        let (window, sibling, sibling_terminal) = {
+            let mut inner = shared.inner.lock();
+            let window = inner
+                .engine
+                .state
+                .window_for_pane(active)
+                .expect("focus window");
+            let sibling = inner
+                .engine
+                .state
+                .split_pane(active, zz_protocol::Axis::Horizontal, PaneKind::Terminal)
+                .expect("split focus window");
+            inner
+                .engine
+                .state
+                .select_pane(active)
+                .expect("select active pane");
+            inner
+                .engine
+                .state
+                .resize_pane_to(active, zz_protocol::Axis::Horizontal, 78)
+                .expect("skew focus split");
+            let terminal = Arc::new(TerminalSession::spawn_output_view(
+                "client-focus sibling fixture".to_owned(),
+                "sibling".to_owned(),
+            ));
+            inner.terminals.insert(sibling, Arc::clone(&terminal));
+            (window, sibling, terminal)
+        };
+        shared
+            .watch_terminal(sibling, &sibling_terminal)
+            .expect("watch sibling terminal");
+        let control_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("focus-control".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("focus-interactive".to_owned()),
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        shared
+            .attach(control, session)
+            .expect("attach control client");
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive client");
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(active));
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-C", "80x24"]),
+            )
+            .expect("store control geometry");
+        shared
+            .input(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: active,
+                    columns: 38,
+                    rows: 24,
+                    cell_width_px: 7,
+                    cell_height_px: 16,
+                },
+            )
+            .expect("store active interactive geometry");
+        shared
+            .attach(control, session)
+            .expect("make control client latest");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        let (initial_active_geometry, initial_sibling_geometry, initial_sibling_resize) = {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.visible_terminals[&interactive],
+                BTreeSet::from([active, sibling])
+            );
+            assert!(
+                !inner
+                    .terminal_geometries
+                    .get(&sibling)
+                    .is_some_and(|geometries| geometries.contains_key(&interactive))
+            );
+            assert_eq!(terminal_geometry_owner(&inner, active), Some(control));
+            assert_eq!(terminal_geometry_owner(&inner, sibling), Some(control));
+            let active_geometry = inner.engine.pane_geometry(active).expect("active geometry");
+            let sibling_geometry = inner
+                .engine
+                .pane_geometry(sibling)
+                .expect("sibling geometry");
+            let sibling_resize = terminal_resize_for_pane(&inner, sibling)
+                .expect("initial sibling geometry")
+                .1;
+            assert_eq!(sibling_resize.cell_width_px, CONTROL_CELL_WIDTH_PX);
+            assert_eq!(sibling_resize.cell_height_px, CONTROL_CELL_HEIGHT_PX);
+            (active_geometry, sibling_geometry, sibling_resize)
+        };
+        wait_for_terminal_dimensions(
+            &sibling_terminal,
+            TerminalViewId(interactive.0),
+            initial_sibling_resize.columns,
+            initial_sibling_resize.rows,
+        );
+        take_reliable_messages(&control_mailbox);
+        take_reliable_messages(&interactive_mailbox);
+        let generation = shared.inner.lock().engine.state.generation();
+
+        shared
+            .input(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("focus interactive client");
+
+        let (active_resize, sibling_resize) = {
+            let inner = shared.inner.lock();
+            assert_eq!(terminal_geometry_owner(&inner, active), Some(interactive));
+            assert_eq!(terminal_geometry_owner(&inner, sibling), Some(control));
+            assert_ne!(
+                inner.engine.pane_geometry(active),
+                Some(initial_active_geometry)
+            );
+            assert_ne!(
+                inner.engine.pane_geometry(sibling),
+                Some(initial_sibling_geometry)
+            );
+            assert!(inner.engine.state.generation() > generation);
+            let active_resize = terminal_resize_for_pane(&inner, active)
+                .expect("focused active geometry")
+                .1;
+            let sibling_resize = terminal_resize_for_pane(&inner, sibling)
+                .expect("recomputed sibling geometry")
+                .1;
+            assert_ne!(sibling_resize, initial_sibling_resize);
+            assert_eq!(sibling_resize.cell_width_px, CONTROL_CELL_WIDTH_PX);
+            assert_eq!(sibling_resize.cell_height_px, CONTROL_CELL_HEIGHT_PX);
+            (active_resize, sibling_resize)
+        };
+        wait_for_terminal_dimensions(
+            &active_terminal,
+            TerminalViewId(interactive.0),
+            active_resize.columns,
+            active_resize.rows,
+        );
+        wait_for_terminal_dimensions(
+            &sibling_terminal,
+            TerminalViewId(interactive.0),
+            sibling_resize.columns,
+            sibling_resize.rows,
+        );
+    }
+
+    #[test]
+    fn client_focus_refreshes_non_latest_owner_cell_metrics() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, terminal) =
+            output_view_session_fixture(&shared, "client-focus-cell-metrics", "focus");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("focus window");
+        let window_target = window.to_string();
+        let (first, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("first-cell-metrics-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("second-cell-metrics-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(first, session).expect("attach first client");
+        shared
+            .attach(second, session)
+            .expect("attach second client");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-t", window_target.as_str(), "window-size", "largest"],
+                ),
+            )
+            .expect("select largest geometry");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        for (client, cell_width_px, cell_height_px) in [(first, 10, 20), (second, 7, 16)] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns: 90,
+                        rows: 25,
+                        cell_width_px,
+                        cell_height_px,
+                    },
+                )
+                .expect("store client geometry");
+        }
+        shared
+            .attach(first, session)
+            .expect("make first cell-metrics client latest");
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(first.0),
+            "first cell metrics geometry was not applied",
+            |viewport| viewport.columns == 90 && viewport.rows == 25,
+        );
+        let generation = terminal
+            .latest_viewport_for(TerminalViewId(first.0))
+            .expect("first client viewport")
+            .generation;
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), pane)
+                .expect("first owner geometry")
+                .1,
+            TerminalGeometry {
+                columns: 90,
+                rows: 25,
+                cell_width_px: 10,
+                cell_height_px: 20,
+            }
+        );
+
+        shared
+            .input(
+                second,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("focus second client");
+
+        assert_eq!(
+            terminal_geometry_owner(&shared.inner.lock(), pane),
+            Some(second)
+        );
+        assert_eq!(
+            terminal_resize_for_pane(&shared.inner.lock(), pane)
+                .expect("second owner geometry")
+                .1,
+            TerminalGeometry {
+                columns: 90,
+                rows: 25,
+                cell_width_px: 7,
+                cell_height_px: 16,
+            }
+        );
+        wait_for_viewport(
+            &terminal,
+            TerminalViewId(first.0),
+            "non-latest owner cell metrics did not reach the terminal",
+            |viewport| {
+                viewport.columns == 90 && viewport.rows == 25 && viewport.generation > generation
+            },
+        );
+    }
+
+    #[test]
+    fn chooser_mouse_activity_preserves_bell_and_read_only_updates_latest_geometry() {
+        let shared = Arc::new(Shared::new(1));
+        let fixture = (0..80)
+            .map(|line| format!("modal mouse line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (session, pane, terminal) =
+            output_view_session_fixture(&shared, "modal-mouse-activity", fixture);
+        let (other, _, _) = switch_test_session(&shared, "modal-mouse-other");
+        let (geometry_owner_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("modal-mouse-owner".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("modal-mouse-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .attach(geometry_owner_client, session)
+            .expect("attach geometry owner");
+        shared.attach(client, session).expect("attach modal client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("modal mouse context");
+        shared
+            .input(
+                geometry_owner_client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 100,
+                    rows: 10,
+                    cell_width_px: 9,
+                    cell_height_px: 19,
+                },
+            )
+            .expect("store owning geometry");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 80,
+                    rows: 8,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("store modal geometry");
+        shared
+            .attach(geometry_owner_client, session)
+            .expect("make geometry owner latest");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientTerminalSize {
+                    columns: 80,
+                    rows: 8,
+                },
+            )
+            .expect("store modal client size");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "mouse", "off"]),
+            )
+            .expect("disable mouse forwarding");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "modal", "value"]),
+            )
+            .expect("create chooser buffer");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-buffer", [] as [&str; 0]),
+            )
+            .expect("open chooser");
+        let view = TerminalViewId(client.0);
+        terminal.view_action(view, TerminalViewAction::ScrollToOffset(5));
+        wait_for_viewport(
+            &terminal,
+            view,
+            "modal mouse fixture did not reach its pinned offset",
+            |viewport| viewport.scrollbar.offset == 5,
+        );
+        let wheel = || InputMessage::TerminalView {
+            pane,
+            action: TerminalViewAction::ScrollWheel {
+                lines: -1,
+                input: TerminalMouseInput::new(
+                    TerminalMousePhase::Press,
+                    Some(TerminalMouseButton::ScrollUp),
+                    PointerCellEvent {
+                        column: 1,
+                        row: 1,
+                        click_count: 1,
+                        rectangle: false,
+                    },
+                    24,
+                    18,
+                    128,
+                    72,
+                    8,
+                    18,
+                    Modifiers::default(),
+                    false,
+                ),
+            },
+        };
+        let motion = || InputMessage::TerminalView {
+            pane,
+            action: TerminalViewAction::Mouse(TerminalMouseInput::new(
+                TerminalMousePhase::Motion,
+                None,
+                PointerCellEvent {
+                    column: 2,
+                    row: 2,
+                    click_count: 0,
+                    rectangle: false,
+                },
+                32,
+                36,
+                128,
+                72,
+                8,
+                18,
+                Modifiers::default(),
+                false,
+            )),
+        };
+        {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            inner.engine.mark_session_active_at(other, 1_700_000_020);
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .unwrap()
+                .activity = Some(-30);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+        }
+        let (other_sort, activity_sequence, geometry, terminal_input_sequence) = {
+            let inner = shared.inner.lock();
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert!(terminal_mouse_rejected(&inner, client, &wheel()));
+            assert_eq!(
+                terminal_geometry_owner(&inner, pane),
+                Some(geometry_owner_client)
+            );
+            (
+                inner.engine.state.sessions[&other].sort_activity,
+                inner.activity_sequence,
+                inner.terminal_geometries[&pane].clone(),
+                inner.terminal_input_sequence,
+            )
+        };
+        shared
+            .input(client, ClientKind::Interactive, &mut context, wheel())
+            .expect("reject read-only modal mouse");
+        {
+            let inner = shared.inner.lock();
+            let retained = inner.engine.state.sessions[&session]
+                .activity
+                .expect("modal mouse activity");
+            assert_ne!(retained, -30);
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                other_sort + 1
+            );
+            assert_eq!(inner.activity_sequence, activity_sequence + 1);
+            assert_eq!(inner.client_activity[&client], activity_sequence + 1);
+            assert_eq!(
+                i64::try_from(inner.client_activity_times[&client]).ok(),
+                Some(retained)
+            );
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert_eq!(inner.terminal_geometries[&pane], geometry);
+            assert_eq!(terminal_geometry_owner(&inner, pane), Some(client));
+            assert_eq!(inner.terminal_input_sequence, terminal_input_sequence + 1);
+            assert_eq!(
+                inner.client_terminal_input_sequences.get(&client).copied(),
+                Some(terminal_input_sequence + 1)
+            );
+            assert_eq!(inner.engine.pane_geometry(pane), Some((80, 8)));
+            assert!(inner.engine.state.pane(pane).expect("modal pane").bell);
+        }
+        assert_eq!(
+            terminal
+                .latest_viewport_for(view)
+                .expect("modal mouse viewport")
+                .scrollbar
+                .offset,
+            5
+        );
+
+        let read_only_motion_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(client, ClientKind::Interactive, &mut context, motion())
+            .expect("account read-only chooser mouse motion");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, read_only_motion_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, read_only_motion_before.1 + 1);
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert!(inner.engine.state.pane(pane).expect("modal pane").bell);
+        }
+
+        shared
+            .attach(geometry_owner_client, session)
+            .expect("restore prior geometry owner");
+        wait_for_viewport(
+            &terminal,
+            view,
+            "restored geometry owner did not resize the terminal",
+            |viewport| viewport.columns == 100 && viewport.rows == 10,
+        );
+        let writable_offset = terminal
+            .latest_viewport_for(view)
+            .expect("resized writable modal viewport")
+            .scrollbar
+            .offset;
+        let writable = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.remove(&client);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .unwrap()
+                .activity = Some(-31);
+            (
+                inner.engine.state.sessions[&session].activity,
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.activity_sequence,
+                inner.client_activity[&client],
+                inner.client_activity_times[&client],
+                inner.terminal_input_sequence,
+                inner.client_terminal_input_sequences.get(&client).copied(),
+                terminal_geometry_owner(&inner, pane),
+            )
+        };
+        assert_eq!(writable.7, Some(geometry_owner_client));
+        shared
+            .input(client, ClientKind::Interactive, &mut context, wheel())
+            .expect("reject writable modal mouse");
+        {
+            let inner = shared.inner.lock();
+            assert_ne!(inner.engine.state.sessions[&session].activity, writable.0);
+            assert_eq!(
+                inner.engine.state.sessions[&session].sort_activity,
+                writable.1 + 1
+            );
+            assert_eq!(inner.activity_sequence, writable.2 + 1);
+            assert_eq!(inner.client_activity[&client], writable.2 + 1);
+            assert_eq!(
+                i64::try_from(inner.client_activity_times[&client]).ok(),
+                inner.engine.state.sessions[&session].activity
+            );
+            assert_eq!(inner.terminal_input_sequence, writable.5 + 1);
+            assert_eq!(
+                inner.client_terminal_input_sequences.get(&client).copied(),
+                Some(writable.5 + 1)
+            );
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert_eq!(inner.terminal_geometries[&pane], geometry);
+            assert_eq!(terminal_geometry_owner(&inner, pane), Some(client));
+            assert!(inner.engine.state.pane(pane).expect("modal pane").bell);
+        }
+        assert_eq!(
+            terminal
+                .latest_viewport_for(view)
+                .expect("writable modal viewport")
+                .scrollbar
+                .offset,
+            writable_offset
+        );
+
+        let before_motion = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(client, ClientKind::Interactive, &mut context, motion())
+            .expect("account chooser mouse motion");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.activity_sequence, before_motion.0 + 1);
+        assert_eq!(inner.terminal_input_sequence, before_motion.1 + 1);
+        assert!(inner.choose_buffers.contains_key(&client));
+        assert!(inner.engine.state.pane(pane).expect("modal pane").bell);
+    }
+
+    #[test]
+    fn chooser_actions_count_once_and_raw_keys_stay_client_scoped() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) =
+            output_view_session_fixture(&shared, "chooser-input-activity", "chooser");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("chooser-owner".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (peer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("chooser-peer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .attach(client, session)
+            .expect("attach chooser owner");
+        shared.attach(peer, session).expect("attach chooser peer");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("chooser input context");
+        for (name, value) in [("first", "one"), ("second", "two")] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-buffer", ["-b", name, value]),
+                )
+                .expect("create chooser buffer");
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-n", "x", "copy-mode"]),
+            )
+            .expect("bind read-only-safe root command");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-buffer", [] as [&str; 0]),
+            )
+            .expect("open chooser");
+
+        let initial = {
+            let mut inner = shared.inner.lock();
+            assert_eq!(inner.choose_buffers[&client].rendered.selected, 0);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::Focus(true),
+                },
+            )
+            .expect("ignore pane focus while chooser is active");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, initial.0);
+            assert_eq!(inner.terminal_input_sequence, initial.1);
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert!(inner.engine.state.pane(pane).expect("chooser pane").bell);
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ChooseBuffer {
+                    action: ChooseBufferAction::Next,
+                },
+            )
+            .expect("move chooser selection");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, initial.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, initial.1 + 1);
+            assert_eq!(inner.choose_buffers[&client].rendered.selected, 1);
+            assert!(inner.engine.state.pane(pane).expect("chooser pane").bell);
+        }
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(KeyCode::ArrowUp, Modifiers::default(), None),
+                    text_follows: false,
+                },
+            )
+            .expect("route raw owner key into chooser");
+        let after_owner_key = {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, initial.0 + 2);
+            assert_eq!(inner.terminal_input_sequence, initial.1 + 2);
+            assert_eq!(inner.choose_buffers[&client].rendered.selected, 0);
+            inner.choose_buffers[&client].rendered.clone()
+        };
+
+        let peer_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                peer,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(KeyCode::ArrowDown, Modifiers::default(), None),
+                    text_follows: false,
+                },
+            )
+            .expect("route peer key outside chooser");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, peer_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, peer_before.1 + 1);
+            assert_eq!(inner.choose_buffers[&client].rendered, after_owner_key);
+        }
+
+        let read_only_before = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.choose_buffers[&client].rendered.clone(),
+            )
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(KeyCode::Character('x'), Modifiers::default(), Some("x")),
+                    text_follows: false,
+                },
+            )
+            .expect("bypass chooser with read-only root key");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, read_only_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, read_only_before.1 + 1);
+            assert_eq!(inner.choose_buffers[&client].rendered, read_only_before.2);
+            assert_eq!(inner.copy_sessions[&client].pane, pane);
+            assert!(inner.engine.state.pane(pane).expect("chooser pane").bell);
+        }
+
+        let safe_view_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel),
+                },
+            )
+            .expect("bypass chooser with read-only-safe copy-mode action");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, safe_view_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, safe_view_before.1 + 1);
+            assert_eq!(inner.choose_buffers[&client].rendered, read_only_before.2);
+            assert!(inner.copy_sessions[&client].exiting);
+            assert!(inner.engine.state.pane(pane).expect("chooser pane").bell);
+        }
+
+        let dedicated_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ChooseBuffer {
+                    action: ChooseBufferAction::Next,
+                },
+            )
+            .expect("reject read-only dedicated chooser action");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.activity_sequence, dedicated_before.0 + 1);
+        assert_eq!(inner.terminal_input_sequence, dedicated_before.1 + 1);
+        assert_eq!(inner.choose_buffers[&client].rendered, read_only_before.2);
+        assert!(inner.engine.state.pane(pane).expect("chooser pane").bell);
+    }
+
+    #[test]
+    fn cross_session_chooser_activation_touches_source_input_then_target_attach() {
+        let shared = Arc::new(Shared::new(1));
+        let (source, _, source_pane) = switch_test_session(&shared, "chooser-activity-source");
+        let (target, _, _) = switch_test_session(&shared, "chooser-activity-target");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("chooser-activity-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .attach(client, source)
+            .expect("attach source session");
+        let mut context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, source_pane)
+                .expect("source chooser context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-tree", ["-s"]),
+            )
+            .expect("open sessions chooser");
+        let (target_row, activity_sequence, source_sort, target_sort) = {
+            let inner = shared.inner.lock();
+            let chooser = &inner.choose_trees[&client];
+            let target_row = chooser
+                .rendered
+                .items
+                .iter()
+                .position(|item| item.target == ChooseTreeTarget::Session(target))
+                .and_then(|row| u32::try_from(row).ok())
+                .expect("target session row");
+            (
+                target_row,
+                inner.activity_sequence,
+                inner.engine.state.sessions[&source].sort_activity,
+                inner.engine.state.sessions[&target].sort_activity,
+            )
+        };
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ChooseTree {
+                    action: ChooseTreeAction::ActivateIndex(target_row),
+                },
+            )
+            .expect("activate target session");
+
+        let inner = shared.inner.lock();
+        assert_eq!(client_attached_session(&inner, client), Some(target));
+        assert!(!inner.choose_trees.contains_key(&client));
+        assert_eq!(inner.activity_sequence, activity_sequence + 2);
+        assert_eq!(inner.client_activity[&client], activity_sequence + 2);
+        assert!(inner.engine.state.sessions[&source].sort_activity > source_sort);
+        assert!(inner.engine.state.sessions[&target].sort_activity > target_sort);
+        assert!(
+            inner.engine.state.sessions[&target].sort_activity
+                > inner.engine.state.sessions[&source].sort_activity
+        );
+    }
+
+    #[test]
+    fn read_only_prompt_keys_bypass_consumption_and_preserve_prompt_and_bell() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "read-only-prompt", "prompt");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-prompt-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .attach(client, session)
+            .expect("attach prompt client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("prompt context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-n", "x", "copy-mode"]),
+            )
+            .expect("bind read-only-safe root command");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-p", "readonly"]),
+            )
+            .expect("open prompt");
+        let initial = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.command_prompts[&client].input.clone(),
+            )
+        };
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(KeyCode::Character('x'), Modifiers::default(), Some("x")),
+                    text_follows: false,
+                },
+            )
+            .expect("bypass read-only prompt with root key");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, initial.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, initial.1 + 1);
+            assert_eq!(inner.command_prompts[&client].input, initial.2);
+            assert_eq!(inner.copy_sessions[&client].pane, pane);
+            assert!(inner.engine.state.pane(pane).expect("prompt pane").bell);
+        }
+
+        let update_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::CommandPrompt {
+                    action: CommandPromptAction::Update {
+                        input: "blocked".to_owned(),
+                        cursor: 7,
+                    },
+                },
+            )
+            .expect("reject read-only native prompt update");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.activity_sequence, update_before.0 + 1);
+        assert_eq!(inner.terminal_input_sequence, update_before.1 + 1);
+        assert_eq!(inner.command_prompts[&client].input, initial.2);
+        assert!(inner.engine.state.pane(pane).expect("prompt pane").bell);
+    }
+
+    #[test]
+    fn terminal_committed_text_accounts_standalone_and_paired_input_at_most_once() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) =
+            output_view_session_fixture(&shared, "committed-terminal", "terminal");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("committed-terminal-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .attach(client, session)
+            .expect("attach terminal client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("terminal context");
+        let activity = || {
+            let inner = shared.inner.lock();
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.engine.state.sessions[&session].sort_activity,
+            )
+        };
+
+        let initial = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "a".to_owned(),
+                },
+            )
+            .expect("standalone writable text");
+        assert_eq!(activity(), (initial.0 + 1, initial.1 + 1, initial.2 + 1));
+
+        let empty_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: String::new(),
+                },
+            )
+            .expect("empty writable text");
+        assert_eq!(activity(), empty_before);
+
+        let paired_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("j"),
+                    text_follows: true,
+                },
+            )
+            .expect("paired writable key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "j".to_owned(),
+                },
+            )
+            .expect("paired writable text");
+        assert_eq!(
+            activity(),
+            (
+                paired_before.0 + 1,
+                paired_before.1 + 1,
+                paired_before.2 + 1
+            )
+        );
+
+        {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+        }
+        let read_only_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "r".to_owned(),
+                },
+            )
+            .expect("standalone read-only text");
+        assert_eq!(
+            activity(),
+            (
+                read_only_before.0 + 1,
+                read_only_before.1 + 1,
+                read_only_before.2 + 1
+            )
+        );
+        assert!(shared.inner.lock().engine.state.pane(pane).unwrap().bell);
+
+        let read_only_paired_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("k"),
+                    text_follows: true,
+                },
+            )
+            .expect("paired read-only key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "k".to_owned(),
+                },
+            )
+            .expect("paired read-only text");
+        assert_eq!(
+            activity(),
+            (
+                read_only_paired_before.0 + 1,
+                read_only_paired_before.1 + 1,
+                read_only_paired_before.2 + 1
+            )
+        );
+        let inner = shared.inner.lock();
+        assert!(inner.engine.state.pane(pane).unwrap().bell);
+        assert!(!inner.pending_committed_text.contains_key(&client));
+        assert!(!inner.suppressed_text.contains_key(&client));
+    }
+
+    #[test]
+    fn browser_committed_text_respects_pairing_and_modal_consumption() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, terminal, _) =
+            output_view_session_fixture(&shared, "committed-browser", "browser");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("committed-browser-client".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared
+            .attach(client, session)
+            .expect("attach browser client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, terminal)
+            .expect("browser context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["about:blank"]),
+            )
+            .expect("create browser pane");
+        let browser = context.pane.expect("browser pane");
+        take_reliable_messages(&mailbox);
+        let activity = || {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+
+        let standalone_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "a".to_owned(),
+                },
+            )
+            .expect("standalone browser text");
+        assert_eq!(activity(), (standalone_before.0 + 1, standalone_before.1));
+
+        let empty_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: String::new(),
+                },
+            )
+            .expect("empty browser text");
+        assert_eq!(activity(), empty_before);
+
+        let paired_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceKey {
+                    pane: browser,
+                    input: chooser_key_press("b"),
+                    text_follows: true,
+                },
+            )
+            .expect("paired browser key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "b".to_owned(),
+                },
+            )
+            .expect("paired browser text");
+        assert_eq!(activity(), (paired_before.0 + 1, paired_before.1));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-p", "browser"]),
+            )
+            .expect("open browser prompt");
+        let prompt_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceKey {
+                    pane: browser,
+                    input: chooser_key_press("p"),
+                    text_follows: true,
+                },
+            )
+            .expect("browser prompt key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "p".to_owned(),
+                },
+            )
+            .expect("browser prompt paired text");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "s".to_owned(),
+                },
+            )
+            .expect("browser prompt standalone text");
+        assert_eq!(activity(), prompt_before);
+        assert_eq!(shared.inner.lock().command_prompts[&client].input, "ps");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::CommandPrompt {
+                    action: CommandPromptAction::Close,
+                },
+            )
+            .expect("close browser prompt");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "browser", "value"]),
+            )
+            .expect("create browser chooser buffer");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-buffer", [] as [&str; 0]),
+            )
+            .expect("open browser chooser");
+        let chooser_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceKey {
+                    pane: browser,
+                    input: chooser_key_press("q"),
+                    text_follows: true,
+                },
+            )
+            .expect("browser chooser key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "q".to_owned(),
+                },
+            )
+            .expect("browser chooser text");
+        assert_eq!(activity(), chooser_before);
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+
+        shared.inner.lock().read_only_clients.insert(client);
+        let read_only_before = activity();
+        for input in [
+            InputMessage::BrowserSurfaceText {
+                pane: browser,
+                text: "r".to_owned(),
+            },
+            InputMessage::BrowserSurfaceKey {
+                pane: browser,
+                input: chooser_key_press("x"),
+                text_follows: true,
+            },
+            InputMessage::BrowserSurfaceText {
+                pane: browser,
+                text: "x".to_owned(),
+            },
+            InputMessage::BrowserSurfaceText {
+                pane: browser,
+                text: String::new(),
+            },
+        ] {
+            shared
+                .input(client, ClientKind::Interactive, &mut context, input)
+                .expect("read-only browser input");
+        }
+        assert_eq!(activity(), read_only_before);
+        let inner = shared.inner.lock();
+        assert!(inner.choose_buffers.contains_key(&client));
+        assert!(!inner.pending_committed_text.contains_key(&client));
+        assert!(!inner.suppressed_text.contains_key(&client));
+    }
+
+    #[test]
+    fn terminal_committed_text_inherits_writable_and_read_only_modal_results() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "committed-modals", "modals");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("committed-modal-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach modal client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("modal context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "modal", "value"]),
+            )
+            .expect("create modal buffer");
+        let activity = || {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        let paired = |context: &mut ExecutionContext, character: &str| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::Key {
+                        pane,
+                        input: chooser_key_press(character),
+                        text_follows: true,
+                    },
+                )
+                .expect("modal key");
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::Text {
+                        pane,
+                        text: character.to_owned(),
+                    },
+                )
+                .expect("modal text");
+        };
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-buffer", [] as [&str; 0]),
+            )
+            .expect("open writable chooser");
+        let chooser_before = activity();
+        paired(&mut context, "q");
+        assert_eq!(activity(), (chooser_before.0 + 1, chooser_before.1 + 1));
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.choose_buffers.contains_key(&client));
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-p", "writable"]),
+            )
+            .expect("open writable prompt");
+        let prompt_before = activity();
+        paired(&mut context, "p");
+        assert_eq!(activity(), prompt_before);
+        assert_eq!(shared.inner.lock().command_prompts[&client].input, "p");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::CommandPrompt {
+                    action: CommandPromptAction::Close,
+                },
+            )
+            .expect("close writable prompt");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "0"]),
+            )
+            .expect("open writable display-panes");
+        let select_key = {
+            let inner = shared.inner.lock();
+            char::from(
+                inner.display_panes[&client]
+                    .state
+                    .indicators
+                    .iter()
+                    .find(|indicator| indicator.pane == pane)
+                    .expect("source indicator")
+                    .select_key,
+            )
+            .to_string()
+        };
+        let display_before = activity();
+        paired(&mut context, &select_key);
+        assert_eq!(activity(), display_before);
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-buffer", [] as [&str; 0]),
+            )
+            .expect("open read-only chooser");
+        {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            inner.engine.state.set_pane_bell(pane, true);
+        }
+        let read_only_chooser_before = activity();
+        paired(&mut context, "z");
+        assert_eq!(
+            activity(),
+            (
+                read_only_chooser_before.0 + 1,
+                read_only_chooser_before.1 + 1
+            )
+        );
+        {
+            let mut inner = shared.inner.lock();
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert!(inner.engine.state.pane(pane).unwrap().bell);
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            inner.read_only_clients.remove(&client);
+            inner.choose_buffers.remove(&client);
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-p", "read-only"]),
+            )
+            .expect("open read-only prompt");
+        shared.inner.lock().read_only_clients.insert(client);
+        let read_only_prompt_before = activity();
+        paired(&mut context, "z");
+        assert_eq!(
+            activity(),
+            (read_only_prompt_before.0 + 1, read_only_prompt_before.1 + 1)
+        );
+        {
+            let mut inner = shared.inner.lock();
+            assert_eq!(inner.command_prompts[&client].input, "");
+            assert!(inner.engine.state.pane(pane).unwrap().bell);
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            inner.read_only_clients.remove(&client);
+            inner.command_prompts.remove(&client);
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "0"]),
+            )
+            .expect("open read-only display-panes");
+        shared.inner.lock().read_only_clients.insert(client);
+        let read_only_display_before = activity();
+        paired(&mut context, "z");
+        assert_eq!(
+            activity(),
+            (
+                read_only_display_before.0 + 1,
+                read_only_display_before.1 + 1
+            )
+        );
+        let inner = shared.inner.lock();
+        assert!(inner.display_panes.contains_key(&client));
+        assert!(inner.engine.state.pane(pane).unwrap().bell);
+        assert!(!inner.pending_committed_text.contains_key(&client));
+        assert!(!inner.suppressed_text.contains_key(&client));
+    }
+
+    #[test]
+    fn committed_text_fifo_handles_overlap_mismatch_switch_and_cleanup() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, terminal, _) = output_view_session_fixture(&shared, "committed-fifo", "fifo");
+        let (target, _, target_pane) = switch_test_session(&shared, "committed-switch-target");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("committed-fifo-client".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach fifo client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, terminal)
+            .expect("fifo context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["about:blank"]),
+            )
+            .expect("create fifo browser");
+        let browser = context.pane.expect("fifo browser");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["about:blank"]),
+            )
+            .expect("create second fifo browser");
+        let second_browser = context.pane.expect("second fifo browser");
+        take_reliable_messages(&mailbox);
+        let activity = || {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+
+        let overlap_before = activity();
+        for character in ["a", "b"] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::Key {
+                        pane: terminal,
+                        input: chooser_key_press(character),
+                        text_follows: true,
+                    },
+                )
+                .expect("overlapping key");
+        }
+        assert_eq!(shared.inner.lock().pending_committed_text[&client].len(), 2);
+        for character in ["a", "b"] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::Text {
+                        pane: terminal,
+                        text: character.to_owned(),
+                    },
+                )
+                .expect("overlapping text");
+        }
+        assert_eq!(activity(), (overlap_before.0 + 2, overlap_before.1 + 2));
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .pending_committed_text
+                .contains_key(&client)
+        );
+
+        let mismatch_before = activity();
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: terminal,
+                    input: chooser_key_press("c"),
+                    text_follows: true,
+                },
+            )
+            .expect("terminal mismatch key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceKey {
+                    pane: browser,
+                    input: chooser_key_press("d"),
+                    text_follows: true,
+                },
+            )
+            .expect("browser mismatch key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "d".to_owned(),
+                },
+            )
+            .expect("forward-matched browser text");
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .pending_committed_text
+                .contains_key(&client)
+        );
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane: terminal,
+                    text: "c".to_owned(),
+                },
+            )
+            .expect("stale terminal text becomes standalone");
+        assert_eq!(activity(), (mismatch_before.0 + 3, mismatch_before.1 + 2));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-n", "x", "focus-sidebar"]),
+            )
+            .expect("bind second browser key");
+        take_reliable_messages(&mailbox);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: browser,
+                    input: chooser_key_press("w"),
+                    text_follows: true,
+                },
+            )
+            .expect("strand first browser key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: second_browser,
+                    input: chooser_key_press("x"),
+                    text_follows: true,
+                },
+            )
+            .expect("run second browser binding");
+        let binding_messages = take_reliable_messages(&mailbox);
+        assert_eq!(
+            binding_messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::FocusSidebar,
+                        ..
+                    })
+                ))
+                .count(),
+            1
+        );
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.pending_committed_text[&client].len(), 2);
+            assert_eq!(inner.suppressed_text[&client], BTreeMap::from([('x', 1)]));
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane: second_browser,
+                    text: "x".to_owned(),
+                },
+            )
+            .expect("match second browser text");
+        let text_messages = take_reliable_messages(&mailbox);
+        assert!(!text_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::FocusSidebar | EventPayload::BrowserCommand { .. },
+                ..
+            })
+        )));
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-n", "x", "switch-client", "-t", "committed-switch-target"],
+                ),
+            )
+            .expect("bind internal switch");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: terminal,
+                    input: chooser_key_press("x"),
+                    text_follows: true,
+                },
+            )
+            .expect("run internal switch binding");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, client), Some(target));
+            assert_eq!(inner.pending_committed_text[&client].len(), 1);
+            assert_eq!(inner.suppressed_text[&client], BTreeMap::from([('x', 1)]));
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane: terminal,
+                    text: "x".to_owned(),
+                },
+            )
+            .expect("consume trailing text after internal switch");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, client), Some(target));
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+
+        shared.enqueue_pending_committed_text(
+            client,
+            target_pane,
+            CommittedTextLane::Terminal,
+            &chooser_key_press("y"),
+            true,
+        );
+        shared.detach(client);
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .pending_committed_text
+                .contains_key(&client)
+        );
+        shared.attach(client, target).expect("reattach fifo client");
+        shared.enqueue_pending_committed_text(
+            client,
+            target_pane,
+            CommittedTextLane::Terminal,
+            &chooser_key_press("y"),
+            true,
+        );
+        shared.unregister(client);
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .pending_committed_text
+                .contains_key(&client)
+        );
+        let (reconnected, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("committed-fifo-reconnect".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        assert_ne!(reconnected, client);
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .pending_committed_text
+                .contains_key(&reconnected)
+        );
+    }
+
+    #[test]
+    fn committed_text_fifo_is_bounded_and_empty_text_retires_one_suppression() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(77);
+        let pane = PaneId(88);
+        let orphan = chooser_key_press("o");
+        shared.suppress_committed_character(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            &orphan,
+            true,
+        );
+        assert!(!shared.inner.lock().suppressed_text.contains_key(&client));
+        let evicted = chooser_key_press("a");
+        shared.enqueue_pending_committed_text(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            &evicted,
+            true,
+        );
+        shared.suppress_committed_character(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            &evicted,
+            true,
+        );
+        for index in 1..=MAX_PENDING_COMMITTED_TEXT {
+            let character = char::from(b'a' + u8::try_from(index % 26).unwrap());
+            let input = chooser_key_press(&character.to_string());
+            shared.enqueue_pending_committed_text(
+                client,
+                pane,
+                CommittedTextLane::Terminal,
+                &input,
+                true,
+            );
+        }
+        assert_eq!(
+            shared.inner.lock().pending_committed_text[&client].len(),
+            MAX_PENDING_COMMITTED_TEXT
+        );
+        assert!(!shared.inner.lock().suppressed_text.contains_key(&client));
+
+        shared.clear_pending_committed_text(client);
+        let input = chooser_key_press("z");
+        shared.enqueue_pending_committed_text(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            &input,
+            true,
+        );
+        shared.suppress_committed_character(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            &input,
+            true,
+        );
+        assert!(
+            shared
+                .match_pending_committed_text(client, pane, CommittedTextLane::Terminal, true,)
+                .is_some()
+        );
+        let inner = shared.inner.lock();
+        assert!(!inner.pending_committed_text.contains_key(&client));
+        assert!(!inner.suppressed_text.contains_key(&client));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_rpc_echoes_request_ids_for_every_client_kind() {
+        let shared = Arc::new(Shared::new(1));
+        for (index, kind) in [
+            ClientKind::Interactive,
+            ClientKind::Command,
+            ClientKind::Control,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (mut client, server) = std::os::unix::net::UnixStream::pair().unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let server_shared = Arc::clone(&shared);
+            let connection = thread::spawn(move || handle_connection(server, &server_shared));
+            zz_protocol::write_protocol_message(
+                &mut client,
+                &ProtocolMessage::ClientHello(ClientHello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_instance_id: ClientInstanceId(index as u64 + 1),
+                    kind,
+                    device_name: None,
+                    capabilities: Vec::new(),
+                    color_scheme: None,
+                    origin: None,
+                    working_directory: None,
+                }),
+            )
+            .unwrap();
+            assert!(matches!(
+                zz_protocol::read_protocol_message(&mut client).unwrap(),
+                ProtocolMessage::ServerHello(_)
+            ));
+            let request_id = index as u64 + 41;
+            zz_protocol::write_protocol_message(
+                &mut client,
+                &ProtocolMessage::PrepareCommandList {
+                    request_id,
+                    commands: vec![CommandInvocation::new("list-sess", [] as [&str; 0])],
+                },
+            )
+            .unwrap();
+            assert!(matches!(
+                zz_protocol::read_protocol_message(&mut client).unwrap(),
+                ProtocolMessage::PreparedCommandList {
+                    request_id: response_id,
+                    commands,
+                } if response_id == request_id
+                    && commands.len() == 1
+                    && commands[0].canonical_name.as_deref() == Some("list-sessions")
+                    && commands[0].result == PreparedCommandResult::Ready
+            ));
+            drop(client);
+            connection.join().unwrap().unwrap();
+        }
     }
 
     #[cfg(unix)]
@@ -24915,6 +30708,7 @@ mod tests {
             &ProtocolMessage::CommandRequest(CommandRequest {
                 request_id: 1,
                 command: CommandInvocation::new("wait-for", ["connection"]),
+                prepared: false,
             }),
         )
         .expect("wait request");
@@ -24935,6 +30729,7 @@ mod tests {
             &ProtocolMessage::CommandRequest(CommandRequest {
                 request_id: 2,
                 command: CommandInvocation::new("wait-for", ["-S", "connection"]),
+                prepared: false,
             }),
         )
         .expect("signal request");
@@ -24964,6 +30759,7 @@ mod tests {
             &ProtocolMessage::CommandRequest(CommandRequest {
                 request_id: 3,
                 command: CommandInvocation::new("wait-for", ["dropped"]),
+                prepared: false,
             }),
         )
         .expect("dropped wait request");
@@ -26132,6 +31928,166 @@ mod tests {
     }
 
     #[test]
+    fn new_session_name_formats_only_inherit_state_from_attached_clients() {
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut seed_context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut seed_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "origin", "-n", "origin-window"],
+                ),
+            )
+            .unwrap();
+        let origin = seed_context.session.unwrap();
+        let origin_window = seed_context.window.unwrap();
+        let origin_pane = seed_context.pane.unwrap();
+
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        let mut interactive_context =
+            ExecutionContext::new(Some(origin), Some(origin_window), Some(origin_pane));
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "#{session_name}-interactive-unattached"],
+                ),
+            )
+            .unwrap();
+        let mut command_context =
+            ExecutionContext::new(Some(origin), Some(origin_window), Some(origin_pane));
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "#{session_name}-command-unattached"],
+                ),
+            )
+            .unwrap();
+
+        shared.attach(interactive, origin).unwrap();
+        interactive_context.retarget(&ExecutionContext::new(
+            Some(origin),
+            Some(origin_window),
+            Some(origin_pane),
+        ));
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-s",
+                        "#{session_name}-#{window_name}-#{pane_id}-interactive-attached",
+                    ],
+                ),
+            )
+            .unwrap();
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-s",
+                        "#{session_name}-#{window_name}-#{pane_id}-interactive-still-attached",
+                    ],
+                ),
+            )
+            .unwrap();
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared.attach(control, origin).unwrap();
+        let mut control_context =
+            ExecutionContext::new(Some(origin), Some(origin_window), Some(origin_pane));
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-s",
+                        "#{session_name}-#{window_name}-#{pane_id}-control-attached",
+                    ],
+                ),
+            )
+            .unwrap();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-s",
+                        "#{session_name}-#{window_name}-#{pane_id}-control-still-attached",
+                    ],
+                ),
+            )
+            .unwrap();
+
+        let inner = shared.inner.lock();
+        let names = inner
+            .engine
+            .state
+            .sessions
+            .values()
+            .map(|session| session.name.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(names.contains("-interactive-unattached"));
+        assert!(names.contains("-command-unattached"));
+        assert!(
+            names.contains(
+                format!("origin-origin-window-{origin_pane}-interactive-attached").as_str()
+            )
+        );
+        assert!(names.contains(
+            format!("origin-origin-window-{origin_pane}-interactive-still-attached").as_str()
+        ));
+        assert!(
+            names.contains(format!("origin-origin-window-{origin_pane}-control-attached").as_str())
+        );
+        assert!(names.contains(
+            format!("origin-origin-window-{origin_pane}-control-still-attached").as_str()
+        ));
+        assert!(!names.contains("origin-interactive-unattached"));
+        assert!(!names.contains("origin-command-unattached"));
+    }
+
+    #[test]
     fn interactive_new_session_without_a_terminal_is_rejected_before_creation() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
@@ -26892,6 +32848,20 @@ mod tests {
         );
         let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
 
+        let error = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["one", "two"]),
+            )
+            .expect_err("too many adjustments");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::CommandParse(message))
+                if message == "refresh-client accepts at most one adjustment"
+        ));
+
         shared
             .execute(
                 control,
@@ -27150,6 +33120,7 @@ mod tests {
             "windows:@*:#{window_name}".to_owned(),
             "fallback:bogus:#{session_name}".to_owned(),
             "flags::#{client_flags}".to_owned(),
+            "command::#{command}".to_owned(),
         ] {
             shared
                 .execute(
@@ -27211,6 +33182,11 @@ mod tests {
             initial
                 .iter()
                 .any(|event| event.0 == "flags" && event.5 == "attached,control-mode")
+        );
+        assert!(
+            initial
+                .iter()
+                .any(|event| event.0 == "command" && event.5.is_empty())
         );
 
         shared.refresh_control_subscriptions();
@@ -27714,6 +33690,56 @@ mod tests {
     }
 
     #[test]
+    fn nested_source_replay_keeps_the_explicit_client_base() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let client_base = directory.path().join("client cwd [literal]*? with spaces");
+        let entry_directory = client_base.join("a");
+        fs::create_dir_all(&entry_directory).expect("nested source directory");
+        fs::write(
+            client_base.join("leaf.conf"),
+            "set-option -g @nested-client-base root\n",
+        )
+        .expect("client-base leaf");
+        fs::write(
+            entry_directory.join("leaf.conf"),
+            "set-option -g @nested-client-base decoy\n",
+        )
+        .expect("containing-file decoy");
+        let entry = entry_directory.join("entry.conf");
+        fs::write(
+            &entry,
+            "set-option -g @nested-replay-started yes\nsource-file leaf.conf\n",
+        )
+        .expect("nested source entry");
+
+        let clientless = Arc::new(Shared::new(47));
+        clientless
+            .load_config_file(&entry, &mut ExecutionContext::default(), 0)
+            .expect("clientless nested source replay");
+        assert_eq!(
+            read_global_option(&clientless, "@nested-client-base"),
+            "decoy"
+        );
+
+        let shared = Arc::new(Shared::new(48));
+        let mut source_invocations = SourceInvocationAccounting::default();
+        shared
+            .load_config_file_with_report_for_terminal(
+                &entry,
+                &mut ExecutionContext::default(),
+                0,
+                &mut ConfigLoadReport::default(),
+                ClientTerminal::NoClient,
+                Some(&client_base),
+                &mut source_invocations,
+            )
+            .expect("nested source replay");
+
+        assert_eq!(read_global_option(&shared, "@nested-replay-started"), "yes");
+        assert_eq!(read_global_option(&shared, "@nested-client-base"), "root");
+    }
+
+    #[test]
     fn config_assignments_hidden_readback_expansion_and_conditions_match_the_pin() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let mux_config = directory.path().join("mux.conf");
@@ -27954,7 +33980,11 @@ mod tests {
         fs::write(nested.join("20-second.conf"), "bind-key F5 kill-pane\n")
             .expect("second nested source");
         let entry = directory.path().join("entry.conf");
-        fs::write(&entry, "source-file 'nested/*.conf'\n").expect("nested source entry");
+        fs::write(
+            &entry,
+            format!("source-file '{}'\n", nested.join("*.conf").display()),
+        )
+        .expect("nested source entry");
 
         let shared = Arc::new(Shared::new(50));
         let mailbox = OutboundMailbox::new();
@@ -28020,33 +34050,36 @@ mod tests {
             }
         }
 
-        let unsupported_directory = directory.path().join("unsupported");
-        fs::create_dir_all(&unsupported_directory).expect("unsupported source directory");
+        let verbose_directory = directory.path().join("verbose");
+        fs::create_dir_all(&verbose_directory).expect("verbose source directory");
         fs::write(
-            unsupported_directory.join("ignored.conf"),
+            verbose_directory.join("loaded.conf"),
             "bind-key F8 new-window\n",
         )
-        .expect("unsupported nested source");
-        let unsupported_entry = directory.path().join("unsupported-entry.conf");
+        .expect("verbose nested source");
+        let verbose_entry = directory.path().join("verbose-entry.conf");
         fs::write(
-            &unsupported_entry,
-            "source-file -v 'unsupported/*.conf'\nbind-key F7 new-window\n",
+            &verbose_entry,
+            "source-file -v 'verbose/*.conf'\nbind-key F7 new-window\n",
         )
-        .expect("unsupported source entry");
+        .expect("verbose source entry");
         let mut report = ConfigLoadReport::default();
         shared
-            .load_config_file_with_report(&unsupported_entry, &mut context, 0, &mut report)
-            .expect("unsupported nested source is skipped");
+            .load_config_file_with_report(&verbose_entry, &mut context, 0, &mut report)
+            .expect("verbose nested source loads");
         {
             let inner = shared.inner.lock();
             assert!(inner.engine.keys.get("prefix", "F7").is_some());
-            assert!(inner.engine.keys.get("prefix", "F8").is_none());
+            assert!(inner.engine.keys.get("prefix", "F8").is_some());
         }
-        assert!(
-            report
-                .summary()
-                .is_some_and(|summary| summary.contains("source-file -v"))
+        assert_eq!(
+            report.verbose_lines(),
+            [format!(
+                "{}:1: bind-key F8 new-window",
+                verbose_directory.join("loaded.conf").display()
+            )]
         );
+        assert!(report.summary().is_none());
 
         take_reliable_messages(&mailbox);
         let missing = directory
@@ -28164,9 +34197,12 @@ mod tests {
         let good = directory.path().join("good.conf");
         fs::write(&good, "").expect("valid source fixture");
         let good = good.display().to_string();
-        let unsupported = directory.path().join("unsupported.conf");
-        fs::write(&unsupported, "source-file -v nested.conf\n").expect("unsupported source");
-        let unsupported = unsupported.display().to_string();
+        let verbose_leaf = directory.path().join("verbose-leaf.conf");
+        fs::write(&verbose_leaf, "set-option -g @verbose-source loaded\n")
+            .expect("verbose source leaf");
+        let verbose = directory.path().join("verbose.conf");
+        fs::write(&verbose, "source-file -v verbose-leaf.conf\n").expect("verbose source");
+        let verbose = verbose.display().to_string();
 
         let shared = Arc::new(Shared::new(63));
         let mailbox = OutboundMailbox::new();
@@ -28230,20 +34266,23 @@ mod tests {
             }
         );
 
-        let skipped = shared.execute_command_request(
+        let verbose_response = shared.execute_command_request(
             command,
             ClientKind::Command,
             &mut context,
             4,
-            &CommandInvocation::new("source-file", [&unsupported]),
+            &CommandInvocation::new("source-file", [&verbose]),
         );
         assert_eq!(
-            skipped,
+            verbose_response,
             CommandResponse::Success {
                 request_id: 4,
-                output: String::new(),
+                output: format!(
+                    "{}:1: set-option -g @verbose-source loaded\n",
+                    verbose_leaf.display()
+                ),
                 exit_code: 0,
-                stderr: "skipped 1 unsupported tmux command: source-file -v\n".to_owned(),
+                stderr: String::new(),
             }
         );
 
@@ -28328,6 +34367,687 @@ mod tests {
     }
 
     #[test]
+    fn source_file_replayed_runtime_errors_reach_each_client_channel() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let runtime = directory.path().join("runtime-errors.conf");
+        fs::write(
+            &runtime,
+            "kill-session -t missing-runtime\n\
+             set-option -g nonexistent-option value\n\
+             set-environment -g \"\" value\n\
+             set-option -g @runtime-after yes\n",
+        )
+        .expect("runtime error source");
+        let inner = directory.path().join("inner.conf");
+        fs::write(
+            &inner,
+            "kill-session -t missing-inner\nset-option -g @inner-after yes\n",
+        )
+        .expect("inner runtime error source");
+        let outer = directory.path().join("outer.conf");
+        fs::write(
+            &outer,
+            format!(
+                "source-file '{}'\nset-option -g @outer-after yes\n",
+                inner.display()
+            ),
+        )
+        .expect("outer runtime error source");
+
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "replay-runtime-errors"]),
+            )
+            .expect("runtime error session");
+
+        let command_response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("source-file", [runtime.display().to_string()]),
+        );
+        assert_eq!(
+            command_response,
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: "can't find session: missing-runtime\n\
+                         invalid option: nonexistent-option\n\
+                         empty variable name\n"
+                    .to_owned(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@runtime-after"), "yes");
+
+        let outer_response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("source-file", [outer.display().to_string()]),
+        );
+        assert_eq!(
+            outer_response,
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 1,
+                stderr: "can't find session: missing-inner\n".to_owned(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@inner-after"), "yes");
+        assert_eq!(read_global_option(&shared, "@outer-after"), "yes");
+
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        let mut interactive_context = ExecutionContext::default();
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                &CommandInvocation::new("attach-session", ["-t", "replay-runtime-errors"]),
+            )
+            .expect("attach interactive runtime error client");
+        take_reliable_messages(&interactive_mailbox);
+        let interactive_response = shared.execute_command_request(
+            interactive,
+            ClientKind::Interactive,
+            &mut interactive_context,
+            3,
+            &CommandInvocation::new("source-file", [runtime.display().to_string()]),
+        );
+        assert_eq!(
+            interactive_response,
+            CommandResponse::Success {
+                request_id: 3,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&interactive_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            warnings,
+            [
+                "Can't find session: missing-runtime",
+                "Invalid option: nonexistent-option",
+                "Empty variable name",
+            ]
+        );
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let mut control_context = ExecutionContext::default();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-t", "replay-runtime-errors"]),
+            )
+            .expect("attach control runtime error client");
+        take_reliable_messages(&control_mailbox);
+        let control_response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            4,
+            &CommandInvocation::new("source-file", [runtime.display().to_string()]),
+        );
+        assert_eq!(
+            control_response,
+            CommandResponse::Success {
+                request_id: 4,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            [
+                ("can't find session: missing-runtime".to_owned(), true, true,),
+                ("invalid option: nonexistent-option".to_owned(), true, true),
+                ("empty variable name".to_owned(), true, true),
+                (String::new(), false, false),
+            ]
+        );
+
+        let alias_root = directory.path().join("source-alias.conf");
+        fs::write(
+            &alias_root,
+            "source ignored.conf\nset-option -g @source-alias-after yes\n",
+        )
+        .expect("source alias root");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[100]", "source=new-window -t missing:"],
+                ),
+            )
+            .expect("source alias");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                5,
+                &CommandInvocation::new("source-file", [alias_root.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 5,
+                output: String::new(),
+                exit_code: 1,
+                stderr: "can't find session: missing\n".to_owned(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@source-alias-after"), "yes");
+
+        let mut report = ConfigLoadReport::default();
+        shared
+            .load_config_file_with_report(&alias_root, &mut context, 0, &mut report)
+            .expect("reload source alias report");
+        assert!(matches!(
+            report.replay_issues(),
+            [ConfigReplayIssue::CommandError {
+                source: Some(source),
+                message,
+            }] if source.source == alias_root.display().to_string()
+                && source.line == 1
+                && message == "can't find session: missing"
+        ));
+    }
+
+    #[test]
+    fn source_replay_uses_typed_phase_and_continues_after_each_failure() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("typed-phase.conf");
+        fs::write(
+            &source,
+            "set-environment -g\n\
+             set-option -g @after-parse yes\n\
+             kill-session -t missing-phase\n\
+             set-option -g @after-runtime yes\n",
+        )
+        .expect("typed phase source");
+        let shared = Arc::new(Shared::new(63));
+        let client = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "typed-phase"]),
+            )
+            .expect("session");
+
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: format!(
+                    "{}:1: set-environment needs a variable and optional value\n",
+                    source.display()
+                ),
+                exit_code: 1,
+                stderr: "can't find session: missing-phase\n".to_owned(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@after-parse"), "yes");
+        assert_eq!(read_global_option(&shared, "@after-runtime"), "yes");
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                2,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&mailbox)),
+            [
+                (
+                    format!(
+                        "{}:1: set-environment needs a variable and optional value",
+                        source.display()
+                    ),
+                    true,
+                    false,
+                ),
+                (String::new(), false, false),
+                ("can't find session: missing-phase".to_owned(), true, true),
+                (String::new(), false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_source_name_failures_are_config_warnings_without_guards() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("name-errors.conf");
+        fs::write(
+            &source,
+            "source ignored.conf\n\
+             wibble\n\
+             kill-s\n\
+             badalias\n\
+             set-environment -g\n\
+             new-pane\n\
+             set-option -g @after-name-errors yes\n",
+        )
+        .expect("name error source");
+        let shared = Arc::new(Shared::new(76));
+        let mut context = ExecutionContext::default();
+        for (index, alias) in ["source=", "badalias="].into_iter().enumerate() {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{}]", index + 90), alias],
+                    ),
+                )
+                .expect("unsupported command alias");
+        }
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let events = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::SourcedCommandGuard {
+                            output,
+                            error,
+                            client_failure,
+                        },
+                    ..
+                }) => Some(format!("guard:{error}:{client_failure}:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("warning:{text}")),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let source = source.display();
+        assert_eq!(
+            events,
+            [
+                format!("warning:{source}:1: unknown command: source"),
+                format!("warning:{source}:2: unknown command: wibble"),
+                format!(
+                    "warning:{source}:3: ambiguous command: kill-s, could be: kill-server, kill-session"
+                ),
+                format!("warning:{source}:4: unknown command: badalias"),
+                format!(
+                    "guard:true:false:{source}:5: set-environment needs a variable and optional value"
+                ),
+                "guard:false:false:".to_owned(),
+                "guard:false:false:".to_owned(),
+                "warning:skipped 1 unsupported tmux command: new-pane".to_owned(),
+            ]
+        );
+        assert_eq!(read_global_option(&shared, "@after-name-errors"), "yes");
+    }
+
+    #[test]
+    fn source_file_flags_preserve_parse_target_verbose_and_client_semantics() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let parse_only = directory.path().join("parse-only.conf");
+        fs::write(
+            &parse_only,
+            "PARSE_ASSIGN=changed\n\
+             set-option -g @parse-only changed\n\
+             set-environment -g PARSE_COMMAND changed\n",
+        )
+        .expect("parse-only source");
+        let invalid = directory.path().join("invalid.conf");
+        fs::write(&invalid, "PARSE_INVALID=changed\nset 'oops\n").expect("invalid source");
+        let beta = directory.path().join("beta.conf");
+        fs::write(&beta, "set-option -g @verbose-order beta\n").expect("beta source");
+        let alpha = directory.path().join("alpha.conf");
+        fs::write(&alpha, "set-option -g @verbose-order alpha\n").expect("alpha source");
+        let target = directory.path().join("target.conf");
+        fs::write(&target, "set-environment SOURCE_TARGET selected\n").expect("target source");
+        let formatted = directory.path().join("source-one.conf");
+        fs::write(
+            &formatted,
+            "set-environment SOURCE_FORMAT_TARGET selected\n",
+        )
+        .expect("formatted target source");
+        let targetless = directory.path().join("targetless.conf");
+        fs::write(&targetless, "set-option -g @targetless loaded\n").expect("targetless source");
+
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        for session in ["source-one", "source-two"] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("new-session", ["-d", "-s", session]),
+                )
+                .expect("source target session");
+        }
+
+        let parsed = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("source-file", ["-nv", &parse_only.display().to_string()]),
+        );
+        assert_eq!(
+            parsed,
+            CommandResponse::Success {
+                request_id: 1,
+                output: format!(
+                    "{}:2: set-option -g @parse-only changed\n\
+                     {}:3: set-environment -g PARSE_COMMAND changed\n",
+                    parse_only.display(),
+                    parse_only.display()
+                ),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.global_environment_variable("PARSE_ASSIGN"),
+                None
+            );
+            assert_eq!(
+                inner.engine.global_environment_variable("PARSE_COMMAND"),
+                None
+            );
+        }
+        assert!(read_global_option(&shared, "@parse-only").is_empty());
+
+        let invalid_response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("source-file", ["-n", &invalid.display().to_string()]),
+        );
+        assert_eq!(
+            invalid_response,
+            CommandResponse::Success {
+                request_id: 2,
+                output: format!("{}:2: unterminated quote\n", invalid.display()),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("PARSE_INVALID"),
+            None
+        );
+
+        let verbose = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            3,
+            &CommandInvocation::new(
+                "source-file",
+                [
+                    "-v",
+                    &beta.display().to_string(),
+                    &alpha.display().to_string(),
+                ],
+            ),
+        );
+        assert_eq!(
+            verbose,
+            CommandResponse::Success {
+                request_id: 3,
+                output: format!(
+                    "{}:1: set-option -g @verbose-order beta\n\
+                     {}:1: set-option -g @verbose-order alpha\n",
+                    beta.display(),
+                    alpha.display()
+                ),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@verbose-order"), "alpha");
+
+        let targeted = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            4,
+            &CommandInvocation::new(
+                "source-file",
+                ["-t", "source-one:0", &target.display().to_string()],
+            ),
+        );
+        assert!(matches!(
+            targeted,
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        let source_one = shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-environment", ["-t", "source-one", "SOURCE_TARGET"]),
+            )
+            .expect("target environment")
+            .output;
+        assert_eq!(source_one, "SOURCE_TARGET=selected");
+        assert!(matches!(
+            shared.execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "show-environment",
+                    ["-t", "source-two", "SOURCE_TARGET"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "unknown variable: SOURCE_TARGET"
+        ));
+
+        let formatted_path = directory
+            .path()
+            .join("#{session_name}.conf")
+            .display()
+            .to_string();
+        assert!(matches!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                5,
+                &CommandInvocation::new(
+                    "source-file",
+                    ["-F", "-t", "source-one:0", &formatted_path],
+                ),
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        let formatted_target = shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "show-environment",
+                    ["-t", "source-one", "SOURCE_FORMAT_TARGET"],
+                ),
+            )
+            .expect("formatted target environment")
+            .output;
+        assert_eq!(formatted_target, "SOURCE_FORMAT_TARGET=selected");
+
+        let targetless_response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            6,
+            &CommandInvocation::new(
+                "source-file",
+                ["-t", "missing:0", &targetless.display().to_string()],
+            ),
+        );
+        assert!(matches!(
+            targetless_response,
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert_eq!(read_global_option(&shared, "@targetless"), "loaded");
+
+        let reload_leaf = directory.path().join("reload-leaf.conf");
+        fs::write(&reload_leaf, "set-option -g @reload-verbose loaded\n")
+            .expect("reload verbose leaf");
+        let reload_root = directory.path().join("reload-root.conf");
+        fs::write(&reload_root, "source-file reload-leaf.conf\n").expect("reload verbose root");
+        shared
+            .inner
+            .lock()
+            .command_streams
+            .entry(command)
+            .or_default();
+        shared
+            .reload_user_config_with_mux_file_and_source_base(
+                command,
+                &mut context,
+                Some(&reload_root),
+                Some(directory.path()),
+                SourceFileLoadOptions {
+                    verbose: true,
+                    ..SourceFileLoadOptions::default()
+                },
+            )
+            .expect("verbose native reload");
+        let reload_output = shared
+            .inner
+            .lock()
+            .command_streams
+            .remove(&command)
+            .expect("verbose native reload stream")
+            .stdout;
+        assert_eq!(
+            reload_output,
+            format!(
+                "{}:1: source-file reload-leaf.conf\n\
+                 {}:1: set-option -g @reload-verbose loaded\n",
+                reload_root.display(),
+                reload_leaf.display()
+            )
+        );
+        assert_eq!(read_global_option(&shared, "@reload-verbose"), "loaded");
+
+        let control = ClientId(u64::from(u16::MAX) - 1);
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                7,
+                &CommandInvocation::new("source-file", ["-v", &alpha.display().to_string()],),
+            ),
+            CommandResponse::Success {
+                request_id: 7,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+    }
+
+    #[test]
     fn nested_source_misses_use_effective_declared_paths_across_client_channels() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let parent = directory
@@ -28367,12 +35087,16 @@ mod tests {
         let shared = Arc::new(Shared::new(64));
         let command = ClientId(u64::from(u16::MAX));
         let mut context = ExecutionContext::default();
+        let parent_path = parent.display().to_string();
         shared
             .execute(
                 command,
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-d", "-s", "nested-diagnostic"]),
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-c", &parent_path, "-s", "nested-diagnostic"],
+                ),
             )
             .expect("nested diagnostic session");
         let expected = "No such file or directory: nested-diagnostic-missing[1].conf";
@@ -28418,6 +35142,11 @@ mod tests {
             None,
             Arc::clone(&interactive_mailbox),
         );
+        shared
+            .inner
+            .lock()
+            .client_working_directories
+            .insert(interactive, parent.clone());
         let mut interactive_context = ExecutionContext::default();
         shared
             .execute(
@@ -28501,6 +35230,11 @@ mod tests {
             None,
             Arc::clone(&control_mailbox),
         );
+        shared
+            .inner
+            .lock()
+            .client_working_directories
+            .insert(control, parent.clone());
         let mut control_context = ExecutionContext::default();
         shared
             .execute(
@@ -28523,26 +35257,14 @@ mod tests {
             CommandResponse::Success {
                 request_id: 5,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
-        let warnings = take_reliable_messages(&control_mailbox)
-            .into_iter()
-            .filter_map(|message| match message {
-                ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
-                    ..
-                }) => Some(text),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(warnings, [expected]);
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            [(expected.to_owned(), true, false)]
+        );
         let response = shared.execute_command_request(
             control,
             ClientKind::Control,
@@ -28559,21 +35281,9 @@ mod tests {
                 stderr: String::new(),
             }
         );
-        assert!(
-            !take_reliable_messages(&control_mailbox)
-                .iter()
-                .any(|message| {
-                    matches!(
-                        message,
-                        ProtocolMessage::Event(Event {
-                            payload: EventPayload::ClientMessage {
-                                kind: ClientMessageKind::Warning,
-                                ..
-                            },
-                            ..
-                        })
-                    )
-                })
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            [(String::new(), false, false)]
         );
         let response = shared.execute_command_request(
             control,
@@ -28592,9 +35302,18 @@ mod tests {
             }
         );
         let invalid = format!("{}:1: unknown command: wibble", invalid_leaf.display());
-        let warnings = take_reliable_messages(&control_mailbox)
+        let events = take_reliable_messages(&control_mailbox)
             .into_iter()
             .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::SourcedCommandGuard {
+                            output,
+                            error,
+                            client_failure,
+                        },
+                    ..
+                }) => Some(("guard", output, error, client_failure)),
                 ProtocolMessage::Event(Event {
                     payload:
                         EventPayload::ClientMessage {
@@ -28603,11 +35322,17 @@ mod tests {
                             ..
                         },
                     ..
-                }) => Some(text),
+                }) => Some(("warning", text, false, false)),
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(warnings, [invalid]);
+        assert_eq!(
+            events,
+            [
+                ("guard", String::new(), false, false),
+                ("warning", invalid, false, false),
+            ]
+        );
     }
 
     #[test]
@@ -28615,6 +35340,8 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let grouped = directory.path().join("grouped.conf");
         let separate = directory.path().join("separate.conf");
+        let mixed_read = directory.path().join("mixed-read.conf");
+        let invalid_utf8 = directory.path().join("invalid-utf8.conf");
         fs::write(&grouped, "source-file missing-a.conf missing-b.conf\n")
             .expect("grouped nested source fixture");
         fs::write(
@@ -28622,10 +35349,25 @@ mod tests {
             "source-file missing-c.conf\nsource-file missing-d.conf\n",
         )
         .expect("separate nested source fixture");
+        fs::write(&invalid_utf8, [0xff]).expect("invalid UTF-8 source fixture");
+        fs::write(
+            &mixed_read,
+            format!(
+                "source-file '{}' missing-after-invalid-utf8.conf\n",
+                invalid_utf8.display()
+            ),
+        )
+        .expect("mixed nested source fixture");
         let missing_a = "No such file or directory: missing-a.conf";
         let missing_b = "No such file or directory: missing-b.conf";
         let missing_c = "No such file or directory: missing-c.conf";
         let missing_d = "No such file or directory: missing-d.conf";
+        let invalid_utf8_error = format!(
+            "stream did not contain valid UTF-8: {}",
+            invalid_utf8.display()
+        );
+        let missing_after_invalid_utf8 =
+            "No such file or directory: missing-after-invalid-utf8.conf";
 
         let shared = Arc::new(Shared::new(66));
         let command = ClientId(u64::from(u16::MAX));
@@ -28668,26 +35410,14 @@ mod tests {
             CommandResponse::Success {
                 request_id: 2,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
-        let warnings = take_reliable_messages(&control_mailbox)
-            .into_iter()
-            .filter_map(|message| match message {
-                ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
-                    ..
-                }) => Some(text),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(warnings, [format!("{missing_a}\n{missing_b}")]);
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            [(format!("{missing_a}\n{missing_b}"), true, false)]
+        );
 
         let response = shared.execute_command_request(
             control,
@@ -28701,26 +35431,139 @@ mod tests {
             CommandResponse::Success {
                 request_id: 3,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
-        let warnings = take_reliable_messages(&control_mailbox)
-            .into_iter()
-            .filter_map(|message| match message {
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            [
+                (missing_c.to_owned(), true, false),
+                (missing_d.to_owned(), true, false),
+            ]
+        );
+
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            4,
+            &CommandInvocation::new("source-file", [mixed_read.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 4,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        let messages = take_reliable_messages(&control_mailbox);
+        assert!(matches!(
+            messages.as_slice(),
+            [
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
+                    payload: EventPayload::SourcedCommandGuard {
+                        output,
+                        error: false,
+                        client_failure: false,
+                    },
+                    ..
+                }),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Error,
+                        text,
+                        ..
+                    },
+                    ..
+                }),
+            ] if output == missing_after_invalid_utf8 && text == &invalid_utf8_error
+        ));
+
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            41,
+            &CommandInvocation::new("source-file", [invalid_utf8.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 41,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert!(matches!(
+            take_reliable_messages(&control_mailbox).as_slice(),
+            [ProtocolMessage::Event(Event {
+                payload: EventPayload::ClientMessage {
+                    kind: ClientMessageKind::Error,
+                    text,
+                    ..
+                },
+                ..
+            })] if text == &invalid_utf8_error
+        ));
+
+        #[cfg(unix)]
+        {
+            let colon_invalid_utf8 = directory.path().join("a: b");
+            let colon_read = directory.path().join("colon-read.conf");
+            fs::write(&colon_invalid_utf8, [0xff]).expect("colon-space invalid UTF-8 fixture");
+            fs::write(
+                &colon_read,
+                format!("source-file '{}'\n", colon_invalid_utf8.display()),
+            )
+            .expect("colon-space source fixture");
+
+            let response = shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                40,
+                &CommandInvocation::new("source-file", [colon_read.display().to_string()]),
+            );
+            assert_eq!(
+                response,
+                CommandResponse::Success {
+                    request_id: 40,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            let messages = take_reliable_messages(&control_mailbox);
+            assert!(matches!(
+                messages.as_slice(),
+                [
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::SourcedCommandGuard {
+                            output,
+                            error: false,
+                            client_failure: false,
+                        },
+                        ..
+                    }),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Error,
                             text,
                             ..
                         },
-                    ..
-                }) => Some(text),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(warnings, [missing_c, missing_d]);
+                        ..
+                    }),
+                ] if output.is_empty()
+                    && text == &format!(
+                        "stream did not contain valid UTF-8: {}",
+                        colon_invalid_utf8.display()
+                    )
+            ));
+        }
 
         let interactive_mailbox = OutboundMailbox::new();
         let (interactive, _) = shared.register_subscribed(
@@ -28734,13 +35577,13 @@ mod tests {
             interactive,
             ClientKind::Interactive,
             &mut ExecutionContext::default(),
-            4,
+            5,
             &CommandInvocation::new("source-file", [grouped.display().to_string()]),
         );
         assert_eq!(
             response,
             CommandResponse::Success {
-                request_id: 4,
+                request_id: 5,
                 output: String::new(),
                 exit_code: 0,
                 stderr: String::new(),
@@ -28762,6 +35605,91 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(warnings, [missing_a, missing_b]);
+    }
+
+    #[test]
+    fn nested_source_control_guards_precede_deeper_replay() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path().join("root.conf");
+        let middle = directory.path().join("middle.conf");
+        let leaf = directory.path().join("leaf.conf");
+        fs::write(
+            &root,
+            format!(
+                "source-file root-before-missing.conf '{}' root-after-missing.conf\n",
+                middle.display()
+            ),
+        )
+        .expect("root source fixture");
+        fs::write(
+            &middle,
+            format!(
+                "source-file middle-before-missing.conf '{}' middle-after-missing.conf\n",
+                leaf.display()
+            ),
+        )
+        .expect("middle source fixture");
+        fs::write(&leaf, "display-message -p CONTROL_QUEUE_LEAF\n").expect("leaf source fixture");
+
+        let shared = Arc::new(Shared::new(77));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut command_context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "nested-control-queue"]),
+            )
+            .expect("nested control queue session");
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let mut control_context = ExecutionContext::default();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-t", "nested-control-queue"]),
+            )
+            .expect("attach nested control queue client");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                1,
+                &CommandInvocation::new("source-file", [root.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&mailbox)),
+            [
+                (
+                    "No such file or directory: root-before-missing.conf\nNo such file or directory: root-after-missing.conf"
+                        .to_owned(),
+                    false,
+                    false,
+                ),
+                (
+                    "No such file or directory: middle-before-missing.conf\nNo such file or directory: middle-after-missing.conf"
+                        .to_owned(),
+                    false,
+                    false,
+                ),
+                ("CONTROL_QUEUE_LEAF".to_owned(), false, false),
+            ]
+        );
     }
 
     #[cfg(unix)]
@@ -28815,26 +35743,14 @@ mod tests {
             CommandResponse::Success {
                 request_id: 2,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
-        let warnings = take_reliable_messages(&mailbox)
-            .into_iter()
-            .filter_map(|message| match message {
-                ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
-                    ..
-                }) => Some(text),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(warnings, [expected]);
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&mailbox)),
+            [(expected, true, false)]
+        );
     }
 
     #[test]
@@ -28907,9 +35823,17 @@ mod tests {
         fn chain(directory: &Path, invocations: usize) -> PathBuf {
             for level in 1..=invocations {
                 let nested = if level < invocations {
-                    format!("source-file f{}.conf\n", level + 1)
+                    format!(
+                        "source-file '{}'\n",
+                        directory.join(format!("f{}.conf", level + 1)).display()
+                    )
                 } else {
-                    "source-file leaf-a.conf leaf-b.conf\nsource-file -q leaf-a.conf\n".to_owned()
+                    format!(
+                        "source-file '{}' '{}'\nsource-file -q '{}'\n",
+                        directory.join("leaf-a.conf").display(),
+                        directory.join("leaf-b.conf").display(),
+                        directory.join("leaf-a.conf").display()
+                    )
                 };
                 let body = format!(
                     "set-option -g @depth {level}\n{nested}set-option -g @after{level} yes\n"
@@ -28935,19 +35859,17 @@ mod tests {
                 .output
         }
 
-        fn source_warnings(mailbox: &OutboundMailbox) -> Vec<String> {
+        fn source_messages(
+            mailbox: &OutboundMailbox,
+            expected_kind: ClientMessageKind,
+        ) -> Vec<String> {
             take_reliable_messages(mailbox)
                 .into_iter()
                 .filter_map(|message| match message {
                     ProtocolMessage::Event(Event {
-                        payload:
-                            EventPayload::ClientMessage {
-                                kind: ClientMessageKind::Warning,
-                                text,
-                                ..
-                            },
+                        payload: EventPayload::ClientMessage { kind, text, .. },
                         ..
-                    }) => Some(text),
+                    }) if kind == expected_kind => Some(text),
                     _ => None,
                 })
                 .collect()
@@ -29033,7 +35955,7 @@ mod tests {
             }
         );
         assert_eq!(
-            source_warnings(&interactive_mailbox),
+            source_messages(&interactive_mailbox, ClientMessageKind::Warning),
             ["Too many nested files", "Too many nested files"]
         );
 
@@ -29057,13 +35979,20 @@ mod tests {
             CommandResponse::Success {
                 request_id: 4,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
+        let failures = sourced_command_guards(take_reliable_messages(&control_mailbox))
+            .into_iter()
+            .filter(|(_, error, _)| *error)
+            .collect::<Vec<_>>();
         assert_eq!(
-            source_warnings(&control_mailbox),
-            [NESTED_SOURCE_LIMIT_ERROR, NESTED_SOURCE_LIMIT_ERROR]
+            failures,
+            [
+                (NESTED_SOURCE_LIMIT_ERROR.to_owned(), true, false),
+                (NESTED_SOURCE_LIMIT_ERROR.to_owned(), true, false),
+            ]
         );
     }
 
@@ -29595,7 +36524,7 @@ mod tests {
         let client = ClientId(99);
         let text = String::from("xλz");
         assert!(matches!(
-            shared.filter_suppressed_text(client, &text),
+            shared.filter_suppressed_text(client, &text, None),
             Cow::Borrowed("xλz")
         ));
 
@@ -29607,7 +36536,15 @@ mod tests {
             .or_default()
             .insert('x', 1);
         assert!(matches!(
-            shared.filter_suppressed_text(client, &text),
+            shared.filter_suppressed_text(
+                client,
+                &text,
+                Some(PendingCommittedText {
+                    pane: PaneId(1),
+                    lane: CommittedTextLane::Terminal,
+                    suppressed_character: Some('x'),
+                }),
+            ),
             Cow::Owned(filtered) if filtered == "λz"
         ));
         assert!(!shared.inner.lock().suppressed_text.contains_key(&client));
@@ -29622,7 +36559,20 @@ mod tests {
             .lock()
             .suppressed_text
             .insert(client, BTreeMap::from([('c', 1)]));
-        assert_eq!(shared.filter_suppressed_text(client, "ç").as_ref(), "ç");
+        assert_eq!(
+            shared
+                .filter_suppressed_text(
+                    client,
+                    "ç",
+                    Some(PendingCommittedText {
+                        pane: PaneId(1),
+                        lane: CommittedTextLane::Terminal,
+                        suppressed_character: Some('c'),
+                    }),
+                )
+                .as_ref(),
+            "ç"
+        );
         assert!(!shared.inner.lock().suppressed_text.contains_key(&client));
     }
 
@@ -29763,7 +36713,7 @@ mod tests {
             .expect_err("a clustered value option still requires a value");
         assert!(matches!(
             error,
-            ServerError::InvalidCommand(message)
+            ServerError::CommandParse(message)
                 if message == "capture-pane -S requires a value"
         ));
     }
@@ -29871,8 +36821,8 @@ mod tests {
                 &CommandInvocation::new(
                     "capture-pane",
                     [
-                        "-pS#{?pane_active,1,bogus}",
-                        "-E#{?pane_active,2,bogus}",
+                        "-pS#{?#{==:#{command},capture-pane},1,bogus}",
+                        "-E#{?#{==:#{command},capture-pane},2,bogus}",
                         "-t",
                         &target,
                     ],
@@ -30036,6 +36986,540 @@ mod tests {
                     })
                 ))
         );
+    }
+
+    #[test]
+    fn display_message_target_client_routes_and_selects_format_client() {
+        let shared = Arc::new(Shared::new(1));
+        let caller_mailbox = OutboundMailbox::new();
+        let same_mailbox = OutboundMailbox::new();
+        let fallback_mailbox = OutboundMailbox::new();
+        let cross_mailbox = OutboundMailbox::new();
+        let control_mailbox = OutboundMailbox::new();
+        let (caller, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("caller-client".to_owned()),
+            None,
+            Arc::clone(&caller_mailbox),
+        );
+        let (same, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("same-client-one".to_owned()),
+            None,
+            Arc::clone(&same_mailbox),
+        );
+        let (fallback, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("same-client-two".to_owned()),
+            None,
+            Arc::clone(&fallback_mailbox),
+        );
+        let (cross, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("cross-client".to_owned()),
+            None,
+            Arc::clone(&cross_mailbox),
+        );
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control-client".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (target_session, target_pane, _) = attached_message_fixture(
+            &shared,
+            "target-session",
+            &[caller, same, fallback, control],
+        );
+        let (cross_session, _, _) = attached_message_fixture(&shared, "cross-session", &[cross]);
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_activity.insert(caller, 10);
+            inner.client_activity.insert(same, 20);
+            inner.client_activity.insert(control, 30);
+            inner.client_activity.insert(fallback, 100);
+            inner.client_sizes.insert(same, (101, 31));
+            inner.client_sizes.insert(fallback, (88, 22));
+            inner.client_sizes.insert(cross, (77, 17));
+            inner.client_ttys.insert(same, "/dev/pts/7".to_owned());
+        }
+        let mut context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, target_pane)
+                .expect("target context");
+        for mailbox in [
+            &caller_mailbox,
+            &same_mailbox,
+            &fallback_mailbox,
+            &cross_mailbox,
+            &control_mailbox,
+        ] {
+            take_reliable_messages(mailbox);
+        }
+        let format = "#{client_name}|#{client_session}|#{client_width}x#{client_height}|#{session_name}|#{pane_id}";
+
+        let same_output = shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-c",
+                        "same-client-one:",
+                        "-t",
+                        &target_pane.to_string(),
+                        format,
+                    ],
+                ),
+            )
+            .expect("print with same-session client facts");
+        assert_eq!(
+            same_output.output,
+            format!("same-client-one|target-session|101x31|target-session|{target_pane}")
+        );
+
+        let partial_output = shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-c",
+                        "cross-client",
+                        "-t",
+                        "=target-session:missing-window",
+                        format,
+                    ],
+                ),
+            )
+            .expect("print with partial target context");
+        assert_eq!(
+            partial_output.output,
+            format!("same-client-two|target-session|88x22|target-session|{target_pane}")
+        );
+
+        for target in ["cross-client", "missing-client"] {
+            let output = shared
+                .execute(
+                    caller,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        ["-p", "-c", target, "-t", &target_pane.to_string(), format],
+                    ),
+                )
+                .expect("print with best target-session client facts");
+            assert_eq!(
+                output.output,
+                format!("same-client-two|target-session|88x22|target-session|{target_pane}")
+            );
+        }
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), fallback),
+            Some(target_session)
+        );
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-c", "same-client", "ambiguous prefix"],
+                ),
+            )
+            .expect("quiet unmatched client prefix");
+        for mailbox in [&caller_mailbox, &same_mailbox, &fallback_mailbox] {
+            assert!(take_timed_client_messages(mailbox).is_empty());
+        }
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.client_messages.contains_key(&caller));
+            assert!(!inner.client_messages.contains_key(&same));
+            assert!(!inner.client_messages.contains_key(&fallback));
+        }
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-c", "missing-client", "-t", "=missing:", "message"],
+                ),
+            )
+            .expect("missing pane and client stay quiet");
+        for mailbox in [&caller_mailbox, &same_mailbox, &fallback_mailbox] {
+            assert!(take_timed_client_messages(mailbox).is_empty());
+        }
+        let missing_output = shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-c",
+                        "missing-client",
+                        "-t",
+                        "=missing:",
+                        "#{session_name}|#{window_name}|#{pane_id}|#{client_name}",
+                    ],
+                ),
+            )
+            .expect("print empty facts for missing targets");
+        assert_eq!(missing_output.output, "|||");
+        let error = shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-c", "missing-client", "-d", "not-a-delay", "message"],
+                ),
+            )
+            .expect_err("delay error follows quiet client miss");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message)) if message == "delay invalid"
+        ));
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-N",
+                        "-c",
+                        "cross-client",
+                        "-t",
+                        &target_pane.to_string(),
+                        format,
+                    ],
+                ),
+            )
+            .expect("printing remains non-displaying");
+        assert!(!shared.inner.lock().message_ignore_keys.contains(&cross));
+        assert!(take_timed_client_messages(&cross_mailbox).is_empty());
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "=target-session", "display-time", "1111"],
+                ),
+            )
+            .expect("set pane-target display time");
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "=cross-session", "display-time", "0"],
+                ),
+            )
+            .expect("set destination display time to zero");
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-N",
+                        "-c",
+                        "cross-client",
+                        "-t",
+                        &target_pane.to_string(),
+                        "destination-zero",
+                    ],
+                ),
+            )
+            .expect("inherit destination zero duration");
+        assert_eq!(
+            take_timed_client_messages(&cross_mailbox),
+            [(Some(target_pane), "destination-zero".to_owned(), 0)]
+        );
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, cross), Some(cross_session));
+            assert_eq!(inner.client_messages[&cross].deadline, None);
+            assert!(!inner.message_ignore_keys.contains(&cross));
+        }
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "=cross-session", "display-time", "4321"],
+                ),
+            )
+            .expect("set positive destination display time");
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-N",
+                        "-c",
+                        "cross-client",
+                        "-t",
+                        &target_pane.to_string(),
+                        "destination-positive",
+                    ],
+                ),
+            )
+            .expect("inherit positive destination duration");
+        assert_eq!(
+            take_timed_client_messages(&cross_mailbox),
+            [(Some(target_pane), "destination-positive".to_owned(), 4321)]
+        );
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.client_messages[&cross].deadline.is_some());
+            assert!(inner.message_ignore_keys.contains(&cross));
+        }
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-C",
+                        "-N",
+                        "-c",
+                        "cross-client",
+                        "-d",
+                        "5000",
+                        "-t",
+                        &target_pane.to_string(),
+                        "#{client_name}|#{client_session}|#{session_name}",
+                    ],
+                ),
+            )
+            .expect("route cross-session message");
+        assert!(take_timed_client_messages(&caller_mailbox).is_empty());
+        assert_eq!(
+            take_timed_client_messages(&cross_mailbox),
+            [(
+                Some(target_pane),
+                "same-client-two|target-session|target-session".to_owned(),
+                5000
+            )]
+        );
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.client_messages.contains_key(&caller));
+            let armed = inner.client_messages[&cross];
+            assert!(!armed.freeze);
+            assert!(armed.deadline.is_some());
+            assert!(inner.message_ignore_keys.contains(&cross));
+        }
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-c", "cross-client", "-d", "5000", "reset"],
+                ),
+            )
+            .expect("reset targeted ignore-keys state");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.client_messages[&cross].freeze);
+            assert!(!inner.message_ignore_keys.contains(&cross));
+        }
+        take_timed_client_messages(&cross_mailbox);
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-c", "control-client", "-d", "0", "control-target"],
+                ),
+            )
+            .expect("route control message");
+        assert_eq!(
+            take_timed_client_messages(&control_mailbox),
+            [(Some(target_pane), "control-target".to_owned(), 0)]
+        );
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.client_messages.contains_key(&control));
+            assert!(!inner.message_ignore_keys.contains(&control));
+        }
+
+        {
+            shared.inner.lock().read_only_clients.insert(same);
+        }
+        shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-c", "pts/7:", "-d", "5000", "read-only-target"],
+                ),
+            )
+            .expect("route message to read-only destination");
+        assert_eq!(
+            take_timed_client_messages(&same_mailbox),
+            [(Some(target_pane), "read-only-target".to_owned(), 5000)]
+        );
+        let same_message = shared.inner.lock().client_messages[&same];
+
+        shared.inner.lock().read_only_clients.insert(caller);
+        let response = shared.execute_command_request(
+            caller,
+            ClientKind::Interactive,
+            &mut context,
+            41,
+            &CommandInvocation::new("display-message", ["-c", "same-client-one", "blocked"]),
+        );
+        assert!(matches!(
+            response,
+            CommandResponse::Error {
+                request_id: 41,
+                error: ServerError::InvalidCommand(message),
+                output,
+            } if message == "client is read-only" && output.is_empty()
+        ));
+        assert_eq!(shared.inner.lock().client_messages[&same], same_message);
+        assert!(take_timed_client_messages(&same_mailbox).is_empty());
+    }
+
+    #[test]
+    fn display_message_unattached_target_uses_global_format_client() {
+        let shared = Arc::new(Shared::new(1));
+        let alpha_mailbox = OutboundMailbox::new();
+        let beta_mailbox = OutboundMailbox::new();
+        let (alpha, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha-client".to_owned()),
+            None,
+            Arc::clone(&alpha_mailbox),
+        );
+        let (beta, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("beta-client".to_owned()),
+            None,
+            Arc::clone(&beta_mailbox),
+        );
+        attached_message_fixture(&shared, "attached-alpha", &[alpha]);
+        attached_message_fixture(&shared, "attached-beta", &[beta]);
+        let (_, target_pane, _) = attached_message_fixture(&shared, "unattached-target", &[]);
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_activity.insert(alpha, 10);
+            inner.client_activity.insert(beta, 20);
+        }
+        let mut context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, target_pane)
+                .expect("unattached target context");
+        let format = "#{client_name}|#{client_session}|#{session_name}|#{pane_id}".to_owned();
+
+        for target_client in [None, Some("alpha-client"), Some("missing-client")] {
+            let mut arguments = vec!["-p".to_owned()];
+            if let Some(target_client) = target_client {
+                arguments.extend(["-c".to_owned(), target_client.to_owned()]);
+            }
+            arguments.extend(["-t".to_owned(), target_pane.to_string(), format.clone()]);
+            let output = shared
+                .execute(
+                    alpha,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("display-message", arguments),
+                )
+                .expect("print with global format client");
+            assert_eq!(
+                output.output,
+                format!("beta-client|attached-beta|unattached-target|{target_pane}")
+            );
+        }
+
+        shared.inner.lock().client_activity.insert(alpha, 30);
+        for target_client in [None, Some("beta-client"), Some("missing-client")] {
+            let mut arguments = vec!["-p".to_owned()];
+            if let Some(target_client) = target_client {
+                arguments.extend(["-c".to_owned(), target_client.to_owned()]);
+            }
+            arguments.extend(["-t".to_owned(), target_pane.to_string(), format.clone()]);
+            let output = shared
+                .execute(
+                    beta,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("display-message", arguments),
+                )
+                .expect("print after global client activity change");
+            assert_eq!(
+                output.output,
+                format!("alpha-client|attached-alpha|unattached-target|{target_pane}")
+            );
+        }
+
+        let no_clients = Arc::new(Shared::new(1));
+        let (_, solo_pane, _) = attached_message_fixture(&no_clients, "unattached-solo", &[]);
+        let mut solo_context =
+            ExecutionContext::for_pane(&no_clients.inner.lock().engine.state, solo_pane)
+                .expect("solo target context");
+        for target_client in [None, Some("missing-client")] {
+            let mut arguments = vec!["-p".to_owned()];
+            if let Some(target_client) = target_client {
+                arguments.extend(["-c".to_owned(), target_client.to_owned()]);
+            }
+            arguments.extend([
+                "-t".to_owned(),
+                solo_pane.to_string(),
+                "#{client_name}|#{client_session}|#{session_name}|#{pane_id}".to_owned(),
+            ]);
+            let output = no_clients
+                .execute(
+                    ClientId(u64::MAX - 1),
+                    ClientKind::Command,
+                    &mut solo_context,
+                    &CommandInvocation::new("display-message", arguments),
+                )
+                .expect("print without attached clients");
+            assert_eq!(output.output, format!("||unattached-solo|{solo_pane}"));
+        }
     }
 
     #[test]
@@ -30230,6 +37714,25 @@ mod tests {
 
     fn armed_client_message(shared: &Arc<Shared>, client: ClientId) -> ActiveClientMessage {
         shared.inner.lock().client_messages[&client]
+    }
+
+    fn take_timed_client_messages(mailbox: &OutboundMailbox) -> Vec<(Option<PaneId>, String, u32)> {
+        take_reliable_messages(mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::TimedClientMessage {
+                            pane,
+                            text,
+                            duration_ms,
+                            ..
+                        },
+                    ..
+                }) => Some((pane, text, duration_ms)),
+                _ => None,
+            })
+            .collect()
     }
 
     fn cleared_message_ids(messages: &[ProtocolMessage]) -> Vec<u64> {
@@ -30455,6 +37958,742 @@ mod tests {
         );
     }
 
+    #[test]
+    fn display_message_ignore_keys_is_sticky_only_after_positive_interactive_messages() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let control_mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (session, pane, _) = attached_message_fixture(&shared, "ignore-sticky", &[client]);
+        shared
+            .attach(control, session)
+            .expect("attach control client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("message context");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-option", ["display-time", "0"]),
+            )
+            .expect("set inherited zero duration");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "inherited zero"]),
+            )
+            .expect("display inherited zero message");
+        assert_eq!(armed_client_message(&shared, client).deadline, None);
+        assert!(!shared.inner.lock().message_ignore_keys.contains(&client));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "ignore"]),
+            )
+            .expect("enable ignored keys");
+        let ignored = armed_client_message(&shared, client);
+        assert!(shared.inner.lock().message_ignore_keys.contains(&client));
+        let deadline = ignored.deadline.expect("positive message deadline");
+        shared.expire_client_message(
+            ClientMessageDeadline {
+                client,
+                token: ignored.token,
+                deadline,
+            },
+            deadline,
+        );
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.client_messages.contains_key(&client));
+            assert!(inner.message_ignore_keys.contains(&client));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "plain zero"]),
+            )
+            .expect("display explicit zero message");
+        assert!(shared.inner.lock().message_ignore_keys.contains(&client));
+        shared.dismiss_client_message(client);
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.client_messages.contains_key(&client));
+            assert!(inner.message_ignore_keys.contains(&client));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "5000", "reset"]),
+            )
+            .expect("reset ignored keys");
+        assert!(!shared.inner.lock().message_ignore_keys.contains(&client));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "retained"]),
+            )
+            .expect("restore ignored keys");
+        let retained = armed_client_message(&shared, client);
+
+        let printed = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "-N", "-d", "5000", "printed"]),
+            )
+            .expect("print ignored message");
+        assert_eq!(printed.output, "printed");
+        assert_eq!(armed_client_message(&shared, client), retained);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-N", "-t", "=missing-ignore-client", "missing"],
+                ),
+            )
+            .expect("missing pane target is canfail");
+        let canfail = armed_client_message(&shared, client);
+        assert_ne!(canfail.token, retained.token);
+        assert_eq!(canfail.deadline, None);
+        for arguments in [vec!["-N", "-a", "formats"], vec!["-N", "-I", "input"]] {
+            assert!(
+                shared
+                    .execute(
+                        client,
+                        ClientKind::Interactive,
+                        &mut context,
+                        &CommandInvocation::new("display-message", arguments),
+                    )
+                    .is_err()
+            );
+        }
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.client_messages[&client], canfail);
+            assert!(inner.message_ignore_keys.contains(&client));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "ignore-list", "k", "display-message", "listed"],
+                ),
+            )
+            .expect("bind listed key");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("list-keys", ["-1", "-T", "ignore-list"]),
+            )
+            .expect("display zero-duration list result");
+        assert!(shared.inner.lock().message_ignore_keys.contains(&client));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-option", ["display-time", "5000"]),
+            )
+            .expect("set positive inherited duration");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("list-keys", ["-1", "-T", "ignore-list"]),
+            )
+            .expect("display positive-duration list result");
+        assert!(!shared.inner.lock().message_ignore_keys.contains(&client));
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "control"]),
+            )
+            .expect("control display message");
+        assert!(!shared.inner.lock().message_ignore_keys.contains(&control));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "detach"]),
+            )
+            .expect("restore ignored keys before detach");
+
+        shared.detach(client);
+        assert!(shared.inner.lock().message_ignore_keys.contains(&client));
+        shared.unregister(client);
+        assert!(!shared.inner.lock().message_ignore_keys.contains(&client));
+    }
+
+    #[test]
+    fn display_message_ignore_keys_preempts_writable_terminal_input() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, pane, _) = attached_message_fixture(&shared, "ignore-input", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("message context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-n", "x", "rename-session", "dispatched"]),
+            )
+            .expect("bind ignored key");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["about:blank"]),
+            )
+            .expect("create browser pane");
+        let browser = context.pane.expect("browser pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable focus events");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "0"]),
+            )
+            .expect("open display panes");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "ignore input"]),
+            )
+            .expect("arm ignored input message");
+        let armed = armed_client_message(&shared, client);
+        let unchanged = {
+            let inner = shared.inner.lock();
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.engine.state.sessions[&session].sort_activity,
+                inner.display_panes[&client].token,
+            )
+        };
+        take_reliable_messages(&mailbox);
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("x"),
+                    text_follows: true,
+                },
+            )
+            .expect("ignore paired key");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.state.sessions[&session].name, "ignore-input");
+            assert_eq!(
+                (
+                    inner.activity_sequence,
+                    inner.terminal_input_sequence,
+                    inner.engine.state.sessions[&session].sort_activity,
+                    inner.display_panes[&client].token,
+                ),
+                unchanged
+            );
+            assert_eq!(inner.pending_committed_text[&client].len(), 1);
+            assert_eq!(inner.suppressed_text[&client][&'x'], 1);
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "x".to_owned(),
+                },
+            )
+            .expect("ignore paired text");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("y"),
+                    text_follows: true,
+                },
+            )
+            .expect("ignore empty paired key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: String::new(),
+                },
+            )
+            .expect("ignore empty paired text");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("z"),
+                    text_follows: false,
+                },
+            )
+            .expect("ignore key without committed text");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+        }
+
+        shared
+            .inner
+            .lock()
+            .swallowed_keys
+            .entry(client)
+            .or_default()
+            .insert("x".to_owned());
+        let mut release = chooser_key_press("x");
+        release.action = KeyAction::Release;
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: release,
+                    text_follows: false,
+                },
+            )
+            .expect("ignore swallowed key release");
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .swallowed_keys
+                .get(&client)
+                .is_some_and(|keys| keys.contains("x"))
+        );
+
+        let mouse = TerminalMouseInput::new(
+            TerminalMousePhase::Press,
+            Some(TerminalMouseButton::Left),
+            PointerCellEvent {
+                column: 1,
+                row: 1,
+                click_count: 1,
+                rectangle: false,
+            },
+            8,
+            18,
+            128,
+            72,
+            8,
+            18,
+            Modifiers::default(),
+            false,
+        );
+        let wheel = TerminalMouseInput::new(
+            TerminalMousePhase::Press,
+            Some(TerminalMouseButton::ScrollUp),
+            PointerCellEvent {
+                column: 1,
+                row: 1,
+                click_count: 1,
+                rectangle: false,
+            },
+            8,
+            18,
+            128,
+            72,
+            8,
+            18,
+            Modifiers::default(),
+            false,
+        );
+        for action in [
+            TerminalViewAction::Mouse(mouse),
+            TerminalViewAction::ScrollWheel {
+                lines: -1,
+                input: wheel,
+            },
+        ] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::TerminalView { pane, action },
+                )
+                .expect("ignore mouse message input");
+        }
+
+        for input in [
+            InputMessage::Text {
+                pane,
+                text: "standalone".to_owned(),
+            },
+            InputMessage::TerminalView {
+                pane: browser,
+                action: zz_terminal::TerminalViewAction::Paste("pasted".to_owned()),
+            },
+            InputMessage::ClientFocus { focused: true },
+        ] {
+            shared
+                .input(client, ClientKind::Interactive, &mut context, input)
+                .expect("ignore writable message input");
+        }
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.client_messages[&client], armed);
+            assert!(client_terminal_publication_frozen(&inner, client));
+            assert_eq!(
+                (
+                    inner.activity_sequence,
+                    inner.terminal_input_sequence,
+                    inner.engine.state.sessions[&session].sort_activity,
+                    inner.display_panes[&client].token,
+                ),
+                unchanged
+            );
+        }
+        let ignored_messages = take_reliable_messages(&mailbox);
+        assert!(cleared_message_ids(&ignored_messages).is_empty());
+        assert!(!ignored_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::DisplayPanes { state: None }
+                    | EventPayload::BrowserCommand { .. },
+                ..
+            })
+        )));
+
+        {
+            let mut inner = shared.inner.lock();
+            take_display_panes(&mut inner, client).expect("retire display panes");
+            inner.command_prompts.insert(
+                client,
+                CommandPrompt::new(
+                    "prompt".to_owned(),
+                    "kept".to_owned(),
+                    None,
+                    CommandPromptType::Command,
+                    CommandPromptMode::Text,
+                    false,
+                ),
+            );
+        }
+        let prompt_activity = shared.inner.lock().activity_sequence;
+        for input in [
+            InputMessage::Text {
+                pane,
+                text: "prompt text".to_owned(),
+            },
+            InputMessage::ClientFocus { focused: false },
+        ] {
+            shared
+                .input(client, ClientKind::Interactive, &mut context, input)
+                .expect("ignore prompt input");
+        }
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.command_prompts[&client].input, "kept");
+            assert_eq!(inner.activity_sequence, prompt_activity);
+            assert_eq!(inner.client_messages[&client], armed);
+        }
+
+        shared.inner.lock().command_prompts.remove(&client);
+        take_reliable_messages(&mailbox);
+        let native_activity = shared.inner.lock().activity_sequence;
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceKey {
+                    pane: browser,
+                    input: chooser_key_press("n"),
+                    text_follows: true,
+                },
+            )
+            .expect("deliver native browser key");
+        let shifted_question = test_key(
+            KeyCode::Character('/'),
+            Modifiers::new(true, false, false, false),
+            Some("?"),
+        );
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: shifted_question,
+                    text_follows: true,
+                },
+            )
+            .expect("ignore shifted terminal key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "n".to_owned(),
+                },
+            )
+            .expect("deliver native browser text");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, native_activity + 1);
+            assert_eq!(inner.pending_committed_text[&client].len(), 1);
+            let pending = inner.pending_committed_text[&client]
+                .front()
+                .expect("terminal committed text");
+            assert_eq!(pending.pane, pane);
+            assert_eq!(pending.lane, CommittedTextLane::Terminal);
+            assert_eq!(pending.suppressed_character, Some('?'));
+            assert_eq!(inner.suppressed_text[&client], BTreeMap::from([('?', 1)]));
+        }
+        assert_eq!(armed_client_message(&shared, client), armed);
+        assert_eq!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::BrowserCommand { pane, .. },
+                        ..
+                    }) if *pane == browser
+                ))
+                .count(),
+            2
+        );
+
+        let deadline = armed.deadline.expect("ignored message deadline");
+        shared.expire_client_message(
+            ClientMessageDeadline {
+                client,
+                token: armed.token,
+                deadline,
+            },
+            deadline,
+        );
+        let trailing_activity = shared.inner.lock().activity_sequence;
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "?".to_owned(),
+                },
+            )
+            .expect("retire shifted trailing text");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, trailing_activity);
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+            assert!(!inner.client_messages.contains_key(&client));
+            assert!(inner.message_ignore_keys.contains(&client));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "reverse"]),
+            )
+            .expect("rearm reverse-order message");
+        let reverse = armed_client_message(&shared, client);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(
+                        KeyCode::Character('/'),
+                        Modifiers::new(true, false, false, false),
+                        Some("?"),
+                    ),
+                    text_follows: true,
+                },
+            )
+            .expect("ignore terminal key before browser key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceKey {
+                    pane: browser,
+                    input: chooser_key_press("n"),
+                    text_follows: true,
+                },
+            )
+            .expect("deliver browser key after ignored terminal key");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "n".to_owned(),
+                },
+            )
+            .expect("retire stale terminal debt before browser text");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
+            assert_eq!(inner.client_messages[&client], reverse);
+        }
+        let reverse_deadline = reverse.deadline.expect("reverse message deadline");
+        shared.expire_client_message(
+            ClientMessageDeadline {
+                client,
+                token: reverse.token,
+                deadline: reverse_deadline,
+            },
+            reverse_deadline,
+        );
+        let reverse_trailing_activity = shared.inner.lock().activity_sequence;
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "?".to_owned(),
+                },
+            )
+            .expect("deliver retired reverse-order terminal text");
+        assert!(shared.inner.lock().activity_sequence > reverse_trailing_activity);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "read only"]),
+            )
+            .expect("rearm ignored message");
+        let armed = armed_client_message(&shared, client);
+
+        let read_only_activity = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            inner.activity_sequence
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("q"),
+                    text_follows: false,
+                },
+            )
+            .expect("pass read-only key");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.activity_sequence > read_only_activity);
+            assert_eq!(inner.client_messages[&client], armed);
+        }
+        let read_only_focus_activity = shared.inner.lock().activity_sequence;
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("pass read-only focus");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.activity_sequence > read_only_focus_activity);
+            assert_eq!(inner.client_messages[&client], armed);
+            assert!(inner.message_ignore_keys.contains(&client));
+        }
+    }
+
     /// zz splits one physical press into `Key` plus a trailing `Text`, and the
     /// suppression of that text happens later, in `input_text`. So a key bound
     /// to `display-message` must not have its own trailing character wipe the
@@ -30590,6 +38829,104 @@ mod tests {
             }) if *pane == browser
                 && keys == &[zz_protocol::KeyToken::Literal("pasted".to_owned())]
         )));
+
+        let mouse_input = |phase, button| {
+            TerminalMouseInput::new(
+                phase,
+                button,
+                PointerCellEvent {
+                    column: 1,
+                    row: 1,
+                    click_count: 1,
+                    rectangle: false,
+                },
+                8,
+                18,
+                128,
+                72,
+                8,
+                18,
+                Modifiers::default(),
+                false,
+            )
+        };
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "mouse"]),
+            )
+            .expect("mouse message");
+        let mouse_message = armed_client_message(&shared, client);
+        take_reliable_messages(&mailbox);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::Mouse(mouse_input(
+                        TerminalMousePhase::Motion,
+                        None,
+                    )),
+                },
+            )
+            .expect("bare mouse hover");
+        assert_eq!(armed_client_message(&shared, client), mouse_message);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::Mouse(mouse_input(
+                        TerminalMousePhase::Press,
+                        Some(TerminalMouseButton::Left),
+                    )),
+                },
+            )
+            .expect("mouse press");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            [mouse_message.token]
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "wheel"]),
+            )
+            .expect("wheel message");
+        let wheel_message = armed_client_message(&shared, client);
+        take_reliable_messages(&mailbox);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::ScrollWheel {
+                        lines: -1,
+                        input: mouse_input(
+                            TerminalMousePhase::Press,
+                            Some(TerminalMouseButton::ScrollUp),
+                        ),
+                    },
+                },
+            )
+            .expect("mouse wheel");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            [wheel_message.token]
+        );
 
         shared
             .execute(
@@ -31257,11 +39594,12 @@ mod tests {
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("display-message", ["-d", "0", "sticky"]),
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "sticky"]),
             )
             .expect("display message");
         let armed = armed_client_message(&shared, client);
         assert!(armed.freeze);
+        assert!(shared.inner.lock().message_ignore_keys.contains(&client));
         take_reliable_messages(&mailbox);
 
         shared
@@ -31273,6 +39611,7 @@ mod tests {
             )
             .expect("no-freeze prompt");
         assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert!(shared.inner.lock().message_ignore_keys.contains(&client));
         assert_eq!(
             cleared_message_ids(&take_reliable_messages(&mailbox)),
             vec![armed.token]
@@ -31672,6 +40011,8 @@ mod tests {
         );
         assert_eq!(client_tty_fact(&["client-tty-v1:".to_owned()]), None);
         assert_eq!(client_tty_fact(&["client-terminal-v1".to_owned()]), None);
+        assert!(client_nested_fact(&["client-nested-v1".to_owned()]));
+        assert!(!client_nested_fact(&["client-nested-v1:".to_owned()]));
         assert_eq!(
             client_size_fact(&["client-size-v1:120x40".to_owned()]),
             Some((120, 40))
@@ -32190,17 +40531,19 @@ mod tests {
         let error = shared
             .pipe_pane(
                 &ExecutionContext::default(),
+                "pipe-pane",
                 &["one".to_owned(), "two".to_owned()],
             )
             .expect_err("extra shell command");
         assert!(matches!(
             error,
-            DaemonError::Server(ServerError::InvalidCommand(message))
+            DaemonError::Server(ServerError::CommandParse(message))
                 if message == PIPE_PANE_USAGE
         ));
         let error = shared
             .pipe_pane(
                 &ExecutionContext::default(),
+                "pipe-pane",
                 &["-t".to_owned(), "%999".to_owned()],
             )
             .expect_err("missing hard target");
@@ -32228,6 +40571,7 @@ mod tests {
         shared
             .pipe_pane(
                 &context,
+                "pipe-pane",
                 &["-t".to_owned(), target.clone(), "sleep 60".to_owned()],
             )
             .expect("open pipe");
@@ -32240,7 +40584,7 @@ mod tests {
             .expect("pane state")
             .dead = true;
         let error = shared
-            .pipe_pane(&context, &["-t".to_owned(), target])
+            .pipe_pane(&context, "pipe-pane", &["-t".to_owned(), target])
             .expect_err("dead target");
         assert!(matches!(
             error,
@@ -32296,7 +40640,12 @@ mod tests {
 
         let directory = tempfile::tempdir().expect("pipe directory");
         let output = directory.path().join("throughput.bin");
-        let command = format!("sleep 0.1; cat > {}", shell_quote(&output));
+        let command_item = directory.path().join("command-item");
+        let command = format!(
+            "printf '#{{command}}' > {}; sleep 0.1; cat > {}",
+            shell_quote(&command_item),
+            shell_quote(&output)
+        );
         shared
             .execute(
                 client,
@@ -32357,6 +40706,10 @@ mod tests {
             &captured[start..captured_end],
             expected.len(),
             &expected[start..expected_end]
+        );
+        assert_eq!(
+            fs::read_to_string(&command_item).expect("pipe command item marker"),
+            "pipe-pane"
         );
         assert!(shared.inner.lock().pane_pipes.contains_key(&pane));
 
@@ -32981,7 +41334,7 @@ mod tests {
         ] {
             assert!(matches!(
                 parse_if_shell_args(&args),
-                Err(ServerError::InvalidCommand(message)) if message == IF_SHELL_USAGE
+                Err(ServerError::CommandParse(message)) if message == IF_SHELL_USAGE
             ));
         }
     }
@@ -33355,15 +41708,71 @@ mod tests {
         let client = ClientId(8);
         let mut context = ExecutionContext::default();
 
+        for spelling in ["run-shell", "run", "run-s"] {
+            let output = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(spelling, ["printf '#{command}'"]),
+                )
+                .unwrap_or_else(|error| panic!("{spelling}: {error}"));
+            assert_eq!(output.output, "run-shell");
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[31]", "zzrun=run-shell"],
+                ),
+            )
+            .expect("install daemon command alias");
         let output = shared
             .execute(
                 client,
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("run-shell", ["-C", "display-message -p x"]),
+                &CommandInvocation::new("zzrun", ["printf '#{command}'"]),
+            )
+            .expect("user alias command item");
+        assert_eq!(output.output, "run-shell");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-C", "display-message -p '#{command}'"]),
             )
             .expect("run-shell command insertion");
-        assert_eq!(output.output, "x");
+        assert_eq!(output.output, "run-shell");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-C", "{ display-message -p '#{command}' }"]),
+            )
+            .expect("run-shell typed block child");
+        assert_eq!(output.output, "display-message");
+
+        context
+            .format_variables
+            .insert("command".to_owned(), "explicit".to_owned());
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["printf '#{command}'"]),
+            )
+            .expect("explicit command format state");
+        assert_eq!(output.output, "explicit");
+        context.format_variables.remove("command");
 
         let output = shared
             .execute(
@@ -33492,6 +41901,33 @@ mod tests {
             )
             .expect("non-format condition expansion");
         assert_eq!(output.output, "expanded-condition");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "test '#{command}' = if-shell",
+                        "display-message -p canonical-condition",
+                        "display-message -p missed-command",
+                    ],
+                ),
+            )
+            .expect("command item condition expansion");
+        assert_eq!(output.output, "canonical-condition");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("if-shell", ["-F", "1", "display-message -p '#{command}'"]),
+            )
+            .expect("if-shell child command item");
+        assert_eq!(output.output, "display-message");
 
         shared
             .execute(
@@ -33736,6 +42172,59 @@ mod tests {
         }
         assert_eq!(shared.inner.lock().active_shell_jobs, 0);
         assert!(!shared.inner.lock().command_outputs.contains_key(&control));
+
+        let wait_for_error =
+            |mailbox: &OutboundMailbox| {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                loop {
+                    if let Some(text) = take_reliable_messages(mailbox).into_iter().find_map(
+                        |message| match message {
+                            ProtocolMessage::Event(Event {
+                                payload:
+                                    EventPayload::ClientMessage {
+                                        kind: ClientMessageKind::Error,
+                                        text,
+                                        ..
+                                    },
+                                ..
+                            }) => Some(text),
+                            _ => None,
+                        },
+                    ) {
+                        break text;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "background command error was not delivered"
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+            };
+
+        take_reliable_messages(&control_mailbox);
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-b", "-C", "not-a-command"]),
+            )
+            .expect("control background inserted command");
+        assert_eq!(
+            wait_for_error(&control_mailbox),
+            "unknown command: not-a-command"
+        );
+
+        take_reliable_messages(&mailbox);
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-b", "-C", "not-a-command"]),
+            )
+            .expect("interactive background inserted command");
+        assert_eq!(wait_for_error(&mailbox), "Unknown command: not-a-command");
     }
 
     #[cfg(unix)]
@@ -33888,7 +42377,7 @@ mod tests {
                 &mut context,
                 &CommandInvocation::new(
                     "run-shell",
-                    ["-bC", "set-option -g @background-command ready"],
+                    ["-bC", "set-option -g @background-command '#{command}'"],
                 ),
             )
             .expect("background command insertion");
@@ -33903,7 +42392,7 @@ mod tests {
                     &CommandInvocation::new("show-options", ["-gqv", "@background-command"]),
                 )
                 .expect("background command value");
-            if value.output == "ready" {
+            if value.output == "run-shell" {
                 break;
             }
             assert!(Instant::now() < deadline);
@@ -34208,6 +42697,20 @@ mod tests {
                 client,
                 ClientKind::Command,
                 &mut context.clone(),
+                &CommandInvocation::new("capture-browser", [] as [&str; 0]),
+            )
+            .expect_err("missing output path");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::CommandParse(message))
+                if message == "capture-browser needs an output path (-o)"
+        ));
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context.clone(),
                 &CommandInvocation::new(
                     "capture-browser",
                     ["-t", &terminal.to_string(), "-o", &output],
@@ -34240,7 +42743,7 @@ mod tests {
     #[test]
     fn capture_pane_parser_rejects_unimplemented_flags() {
         let error = parse_capture_pane_args(&["-C".to_owned()]).expect_err("unsupported flag");
-        assert!(matches!(error, ServerError::UnsupportedCommand(_)));
+        assert!(matches!(error, ServerError::CommandParse(_)));
     }
 
     #[test]
@@ -34266,7 +42769,8 @@ mod tests {
                 .expect_err("unsupported option");
         assert!(matches!(
             error,
-            ServerError::UnsupportedCommand(command) if command == "paste-buffer -x"
+            ServerError::CommandParse(command)
+                if command == "unsupported command: paste-buffer -x"
         ));
     }
 
@@ -34327,6 +42831,466 @@ mod tests {
         let mut expected = b"prefix:".to_vec();
         expected.extend_from_slice(bytes);
         assert_eq!(fs::read(&output).expect("appended bytes"), expected);
+    }
+
+    #[test]
+    fn buffer_file_paths_expand_once_in_the_selected_client_context() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(1));
+        let (
+            source_session,
+            source_window,
+            source_pane,
+            target_session,
+            target_window,
+            target_pane,
+        ) = {
+            let mut inner = shared.inner.lock();
+            let (source_session, source_window, source_pane) = inner
+                .engine
+                .state
+                .create_session("source-session")
+                .expect("source session");
+            let (target_session, target_window, target_pane) = inner
+                .engine
+                .state
+                .create_session("target-session")
+                .expect("target session");
+            inner
+                .engine
+                .state
+                .rename_window(target_window, "target-window")
+                .expect("target window name");
+            inner
+                .engine
+                .state
+                .update_pane_title(target_pane, "target-pane")
+                .expect("target pane title");
+            (
+                source_session,
+                source_window,
+                source_pane,
+                target_session,
+                target_window,
+                target_pane,
+            )
+        };
+        let (source_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("source-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (target_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("target-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (command_client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared
+            .attach(source_client, source_session)
+            .expect("attach source client");
+        shared
+            .attach(target_client, target_session)
+            .expect("attach target client");
+        shared
+            .inner
+            .lock()
+            .client_origins
+            .insert(command_client, source_pane);
+        let mut command_context =
+            ExecutionContext::new(Some(source_session), Some(source_window), Some(source_pane));
+        let mut target_context =
+            ExecutionContext::new(Some(target_session), Some(target_window), Some(target_pane));
+
+        for (index, value) in ["zzload=load-buffer", "zzsave=save-buffer"]
+            .into_iter()
+            .enumerate()
+        {
+            shared
+                .execute(
+                    command_client,
+                    ClientKind::Command,
+                    &mut command_context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{}]", index + 50), value],
+                    ),
+                )
+                .expect("install buffer command alias");
+        }
+
+        let targeted_template = directory
+            .path()
+            .join("#{session_name}-#{window_name}-#{pane_title}-#{command}-#{path_tag}")
+            .to_string_lossy()
+            .into_owned();
+        for (spelling, tag) in [
+            ("load-buffer", "canonical"),
+            ("loadb", "alias"),
+            ("loa", "prefix"),
+            ("zzload", "user-alias"),
+        ] {
+            let input = directory.path().join(format!(
+                "target-session-target-window-target-pane-load-buffer-{tag}"
+            ));
+            fs::write(&input, tag).expect("formatted load fixture");
+            command_context
+                .format_variables
+                .insert("path_tag".to_owned(), tag.to_owned());
+            shared
+                .execute(
+                    command_client,
+                    ClientKind::Command,
+                    &mut command_context,
+                    &CommandInvocation::new(
+                        spelling,
+                        [
+                            "-b".to_owned(),
+                            tag.to_owned(),
+                            "-t".to_owned(),
+                            "target-client".to_owned(),
+                            targeted_template.clone(),
+                        ],
+                    ),
+                )
+                .unwrap_or_else(|error| panic!("{spelling}: {error}"));
+        }
+        {
+            let inner = shared.inner.lock();
+            for tag in ["canonical", "alias", "prefix", "user-alias"] {
+                assert_eq!(
+                    resolve_buffer(&inner, Some(tag))
+                        .expect("loaded formatted buffer")
+                        .data
+                        .as_ref(),
+                    tag.as_bytes()
+                );
+            }
+        }
+
+        let origin_input = directory.path().join("source-session-load-buffer-origin");
+        fs::write(&origin_input, b"origin client").expect("origin client fixture");
+        shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "load-buffer",
+                    [
+                        "-b".to_owned(),
+                        "origin".to_owned(),
+                        directory
+                            .path()
+                            .join("#{session_name}-#{command}-origin")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect("command origin client target");
+
+        let non_time_input = directory.path().join("target-session-%Y");
+        fs::write(&non_time_input, b"non-time format").expect("non-time fixture");
+        shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "load-buffer",
+                    [
+                        "-b".to_owned(),
+                        "non-time".to_owned(),
+                        "-t".to_owned(),
+                        "target-client".to_owned(),
+                        directory
+                            .path()
+                            .join("#{session_name}-%Y")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect("buffer path does not apply strftime");
+
+        command_context
+            .format_variables
+            .insert("command".to_owned(), "explicit-#{session_name}".to_owned());
+        let one_pass = directory.path().join("explicit-#{session_name}");
+        fs::write(&one_pass, b"one pass").expect("one-pass fixture");
+        shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "loadb",
+                    [
+                        "-b".to_owned(),
+                        "one-pass".to_owned(),
+                        "-t".to_owned(),
+                        "target-client".to_owned(),
+                        directory
+                            .path()
+                            .join("#{command}")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect("explicit command state load");
+        command_context.format_variables.remove("command");
+
+        let missing_target_input = directory.path().join("target-session-missing-target");
+        fs::write(&missing_target_input, b"quiet target miss").expect("quiet miss fixture");
+        let mut source_context =
+            ExecutionContext::new(Some(source_session), Some(source_window), Some(source_pane));
+        shared
+            .execute(
+                source_client,
+                ClientKind::Interactive,
+                &mut source_context,
+                &CommandInvocation::new(
+                    "load-buffer",
+                    [
+                        "-b".to_owned(),
+                        "quiet-target".to_owned(),
+                        "-t".to_owned(),
+                        "missing-client".to_owned(),
+                        directory
+                            .path()
+                            .join("#{session_name}-missing-target")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect("missing target falls back quietly");
+
+        let empty = directory.path().join("target-session-empty");
+        fs::write(&empty, []).expect("formatted empty fixture");
+        shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "load-buffer",
+                    [
+                        "-b".to_owned(),
+                        String::new(),
+                        "-t".to_owned(),
+                        "target-client".to_owned(),
+                        directory
+                            .path()
+                            .join("#{session_name}-empty")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect("formatted empty load");
+        assert!(resolve_buffer(&shared.inner.lock(), Some("")).is_err());
+
+        let missing_path = directory.path().join("missing-target-session");
+        let error = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "load-buffer",
+                    [
+                        "-t".to_owned(),
+                        "target-client".to_owned(),
+                        directory
+                            .path()
+                            .join("missing-#{session_name}")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect_err("expanded missing path");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message.contains(missing_path.to_string_lossy().as_ref())
+                    && !message.contains("#{session_name}")
+        ));
+
+        command_context
+            .format_variables
+            .insert("path".to_owned(), String::new());
+        let error = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("load-buffer", ["#{path}"]),
+            )
+            .expect_err("empty expanded load path");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message.starts_with("load-buffer: ")
+        ));
+        command_context
+            .format_variables
+            .insert("path".to_owned(), "-".to_owned());
+        let error = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("load-buffer", ["#{path}"]),
+            )
+            .expect_err("formatted stdin path");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::UnsupportedCommand(message))
+                if message == "load-buffer from standard input"
+        ));
+        command_context.format_variables.remove("path");
+
+        shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("set-buffer", ["-b", "saved", "saved payload"]),
+            )
+            .expect("seed saved buffer");
+        command_context
+            .format_variables
+            .insert("path".to_owned(), String::new());
+        let error = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("save-buffer", ["-b", "saved", "#{path}"]),
+            )
+            .expect_err("empty expanded save path");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message.starts_with("save-buffer: ")
+        ));
+        command_context.format_variables.remove("path");
+        let origin_output = directory.path().join("source-session-save-buffer-origin");
+        shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "save-buffer",
+                    [
+                        "-b".to_owned(),
+                        "saved".to_owned(),
+                        directory
+                            .path()
+                            .join("#{session_name}-#{command}-origin")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect("save through command origin client");
+        assert_eq!(
+            fs::read(origin_output).expect("origin client save"),
+            b"saved payload"
+        );
+        for (spelling, tag) in [
+            ("save-buffer", "canonical"),
+            ("saveb", "alias"),
+            ("sa", "prefix"),
+            ("zzsave", "user-alias"),
+        ] {
+            target_context
+                .format_variables
+                .insert("path_tag".to_owned(), tag.to_owned());
+            let output = directory.path().join(format!(
+                "target-session-target-window-target-pane-save-buffer-{tag}"
+            ));
+            shared
+                .execute(
+                    target_client,
+                    ClientKind::Interactive,
+                    &mut target_context,
+                    &CommandInvocation::new(
+                        spelling,
+                        [
+                            "-b".to_owned(),
+                            "saved".to_owned(),
+                            targeted_template.clone(),
+                        ],
+                    ),
+                )
+                .unwrap_or_else(|error| panic!("{spelling}: {error}"));
+            assert_eq!(fs::read(output).expect("formatted save"), b"saved payload");
+        }
+
+        target_context
+            .format_variables
+            .insert("command".to_owned(), "explicit-#{session_name}".to_owned());
+        let explicit_save = directory.path().join("save-explicit-#{session_name}");
+        shared
+            .execute(
+                target_client,
+                ClientKind::Interactive,
+                &mut target_context,
+                &CommandInvocation::new(
+                    "saveb",
+                    [
+                        "-b".to_owned(),
+                        "saved".to_owned(),
+                        directory
+                            .path()
+                            .join("save-#{command}")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ],
+                ),
+            )
+            .expect("explicit command state save");
+        assert_eq!(
+            fs::read(explicit_save).expect("explicit formatted save"),
+            b"saved payload"
+        );
+        target_context.format_variables.remove("command");
+        target_context
+            .format_variables
+            .insert("path".to_owned(), "-".to_owned());
+        let error = shared
+            .execute(
+                target_client,
+                ClientKind::Interactive,
+                &mut target_context,
+                &CommandInvocation::new("save-buffer", ["-b", "saved", "#{path}"]),
+            )
+            .expect_err("formatted stdout path");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::UnsupportedCommand(message))
+                if message == "save-buffer to standard output"
+        ));
+
+        let empty_shared = Arc::new(Shared::new(1));
+        assert!(matches!(
+            empty_shared.buffer_command(
+                &ExecutionContext::default(),
+                "save-buffer",
+                &["-".to_owned()],
+            ),
+            Err(DaemonError::Server(ServerError::MissingTarget(target)))
+                if target == "paste buffer"
+        ));
     }
 
     #[test]
@@ -34454,12 +43418,12 @@ mod tests {
                 "list-buffers",
                 &[
                     "-F".to_owned(),
-                    "#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}"
+                    "#{command}|#{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}"
                         .to_owned(),
                 ],
             )
             .expect("format named buffer");
-        assert_eq!(named.output, "named|5|alpha|1");
+        assert_eq!(named.output, "list-buffers|named|5|alpha|1");
 
         shared
             .buffer_command(&context, "set-buffer", &["bravo".to_owned()])
@@ -34488,8 +43452,13 @@ mod tests {
                 "named\nbuffer0",
             ),
             (
-                vec!["-f", "#{==:#{buffer_name},named}", "-F", "#{buffer_name}"],
-                "named",
+                vec![
+                    "-f",
+                    "#{&&:#{==:#{command},list-buffers},#{==:#{buffer_name},named}}",
+                    "-F",
+                    "#{command}:#{buffer_name}",
+                ],
+                "list-buffers:named",
             ),
         ] {
             let listed = shared
@@ -35443,19 +44412,31 @@ mod tests {
         );
         drop(inner);
 
-        for (command, arguments, unsupported) in [
+        for (command, arguments, expected, parse) in [
             (
                 "load-buffer",
                 vec!["-t", "missing", "-w", "fixture"],
-                "load-buffer -w",
+                "unsupported command: load-buffer -w",
+                true,
             ),
             (
                 "set-buffer",
                 vec!["-t", "missing", "-w", "fixture"],
-                "set-buffer -w",
+                "unsupported command: set-buffer -w",
+                true,
             ),
-            ("save-buffer", vec!["-"], "save-buffer to standard output"),
-            ("paste-buffer", vec!["-x"], "paste-buffer -x"),
+            (
+                "save-buffer",
+                vec!["-"],
+                "unsupported command: save-buffer to standard output",
+                false,
+            ),
+            (
+                "paste-buffer",
+                vec!["-x"],
+                "unsupported command: paste-buffer -x",
+                true,
+            ),
         ] {
             let error = shared
                 .buffer_command(
@@ -35464,11 +44445,11 @@ mod tests {
                     &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
                 )
                 .expect_err("unsupported buffer mode");
-            assert!(matches!(
-                error,
-                DaemonError::Server(ServerError::UnsupportedCommand(message))
-                    if message == unsupported
-            ));
+            let DaemonError::Server(error) = error else {
+                panic!("unexpected error: {error:?}");
+            };
+            assert_eq!(error.tmux_message(), expected);
+            assert_eq!(error.is_command_parse(), parse);
         }
     }
 
@@ -36525,7 +45506,8 @@ bind - split-window -v -c "#{pane_current_path}"
     fn copy_pipe_failure_is_a_reliable_client_message_and_releases_its_permit() {
         let shared = Arc::new(Shared::new(1));
         let subscriber = OutboundMailbox::new();
-        let (pane, client) = {
+        let control_subscriber = OutboundMailbox::new();
+        let (pane, client, control) = {
             let mut inner = shared.inner.lock();
             let mut context = ExecutionContext::default();
             inner
@@ -36538,24 +45520,35 @@ bind - split-window -v -c "#{pane_current_path}"
             let session = context.session.expect("session id");
             let pane = context.pane.expect("pane id");
             let client = ClientId(41);
+            let control = ClientId(42);
             inner.attached.entry(session).or_default().insert(client);
+            inner.attached.entry(session).or_default().insert(control);
             inner.subscribers.insert(client, Arc::clone(&subscriber));
-            (pane, client)
+            inner
+                .subscribers
+                .insert(control, Arc::clone(&control_subscriber));
+            inner.client_kinds.insert(client, ClientKind::Interactive);
+            inner.client_kinds.insert(control, ClientKind::Control);
+            (pane, client, control)
         };
         let command = if cfg!(windows) { "exit /B 7" } else { "exit 7" };
 
+        let wait_for_error = |subscriber: &OutboundMailbox| {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while subscriber.state.lock().reliable.is_empty() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                !subscriber.state.lock().reliable.is_empty(),
+                "copy-pipe diagnostic was not delivered"
+            );
+            let frame = subscriber.recv().expect("copy-pipe diagnostic");
+            decode_protocol_frame(&frame).expect("diagnostic frame")
+        };
+
         shared.spawn_copy_pipe(pane, client, command.to_owned(), "selection".to_owned());
 
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while subscriber.state.lock().reliable.is_empty() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            !subscriber.state.lock().reliable.is_empty(),
-            "copy-pipe diagnostic was not delivered"
-        );
-        let frame = subscriber.recv().expect("copy-pipe diagnostic");
-        let message = decode_protocol_frame(&frame).expect("diagnostic frame");
+        let message = wait_for_error(&subscriber);
         assert!(matches!(
             message,
             ProtocolMessage::Event(Event {
@@ -36567,6 +45560,24 @@ bind - split-window -v -c "#{pane_current_path}"
                 ..
             }) if actual == pane && text.contains("exited unsuccessfully")
         ));
+        assert!(control_subscriber.state.lock().reliable.is_empty());
+        assert_eq!(shared.inner.lock().active_copy_pipes, 0);
+
+        shared.spawn_copy_pipe(pane, control, command.to_owned(), "selection".to_owned());
+
+        let message = wait_for_error(&subscriber);
+        assert!(matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::ClientMessage {
+                    pane: Some(actual),
+                    kind: ClientMessageKind::Error,
+                    text,
+                },
+                ..
+            }) if actual == pane && text.contains("exited unsuccessfully")
+        ));
+        assert!(control_subscriber.state.lock().reliable.is_empty());
         assert_eq!(shared.inner.lock().active_copy_pipes, 0);
     }
 
@@ -38579,6 +47590,31 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn command_prompt_focus_actions_match_tmux_prequeue() {
+        for (focused, answer) in [(true, "FocusIn"), (false, "FocusOut")] {
+            assert_eq!(
+                command_prompt_focus_action(CommandPromptMode::Key, focused),
+                PromptKeyAction::SubmitAnswer(answer.to_owned())
+            );
+            assert_eq!(
+                command_prompt_focus_action(CommandPromptMode::Numeric, focused),
+                PromptKeyAction::SubmitAndPass
+            );
+            for mode in [
+                CommandPromptMode::Text,
+                CommandPromptMode::Single,
+                CommandPromptMode::Incremental,
+                CommandPromptMode::BackspaceExit,
+            ] {
+                assert_eq!(
+                    command_prompt_focus_action(mode, focused),
+                    PromptKeyAction::Handled
+                );
+            }
+        }
+    }
+
+    #[test]
     fn command_prompt_editor_preserves_unicode_boundaries_and_history_drafts() {
         let mut prompt = CommandPrompt::new(
             ":".to_owned(),
@@ -40067,18 +49103,36 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(
             effective,
             TerminalGeometry {
-                columns: 200,
-                rows: 30,
-                cell_width_px: 8,
-                cell_height_px: 18,
+                columns: 100,
+                rows: 60,
+                cell_width_px: 7,
+                cell_height_px: 16,
             },
-            "the lowest client id owns one whole geometry before either client is active"
+            "the latest attached client owns one whole geometry before later input"
         );
         assert_eq!(
             terminal_geometry_owner(&shared.inner.lock(), pane),
-            Some(first_client)
+            Some(second_client)
         );
+        wait_for_terminal_dimensions(&terminal, TerminalViewId(first_client.0), 100, 60);
+        let attach_generation = shared.inner.lock().engine.state.generation();
+        shared
+            .attach(first_client, session)
+            .expect("reattach first client without focus events");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.engine.focus_events());
+            assert_eq!(terminal_geometry_owner(&inner, pane), Some(first_client));
+            assert_eq!(inner.engine.pane_geometry(pane), Some((200, 30)));
+            assert!(inner.engine.state.generation() > attach_generation);
+            assert!(
+                inner.client_terminal_input_sequences[&first_client]
+                    > inner.client_terminal_input_sequences[&second_client]
+            );
+        }
         wait_for_terminal_dimensions(&terminal, TerminalViewId(first_client.0), 200, 30);
+        take_reliable_messages(&first_mailbox);
+        let input_generation = shared.inner.lock().engine.state.generation();
 
         shared
             .input(
@@ -40095,16 +49149,46 @@ bind - split-window -v -c "#{pane_current_path}"
             terminal_geometry_owner(&shared.inner.lock(), pane),
             Some(second_client)
         );
+        let published_generation = {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.pane_geometry(pane), Some((100, 60)));
+            assert_eq!(inner.engine.state.generation(), input_generation + 1);
+            assert_eq!(inner.last_published_mux_generation, input_generation + 1);
+            assert_eq!(
+                terminal_resize_for_pane(&inner, pane)
+                    .expect("second client geometry")
+                    .1,
+                TerminalGeometry {
+                    columns: 100,
+                    rows: 60,
+                    cell_width_px: 7,
+                    cell_height_px: 16,
+                }
+            );
+            inner.engine.state.generation()
+        };
+        let peer_messages = take_reliable_messages(&first_mailbox);
         assert_eq!(
-            terminal_resize_for_pane(&shared.inner.lock(), pane)
-                .expect("second client geometry")
-                .1,
-            TerminalGeometry {
-                columns: 100,
-                rows: 60,
-                cell_width_px: 7,
-                cell_height_px: 16,
-            }
+            peer_messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Snapshot(_),
+                        ..
+                    })
+                ))
+                .count(),
+            1
+        );
+        let peer_snapshot = latest_reliable_snapshot(&peer_messages);
+        assert_eq!(peer_snapshot.generation, published_generation);
+        assert!(
+            peer_snapshot.sessions[0].windows[0]
+                .layout_dump
+                .ends_with(&format!("100x60,0,0,{}", pane.0)),
+            "{}",
+            peer_snapshot.sessions[0].windows[0].layout_dump
         );
         wait_for_terminal_dimensions(&terminal, TerminalViewId(first_client.0), 100, 60);
 
@@ -40124,6 +49208,25 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(first_client)
         );
         wait_for_terminal_dimensions(&terminal, TerminalViewId(first_client.0), 200, 30);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "mouse", "off"]),
+            )
+            .expect("disable mouse forwarding");
+        shared
+            .input(
+                second_client,
+                ClientKind::Interactive,
+                &mut second_context,
+                InputMessage::ClientTerminalSize {
+                    columns: 100,
+                    rows: 60,
+                },
+            )
+            .expect("store second client size");
 
         let mouse_input = |phase, button| {
             TerminalMouseInput::new(
@@ -40186,24 +49289,62 @@ bind - split-window -v -c "#{pane_current_path}"
             );
         }
 
+        take_reliable_messages(&first_mailbox);
+        let mouse_press = InputMessage::TerminalView {
+            pane,
+            action: TerminalViewAction::Mouse(mouse_input(
+                TerminalMousePhase::Press,
+                Some(TerminalMouseButton::Left),
+            )),
+        };
+        assert!(terminal_mouse_rejected(
+            &shared.inner.lock(),
+            second_client,
+            &mouse_press
+        ));
+        let mouse_generation = shared.inner.lock().engine.state.generation();
         shared
             .input(
                 second_client,
                 ClientKind::Interactive,
                 &mut second_context,
-                InputMessage::TerminalView {
-                    pane,
-                    action: TerminalViewAction::Mouse(mouse_input(
-                        TerminalMousePhase::Press,
-                        Some(TerminalMouseButton::Left),
-                    )),
-                },
+                mouse_press,
             )
-            .expect("second client presses the mouse");
+            .expect("reject second client mouse press after recording activity");
         assert_eq!(
             terminal_geometry_owner(&shared.inner.lock(), pane),
             Some(second_client),
             "mouse press must transfer geometry ownership"
+        );
+        let mouse_published_generation = {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.pane_geometry(pane), Some((100, 60)));
+            assert_eq!(inner.engine.state.generation(), mouse_generation + 1);
+            assert_eq!(inner.last_published_mux_generation, mouse_generation + 1);
+            inner.engine.state.generation()
+        };
+        let peer_messages = take_reliable_messages(&first_mailbox);
+        assert_eq!(
+            peer_messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Snapshot(_),
+                        ..
+                    })
+                ))
+                .count(),
+            1
+        );
+        let peer_snapshot = latest_reliable_snapshot(&peer_messages);
+        assert_eq!(peer_snapshot.generation, mouse_published_generation);
+        assert!(
+            peer_snapshot.sessions[0].windows[0]
+                .layout_dump
+                .ends_with(&format!("100x60,0,0,{}", pane.0)),
+            "{}",
+            peer_snapshot.sessions[0].windows[0].layout_dump
         );
         wait_for_terminal_dimensions(&terminal, TerminalViewId(first_client.0), 100, 60);
 
@@ -40341,21 +49482,21 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("third client geometry");
         assert_eq!(
             terminal_geometry_owner(&shared.inner.lock(), pane),
-            Some(first_client),
-            "attach and geometry reports do not displace the last active viewer"
+            Some(third_client),
+            "the latest attach owns geometry as soon as that client reports it"
         );
         assert_eq!(
             terminal_resize_for_pane(&shared.inner.lock(), pane)
-                .expect("active first client geometry")
+                .expect("latest third client geometry")
                 .1,
             TerminalGeometry {
-                columns: 200,
-                rows: 30,
-                cell_width_px: 8,
-                cell_height_px: 18,
+                columns: 60,
+                rows: 20,
+                cell_width_px: 6,
+                cell_height_px: 14,
             }
         );
-        wait_for_terminal_dimensions(&terminal, TerminalViewId(first_client.0), 200, 30);
+        wait_for_terminal_dimensions(&terminal, TerminalViewId(first_client.0), 60, 20);
 
         let inner = shared.inner.lock();
         assert_eq!(
@@ -40371,7 +49512,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn detach_yields_geometry_ownership_until_the_client_types_again() {
+    fn detach_releases_and_reattach_reclaims_geometry_ownership() {
         let shared = Arc::new(Shared::new(1));
         let first_mailbox = OutboundMailbox::new();
         let second_mailbox = OutboundMailbox::new();
@@ -40505,8 +49646,8 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("first geometry after re-attach");
         assert_eq!(
             terminal_geometry_owner(&shared.inner.lock(), pane),
-            Some(second_client),
-            "re-attaching does not reclaim ownership with a pre-detach sequence"
+            Some(first_client),
+            "re-attaching claims latest ownership once the client reports geometry"
         );
 
         shared
@@ -40520,7 +49661,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(
             terminal_geometry_owner(&shared.inner.lock(), pane),
             Some(first_client),
-            "typing again reclaims ownership"
+            "later typing retains ownership"
         );
     }
 
@@ -40756,9 +49897,14 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session: detached, by: None, .. },
+                    payload:
+                        EventPayload::Detached {
+                            session: detached,
+                            by: None,
+                            reason,
+                        },
                     ..
-                }) if *detached == session
+                }) if *detached == session && reason.is_requested()
             )
         }));
         assert!(
@@ -40816,9 +49962,14 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session: detached, by: Some(by), .. },
+                    payload:
+                        EventPayload::Detached {
+                            session: detached,
+                            by: None,
+                            reason,
+                        },
                     ..
-                }) if *detached == session && by == "desktop"
+                }) if *detached == session && reason.is_requested()
             )
         }));
         let inner = shared.inner.lock();
@@ -40866,7 +50017,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 caller,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("detach-client", ["-s", "work"]),
+                &CommandInvocation::new("detach-client", ["-a", "-s", "work"]),
             )
             .expect("detach the session");
 
@@ -40874,9 +50025,14 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session: detached, by: None, .. },
+                    payload:
+                        EventPayload::Detached {
+                            session: detached,
+                            by: None,
+                            reason,
+                        },
                     ..
-                }) if *detached == session
+                }) if *detached == session && reason.is_requested()
             )
         }));
         let inner = shared.inner.lock();
@@ -40884,6 +50040,213 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.attached.get(&session).is_none_or(BTreeSet::is_empty),
             "-s empties the session"
         );
+    }
+
+    #[test]
+    fn detach_client_resolves_origin_and_exact_client_aliases() {
+        let shared = Arc::new(Shared::new(1));
+        let alpha_mailbox = OutboundMailbox::new();
+        let beta_mailbox = OutboundMailbox::new();
+        let gamma_mailbox = OutboundMailbox::new();
+        let (alpha, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha".to_owned()),
+            None,
+            Arc::clone(&alpha_mailbox),
+        );
+        let (beta, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("beta".to_owned()),
+            None,
+            Arc::clone(&beta_mailbox),
+        );
+        let (gamma, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("gamma".to_owned()),
+            None,
+            Arc::clone(&gamma_mailbox),
+        );
+        let (origin_session, origin_pane, _) =
+            attached_message_fixture(&shared, "origin", &[alpha, beta]);
+        let (other_session, _, _) = attached_message_fixture(&shared, "other", &[gamma]);
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_origins.insert(command, origin_pane);
+            inner.client_activity.insert(alpha, 10);
+            inner.client_activity.insert(beta, 20);
+            inner.client_activity.insert(gamma, 100);
+            inner.client_ttys.insert(beta, "/dev/pts/77".to_owned());
+        }
+        for mailbox in [&alpha_mailbox, &beta_mailbox, &gamma_mailbox] {
+            take_reliable_messages(mailbox);
+        }
+        let mut context = ExecutionContext::default();
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("detach-client", [] as [&str; 0]),
+            )
+            .expect("detach best client on origin session");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, alpha), Some(origin_session));
+            assert_eq!(client_attached_session(&inner, beta), None);
+            assert_eq!(client_attached_session(&inner, gamma), Some(other_session));
+        }
+        assert!(take_reliable_messages(&beta_mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Detached { session, by: None, reason },
+                    ..
+                }) if *session == origin_session && reason.is_requested()
+            )
+        }));
+
+        for target in ["beta:", "/dev/pts/77", "pts/77"] {
+            shared.attach(beta, origin_session).expect("reattach beta");
+            take_reliable_messages(&beta_mailbox);
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("detach-client", ["-t", target]),
+                )
+                .expect("detach exact alias");
+            assert_eq!(client_attached_session(&shared.inner.lock(), beta), None);
+            assert!(take_reliable_messages(&beta_mailbox).iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Detached { session, by: None, reason },
+                        ..
+                    }) if *session == origin_session && reason.is_requested()
+                )
+            }));
+        }
+
+        shared.attach(beta, origin_session).expect("reattach beta");
+        let error = shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-t", "missing", "-s", "missing"]),
+            )
+            .expect_err("target client resolves before source session");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "can't find client: missing"
+        ));
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-t", "alpha", "-s", "missing"]),
+            )
+            .expect("missing source session is quiet");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), alpha),
+            Some(origin_session)
+        );
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-a", "-t", "alpha"]),
+            )
+            .expect("detach every client except explicit target");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, alpha), Some(origin_session));
+            assert_eq!(client_attached_session(&inner, beta), None);
+            assert_eq!(client_attached_session(&inner, gamma), None);
+        }
+        for mailbox in [&beta_mailbox, &gamma_mailbox] {
+            assert!(take_reliable_messages(mailbox).iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::Detached { by: None, reason, .. },
+                        ..
+                    }) if reason.is_requested()
+                )
+            }));
+        }
+    }
+
+    #[test]
+    fn read_only_detach_client_is_limited_to_itself() {
+        let shared = Arc::new(Shared::new(1));
+        let mine = OutboundMailbox::new();
+        let theirs = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("readonly".to_owned()),
+            None,
+            Arc::clone(&mine),
+        );
+        let (peer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("peer".to_owned()),
+            None,
+            Arc::clone(&theirs),
+        );
+        let (session, pane, _) = attached_message_fixture(&shared, "readonly", &[client, peer]);
+        shared.inner.lock().read_only_clients.insert(client);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("read-only context");
+
+        for arguments in [vec!["-a"], vec!["-s", "readonly"], vec!["-t", "peer"]] {
+            let error = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("detach-client", arguments),
+                )
+                .expect_err("read-only detach restriction");
+            assert!(matches!(
+                error,
+                DaemonError::Server(ServerError::InvalidCommand(message))
+                    if message == "client is read-only"
+            ));
+        }
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(client_attached_session(&inner, client), Some(session));
+            assert_eq!(client_attached_session(&inner, peer), Some(session));
+        }
+
+        take_reliable_messages(&mine);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("detach-client", ["-t", "readonly:"]),
+            )
+            .expect("read-only client detaches itself");
+        assert_eq!(client_attached_session(&shared.inner.lock(), client), None);
+        assert!(take_reliable_messages(&mine).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::Detached { session: detached, by: None, reason },
+                    ..
+                }) if *detached == session && reason.is_requested()
+            )
+        }));
     }
 
     #[test]
@@ -40970,11 +50333,14 @@ bind - split-window -v -c "#{pane_current_path}"
                 },
             )
             .expect("laptop geometry");
+        shared
+            .attach(desktop, session)
+            .expect("make desktop the latest attached geometry client");
         {
             let mut inner = shared.inner.lock();
             inner.focused_windows.insert(desktop, window);
             let effective = terminal_resize_for_pane(&inner, pane)
-                .expect("lowest-id owner geometry")
+                .expect("latest attached desktop geometry")
                 .1;
             assert_eq!((effective.columns, effective.rows), (80, 24));
         }
@@ -41000,10 +50366,10 @@ bind - split-window -v -c "#{pane_current_path}"
                             EventPayload::Detached {
                                 session: detached,
                                 by: Some(device),
-                                ..
+                                reason,
                             },
                         ..
-                    }) if *detached == session && device == "laptop"
+                    }) if *detached == session && device == "laptop" && reason.is_evicted()
                 )),
             "victim must receive the named detach event"
         );
@@ -41190,6 +50556,13 @@ bind - split-window -v -c "#{pane_current_path}"
         };
         resize(first_client, &mut first_context, first_pane, 200, 30);
         resize(second_client, &mut second_context, first_pane, 100, 60);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((100, 60))
+        );
+        shared
+            .attach(first_client, session)
+            .expect("reattach latest client");
         assert_eq!(
             shared.inner.lock().engine.pane_geometry(first_pane),
             Some((200, 30))
@@ -41723,7 +51096,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 },
             )
             .expect("second geometry");
-        wait_for_terminal_dimensions(&first_terminal, TerminalViewId(first_client.0), 200, 60);
+        wait_for_terminal_dimensions(&first_terminal, TerminalViewId(first_client.0), 100, 30);
 
         {
             let mut inner = shared.inner.lock();
@@ -42185,7 +51558,188 @@ bind - split-window -v -c "#{pane_current_path}"
                 ))
         );
 
+        let motion_before = {
+            let mut inner = shared.inner.lock();
+            assert!(inner.engine.state.set_pane_bell(terminal, true));
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                terminal_geometry_owner(&inner, terminal),
+                inner.display_panes[&client].token,
+            )
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane: terminal,
+                    action: TerminalViewAction::Mouse(TerminalMouseInput::new(
+                        TerminalMousePhase::Motion,
+                        None,
+                        PointerCellEvent {
+                            column: 1,
+                            row: 1,
+                            click_count: 0,
+                            rectangle: false,
+                        },
+                        8,
+                        16,
+                        80,
+                        24,
+                        8,
+                        16,
+                        Modifiers::default(),
+                        false,
+                    )),
+                },
+            )
+            .expect("consume display-panes mouse motion");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, motion_before.0);
+            assert_eq!(inner.terminal_input_sequence, motion_before.1);
+            assert_eq!(terminal_geometry_owner(&inner, terminal), motion_before.2);
+            assert_eq!(inner.display_panes[&client].token, motion_before.3);
+            assert!(inner.engine.state.pane(terminal).expect("motion pane").bell);
+        }
+        assert!(!take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::DisplayPanes { state: None },
+                    ..
+                })
+            )
+        }));
+
+        let press_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane: terminal,
+                    action: TerminalViewAction::Mouse(TerminalMouseInput::new(
+                        TerminalMousePhase::Press,
+                        Some(TerminalMouseButton::Left),
+                        PointerCellEvent {
+                            column: 1,
+                            row: 1,
+                            click_count: 1,
+                            rectangle: false,
+                        },
+                        8,
+                        16,
+                        80,
+                        24,
+                        8,
+                        16,
+                        Modifiers::default(),
+                        false,
+                    )),
+                },
+            )
+            .expect("fall through display-panes mouse press");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert_eq!(inner.activity_sequence, press_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, press_before.1 + 1);
+            assert!(!inner.engine.state.pane(terminal).expect("press pane").bell);
+        }
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::DisplayPanes { state: None },
+                    ..
+                })
+            )
+        }));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "1000"]),
+            )
+            .expect("reopen pane indicators for wheel input");
+        take_reliable_messages(&mailbox);
+        let wheel_before = {
+            let mut inner = shared.inner.lock();
+            assert!(inner.engine.state.set_pane_bell(terminal, true));
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane: terminal,
+                    action: TerminalViewAction::ScrollWheel {
+                        lines: -1,
+                        input: TerminalMouseInput::new(
+                            TerminalMousePhase::Press,
+                            Some(TerminalMouseButton::ScrollUp),
+                            PointerCellEvent {
+                                column: 1,
+                                row: 1,
+                                click_count: 1,
+                                rectangle: false,
+                            },
+                            8,
+                            16,
+                            80,
+                            24,
+                            8,
+                            16,
+                            Modifiers::default(),
+                            false,
+                        ),
+                    },
+                },
+            )
+            .expect("fall through display-panes mouse wheel");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert_eq!(inner.activity_sequence, wheel_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, wheel_before.1 + 1);
+            assert!(!inner.engine.state.pane(terminal).expect("wheel pane").bell);
+        }
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::DisplayPanes { state: None },
+                    ..
+                })
+            )
+        }));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "1000"]),
+            )
+            .expect("reopen pane indicators for key input");
+        take_reliable_messages(&mailbox);
+
         let invalid = test_key(KeyCode::Character('x'), Modifiers::default(), Some("x"));
+        let invalid_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
         shared
             .input(
                 client,
@@ -42214,6 +51768,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 ..
             }) if *pane == browser && input == &invalid
         )));
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, invalid_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, invalid_before.1);
+        }
 
         shared
             .execute(
@@ -42224,6 +51783,10 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("reopen pane indicators");
         take_reliable_messages(&mailbox);
+        let selection_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
         shared
             .input(
                 client,
@@ -42239,7 +51802,48 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("select pane zero");
         assert_eq!(context.pane, Some(terminal));
-        assert!(!shared.inner.lock().display_panes.contains_key(&client));
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert_eq!(inner.activity_sequence, selection_before.0);
+            assert_eq!(inner.terminal_input_sequence, selection_before.1);
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "1000"]),
+            )
+            .expect("open pane indicators for Escape");
+        take_reliable_messages(&mailbox);
+        let escape_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::DisplayPanes {
+                    action: DisplayPanesAction::Close,
+                },
+            )
+            .expect("fall through Escape");
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert_eq!(inner.activity_sequence, escape_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, escape_before.1 + 1);
+            assert!(
+                !inner
+                    .swallowed_keys
+                    .get(&client)
+                    .is_some_and(|keys| keys.contains("Escape"))
+            );
+        }
 
         shared
             .execute(
@@ -42258,8 +51862,17 @@ bind - split-window -v -c "#{pane_current_path}"
                 deadline: overlay.deadline.expect("timed pane deadline"),
             }
         };
+        let timeout_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
         assert!(shared.expire_display_panes(scheduled, scheduled.deadline));
-        assert!(!shared.inner.lock().display_panes.contains_key(&client));
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&client));
+            assert_eq!(inner.activity_sequence, timeout_before.0);
+            assert_eq!(inner.terminal_input_sequence, timeout_before.1);
+        }
         let messages = take_reliable_messages(&mailbox);
         let opened = messages.iter().position(|message| {
             matches!(
@@ -42282,6 +51895,312 @@ bind - split-window -v -c "#{pane_current_path}"
             })
         });
         assert!(closed.is_some());
+    }
+
+    #[test]
+    fn read_only_display_panes_bypasses_overlay_consumption_and_preserves_bell() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) =
+            output_view_session_fixture(&shared, "read-only-display-panes", "display");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-display-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .attach(client, session)
+            .expect("attach display client");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("display panes context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-n", "x", "copy-mode"]),
+            )
+            .expect("bind read-only-safe root command");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "0"]),
+            )
+            .expect("open display overlay");
+        let initial = {
+            let mut inner = shared.inner.lock();
+            inner.read_only_clients.insert(client);
+            assert!(inner.engine.state.set_pane_bell(pane, true));
+            (
+                inner.activity_sequence,
+                inner.terminal_input_sequence,
+                inner.display_panes[&client].token,
+            )
+        };
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::DisplayPanes {
+                    action: DisplayPanesAction::Key(test_key(
+                        KeyCode::Character('x'),
+                        Modifiers::default(),
+                        Some("x"),
+                    )),
+                },
+            )
+            .expect("bypass display overlay with read-only key");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, initial.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, initial.1 + 1);
+            assert_eq!(inner.display_panes[&client].token, initial.2);
+            assert_eq!(inner.copy_sessions[&client].pane, pane);
+            assert!(inner.engine.state.pane(pane).expect("display pane").bell);
+        }
+
+        let safe_view_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel),
+                },
+            )
+            .expect("bypass display overlay with read-only-safe copy-mode action");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, safe_view_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, safe_view_before.1 + 1);
+            assert_eq!(inner.display_panes[&client].token, initial.2);
+            assert!(inner.copy_sessions[&client].exiting);
+            assert!(inner.engine.state.pane(pane).expect("display pane").bell);
+        }
+
+        let select_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::DisplayPanes {
+                    action: DisplayPanesAction::Select(pane),
+                },
+            )
+            .expect("reject read-only native pane selection");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, select_before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, select_before.1 + 1);
+            assert_eq!(inner.display_panes[&client].token, initial.2);
+            assert!(inner.engine.state.pane(pane).expect("display pane").bell);
+        }
+
+        let close_before = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::DisplayPanes {
+                    action: DisplayPanesAction::Close,
+                },
+            )
+            .expect("bypass read-only display Escape");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.activity_sequence, close_before.0 + 1);
+        assert_eq!(inner.terminal_input_sequence, close_before.1 + 1);
+        assert_eq!(inner.display_panes[&client].token, initial.2);
+        assert!(inner.engine.state.pane(pane).expect("display pane").bell);
+    }
+
+    #[test]
+    fn client_target_collisions_follow_global_creation_order_after_session_switches() {
+        let shared = Arc::new(Shared::new(1));
+        let (older, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("name-collision".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (newer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("newer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        assert!(older < newer);
+        let (early, late) = {
+            let mut inner = shared.inner.lock();
+            let (early, _, _) = inner
+                .engine
+                .state
+                .create_session("early")
+                .expect("early session");
+            let (late, _, _) = inner
+                .engine
+                .state
+                .create_session("late")
+                .expect("late session");
+            (early, late)
+        };
+        shared.attach(older, early).expect("attach older client");
+        shared.attach(newer, late).expect("attach newer client");
+        shared.attach(older, late).expect("switch older client");
+        shared.attach(newer, early).expect("switch newer client");
+        {
+            let mut inner = shared.inner.lock();
+            inner
+                .client_ttys
+                .insert(newer, "/dev/name-collision".to_owned());
+            assert_eq!(client_attached_session(&inner, newer), Some(early));
+            assert_eq!(client_attached_session(&inner, older), Some(late));
+            assert_eq!(find_attached_client(&inner, "name-collision"), Some(older));
+            assert_eq!(find_attached_client(&inner, "name-collision:"), Some(older));
+
+            inner
+                .client_ttys
+                .insert(older, "/dev/tty-collision".to_owned());
+            inner.client_names.insert(newer, "tty-collision".to_owned());
+            assert_eq!(find_attached_client(&inner, "tty-collision"), Some(older));
+            assert_eq!(find_attached_client(&inner, "tty-collision:"), Some(older));
+            assert_eq!(find_attached_client(&inner, "tty-collision::"), None);
+            for alias in [
+                older.0.to_string(),
+                format!("client-{}", older.0),
+                format!("device-{}", older.0),
+            ] {
+                assert_eq!(
+                    find_attached_client_with_aliases(&inner, &alias, true),
+                    Some(older)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn overlay_refresh_and_lock_callers_share_client_tty_targets() {
+        let (shared, target, _, mut context) = popup_test_workspace("target-client");
+        let session = context.session.expect("target session");
+        let (invoking, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("invoking-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control-target".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared
+            .attach(invoking, session)
+            .expect("attach invoking client");
+        shared
+            .attach(control, session)
+            .expect("attach control client");
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_ttys.insert(target, "/dev/pts/9".to_owned());
+            inner.client_ttys.insert(control, "/dev/pts/10".to_owned());
+        }
+        let target_selectors = vec![
+            "/dev/pts/9".to_owned(),
+            "/dev/pts/9:".to_owned(),
+            "pts/9".to_owned(),
+            "pts/9:".to_owned(),
+            "target-client:".to_owned(),
+            target.0.to_string(),
+            format!("client-{}", target.0),
+            format!("device-{}", target.0),
+        ];
+        for selector in &target_selectors {
+            shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "display-menu",
+                        ["-c", selector, "Item", "i", "display-message selected"],
+                    ),
+                )
+                .expect("target display-menu client");
+            assert!(shared.inner.lock().menus.contains_key(&target));
+            assert!(!shared.inner.lock().menus.contains_key(&invoking));
+            shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("display-popup", ["-c", selector, "-C"]),
+                )
+                .expect("target display-popup client");
+            assert!(!shared.inner.lock().menus.contains_key(&target));
+
+            shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "confirm-before",
+                        ["-t", selector, "display-message confirmed"],
+                    ),
+                )
+                .expect("target confirm-before client");
+            assert!(shared.inner.lock().confirms.contains_key(&target));
+            assert!(!shared.inner.lock().confirms.contains_key(&invoking));
+            shared.input_confirm(target, &context, ConfirmAction::Reply(false));
+
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("lock-client", ["-t", selector]),
+                )
+                .expect("target lock-client");
+        }
+
+        let control_selectors = vec![
+            "/dev/pts/10".to_owned(),
+            "/dev/pts/10:".to_owned(),
+            "pts/10".to_owned(),
+            "pts/10:".to_owned(),
+            "control-target:".to_owned(),
+            control.0.to_string(),
+            format!("client-{}", control.0),
+            format!("device-{}", control.0),
+        ];
+        for selector in &control_selectors {
+            shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("refresh-client", ["-t", selector, "-f", "no-output"]),
+                )
+                .expect("target refresh-client");
+            assert!(shared.inner.lock().control_outputs[&control].no_output);
+        }
     }
 
     #[test]
@@ -42370,7 +52289,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .lock()
             .client_ttys
             .insert(target_client, "/dev/pts/3".to_owned());
-        for target in ["/dev/pts/3", "/dev/pts/3:", "pts/3", "pts/3:", "3"] {
+        for target in ["/dev/pts/3", "/dev/pts/3:", "pts/3", "pts/3:"] {
             shared
                 .execute(
                     invoking,
@@ -42389,6 +52308,52 @@ bind - split-window -v -c "#{pane_current_path}"
             assert_eq!(overlay.source_pane, target_browser);
             take_display_panes(&mut inner, target_client);
         }
+
+        for (target, normalized) in [("3", "3"), ("3:", "3"), ("pts/3::", "pts/3:")] {
+            let error = shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut invoking_context,
+                    &CommandInvocation::new("display-panes", ["-t", target, "-d", "not-a-delay"]),
+                )
+                .expect_err("Linux tty basename must not select a client");
+            assert!(matches!(
+                error,
+                DaemonError::Server(ServerError::InvalidCommand(message))
+                    if message == format!("can't find client: {normalized}")
+            ));
+        }
+
+        shared
+            .inner
+            .lock()
+            .client_names
+            .insert(target_client, "3".to_owned());
+        for target in ["3", "3:"] {
+            shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut invoking_context,
+                    &CommandInvocation::new("display-panes", ["-t", target, "-d", "0"]),
+                )
+                .expect("exact client name target pane overlay");
+            let mut inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&invoking));
+            let overlay = inner
+                .display_panes
+                .get(&target_client)
+                .expect("exact-name target client overlay");
+            assert_eq!(overlay.source_window, target_window);
+            assert_eq!(overlay.source_pane, target_browser);
+            take_display_panes(&mut inner, target_client);
+        }
+        shared
+            .inner
+            .lock()
+            .client_names
+            .insert(target_client, "target-client".to_owned());
 
         let error = shared
             .execute(
@@ -42486,32 +52451,42 @@ bind - split-window -v -c "#{pane_current_path}"
                     [
                         "-C",
                         "2",
+                        "-T",
+                        "#{command}",
+                        "-x",
+                        "#{?#{==:#{command},display-menu},1,0}",
+                        "-y",
+                        "#{?#{==:#{command},display-menu},9,0}",
                         "-t",
                         &first.to_string(),
-                        "First",
+                        "First-#{command}",
                         "f",
                         "select-pane -T first-choice",
                         "",
-                        "-Disabled",
+                        "-Disabled-#{command}",
                         "d",
                         "select-pane -T disabled-choice",
-                        "Last",
+                        "Last-#{command}",
                         "l",
-                        "select-pane -T chosen",
+                        "select-pane -T chosen-#{command}",
                         "",
                     ],
                 ),
             )
             .expect("open menu");
         let state = shared.inner.lock().menus[&client].state.clone();
-        assert_eq!((state.width, state.height), (13, 7));
+        assert_eq!(
+            (state.left, state.top, state.width, state.height),
+            (1, 2, 26, 7)
+        );
+        assert_eq!(state.title, "display-menu");
         assert_eq!(state.selected, Some(3));
         assert_eq!(state.items.len(), 5);
         assert!(state.items[1].is_none());
         assert!(state.items[4].is_none());
         assert!(matches!(
             &state.items[2],
-            Some(MenuItem { name, enabled: false, key: None }) if name == "Disabled"
+            Some(MenuItem { name, enabled: false, key: None }) if name == "Disabled-display-menu"
         ));
         assert!(
             take_reliable_messages(&mailbox)
@@ -42536,8 +52511,14 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("choose menu item");
         let inner = shared.inner.lock();
-        assert_eq!(inner.engine.state.pane(first).unwrap().title, "chosen");
-        assert_ne!(inner.engine.state.pane(second).unwrap().title, "chosen");
+        assert_eq!(
+            inner.engine.state.pane(first).unwrap().title,
+            "chosen-display-menu"
+        );
+        assert_ne!(
+            inner.engine.state.pane(second).unwrap().title,
+            "chosen-display-menu"
+        );
         assert!(!inner.menus.contains_key(&client));
     }
 
@@ -42731,7 +52712,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new("confirm-before", ["-c", "bad", "{ broken"]),
             ),
-            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+            Err(DaemonError::Server(ServerError::CommandParse(message)))
                 if message != "invalid confirm key"
         ));
         for key in ["", "yy", "é", "\n"] {
@@ -42767,6 +52748,34 @@ bind - split-window -v -c "#{pane_current_path}"
             "confirmed"
         );
 
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["renamew '#{command}'"]),
+            )
+            .expect("open string confirm");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "confirm-before"
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["{ renamew '#{command}' }"]),
+            )
+            .expect("open typed-block confirm");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "rename-window"
+        );
+
         context
             .format_variables
             .insert("question".to_owned(), "Proceed?".to_owned());
@@ -42777,13 +52786,17 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "confirm-before",
-                    ["-p", "#{question} {confirm-key}", "renamew accepted"],
+                    [
+                        "-p",
+                        "#{question}|#{command} {confirm-key}",
+                        "renamew accepted",
+                    ],
                 ),
             )
             .expect("open custom confirm");
         assert_eq!(
             shared.inner.lock().confirms[&client].state.prompt,
-            "Proceed? {confirm-key} "
+            "Proceed?| {confirm-key} "
         );
         shared.input_confirm(client, &context, ConfirmAction::Reply(true));
         assert_eq!(
@@ -43059,8 +53072,12 @@ bind - split-window -v -c "#{pane_current_path}"
                         "-w20",
                         "-h",
                         "10",
+                        "-x",
+                        "#{?#{==:#{command},display-popup},29,0}",
+                        "-y",
+                        "#{?#{==:#{command},display-popup},16,0}",
                         "-T",
-                        "first",
+                        "first-#{command}",
                         "-s",
                         "bg=red,fg=white",
                         "-S",
@@ -43081,7 +53098,7 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         assert_eq!((state.client_columns, state.client_rows), (80, 24));
         assert_eq!((state.cell_width_px, state.cell_height_px), (8, 18));
-        assert_eq!(state.title, "first");
+        assert_eq!(state.title, "first-display-popup");
         assert_eq!(state.style, "bg=red,fg=white");
         assert_eq!(state.border_style, "fg=cyan");
         assert_eq!(state.border_lines, PopupBorderLines::Rounded);
@@ -43103,7 +53120,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     ProtocolMessage::Event(Event {
                         payload: EventPayload::Popup { state: Some(state) },
                         ..
-                    }) if state.title == "first"
+                    }) if state.title == "first-display-popup"
                 ))
         );
 
@@ -43492,23 +53509,24 @@ bind - split-window -v -c "#{pane_current_path}"
                         "-h",
                         "8",
                         "-d",
-                        "#{popup_test_dir}",
+                        "#{?#{==:#{command},display-popup},#{popup_test_dir},/missing}",
                         "-e",
-                        "POPUP_VALUE=works",
+                        "POPUP_VALUE=#{command}",
                         "-T",
-                        "#{session_name}:#{popup_width}",
-                        "printf '%s|%s' \"$POPUP_VALUE\" \"${PWD##*/}\"",
+                        "#{command}:#{session_name}:#{popup_width}",
+                        "printf '%s|%s|%s' \"$POPUP_VALUE\" \"${PWD##*/}\" '#{command}'",
                     ],
                 ),
             )
             .expect("open environment popup");
         let state = wait_for_popup_state(&shared, client, |state| state.dead);
-        assert_eq!(state.title, "popup-test:40");
+        assert_eq!(state.title, "display-popup:popup-test:40");
         let terminal = Arc::clone(&shared.inner.lock().popups[&client].terminal);
         let captured = terminal
             .capture_frozen_frame(CaptureOptions::default())
             .expect("capture popup terminal");
-        assert!(captured.contains("works|"));
+        assert!(captured.contains("#{command}|"));
+        assert!(captured.contains("|#{command}"));
         assert!(
             captured.contains(
                 directory
@@ -43695,13 +53713,15 @@ bind - split-window -v -c "#{pane_current_path}"
                         "z",
                         "-O",
                         "name",
+                        "-f",
+                        "#{==:#{command},list-clients}",
                         "-F",
-                        "#{line}:#{client_name}:#{session_name}:#{client_width}x#{client_height}:#{client_termname}",
+                        "#{command}:#{line}:#{client_name}:#{session_name}:#{client_width}x#{client_height}:#{client_termname}",
                     ],
                 ),
             )
             .unwrap();
-        assert_eq!(filtered.output, "1:zeta:z:0x0:");
+        assert_eq!(filtered.output, "list-clients:1:zeta:z:0x0:");
     }
 
     fn switch_test_session(shared: &Shared, name: &str) -> (SessionId, WindowId, PaneId) {
@@ -43802,6 +53822,396 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn read_only_terminal_view_actions_use_the_typed_navigation_allowlist() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) =
+            output_view_session_fixture(&shared, "read-only-view", "one\ntwo\nthree");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-viewer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach viewer");
+        shared.inner.lock().read_only_clients.insert(client);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("view context");
+
+        let safe = [
+            TerminalViewAction::ScrollLines(-1),
+            TerminalViewAction::ScrollPages(-1),
+            TerminalViewAction::ScrollTop,
+            TerminalViewAction::ScrollBottom,
+            TerminalViewAction::ScrollToFraction(0),
+            TerminalViewAction::ScrollToOffset(0),
+            TerminalViewAction::EnterCopyMode,
+            TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::SetMark),
+            TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Left),
+        ];
+        for action in safe {
+            assert!(terminal_view_action_is_read_only_safe(&action));
+            let before = {
+                let mut inner = shared.inner.lock();
+                inner.engine.state.set_pane_bell(pane, true);
+                assert!(inner.engine.state.pane(pane).expect("view pane").bell);
+                (inner.activity_sequence, inner.terminal_input_sequence)
+            };
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::TerminalView { pane, action },
+                )
+                .expect("apply read-only local view action");
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, before.1 + 1);
+            assert!(inner.engine.state.pane(pane).expect("view pane").bell);
+        }
+        assert_eq!(shared.inner.lock().copy_sessions[&client].pane, pane);
+
+        let mouse = || {
+            TerminalMouseInput::new(
+                TerminalMousePhase::Press,
+                Some(TerminalMouseButton::ScrollUp),
+                PointerCellEvent {
+                    column: 0,
+                    row: 0,
+                    click_count: 1,
+                    rectangle: false,
+                },
+                0,
+                0,
+                80,
+                24,
+                8,
+                18,
+                Modifiers::default(),
+                false,
+            )
+        };
+        let blocked = [
+            TerminalViewAction::Paste("blocked".to_owned()),
+            TerminalViewAction::ClearHistory,
+            TerminalViewAction::SelectionPress(PointerCellEvent {
+                column: 0,
+                row: 0,
+                click_count: 1,
+                rectangle: false,
+            }),
+            TerminalViewAction::CopySelection {
+                request_id: 1,
+                target: ClipboardTarget::Clipboard,
+            },
+            TerminalViewAction::SearchBegin(zz_terminal::SearchQuery::literal("blocked")),
+            TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::StartSelection),
+            TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::SearchAgain {
+                reverse: false,
+            }),
+            TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::ToggleRectangle),
+            TerminalViewAction::Mouse(mouse()),
+            TerminalViewAction::ScrollWheel {
+                lines: -1,
+                input: mouse(),
+            },
+        ];
+        for action in blocked {
+            assert!(!terminal_view_action_is_read_only_safe(&action));
+            let before = {
+                let inner = shared.inner.lock();
+                (inner.activity_sequence, inner.terminal_input_sequence)
+            };
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::TerminalView { pane, action },
+                )
+                .expect("reject read-only shared view action");
+            let inner = shared.inner.lock();
+            assert_eq!(inner.activity_sequence, before.0 + 1);
+            assert_eq!(inner.terminal_input_sequence, before.1 + 1);
+            assert_eq!(inner.copy_sessions[&client].pane, pane);
+            assert!(inner.engine.state.pane(pane).expect("view pane").bell);
+        }
+
+        let before_focus = {
+            let inner = shared.inner.lock();
+            (inner.activity_sequence, inner.terminal_input_sequence)
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::Focus(true),
+                },
+            )
+            .expect("reject read-only pane focus");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.activity_sequence, before_focus.0);
+        assert_eq!(inner.terminal_input_sequence, before_focus.1);
+        assert!(inner.engine.state.pane(pane).expect("view pane").bell);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_pane_focus_never_reaches_application_focus_reporting() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-focus".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-s",
+                        "read-only-focus",
+                        "stty raw -echo; printf '\\033[?1004h\\033]0;focus-ready\\007'; bytes=$(dd bs=3 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n'); printf '\\r\\nFOCUS_BYTES:%s\\r\\n' \"$bytes\"; exec /bin/cat",
+                    ],
+                ),
+            )
+            .expect("spawn focus fixture");
+        let session = context.session.expect("focus session");
+        let pane = context.pane.expect("focus pane");
+        shared
+            .attach(client, session)
+            .expect("attach focus fixture");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "focus-events", "on"]),
+            )
+            .expect("enable application focus events");
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        let view = TerminalViewId(client.0);
+        wait_for_viewport(
+            &terminal,
+            view,
+            "focus fixture never became ready",
+            |viewport| viewport.title() == "focus-ready",
+        );
+
+        shared.inner.lock().read_only_clients.insert(client);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::Focus(true),
+                },
+            )
+            .expect("reject read-only pane focus");
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            terminal
+                .latest_viewport_for(view)
+                .is_some_and(|viewport| !viewport_text(&viewport).contains("FOCUS_BYTES:"))
+        );
+
+        shared.inner.lock().read_only_clients.remove(&client);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane,
+                    action: TerminalViewAction::Focus(true),
+                },
+            )
+            .expect("forward writable pane focus");
+        wait_for_viewport(
+            &terminal,
+            view,
+            "writable focus did not reach the application",
+            |viewport| viewport_text(viewport).contains("FOCUS_BYTES:1b5b49"),
+        );
+    }
+
+    #[test]
+    fn read_only_send_keys_and_binding_preflight_are_all_or_nothing() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) =
+            output_view_session_fixture(&shared, "read-only-send", "one\ntwo\nthree");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-sender".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach sender");
+        let (peer_session, peer_pane, _) =
+            output_view_session_fixture(&shared, "read-only-send-peer", "peer");
+        let (peer, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("read-only-peer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(peer, peer_session).expect("attach peer");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("send context");
+        let target = pane.to_string();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["-h", "https://example.com"]),
+            )
+            .expect("create browser input sink");
+        let browser = context.pane.expect("browser pane");
+        let browser_target = browser.to_string();
+        context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("restore send context");
+        shared.inner.lock().read_only_clients.insert(client);
+        take_reliable_messages(&mailbox);
+
+        for (request_id, command) in [
+            (
+                1,
+                CommandInvocation::new("send-keys", ["-t", &browser_target, "blocked", "Enter"]),
+            ),
+            (
+                2,
+                CommandInvocation::new("send-keys", ["-t", &target, "-X", "begin-selection"]),
+            ),
+        ] {
+            assert!(matches!(
+                shared.execute_command_request(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Error {
+                    error: ServerError::InvalidCommand(message),
+                    ..
+                } if message == "client is read-only"
+            ));
+            assert!(take_browser_literals(&mailbox, browser).is_empty());
+        }
+        let peer_target = peer_pane.to_string();
+        assert!(matches!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                5,
+                &CommandInvocation::new(
+                    "send-keys",
+                    ["-t", &peer_target, "-X", "cursor-left"],
+                ),
+            ),
+            CommandResponse::Error {
+                error: ServerError::InvalidCommand(message),
+                ..
+            } if message == "client is read-only"
+        ));
+
+        assert!(matches!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                3,
+                &CommandInvocation::new("copy-mode", ["-t", &target]),
+            ),
+            CommandResponse::Success { .. }
+        ));
+        assert_eq!(shared.inner.lock().copy_sessions[&client].pane, pane);
+        assert!(matches!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                4,
+                &CommandInvocation::new("send-keys", ["-t", &target, "-X", "cursor-left"],),
+            ),
+            CommandResponse::Success { .. }
+        ));
+
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[
+                    CommandInvocation::new("detach-client", [] as [&str; 0]),
+                    CommandInvocation::new("send-keys", ["-t", &browser_target, "blocked"]),
+                ],
+                false,
+            )
+            .expect("preflight mixed binding");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(session)
+        );
+        let blocked_messages = take_reliable_messages(&mailbox);
+        assert!(!blocked_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand { pane, .. },
+                ..
+            }) if *pane == browser
+        )));
+        assert!(blocked_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::TimedClientMessage { text, .. },
+                ..
+            }) if text == "client is read-only"
+        )));
+
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[CommandInvocation::new(
+                    "send-keys",
+                    ["-t", &target, "-X", "cancel"],
+                )],
+                false,
+            )
+            .expect("run safe copy binding");
+        assert!(shared.inner.lock().copy_sessions[&client].exiting);
+        assert!(
+            !take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::TimedClientMessage { text, .. },
+                        ..
+                    }) if text == "client is read-only"
+                ))
+        );
+    }
+
+    #[test]
     fn read_only_command_requests_authorize_the_expanded_alias_once() {
         let shared = Arc::new(Shared::new(1));
         let (a, _, _) = switch_test_session(&shared, "A");
@@ -43879,6 +54289,347 @@ bind - split-window -v -c "#{pane_current_path}"
             allowed,
             CommandResponse::Success { output, .. } if output == "viewer"
         ));
+    }
+
+    #[test]
+    fn prepared_command_lists_freeze_one_alias_layer_without_side_effects() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(90);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .unwrap();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[40]", "a=display-message -p old"],
+                ),
+            )
+            .unwrap();
+        for (index, value) in [("41", "bad=list-sessions ; kill-server"), ("42", "empty=")] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .unwrap();
+        }
+        let source = zz_protocol::SourceSpan {
+            source: "control".to_owned(),
+            line: 7,
+            column: 3,
+        };
+        let classified = shared.prepare_command_list(vec![
+            CommandInvocation {
+                name: "a".to_owned(),
+                args: vec!["tail".to_owned()],
+                source: Some(source.clone()),
+            },
+            CommandInvocation::new("list-sess", [] as [&str; 0]),
+            CommandInvocation::new("new-pane", [] as [&str; 0]),
+            CommandInvocation::new("bogus", [] as [&str; 0]),
+            CommandInvocation::new("kill-s", [] as [&str; 0]),
+            CommandInvocation::new("bad", [] as [&str; 0]),
+            CommandInvocation::new("empty", [] as [&str; 0]),
+        ]);
+        assert_eq!(classified[0].invocation.name, "display-message");
+        assert_eq!(classified[0].invocation.args, ["-p", "old", "tail"]);
+        assert_eq!(classified[0].invocation.source.as_ref(), Some(&source));
+        assert!(classified[0].alias_matched);
+        assert_eq!(
+            classified[1].canonical_name.as_deref(),
+            Some("list-sessions")
+        );
+        assert_eq!(classified[1].result, PreparedCommandResult::Ready);
+        assert_eq!(classified[2].canonical_name.as_deref(), Some("new-pane"));
+        assert_eq!(classified[2].result, PreparedCommandResult::Ready);
+        for command in &classified[3..5] {
+            assert!(!command.alias_matched);
+            assert!(matches!(
+                command.result,
+                PreparedCommandResult::Error(ref error) if error.is_command_parse()
+            ));
+        }
+        for command in &classified[5..] {
+            assert!(command.alias_matched);
+            assert_eq!(command.canonical_name, None);
+            assert!(matches!(
+                command.result,
+                PreparedCommandResult::Error(ref error) if error.is_command_parse()
+            ));
+        }
+        let mutation = CommandInvocation::new(
+            "set-option",
+            ["-s", "command-alias[40]", "a=display-message -p new"],
+        );
+        let prepared = shared.prepare_command_list(vec![
+            CommandInvocation::new("a", [] as [&str; 0]),
+            mutation,
+            CommandInvocation::new("a", [] as [&str; 0]),
+        ]);
+        assert_eq!(prepared.len(), 3);
+        for command in [&prepared[0], &prepared[2]] {
+            assert!(command.alias_matched);
+            assert_eq!(command.canonical_name.as_deref(), Some("display-message"));
+            assert_eq!(command.invocation.name, "display-message");
+            assert_eq!(command.invocation.args, ["-p", "old"]);
+            assert_eq!(command.result, PreparedCommandResult::Ready);
+        }
+        assert!(!prepared[1].alias_matched);
+        assert_eq!(prepared[1].canonical_name.as_deref(), Some("set-option"));
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                client,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &prepared[1].invocation,
+                true,
+            ),
+            CommandResponse::Success { .. }
+        ));
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                client,
+                ClientKind::Command,
+                &mut context,
+                2,
+                &prepared[2].invocation,
+                true,
+            ),
+            CommandResponse::Success { output, .. } if output == "old"
+        ));
+        let refreshed =
+            shared.prepare_command_list(vec![CommandInvocation::new("a", [] as [&str; 0])]);
+        assert_eq!(refreshed[0].invocation.args, ["-p", "new"]);
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                client,
+                ClientKind::Command,
+                &mut context,
+                3,
+                &CommandInvocation::new("set-option", ["-Z", "@bad", "value"]),
+                true,
+            ),
+            CommandResponse::Error {
+                error: ServerError::CommandParse(message),
+                ..
+            } if message == "set-option does not support -Z"
+        ));
+    }
+
+    #[test]
+    fn forged_prepared_requests_are_still_read_only_authorized() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("viewer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("attach-session", ["-r", "-t", "A"]),
+            )
+            .unwrap();
+        let response = shared.execute_command_request_with_prepared(
+            client,
+            ClientKind::Control,
+            &mut context,
+            7,
+            &CommandInvocation::new("kill-session", ["-t", "B"]),
+            true,
+        );
+        assert!(matches!(
+            response,
+            CommandResponse::Error {
+                error: ServerError::InvalidCommand(message),
+                ..
+            } if message == "client is read-only"
+        ));
+        assert!(shared.inner.lock().engine.state.sessions.contains_key(&b));
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(a)
+        );
+    }
+
+    #[test]
+    fn unsupported_alias_shadows_fail_before_authorization_and_binding_effects() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, pane) = switch_test_session(&shared, "work");
+        let (victim, _, _) = switch_test_session(&shared, "victim");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("viewer".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("attach-session", ["-r", "-t", "work"]),
+            )
+            .expect("read-only attach");
+        take_reliable_messages(&mailbox);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-s", "command-alias[40]", "kill-session="]),
+            )
+            .expect("empty destructive shadow");
+
+        assert!(matches!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                41,
+                &CommandInvocation::new("kill-session", ["-t", "victim"]),
+            ),
+            CommandResponse::Error {
+                error: ServerError::CommandParse(message),
+                ..
+            } if message == "unknown command: kill-session"
+        ));
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .contains_key(&victim)
+        );
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(session)
+        );
+
+        let error = shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[CommandInvocation::new("kill-session", ["-t", "victim"])],
+                false,
+            )
+            .expect_err("unsupported alias precedes read-only binding authorization");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::CommandParse(message))
+                if message == "unknown command: kill-session"
+        ));
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .contains_key(&victim)
+        );
+        assert!(
+            !take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::TimedClientMessage { text, .. },
+                        ..
+                    }) if text == "client is read-only"
+                ))
+        );
+
+        shared.inner.lock().read_only_clients.remove(&client);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-s", "command-alias[41]", "kill-server="]),
+            )
+            .expect("empty server shadow");
+        assert!(matches!(
+            shared.execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            ),
+            Err(DaemonError::Server(ServerError::CommandParse(message)))
+                if message == "unknown command: kill-server"
+        ));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-s", "-u", "command-alias[40]"]),
+            )
+            .expect("clear first shadow");
+        let (dynamic_victim, _, _) = switch_test_session(&shared, "dynamic-victim");
+        let error = shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[
+                    CommandInvocation::new(
+                        "set-option",
+                        ["-s", "command-alias[40]", "kill-session="],
+                    ),
+                    CommandInvocation::new("kill-session", ["-t", "dynamic-victim"]),
+                ],
+                false,
+            )
+            .expect_err("later binding command observes the unsupported shadow");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::CommandParse(message))
+                if message == "unknown command: kill-session"
+        ));
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .contains_key(&dynamic_victim)
+        );
     }
 
     #[test]
@@ -44046,6 +54797,24 @@ bind - split-window -v -c "#{pane_current_path}"
             };
             assert!(!terminal_mouse_rejected(&inner, client, &focus));
         }
+        let rejected_sort = {
+            let mut inner = shared.inner.lock();
+            inner.engine.state.sessions.get_mut(&a).unwrap().activity = Some(11);
+            inner.engine.state.sessions[&a].sort_activity
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                wheel_for(pane),
+            )
+            .expect("reject mouse input after recording activity");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&a].sort_activity > rejected_sort);
+            assert_ne!(inner.engine.state.sessions[&a].activity, Some(11));
+        }
         shared.inner.lock().client_sizes.remove(&client);
         {
             let inner = shared.inner.lock();
@@ -44090,7 +54859,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn nested_attach_refuses_when_the_caller_tty_matches_a_pane() {
+    fn nested_attach_refuses_only_preexisting_sessions_when_the_caller_tty_matches_a_pane() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (creator, _) =
@@ -44112,20 +54881,42 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("pane tty")
             .to_string_lossy()
             .into_owned();
+        shared
+            .execute(
+                creator,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "##{command}"]),
+            )
+            .expect("literal format-shaped attach target");
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .values()
+                .any(|session| session.name == "#{command}")
+        );
 
         let nested_mailbox = OutboundMailbox::new();
         let (nested, _) = shared.register_subscribed(
-            ClientKind::Interactive,
+            ClientKind::Control,
             Some("nested".to_owned()),
             None,
             Arc::clone(&nested_mailbox),
         );
-        shared.inner.lock().client_ttys.insert(nested, pane_tty);
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_ttys.insert(nested, pane_tty);
+            inner.nested_clients.insert(nested);
+        }
         let mut nested_context = ExecutionContext::default();
         let refusal = shared
             .execute(
                 nested,
-                ClientKind::Interactive,
+                ClientKind::Control,
                 &mut nested_context,
                 &CommandInvocation::new("attach-session", ["-t", "outer"]),
             )
@@ -44141,9 +54932,9 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(matches!(
             shared.execute(
                 nested,
-                ClientKind::Interactive,
+                ClientKind::Control,
                 &mut nested_context,
-                &CommandInvocation::new("new-session", ["-s", "outer"]),
+                &CommandInvocation::new("attach-session", ["-t", "missing"]),
             ),
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "sessions should be nested with care, unset $TMUX to force"
@@ -44151,9 +54942,235 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(matches!(
             shared.execute(
                 nested,
-                ClientKind::Interactive,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-s", "outer"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "duplicate session: outer"
+        ));
+        shared
+            .execute(
+                nested,
+                ClientKind::Control,
                 &mut nested_context,
                 &CommandInvocation::new("new-session", ["-s", "inner"]),
+            )
+            .expect("fresh attached creation from a nested tty is allowed");
+        let inner_session = nested_context.session.expect("fresh attached session");
+        assert_eq!(
+            shared.inner.lock().engine.state.sessions[&inner_session].name,
+            "inner"
+        );
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), nested),
+            Some(inner_session)
+        );
+        shared.detach_client_state(nested, false);
+        shared
+            .execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-s", "inner-a"]),
+            )
+            .expect("fresh new-session attach miss from a nested tty is allowed");
+        let inner_a_session = nested_context.session.expect("fresh -A attached session");
+        assert_eq!(
+            shared.inner.lock().engine.state.sessions[&inner_a_session].name,
+            "inner-a"
+        );
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), nested),
+            Some(inner_a_session)
+        );
+        shared.detach_client_state(nested, false);
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-s", "outer"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "outer"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+        shared
+            .execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "#{command}"]),
+            )
+            .expect("formatted detached creation is not refused from its raw text");
+        {
+            let inner = shared.inner.lock();
+            let expanded = inner
+                .engine
+                .state
+                .sessions
+                .iter()
+                .find_map(|(id, session)| (session.name == "new-session").then_some(*id))
+                .expect("expanded detached session");
+            assert!(
+                inner
+                    .attached
+                    .get(&expanded)
+                    .is_none_or(|clients| !clients.contains(&nested))
+            );
+        }
+        nested_context.set_client_size(Some((1, 1)));
+        nested_context.set_client_working_directory(Some(PathBuf::from("/stale")));
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_sizes.insert(nested, (132, 43));
+            inner
+                .client_working_directories
+                .insert(nested, PathBuf::from("/fresh"));
+        }
+        let target_before_formatted_attach = (
+            nested_context.session,
+            nested_context.window,
+            nested_context.pane,
+        );
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-A", "-d", "-s", "#{command}"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+        assert_eq!(
+            (
+                nested_context.session,
+                nested_context.window,
+                nested_context.pane,
+            ),
+            target_before_formatted_attach
+        );
+        assert_eq!(nested_context.client_size(), Some((132, 43)));
+        assert_eq!(
+            nested_context.client_working_directory(),
+            Some(Path::new("/fresh"))
+        );
+        assert!(
+            shared
+                .inner
+                .lock()
+                .attached
+                .values()
+                .all(|clients| !clients.contains(&nested))
+        );
+        shared
+            .execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "fresh-#{command}"]),
+            )
+            .expect("detached creation from a nested tty is allowed");
+        {
+            let inner = shared.inner.lock();
+            let fresh = inner
+                .engine
+                .state
+                .sessions
+                .iter()
+                .find_map(|(id, session)| (session.name == "fresh-new-session").then_some(*id))
+                .expect("fresh detached session");
+            assert!(
+                inner
+                    .attached
+                    .get(&fresh)
+                    .is_none_or(|clients| !clients.contains(&nested))
+            );
+        }
+        assert!(matches!(
+            shared.attach_target(nested, ClientKind::Control, &mut nested_context, "outer"),
+            Err(ServerError::InvalidCommand(message))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+
+        shared.inner.lock().client_ttys.remove(&nested);
+        shared
+            .attach_target(nested, ClientKind::Control, &mut nested_context, "outer")
+            .expect("a nested marker without a tty identity is allowed");
+        shared.detach_client_state(nested, false);
+        shared
+            .inner
+            .lock()
+            .client_ttys
+            .insert(nested, "/dev/zz-not-a-pane".to_owned());
+        shared
+            .attach_target(nested, ClientKind::Control, &mut nested_context, "outer")
+            .expect("a nested marker with a mismatched tty identity is allowed");
+        shared.detach_client_state(nested, false);
+        shared.inner.lock().client_ttys.insert(
+            nested,
+            terminal.tty().unwrap().to_string_lossy().into_owned(),
+        );
+
+        shared.inner.lock().nested_clients.remove(&nested);
+        shared
+            .execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-s", "outer"]),
+            )
+            .expect("new-session attach without nested capability is allowed");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), nested),
+            nested_context.session
+        );
+        shared.detach_client_state(nested, false);
+        shared
+            .execute(
+                nested,
+                ClientKind::Control,
+                &mut nested_context,
+                &CommandInvocation::new("attach-session", ["-t", "outer"]),
+            )
+            .expect("attach without nested capability is allowed");
+        assert!(shared.inner.lock().client_ttys.contains_key(&nested));
+
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive_nested, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("interactive-nested".to_owned()),
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_ttys.insert(
+                interactive_nested,
+                terminal.tty().unwrap().to_string_lossy().into_owned(),
+            );
+            inner.nested_clients.insert(interactive_nested);
+        }
+        assert!(matches!(
+            shared.execute(
+                interactive_nested,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("new-session", ["-s", "interactive-inner"]),
             ),
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "sessions should be nested with care, unset $TMUX to force"
@@ -44166,57 +55183,15 @@ bind - split-window -v -c "#{pane_current_path}"
                 .state
                 .sessions
                 .values()
-                .all(|session| session.name != "inner")
+                .all(|session| session.name != "interactive-inner")
         );
-        assert!(matches!(
-            shared.execute(
-                nested,
-                ClientKind::Interactive,
-                &mut nested_context,
-                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "outer"]),
-            ),
-            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
-                if message == "sessions should be nested with care, unset $TMUX to force"
-        ));
-        shared
-            .execute(
-                nested,
-                ClientKind::Interactive,
-                &mut nested_context,
-                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "fresh"]),
-            )
-            .expect("detached creation from a nested tty is allowed");
+        shared.unregister(interactive_nested);
+        shared.unregister(nested);
         {
             let inner = shared.inner.lock();
-            let fresh = inner
-                .engine
-                .state
-                .sessions
-                .iter()
-                .find_map(|(id, session)| (session.name == "fresh").then_some(*id))
-                .expect("fresh detached session");
-            assert!(
-                inner
-                    .attached
-                    .get(&fresh)
-                    .is_none_or(|clients| !clients.contains(&nested))
-            );
+            assert!(!inner.nested_clients.contains(&nested));
+            assert!(!inner.client_ttys.contains_key(&nested));
         }
-        assert!(matches!(
-            shared.attach_target(nested, ClientKind::Interactive, &mut nested_context, "outer"),
-            Err(ServerError::InvalidCommand(message))
-                if message == "sessions should be nested with care, unset $TMUX to force"
-        ));
-
-        shared.inner.lock().client_ttys.remove(&nested);
-        shared
-            .execute(
-                nested,
-                ClientKind::Interactive,
-                &mut nested_context,
-                &CommandInvocation::new("attach-session", ["-t", "outer"]),
-            )
-            .expect("attach without a tty fact is allowed");
     }
 
     #[test]
@@ -45161,6 +56136,11 @@ bind - split-window -v -c "#{pane_current_path}"
             .attach(control, b)
             .expect("attach the control client to b");
         take_reliable_messages(&mailbox);
+        let survivor_sort = {
+            let mut inner = shared.inner.lock();
+            inner.engine.state.sessions.get_mut(&c).unwrap().activity = Some(9);
+            inner.engine.state.sessions[&c].sort_activity
+        };
         let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, b_pane)
             .expect("b context");
         shared
@@ -45183,6 +56163,11 @@ bind - split-window -v -c "#{pane_current_path}"
             client_attached_session(&shared.inner.lock(), control),
             Some(c)
         );
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.engine.state.sessions[&c].sort_activity > survivor_sort);
+            assert_ne!(inner.engine.state.sessions[&c].activity, Some(9));
+        }
         let messages = take_reliable_messages(&mailbox);
         let kinds = messages
             .iter()
@@ -45523,7 +56508,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect_err("daemon expands one alias layer");
         assert!(matches!(
             error,
-            DaemonError::Server(ServerError::InvalidCommand(message))
+            DaemonError::Server(ServerError::CommandParse(message))
                 if message == "unknown command: second"
         ));
     }
@@ -45821,6 +56806,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "display-message '#{hook}|#{hook_arguments}'",
             ),
             ("after-list-buffers", "display-message 'daemon=#{hook}'"),
+            ("after-set-buffer", "list-buffers -F '#{hook}|#{command}'"),
         ] {
             shared
                 .execute(
@@ -45897,6 +56883,16 @@ bind - split-window -v -c "#{pane_current_path}"
                 .map(|message| message.text.as_str()),
             Some("daemon=after-list-buffers")
         );
+
+        let hook_output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "hook-row", "value"]),
+            )
+            .expect("daemon-preempted hook body");
+        assert_eq!(hook_output.output, "after-set-buffer|list-buffers");
 
         for (args, value) in [
             (
@@ -47160,6 +58156,43 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(fields[3].contains("sleep"));
         assert!(fields[3].contains("30"));
 
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-window", ["-d", "-P", "-F", "#{command}"]),
+            )
+            .expect("new-window command item")
+            .output;
+        assert_eq!(output, "new-window\n");
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d", "-P", "-F", "#{command}"]),
+            )
+            .expect("split-window command item")
+            .output;
+        assert_eq!(output, "split-window\n");
+
+        context
+            .format_variables
+            .insert("command".to_owned(), "explicit".to_owned());
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d", "-P", "-F", "#{command}"]),
+            )
+            .expect("split-window explicit command state")
+            .output;
+        assert_eq!(output, "explicit\n");
+        context.format_variables.remove("command");
+
         let empty = shared
             .execute(
                 client,
@@ -47224,7 +58257,7 @@ bind - split-window -v -c "#{pane_current_path}"
             response,
             CommandResponse::Error {
                 request_id: 2,
-                error: ServerError::InvalidCommand(message),
+                error: ServerError::CommandParse(message),
                 output,
             } if message == "unknown command: wibble" && output.is_empty()
         ));
@@ -50357,6 +61390,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "beta",
             )
             .expect("attach beta");
+        shared.refresh_status(false);
         drain_reliable_messages_until_quiet(&[&alpha_mailbox, &beta_mailbox]);
         let sequence_boundary = Shared::next_sequence();
 
@@ -51163,6 +62197,14 @@ bind - split-window -v -c "#{pane_current_path}"
             inner
                 .suppressed_text
                 .insert(client, BTreeMap::from([('b', 1)]));
+            inner.pending_committed_text.insert(
+                client,
+                VecDeque::from([PendingCommittedText {
+                    pane,
+                    lane: CommittedTextLane::Terminal,
+                    suppressed_character: Some('b'),
+                }]),
+            );
             inner
                 .pending_gui_requests
                 .insert(99, PendingGuiRequest { client, reply });
@@ -51204,6 +62246,7 @@ bind - split-window -v -c "#{pane_current_path}"
             assert!(!inner.prefix_armed.contains(&client));
             assert!(!inner.swallowed_keys.contains_key(&client));
             assert!(!inner.suppressed_text.contains_key(&client));
+            assert!(!inner.pending_committed_text.contains_key(&client));
             assert!(!inner.pending_gui_requests.contains_key(&99));
         }
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -51215,6 +62258,21 @@ bind - split-window -v -c "#{pane_current_path}"
             "detach must park the terminal view"
         );
 
+        let pending_attach_input = chooser_key_press("a");
+        shared.enqueue_pending_committed_text(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            &pending_attach_input,
+            true,
+        );
+        shared.suppress_committed_character(
+            client,
+            pane,
+            CommittedTextLane::Terminal,
+            &pending_attach_input,
+            true,
+        );
         zz_protocol::write_protocol_message(
             &mut client_stream,
             &ProtocolMessage::Attach {
@@ -51259,6 +62317,8 @@ bind - split-window -v -c "#{pane_current_path}"
             assert!(!inner.key_engines.contains_key(&client));
             assert!(!inner.copy_sessions.contains_key(&client));
             assert!(!inner.prefix_armed.contains(&client));
+            assert!(!inner.pending_committed_text.contains_key(&client));
+            assert!(!inner.suppressed_text.contains_key(&client));
         }
 
         drop(client_stream);
@@ -51630,6 +62690,24 @@ bind - split-window -v -c "#{pane_current_path}"
         frames
             .into_iter()
             .map(|frame| decode_protocol_frame(&frame).expect("decode reliable message"))
+            .collect()
+    }
+
+    fn sourced_command_guards(messages: Vec<ProtocolMessage>) -> Vec<(String, bool, bool)> {
+        messages
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::SourcedCommandGuard {
+                            output,
+                            error,
+                            client_failure,
+                        },
+                    ..
+                }) => Some((output, error, client_failure)),
+                _ => None,
+            })
             .collect()
     }
 

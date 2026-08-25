@@ -16,3 +16,6 @@ out: show-environment -g SOURCE_MALFORMED
 out: show-environment -g SOURCE_MALFORMED_QUIET
 out: show-environment -g SOURCE_NESTED_MISS
 out: show-environment -g SOURCE_NESTED_QUIET
+out: show-environment -g SOURCE_RUNTIME
+out: show-environment -g SOURCE_RUNTIME_OUTER
+out: show-environment -g SOURCE_DEFAULT_ORDER

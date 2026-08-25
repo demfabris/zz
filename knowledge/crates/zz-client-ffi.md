@@ -4,7 +4,7 @@ title: zz-client-ffi crate
 description: Unix C ABI over zz-client for native shells, with pollable events, mux snapshots, raw terminal input, and caller-owned styled terminal viewports.
 resource: crates/zz-client-ffi/include/zz-client.h
 tags: [client, ffi, c-abi, unix, ios, crate]
-timestamp: 2026-08-15T00:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -25,12 +25,17 @@ The header exposes:
 - connect/free, the wake descriptor, typed events, appearance changes, disconnects, pane IDs, and
   viewport damage rows;
 - attach, literal text, raw key press/repeat/release, tmux-style command execution, terminal resize,
-  terminal focus, and line scrolling;
+  client-window focus, terminal pane/application focus, and line scrolling;
 - caller-owned mux snapshots with generation, session identity/name/attachment, active window, and
   ordered active-window pane metadata;
 - caller-owned terminal viewports with dimensions, generation counters, default colors, raw cells,
   style records, grapheme offsets/bytes, and cursor state;
 - decoded UTF-8 row text for simple consumers that do not need graphical fidelity.
+
+`zz_client_attach` returning true means the client wrote the request; `ZZ_EVENT_ATTACHED` confirms
+the attachment. A shell sends `zz_client_set_focused` after that event. The function carries the
+client-window signal. `zz_client_focus_terminal` remains the independent pane/application signal and
+may accompany it when an owned terminal follows the outer scene transition.
 
 Mux snapshots own an `Arc<MuxSnapshot>`. Pane order comes from the active window's layout tree, so a
 client can present a stable visual order without rebuilding target resolution. Viewport snapshots
@@ -49,10 +54,13 @@ Those remain shared-core work rather than Swift responsibilities.
 
 # Testing
 
-`tests/smoke.c` connects to a real in-process daemon, attaches, validates mux/session/pane metadata,
+`tests/smoke.c` connects to a real in-process daemon, writes an attach request, waits for attached
+mux/session/pane metadata,
 creates and attaches another session, creates a second pane, reads styled terminal planes, sends raw
-Enter, kills that attached session, observes the detached snapshot, explicitly reattaches the
-surviving session, recovers its terminal content, then frees and reconnects in the same C process.
+Enter, reports client focus and blur through `zz_client_set_focused`, kills that attached session,
+observes the detached snapshot, explicitly reattaches the surviving session, recovers its terminal
+content, then frees and reconnects in the same C process. `zz_client_focus_terminal` remains the
+separate pane/application signal.
 Rust tests cover interned graphemes, wide-cell spacers, UTF-8-safe truncation, and the real-daemon
 link boundary. The iPhone build cross-compiles the crate for
 `aarch64-apple-ios-sim` on every Xcode build.

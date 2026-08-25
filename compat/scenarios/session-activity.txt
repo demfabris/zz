@@ -1,0 +1,5 @@
+fmt: #{==:#{session_activity},#{session_created}}|#{!!:#{t:session_activity}}
+new-session -d -s activity-a
+new-session -d -s activity-b
+fmt: #{S/t:#{session_name}|}
+out: list-sessions -O activity -F #{session_name}

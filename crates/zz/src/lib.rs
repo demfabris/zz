@@ -61,8 +61,8 @@ use zz_daemon::{DaemonError, InteractiveClient};
 use zz_mux::MuxEngine;
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
-    CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, ServerError, ServerHello,
-    canonical_command,
+    CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, PreparedCommand,
+    PreparedCommandResult, ServerError, ServerHello, canonical_command,
 };
 use zz_terminal::TerminalColorScheme;
 #[cfg(not(target_os = "ios"))]
@@ -709,10 +709,8 @@ fn run_command_mode(
             login_shell,
         ));
     }
-    let command_chain = split_command_chain(arguments);
-    let new_session_tui = command_chain_uses_tui(&command_chain);
-    let mut commands = command_chain.into_iter();
-    let Some(mut invocation) = commands.next() else {
+    let mut command_chain = split_command_chain(arguments);
+    let Some(invocation) = command_chain.first().cloned() else {
         if host.is_some() {
             eprintln!("zz: --host requires a command");
             return Some(ExitCode::FAILURE);
@@ -721,7 +719,7 @@ fn run_command_mode(
     };
     let command = invocation.name.clone();
     if command == "app" {
-        if host.is_some() || !invocation.args.is_empty() || commands.next().is_some() {
+        if host.is_some() || !invocation.args.is_empty() || command_chain.len() != 1 {
             eprintln!("{NATIVE_APP_USAGE}");
             return Some(ExitCode::FAILURE);
         }
@@ -734,7 +732,7 @@ fn run_command_mode(
     if command == "protocol-version" {
         return Some(
             match protocol_version_output(
-                invocation.args.into_iter(),
+                invocation.args.clone().into_iter(),
                 host,
                 socket_source.is_overridden(),
             ) {
@@ -778,7 +776,7 @@ fn run_command_mode(
     }
 
     if command == "fleet" {
-        return Some(match fleet::run(invocation.args) {
+        return Some(match fleet::run(invocation.args.clone()) {
             Ok(output) => {
                 if !output.is_empty() {
                     println!("{output}");
@@ -797,17 +795,50 @@ fn run_command_mode(
         return Some(ExitCode::FAILURE);
     }
 
-    if is_kill_server_command(&command) && host.is_none() {
-        return Some(run_kill_server(socket_path, invocation.args));
+    if command == "--kill-server" {
+        return Some(match host {
+            Some(host) => run_host_kill_server(host, invocation.args),
+            None => run_kill_server(socket_path, invocation.args, true),
+        });
     }
 
-    if command_reads_stdin(&invocation) {
+    let mut prepared = host
+        .is_none()
+        .then(|| prepare_cli_command_chain(socket_path, &command_chain))
+        .flatten();
+
+    if let Some(error) = prepared
+        .as_ref()
+        .and_then(|prepared| prepared_command_error(&prepared.commands))
+    {
+        eprintln!("{}", server_error_message(error));
+        return Some(ExitCode::FAILURE);
+    }
+
+    if command == "kill-server" && host.is_none() && prepared.is_none() {
+        return Some(run_kill_server(socket_path, invocation.args, false));
+    }
+
+    let reads_stdin = prepared.as_ref().map_or_else(
+        || command_reads_stdin(&command_chain[0]),
+        |prepared| {
+            prepared
+                .commands
+                .first()
+                .is_some_and(prepared_command_reads_stdin)
+        },
+    );
+    if reads_stdin {
         match read_stdin_payload() {
             Ok(payload) => {
-                if !invocation.args.iter().any(|argument| argument == "--") {
-                    invocation.args.push("--".to_owned());
+                let arguments = prepared.as_mut().map_or_else(
+                    || &mut command_chain[0].args,
+                    |prepared| &mut prepared.commands[0].invocation.args,
+                );
+                if !arguments.iter().any(|argument| argument == "--") {
+                    arguments.push("--".to_owned());
                 }
-                invocation.args.push(payload);
+                arguments.push(payload);
             }
             Err(error) => {
                 eprintln!("zz: {error}");
@@ -816,7 +847,20 @@ fn run_command_mode(
         }
     }
 
-    if new_session_tui || attach_prefix_uses_tui(&command) {
+    let new_session_tui = prepared.as_ref().map_or_else(
+        || command_chain_uses_tui(&command_chain),
+        |prepared| prepared_command_chain_uses_tui(&command_chain, &prepared.commands),
+    );
+    let attach_tui = prepared.as_ref().map_or_else(
+        || attach_prefix_uses_tui(&command),
+        |prepared| {
+            prepared
+                .commands
+                .first()
+                .is_some_and(|prepared| prepared_attach_uses_tui(&command, prepared))
+        },
+    );
+    if new_session_tui || attach_tui {
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
             host: host.map(str::to_owned),
@@ -836,19 +880,38 @@ fn run_command_mode(
         let request = options
             .with_browser_provider(tui_browser_provider)
             .with_local_reconnect(&reconnect);
-        return Some(
-            match zz_tui::run_new_session(request, std::iter::once(invocation).chain(commands)) {
+        return Some(match prepared {
+            Some(PreparedCliCommandChain { client, commands }) => {
+                drop(client);
+                match zz_tui::run_prepared_new_session(request, commands) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+            None => match zz_tui::run_new_session(request, command_chain) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("{error}");
                     ExitCode::FAILURE
                 }
             },
-        );
+        });
     }
 
-    if matches!(command.as_str(), "attach" | "attach-session") {
-        let options = match parse_native_attach_arguments(invocation.args) {
+    let native_attach = prepared.as_ref().map_or_else(
+        || matches!(command.as_str(), "attach" | "attach-session"),
+        |prepared| {
+            prepared
+                .commands
+                .first()
+                .is_some_and(|prepared| prepared_native_attach(&command, prepared))
+        },
+    );
+    if native_attach {
+        let options = match parse_native_attach_arguments(command_chain[0].args.clone()) {
             Ok(options) => options,
             Err(NativeAttachArgumentError::Usage) => {
                 eprintln!("{NATIVE_ATTACH_USAGE}");
@@ -882,6 +945,9 @@ fn run_command_mode(
         let request = options
             .with_browser_provider(tui_browser_provider)
             .with_local_reconnect(&reconnect);
+        if let Some(PreparedCliCommandChain { client, .. }) = prepared.take() {
+            drop(client);
+        }
         return Some(match zz_tui::run(request) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -902,24 +968,55 @@ fn run_command_mode(
             ExitCode::FAILURE
         });
     }
-    let mut client = match host.map_or_else(
-        || {
-            connect_command_client(socket_path, mux_config_files, start_server)
-                .map_err(|error| format_local_command_error(socket_path, error))
+    let connected = match host {
+        Some(host) => connect_host_command_client(host)
+            .map(|client| (client, None))
+            .map_err(|error| format!("zz: {error}")),
+        None => match prepared {
+            Some(PreparedCliCommandChain { client, commands }) => Ok((client, Some(commands))),
+            None => connect_command_client(socket_path, mux_config_files, start_server)
+                .map(|client| (client, None))
+                .map_err(|error| format_local_command_error(socket_path, error)),
         },
-        |host| connect_host_command_client(host).map_err(|error| format!("zz: {error}")),
-    ) {
-        Ok(client) => client,
+    };
+    let (mut client, prepared_commands) = match connected {
+        Ok(connected) => connected,
         Err(error) => {
             eprintln!("{error}");
             return Some(ExitCode::FAILURE);
         }
     };
-    if host.is_some() && invocation.name == "--kill-server" {
-        "kill-server".clone_into(&mut invocation.name);
+    if let Some(prepared_commands) = prepared_commands {
+        let recover_kill = prepared_commands
+            .first()
+            .is_some_and(|prepared| prepared_kill_server_recovery(&command, prepared));
+        return match execute_command_chain(
+            prepared_commands.into_iter().enumerate(),
+            |(index, command)| {
+                execute_prepared_command(&mut client, command).map_err(|error| (index, error))
+            },
+            |outcome| {
+                print_command_output(&outcome.stdout);
+                print_command_error(&outcome.stderr);
+            },
+        ) {
+            Ok(exit_code) => Some(ExitCode::from(exit_code)),
+            Err((0, error)) if recover_kill && daemon_transport_failure(&error) => {
+                Some(recover_kill_server_failure(socket_path, &error))
+            }
+            Err((_, DaemonError::CommandFailed { output, error })) => {
+                print_command_output(&output);
+                eprintln!("{}", command_error_message(&error));
+                Some(ExitCode::FAILURE)
+            }
+            Err((_, error)) => {
+                eprintln!("{}", command_error_message(&error));
+                Some(ExitCode::FAILURE)
+            }
+        };
     }
     match execute_command_chain(
-        std::iter::once(invocation).chain(commands),
+        command_chain,
         |command| client.execute_streams(command),
         |outcome| {
             print_command_output(&outcome.stdout);
@@ -936,6 +1033,99 @@ fn run_command_mode(
             eprintln!("{}", command_error_message(&error));
             Some(ExitCode::FAILURE)
         }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+struct PreparedCliCommandChain {
+    client: CommandClient,
+    commands: Vec<PreparedCommand>,
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepare_cli_command_chain(
+    socket_path: &Path,
+    commands: &[CommandInvocation],
+) -> Option<PreparedCliCommandChain> {
+    let mut client = CommandClient::connect(socket_path).ok()?;
+    let commands = client.prepare_commands(commands.to_vec()).ok()?;
+    Some(PreparedCliCommandChain { client, commands })
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_command_is(command: &PreparedCommand, canonical_name: &str) -> bool {
+    command.result == PreparedCommandResult::Ready
+        && command.canonical_name.as_deref() == Some(canonical_name)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> {
+    commands.iter().find_map(|command| match &command.result {
+        PreparedCommandResult::Ready => None,
+        PreparedCommandResult::Error(error) => Some(error),
+    })
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_command_reads_stdin(command: &PreparedCommand) -> bool {
+    prepared_command_is(command, "agent-send")
+        && zz_daemon::agent_send_reads_stdin(&command.invocation.args)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_command_chain_uses_tui(
+    typed: &[CommandInvocation],
+    prepared: &[PreparedCommand],
+) -> bool {
+    typed.iter().zip(prepared).any(|(typed, prepared)| {
+        !matches!(typed.name.as_str(), "attach" | "attach-session")
+            && prepared_command_is(prepared, "new-session")
+            && MuxEngine::new_session_attaches(&prepared.invocation.args).unwrap_or(false)
+    })
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_attach_uses_tui(typed_name: &str, prepared: &PreparedCommand) -> bool {
+    !matches!(typed_name, "attach" | "attach-session")
+        && prepared_command_is(prepared, "attach-session")
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_native_attach(typed_name: &str, prepared: &PreparedCommand) -> bool {
+    matches!(typed_name, "attach" | "attach-session")
+        && !prepared.alias_matched
+        && prepared_command_is(prepared, "attach-session")
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_kill_server_recovery(typed_name: &str, prepared: &PreparedCommand) -> bool {
+    typed_name == "kill-server"
+        && !prepared.alias_matched
+        && prepared_command_is(prepared, "kill-server")
+}
+
+#[cfg(not(target_os = "ios"))]
+fn execute_prepared_command(
+    client: &mut CommandClient,
+    command: PreparedCommand,
+) -> Result<CommandOutcome, DaemonError> {
+    match command.result {
+        PreparedCommandResult::Ready => client.execute_prepared_streams(command.invocation),
+        PreparedCommandResult::Error(error) => Err(DaemonError::Server(error)),
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn daemon_transport_failure(error: &DaemonError) -> bool {
+    match error {
+        DaemonError::Io(_) | DaemonError::Protocol(_) | DaemonError::IncompatibleDaemon { .. } => {
+            true
+        }
+        DaemonError::CommandFailed { error, .. } => daemon_transport_failure(error),
+        DaemonError::Server(_)
+        | DaemonError::AlreadyRunning(_)
+        | DaemonError::Thread(_)
+        | DaemonError::CommandExit { .. } => false,
     }
 }
 
@@ -979,9 +1169,9 @@ fn split_command_chain(arguments: &[String]) -> Vec<CommandInvocation> {
 /// the rest of the group on `CMD_RETURN_ERROR`), never merely because the
 /// client's exit status went nonzero, and the last nonzero status wins.
 #[cfg(not(target_os = "ios"))]
-fn execute_command_chain<E>(
-    commands: impl IntoIterator<Item = CommandInvocation>,
-    mut execute: impl FnMut(CommandInvocation) -> Result<CommandOutcome, E>,
+fn execute_command_chain<T, E>(
+    commands: impl IntoIterator<Item = T>,
+    mut execute: impl FnMut(T) -> Result<CommandOutcome, E>,
     mut emit: impl FnMut(&CommandOutcome),
 ) -> Result<u8, E> {
     let mut exit_code = 0;
@@ -1081,11 +1271,6 @@ fn read_stdin_payload() -> Result<String, String> {
         .read_to_string(&mut payload)
         .map_err(|error| format!("could not read standard input: {error}"))?;
     Ok(payload)
-}
-
-#[cfg(not(target_os = "ios"))]
-fn is_kill_server_command(command: &str) -> bool {
-    matches!(command, "kill-server" | "--kill-server")
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1297,18 +1482,35 @@ fn server_error_message(error: &ServerError) -> String {
 }
 
 #[cfg(not(target_os = "ios"))]
-fn run_kill_server(path: &Path, args: impl IntoIterator<Item = String>) -> ExitCode {
+fn run_kill_server(
+    path: &Path,
+    args: impl IntoIterator<Item = String>,
+    prepared: bool,
+) -> ExitCode {
     let invocation = CommandInvocation::new("kill-server", args);
     let failure = match CommandClient::connect(path) {
-        Ok(mut client) => match client.execute(invocation) {
-            Ok(output) => {
-                if !output.is_empty() {
-                    println!("{output}");
+        Ok(mut client) => {
+            if prepared {
+                match client.execute_prepared_streams(invocation) {
+                    Ok(outcome) => {
+                        print_command_output(&outcome.stdout);
+                        print_command_error(&outcome.stderr);
+                        return ExitCode::from(outcome.exit_code);
+                    }
+                    Err(error) => error,
                 }
-                return ExitCode::SUCCESS;
+            } else {
+                match client.execute(invocation) {
+                    Ok(output) => {
+                        if !output.is_empty() {
+                            println!("{output}");
+                        }
+                        return ExitCode::SUCCESS;
+                    }
+                    Err(error) => error,
+                }
             }
-            Err(error) => error,
-        },
+        }
         Err(error) if daemon_is_missing(&error) => {
             eprintln!("{}", format_local_command_error(path, error));
             return ExitCode::FAILURE;
@@ -1316,6 +1518,38 @@ fn run_kill_server(path: &Path, args: impl IntoIterator<Item = String>) -> ExitC
         Err(error) => error,
     };
 
+    recover_kill_server_failure(path, &failure)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn run_host_kill_server(host: &str, args: impl IntoIterator<Item = String>) -> ExitCode {
+    let mut client = match connect_host_command_client(host) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("zz: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match client.execute_prepared_streams(CommandInvocation::new("kill-server", args)) {
+        Ok(outcome) => {
+            print_command_output(&outcome.stdout);
+            print_command_error(&outcome.stderr);
+            ExitCode::from(outcome.exit_code)
+        }
+        Err(DaemonError::CommandFailed { output, error }) => {
+            print_command_output(&output);
+            eprintln!("{}", command_error_message(&error));
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("{}", command_error_message(&error));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn recover_kill_server_failure(path: &Path, failure: &DaemonError) -> ExitCode {
     log::warn!(
         target: "zz::diagnostics::process",
         "graceful kill-server failed path={} error={failure}; attempting verified recovery",
@@ -1955,22 +2189,16 @@ mod tests {
         ApplicationArgumentError, CommandOutcome, TMUX_USAGE, TMUX_VERSION_OUTPUT,
         application_arguments, application_working_directory, attach_prefix_uses_tui,
         command_chain_uses_tui, command_error_message, command_reads_stdin, daemon_is_missing,
-        execute_command_chain, implicit_tmux_endpoint_conflict, is_kill_server_command,
-        new_session_uses_tui, parse_native_attach_arguments, protocol_version_output,
+        daemon_transport_failure, execute_command_chain, implicit_tmux_endpoint_conflict,
+        new_session_uses_tui, parse_native_attach_arguments, prepared_attach_uses_tui,
+        prepared_command_chain_uses_tui, prepared_command_reads_stdin,
+        prepared_kill_server_recovery, prepared_native_attach, protocol_version_output,
         run_command_mode, split_command_chain, terminal_color_scheme, tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
     use zz_daemon::DaemonError;
-    use zz_protocol::CommandInvocation;
-
-    #[test]
-    fn kill_server_accepts_command_and_flag_spellings_only() {
-        assert!(is_kill_server_command("kill-server"));
-        assert!(is_kill_server_command("--kill-server"));
-        assert!(!is_kill_server_command("kill-session"));
-        assert!(!is_kill_server_command("--kill-session"));
-    }
+    use zz_protocol::{CommandInvocation, PreparedCommand, PreparedCommandResult, ServerError};
 
     #[test]
     fn app_is_an_exact_native_gui_verb_even_inside_tmux() {
@@ -2089,6 +2317,61 @@ mod tests {
     }
 
     #[test]
+    fn prepared_cli_routing_uses_canonical_identity_and_alias_match() {
+        let prepared =
+            |typed: &str, canonical: &str, alias_matched: bool, args: &[&str]| PreparedCommand {
+                invocation: CommandInvocation::new(typed, args.iter().copied()),
+                canonical_name: Some(canonical.to_owned()),
+                alias_matched,
+                result: PreparedCommandResult::Ready,
+            };
+
+        let exact_shadow = prepared("attach", "attach-session", true, &[]);
+        assert!(!prepared_native_attach("attach", &exact_shadow));
+        assert!(!prepared_attach_uses_tui("attach", &exact_shadow));
+
+        let live_attach = prepared("go", "attach-session", true, &["-t", "work"]);
+        assert!(prepared_attach_uses_tui("go", &live_attach));
+
+        let live_new = prepared("work", "new-session", true, &["-s", "work"]);
+        assert!(prepared_command_chain_uses_tui(
+            &[CommandInvocation::new("work", ["-s", "work"])],
+            &[live_new]
+        ));
+
+        let live_send = prepared("pipe", "agent-send", true, &["-t", "%0"]);
+        assert!(prepared_command_reads_stdin(&live_send));
+        let shadowed_send = prepared("agent-send", "display-message", true, &["-p", "shadow"]);
+        assert!(!prepared_command_reads_stdin(&shadowed_send));
+
+        let plain_kill = prepared("kill-server", "kill-server", false, &[]);
+        let aliased_kill = prepared("kill-server", "kill-server", true, &[]);
+        assert!(prepared_kill_server_recovery("kill-server", &plain_kill));
+        assert!(!prepared_kill_server_recovery("kill-server", &aliased_kill));
+    }
+
+    #[test]
+    fn kill_recovery_accepts_only_transport_and_handshake_failures() {
+        assert!(daemon_transport_failure(&DaemonError::Io(io::Error::from(
+            io::ErrorKind::BrokenPipe
+        ))));
+        assert!(!daemon_transport_failure(&DaemonError::Server(
+            ServerError::InvalidCommand("no".to_owned())
+        )));
+        assert!(!daemon_transport_failure(&DaemonError::CommandExit {
+            output: String::new(),
+            exit_code: 7,
+        }));
+        assert!(daemon_transport_failure(&DaemonError::CommandFailed {
+            output: String::new(),
+            error: Box::new(DaemonError::IncompatibleDaemon {
+                daemon: Some(73),
+                client: 74,
+            }),
+        }));
+    }
+
+    #[test]
     fn new_session_tui_routing_scans_the_complete_command_chain() {
         let attaching_later = split_command_chain(
             &[
@@ -2202,7 +2485,7 @@ mod tests {
         let commands = split_command_chain(&["three", ";", "zero", ";", "five"].map(str::to_owned));
         let mut seen = Vec::new();
         let mut streams = Vec::new();
-        let result = execute_command_chain::<u8>(
+        let result: Result<u8, u8> = execute_command_chain(
             commands,
             |command| {
                 seen.push(command.name.clone());

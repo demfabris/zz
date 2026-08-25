@@ -11,6 +11,18 @@ mkdir -p "$control_dir"
 printf '' >"$control_dir/hit.conf"
 printf '%s\n' 'source-file zz-control-nested-one-missing.conf zz-control-nested-two-missing.conf' >"$control_dir/nested.conf"
 printf '%s\n' 'wibble' >"$control_dir/invalid.conf"
+printf '%s\n' 'set-option -g @control_verbose loaded' >"$control_dir/verbose.conf"
+printf '%s\n' \
+    'kill-session -t missing-runtime' \
+    'set-option -g nonexistent-option value' \
+    'set-option -g @runtime_after yes' >"$control_dir/runtime.conf"
+queue_dir="$control_dir/queue"
+mkdir -p "$queue_dir"
+printf '%s\n' 'display-message -p CONTROL_QUEUE_LEAF' >"$queue_dir/leaf.conf"
+printf "source-file middle-before-missing.conf '%s' middle-after-missing.conf\n" \
+    "$queue_dir/leaf.conf" >"$queue_dir/middle.conf"
+printf "source-file root-before-missing.conf '%s' root-after-missing.conf\n" \
+    "$queue_dir/middle.conf" >"$queue_dir/root.conf"
 depth_dir="$control_dir/depth"
 mkdir -p "$depth_dir"
 printf '%s\n' 'set-option -g @leaf yes' >"$depth_dir/leaf.conf"
@@ -235,6 +247,74 @@ transcript="$(
 )"
 
 main_client set-environment -g SOURCE_FILE_CONTROL "$transcript"
+
+verbose_raw="$control_dir/verbose.raw"
+verbose_errors="$control_dir/verbose.err"
+{
+    printf "source-file -v '%s'\n" "$control_dir/verbose.conf"
+    printf '%s\n' 'detach-client'
+} | control_client >"$verbose_raw" 2>"$verbose_errors"
+if [ ! -s "$verbose_errors" ] && \
+   ! grep -Fq 'verbose.conf:' "$verbose_raw" && \
+   [ "$(probe_command show-options -gqv @control_verbose)" = loaded ]; then
+    main_client set-environment -g SOURCE_FILE_CONTROL_VERBOSE suppressed
+else
+    main_client set-environment -g SOURCE_FILE_CONTROL_VERBOSE leaked
+fi
+
+runtime_raw="$control_dir/runtime.raw"
+runtime_errors="$control_dir/runtime.err"
+if {
+    printf "source-file '%s'\n" "$control_dir/runtime.conf"
+    printf '%s\n' 'display-message -p RUNTIME_DONE'
+    printf '%s\n' 'detach-client'
+} | control_client >"$runtime_raw" 2>"$runtime_errors"; then
+    runtime_status=0
+else
+    runtime_status=$?
+fi
+runtime_kill="$(grep -c '^can'"'"'t find session: missing-runtime$' "$runtime_raw" || true)"
+runtime_option="$(grep -c '^invalid option: nonexistent-option$' "$runtime_raw" || true)"
+runtime_done="$(grep -c '^RUNTIME_DONE$' "$runtime_raw" || true)"
+runtime_after="$(probe_command show-options -gqv @runtime_after)"
+main_client set-environment -g SOURCE_FILE_CONTROL_RUNTIME \
+    "rc=$runtime_status stderr=$(wc -c <"$runtime_errors" | tr -d ' ') kill=$runtime_kill option=$runtime_option done=$runtime_done after=$runtime_after"
+
+queue_raw="$control_dir/queue.raw"
+queue_errors="$control_dir/queue.err"
+if {
+    printf "source-file '%s'\n" "$queue_dir/root.conf"
+    printf '%s\n' 'detach-client'
+} | control_client >"$queue_raw" 2>"$queue_errors"; then
+    queue_status=0
+else
+    queue_status=$?
+fi
+if [ "$queue_status" -gt 1 ] || [ -s "$queue_errors" ]; then
+    sed -n '1,120p' "$queue_errors" >&2
+    exit 1
+fi
+queue_transcript="$(
+    sed "s|$queue_dir/||g" "$queue_raw" | awk '
+        /^%begin [0-9]+ [0-9]+ 1$/ {
+            active = 1
+            print "%begin"
+            next
+        }
+        /^%end [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) print "%end"
+            active = 0
+            next
+        }
+        /^%error [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) print "%error"
+            active = 0
+            next
+        }
+        active { print }
+    ' | tr '\n' '~'
+)"
+main_client set-environment -g SOURCE_FILE_CONTROL_NESTED_QUEUE "$queue_transcript"
 
 depth_raw="$control_dir/depth.raw"
 depth_errors="$control_dir/depth.err"

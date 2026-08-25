@@ -10,8 +10,8 @@ use std::{
 
 use zz_daemon::InteractiveClient;
 use zz_protocol::{
-    CommandInvocation, CommandResponse, EventPayload, MuxSnapshot, ProtocolMessage, ServerError,
-    SessionId, WindowId,
+    CommandInvocation, CommandResponse, EventPayload, MuxSnapshot, PreparedCommand,
+    PreparedCommandResult, ProtocolMessage, ServerError, SessionId, WindowId,
 };
 
 use super::{
@@ -86,28 +86,53 @@ fn drive<W: Write>(
     let (events, receiver) = mpsc::sync_channel(32);
     spawn_protocol_reader(Arc::clone(client), events.clone());
     let mut stdin_started = false;
-    if let Some(error) = unknown_command(&initial.name) {
-        output.write_line(&error)?;
+    let mut state = ControlState::default();
+    let mut pending_stdin = VecDeque::new();
+    let prepared = prepare_command_unit(
+        client.as_ref(),
+        &receiver,
+        output,
+        vec![initial],
+        &mut state,
+        &mut pending_stdin,
+    )?;
+    if prepared.exit.is_some() {
         finish_exit(
             output,
-            None,
-            false,
+            prepared.exit.reason(),
+            state.wait_exit,
             false,
             &events,
             &mut stdin_started,
             &receiver,
-            &mut VecDeque::new(),
+            &mut pending_stdin,
+        )?;
+        return Ok(match prepared.exit {
+            ExitSignal::Clean | ExitSignal::Detached => control_exit_code(0, &state),
+            _ => 1,
+        });
+    }
+    if let Some(error) = prepared_error(&prepared.commands) {
+        output.write_line(&error.tmux_message())?;
+        finish_exit(
+            output,
+            None,
+            state.wait_exit,
+            false,
+            &events,
+            &mut stdin_started,
+            &receiver,
+            &mut pending_stdin,
         )?;
         return Ok(1);
     }
-
-    let mut state = ControlState::default();
-    let mut pending_stdin = VecDeque::new();
-    let initial_result = execute_command(
+    let initial_result = execute_prepared_command(
         client.as_ref(),
         &receiver,
         output,
-        initial,
+        prepared.commands.into_iter().next().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "missing prepared command")
+        })?,
         0,
         &mut state,
         &mut pending_stdin,
@@ -123,7 +148,10 @@ fn drive<W: Write>(
             &receiver,
             &mut pending_stdin,
         )?;
-        return Ok(initial_result.exit_code);
+        return Ok(match initial_result.exit {
+            ExitSignal::Detached | ExitSignal::Clean => control_exit_code(0, &state),
+            _ => initial_result.exit_code,
+        });
     }
     if initial_result.exit_code != 0 || state.attached_session.is_none() {
         finish_exit(
@@ -136,10 +164,11 @@ fn drive<W: Write>(
             &receiver,
             &mut pending_stdin,
         )?;
-        return Ok(initial_result.exit_code);
+        return Ok(control_exit_code(initial_result.exit_code, &state));
     }
 
     ensure_stdin_reader(&events, &mut stdin_started);
+    let mut client_exit_code = 0;
     loop {
         let event = pending_stdin.pop_front().map_or_else(
             || receiver.recv().unwrap_or(MainEvent::Disconnected),
@@ -160,13 +189,43 @@ fn drive<W: Write>(
                         &receiver,
                         &mut pending_stdin,
                     )?;
-                    return Ok(0);
+                    return Ok(control_exit_code(0, &state));
                 }
                 ParsedLine::Ignore => {}
                 ParsedLine::Error(error) => output.parse_error(&error)?,
                 ParsedLine::Commands(commands) => {
-                    for command in commands {
-                        let result = execute_command(
+                    let prepared = prepare_command_unit(
+                        client.as_ref(),
+                        &receiver,
+                        output,
+                        commands,
+                        &mut state,
+                        &mut pending_stdin,
+                    )?;
+                    if prepared.exit.is_some() {
+                        finish_exit(
+                            output,
+                            prepared.exit.reason(),
+                            state.wait_exit,
+                            false,
+                            &events,
+                            &mut stdin_started,
+                            &receiver,
+                            &mut pending_stdin,
+                        )?;
+                        return Ok(match prepared.exit {
+                            ExitSignal::Clean | ExitSignal::Detached => {
+                                control_exit_code(0, &state)
+                            }
+                            _ => 1,
+                        });
+                    }
+                    if let Some(error) = prepared_error(&prepared.commands) {
+                        output.parse_error(&format!("parse error: {}", error.tmux_message()))?;
+                        continue;
+                    }
+                    for command in prepared.commands {
+                        let result = execute_prepared_command(
                             client.as_ref(),
                             &receiver,
                             output,
@@ -186,7 +245,15 @@ fn drive<W: Write>(
                                 &receiver,
                                 &mut pending_stdin,
                             )?;
-                            return Ok(result.exit_code);
+                            return Ok(match result.exit {
+                                ExitSignal::Detached | ExitSignal::Clean => {
+                                    control_exit_code(0, &state)
+                                }
+                                _ => result.exit_code,
+                            });
+                        }
+                        if result.marks_client_failure {
+                            client_exit_code = 1;
                         }
                         if result.abort_line {
                             break;
@@ -207,7 +274,7 @@ fn drive<W: Write>(
                     &receiver,
                     &mut pending_stdin,
                 )?;
-                return Ok(0);
+                return Ok(control_exit_code(client_exit_code, &state));
             }
             MainEvent::Stdin(StdinEvent::Error(error)) => {
                 eprintln!("zz: {error}");
@@ -237,7 +304,10 @@ fn drive<W: Write>(
                         &receiver,
                         &mut pending_stdin,
                     )?;
-                    return Ok(u8::from(exit != ExitSignal::Clean));
+                    return Ok(match exit {
+                        ExitSignal::Detached | ExitSignal::Clean => control_exit_code(0, &state),
+                        _ => 1,
+                    });
                 }
             }
             MainEvent::Disconnected => {
@@ -257,6 +327,101 @@ fn drive<W: Write>(
     }
 }
 
+fn prepared_error(commands: &[PreparedCommand]) -> Option<&ServerError> {
+    commands.iter().find_map(|command| match &command.result {
+        PreparedCommandResult::Ready => None,
+        PreparedCommandResult::Error(error) => Some(error),
+    })
+}
+
+fn prepare_command_unit<W: Write>(
+    client: &InteractiveClient,
+    receiver: &mpsc::Receiver<MainEvent>,
+    output: &mut ControlWriter<W>,
+    commands: Vec<CommandInvocation>,
+    state: &mut ControlState,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) -> io::Result<PreparedUnit> {
+    let expected = commands.len();
+    let request_id = client
+        .prepare_commands(commands)
+        .map_err(io::Error::other)?;
+    let mut exit = ExitSignal::None;
+    loop {
+        match receiver.recv().unwrap_or(MainEvent::Disconnected) {
+            MainEvent::Protocol(message) => match match_prepared_response(*message, request_id) {
+                Ok(commands) => {
+                    if commands.len() != expected {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "prepared command count mismatch",
+                        ));
+                    }
+                    return Ok(PreparedUnit { commands, exit });
+                }
+                Err(message) => {
+                    let signal = handle_protocol(message, state, output)?;
+                    if signal.is_some() {
+                        exit = signal;
+                    }
+                }
+            },
+            MainEvent::Stdin(stdin) => pending_stdin.push_back(stdin),
+            MainEvent::Disconnected => {
+                return Ok(PreparedUnit {
+                    commands: Vec::new(),
+                    exit: if exit.is_some() {
+                        exit
+                    } else {
+                        ExitSignal::Unexpected
+                    },
+                });
+            }
+        }
+    }
+}
+
+fn match_prepared_response(
+    message: ProtocolMessage,
+    request_id: u64,
+) -> Result<Vec<PreparedCommand>, ProtocolMessage> {
+    match message {
+        ProtocolMessage::PreparedCommandList {
+            request_id: response_id,
+            commands,
+        } if response_id == request_id => Ok(commands),
+        message => Err(message),
+    }
+}
+
+fn execute_prepared_command<W: Write>(
+    client: &InteractiveClient,
+    receiver: &mpsc::Receiver<MainEvent>,
+    output: &mut ControlWriter<W>,
+    command: PreparedCommand,
+    flags: u8,
+    state: &mut ControlState,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) -> io::Result<CommandResult> {
+    let PreparedCommand {
+        invocation,
+        result: PreparedCommandResult::Ready,
+        ..
+    } = command
+    else {
+        unreachable!()
+    };
+    execute_command(
+        client,
+        receiver,
+        output,
+        invocation,
+        flags,
+        state,
+        pending_stdin,
+    )
+}
+
 fn execute_command<W: Write>(
     client: &InteractiveClient,
     receiver: &mpsc::Receiver<MainEvent>,
@@ -267,7 +432,7 @@ fn execute_command<W: Write>(
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<CommandResult> {
     let frame = output.begin(flags)?;
-    let request_id = match client.execute(command) {
+    let request_id = match client.execute_prepared(command) {
         Ok(request_id) => request_id,
         Err(error) => {
             output.error(&frame, &error.to_string())?;
@@ -275,6 +440,7 @@ fn execute_command<W: Write>(
                 exit_code: 1,
                 exit: ExitSignal::Unexpected,
                 abort_line: true,
+                marks_client_failure: false,
             });
         }
     };
@@ -286,11 +452,14 @@ fn execute_command<W: Write>(
                     if response_request_id(&response) == request_id =>
                 {
                     let abort_line = response_aborts_line(&response);
+                    let marks_client_failure =
+                        response_marks_client_failure(&response) || state.client_failure;
                     let exit_code = output.response(&frame, response)?;
                     return Ok(CommandResult {
                         exit_code,
                         exit,
                         abort_line,
+                        marks_client_failure,
                     });
                 }
                 message => {
@@ -301,6 +470,7 @@ fn execute_command<W: Write>(
                             exit_code: 1,
                             exit: signal,
                             abort_line: true,
+                            marks_client_failure: false,
                         });
                     }
                     if signal.is_some() {
@@ -319,6 +489,7 @@ fn execute_command<W: Write>(
                         ExitSignal::Unexpected
                     },
                     abort_line: true,
+                    marks_client_failure: false,
                 });
             }
         }
@@ -332,6 +503,7 @@ struct ControlState {
     last_windows: BTreeMap<SessionId, WindowId>,
     self_name: Option<String>,
     wait_exit: bool,
+    client_failure: bool,
 }
 
 impl ControlState {
@@ -471,10 +643,27 @@ fn handle_protocol<W: Write>(
                 line.extend(render_message(&text));
                 output.notify(&line)?;
             }
+            EventPayload::SourcedCommandGuard {
+                output: text,
+                error,
+                client_failure,
+            } => {
+                state.client_failure |= client_failure;
+                output.sourced_command_guard(&text, error)?;
+            }
+            EventPayload::ClientMessage {
+                kind: zz_protocol::ClientMessageKind::Error,
+                text,
+                ..
+            } => {
+                state.client_failure |= is_source_error_message(&text);
+                output.diagnostic_error(&text)?;
+            }
             EventPayload::ClientMessage { kind, text, .. }
                 if kind == zz_protocol::ClientMessageKind::Warning
                     && is_source_error_message(&text) =>
             {
+                state.client_failure = true;
                 output.diagnostic_error(&text)?;
             }
             EventPayload::ClientMessage { kind, text, .. }
@@ -484,7 +673,7 @@ fn handle_protocol<W: Write>(
             }
             EventPayload::Detached { .. } => {
                 state.attached_session = None;
-                return Ok(ExitSignal::Clean);
+                return Ok(ExitSignal::Detached);
             }
             EventPayload::ServerStopping => return Ok(ExitSignal::Clean),
             EventPayload::ControlExit { reason } if reason == "too far behind" => {
@@ -659,22 +848,41 @@ fn is_config_message(text: &str) -> bool {
         || text.contains(" invalid line")
         || text.starts_with("invalid line")
         || (text.starts_with("skipped ") && text.contains("unsupported tmux command"))
-        || text
-            .split_once(": ")
-            .and_then(|(location, _)| location.rsplit_once(':'))
-            .is_some_and(|(_, line)| line.parse::<u32>().is_ok())
+        || text.rmatch_indices(": ").any(|(delimiter, _)| {
+            text[..delimiter]
+                .rsplit_once(':')
+                .is_some_and(|(path, line)| !path.is_empty() && line.parse::<u32>().is_ok())
+        })
 }
 
 fn is_source_error_message(text: &str) -> bool {
+    let mut lines = text.lines();
+    lines.next().is_some_and(is_source_error_line) && lines.all(is_source_error_line)
+}
+
+fn is_source_error_line(text: &str) -> bool {
     text.starts_with("No such file or directory: ")
         || text.starts_with("Invalid argument: ")
         || text.starts_with("Cannot allocate memory: ")
         || text.starts_with("Pattern syntax error")
         || text == "too many nested files"
+        || text
+            .strip_prefix("stream did not contain valid UTF-8: ")
+            .is_some_and(|path| Path::new(path).is_absolute())
+        || text.split_once("): ").is_some_and(|(error, path)| {
+            error
+                .rsplit_once(" (os error ")
+                .is_some_and(|(_, code)| code.parse::<i32>().is_ok())
+                && Path::new(path).is_absolute()
+        })
 }
 
 fn response_aborts_line(response: &CommandResponse) -> bool {
     matches!(response, CommandResponse::Error { .. })
+}
+
+fn response_marks_client_failure(response: &CommandResponse) -> bool {
+    matches!(response, CommandResponse::Error { error, .. } if !error.is_command_parse())
 }
 
 fn response_request_id(response: &CommandResponse) -> u64 {
@@ -682,6 +890,14 @@ fn response_request_id(response: &CommandResponse) -> u64 {
         CommandResponse::Success { request_id, .. } | CommandResponse::Error { request_id, .. } => {
             *request_id
         }
+    }
+}
+
+fn control_exit_code(command_exit_code: u8, state: &ControlState) -> u8 {
+    if command_exit_code == 0 && state.client_failure {
+        1
+    } else {
+        command_exit_code
     }
 }
 
@@ -819,25 +1035,10 @@ fn parse_line(line: &str) -> ParsedLine {
     if let Some(diagnostic) = parsed.diagnostics.first() {
         return ParsedLine::Error(format!("parse error: {}", diagnostic.message));
     }
-    if let Some(error) = parsed
-        .commands
-        .iter()
-        .find_map(|command| unknown_command(&command.name))
-    {
-        return ParsedLine::Error(format!("parse error: {error}"));
-    }
     if parsed.commands.is_empty() {
         ParsedLine::Ignore
     } else {
         ParsedLine::Commands(parsed.commands)
-    }
-}
-
-fn unknown_command(name: &str) -> Option<String> {
-    match zz_protocol::resolve_command(name) {
-        zz_protocol::CommandResolution::Unknown => Some(format!("unknown command: {name}")),
-        zz_protocol::CommandResolution::Ambiguous(message) => Some(message),
-        _ => None,
     }
 }
 
@@ -850,7 +1051,15 @@ fn unix_timestamp() -> u64 {
 
 enum DeferredOutput {
     Notification(Vec<u8>),
-    DiagnosticError { time: u64, text: String },
+    DiagnosticError {
+        time: u64,
+        text: String,
+    },
+    SourcedCommandGuard {
+        time: u64,
+        output: String,
+        error: bool,
+    },
 }
 
 struct ControlWriter<W: Write> {
@@ -906,6 +1115,11 @@ impl<W: Write> ControlWriter<W> {
                     self.write_line(&text)?;
                     self.write_frame_end(&frame, true)?;
                 }
+                DeferredOutput::SourcedCommandGuard {
+                    time,
+                    output,
+                    error,
+                } => self.write_sourced_command_guard(time, &output, error)?,
             }
         }
         Ok(())
@@ -928,6 +1142,36 @@ impl<W: Write> ControlWriter<W> {
         self.write_line(text)?;
         self.write_frame_end(&frame, true)?;
         self.output.flush()
+    }
+
+    fn sourced_command_guard(&mut self, output: &str, error: bool) -> io::Result<()> {
+        self.sourced_command_guard_at(unix_timestamp(), output, error)
+    }
+
+    fn sourced_command_guard_at(&mut self, time: u64, output: &str, error: bool) -> io::Result<()> {
+        if self.block_open {
+            self.deferred
+                .push_back(DeferredOutput::SourcedCommandGuard {
+                    time,
+                    output: output.to_owned(),
+                    error,
+                });
+            return Ok(());
+        }
+        self.write_sourced_command_guard(time, output, error)?;
+        self.output.flush()
+    }
+
+    fn write_sourced_command_guard(
+        &mut self,
+        time: u64,
+        output: &str,
+        error: bool,
+    ) -> io::Result<()> {
+        let frame = self.allocate_frame(time, 1);
+        self.write_frame_begin(&frame)?;
+        self.payload(output)?;
+        self.write_frame_end(&frame, error)
     }
 
     fn begin(&mut self, flags: u8) -> io::Result<Frame> {
@@ -980,10 +1224,7 @@ impl<W: Write> ControlWriter<W> {
             }
             CommandResponse::Error { error, output, .. } => {
                 self.payload(&output)?;
-                match error {
-                    ServerError::InvalidCommand(message) => self.write_line(&message)?,
-                    error => self.write_line(&error.to_string())?,
-                }
+                self.write_line(&error.tmux_message())?;
                 self.end(frame, true)?;
                 Ok(1)
             }
@@ -1062,12 +1303,19 @@ struct CommandResult {
     exit_code: u8,
     exit: ExitSignal,
     abort_line: bool,
+    marks_client_failure: bool,
+}
+
+struct PreparedUnit {
+    commands: Vec<PreparedCommand>,
+    exit: ExitSignal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExitSignal {
     None,
     Clean,
+    Detached,
     TooFarBehind,
     Unexpected,
 }
@@ -1081,7 +1329,7 @@ impl ExitSignal {
         match self {
             Self::TooFarBehind => Some("too far behind"),
             Self::Unexpected => Some("server exited unexpectedly"),
-            Self::None | Self::Clean => None,
+            Self::None | Self::Clean | Self::Detached => None,
         }
     }
 }
@@ -1237,7 +1485,7 @@ mod tests {
     }
 
     #[test]
-    fn source_errors_use_direct_nested_and_quiet_control_shapes() {
+    fn sourced_guards_defer_fifo_without_leaking_into_the_next_command() {
         let mut writer = ControlWriter::new(Vec::new(), false);
         let direct = writer.begin_at(17, 1).unwrap();
         assert_eq!(
@@ -1255,6 +1503,143 @@ mod tests {
                 .unwrap(),
             1
         );
+        let outer = writer.begin_at(18, 1).unwrap();
+        writer.sourced_command_guard_at(19, "", false).unwrap();
+        writer.sourced_command_guard_at(20, "", false).unwrap();
+        writer
+            .sourced_command_guard_at(21, "No such file or directory: partial.conf", false)
+            .unwrap();
+        writer
+            .sourced_command_guard_at(22, "can't find session: missing-runtime", true)
+            .unwrap();
+        assert_eq!(
+            writer
+                .response(
+                    &outer,
+                    CommandResponse::Success {
+                        request_id: 2,
+                        output: String::new(),
+                        exit_code: 3,
+                        stderr: String::new(),
+                    },
+                )
+                .unwrap(),
+            3
+        );
+        let fresh = writer.begin_at(23, 1).unwrap();
+        writer
+            .response(
+                &fresh,
+                CommandResponse::Success {
+                    request_id: 3,
+                    output: "fresh".to_owned(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 17 1 1\nNo such file or directory: direct.conf\n%error 17 1 1\n\
+              %begin 18 2 1\n%end 18 2 1\n\
+              %begin 19 3 1\n%end 19 3 1\n\
+              %begin 20 4 1\n%end 20 4 1\n\
+              %begin 21 5 1\nNo such file or directory: partial.conf\n%end 21 5 1\n\
+              %begin 22 6 1\ncan't find session: missing-runtime\n%error 22 6 1\n\
+              %begin 23 7 1\nfresh\n%end 23 7 1\n"
+        );
+    }
+
+    #[test]
+    fn standalone_diagnostics_only_make_source_reads_sticky() {
+        let source_read = "stream did not contain valid UTF-8: /tmp/invalid-source.conf";
+        for kind in [
+            zz_protocol::ClientMessageKind::Error,
+            zz_protocol::ClientMessageKind::Warning,
+        ] {
+            let mut source_writer = ControlWriter::new(Vec::new(), false);
+            let mut source_state = ControlState::default();
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::ClientMessage {
+                        pane: None,
+                        kind,
+                        text: source_read.to_owned(),
+                    },
+                }),
+                &mut source_state,
+                &mut source_writer,
+            )
+            .unwrap();
+            assert!(source_state.client_failure);
+            assert_eq!(control_exit_code(0, &source_state), 1);
+            let source_lines = std::str::from_utf8(&source_writer.output)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>();
+            assert_eq!(source_lines[1], source_read);
+            assert!(source_lines[2].starts_with("%error "));
+        }
+
+        let mut unrelated_writer = ControlWriter::new(Vec::new(), false);
+        let mut unrelated_state = ControlState::default();
+        handle_protocol(
+            ProtocolMessage::Event(zz_protocol::Event {
+                sequence: 2,
+                payload: EventPayload::ClientMessage {
+                    pane: None,
+                    kind: zz_protocol::ClientMessageKind::Error,
+                    text: "background worker failed".to_owned(),
+                },
+            }),
+            &mut unrelated_state,
+            &mut unrelated_writer,
+        )
+        .unwrap();
+        assert!(!unrelated_state.client_failure);
+        assert_eq!(control_exit_code(0, &unrelated_state), 0);
+        assert!(
+            std::str::from_utf8(&unrelated_writer.output)
+                .unwrap()
+                .contains("background worker failed")
+        );
+    }
+
+    #[test]
+    fn sourced_guard_stickiness_is_explicit_and_parse_errors_are_nonsticky() {
+        for (client_failure, expected) in [(false, 0), (true, 1)] {
+            let mut writer = ControlWriter::new(Vec::new(), false);
+            let mut state = ControlState::default();
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::SourcedCommandGuard {
+                        output: "diagnostic".to_owned(),
+                        error: true,
+                        client_failure,
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+            assert_eq!(control_exit_code(0, &state), expected);
+            let lines = std::str::from_utf8(&writer.output)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>();
+            assert_eq!(lines[1], "diagnostic");
+            assert_eq!(
+                lines[0].strip_prefix("%begin "),
+                lines[2].strip_prefix("%error ")
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_diagnostic_errors_still_defer_after_open_commands() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
         let nested = writer.begin_at(18, 1).unwrap();
         writer
             .diagnostic_error_at(
@@ -1276,21 +1661,9 @@ mod tests {
                 .unwrap(),
             0
         );
-        let quiet = writer.begin_at(20, 1).unwrap();
-        writer
-            .response(
-                &quiet,
-                CommandResponse::Success {
-                    request_id: 3,
-                    output: String::new(),
-                    exit_code: 0,
-                    stderr: String::new(),
-                },
-            )
-            .unwrap();
         assert_eq!(
             writer.output,
-            b"%begin 17 1 1\nNo such file or directory: direct.conf\n%error 17 1 1\n%begin 18 2 1\n%end 18 2 1\n%begin 19 3 1\nNo such file or directory: nested-a.conf\nNo such file or directory: nested-b.conf\n%error 19 3 1\n%begin 20 4 1\n%end 20 4 1\n"
+            b"%begin 18 1 1\n%end 18 1 1\n%begin 19 2 1\nNo such file or directory: nested-a.conf\nNo such file or directory: nested-b.conf\n%error 19 2 1\n"
         );
     }
 
@@ -1312,10 +1685,29 @@ mod tests {
             error: ServerError::InvalidCommand("failed".to_owned()),
             output: String::new(),
         }));
+        let parse = CommandResponse::Error {
+            request_id: 3,
+            error: ServerError::CommandParse("unknown flag -Z".to_owned()),
+            output: String::new(),
+        };
+        assert!(response_aborts_line(&parse));
+        assert!(!response_marks_client_failure(&parse));
+        assert!(response_marks_client_failure(&CommandResponse::Error {
+            request_id: 4,
+            error: ServerError::SessionNotFound("missing".to_owned()),
+            output: String::new(),
+        }));
+        assert!(!response_marks_client_failure(&CommandResponse::Success {
+            request_id: 5,
+            output: String::new(),
+            exit_code: 3,
+            stderr: String::new(),
+        }));
+        assert_eq!(control_exit_code(3, &ControlState::default()), 3);
     }
 
     #[test]
-    fn nested_source_warning_defers_a_plain_error_without_config_error() {
+    fn legacy_nested_source_warning_defers_a_plain_error_without_config_error() {
         let mut writer = ControlWriter::new(Vec::new(), false);
         let frame = writer.begin_at(21, 1).unwrap();
         let mut state = ControlState::default();
@@ -1361,6 +1753,103 @@ mod tests {
     }
 
     #[test]
+    fn typed_error_messages_use_standalone_frames_without_text_classification() {
+        for text in [
+            "No such file or directory: missing.conf",
+            "Invalid argument: invalid.conf",
+            "Cannot allocate memory: large.conf",
+            "Pattern syntax error: invalid[.conf",
+            "too many nested files",
+            "/tmp/mux.conf:51: too many nested files",
+            "Is a directory (os error 21): /tmp/a: b",
+            "stream did not contain valid UTF-8: binary.conf",
+            "No such file or directory: missing.conf\nstream did not contain valid UTF-8: binary.conf",
+            "stream did not contain valid UTF-8: binary.conf\nNo such file or directory: missing.conf",
+        ] {
+            let mut writer = ControlWriter::new(Vec::new(), false);
+            let mut state = ControlState::default();
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::ClientMessage {
+                        pane: None,
+                        kind: zz_protocol::ClientMessageKind::Error,
+                        text: text.to_owned(),
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+
+            let lines = std::str::from_utf8(&writer.output)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>();
+            let payload = text.lines().collect::<Vec<_>>();
+            assert!(lines[0].starts_with("%begin "), "{text}");
+            assert_eq!(&lines[1..=payload.len()], payload, "{text}");
+            assert_eq!(
+                lines[0].strip_prefix("%begin "),
+                lines[payload.len() + 1].strip_prefix("%error "),
+                "{text}"
+            );
+            assert_eq!(lines.len(), payload.len() + 2, "{text}");
+        }
+    }
+
+    #[test]
+    fn untyped_warnings_keep_config_routing_without_promoting_unknown_source_text() {
+        for text in [
+            "Is a directory (os error 21): relative-source.conf",
+            "stream did not contain valid UTF-8: binary.conf",
+            "No such file or directory: missing.conf\nstream did not contain valid UTF-8: binary.conf",
+            "worker warning",
+        ] {
+            let mut writer = ControlWriter::new(Vec::new(), false);
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::ClientMessage {
+                        pane: None,
+                        kind: zz_protocol::ClientMessageKind::Warning,
+                        text: text.to_owned(),
+                    },
+                }),
+                &mut ControlState::default(),
+                &mut writer,
+            )
+            .unwrap();
+            assert!(writer.output.is_empty(), "{text}");
+        }
+
+        for text in [
+            "/tmp/mux.conf:51: unknown command: wibble",
+            "/tmp/a: b/mux.conf:51: unknown command: wibble",
+            "skipped 1 unsupported tmux command: new-pane",
+        ] {
+            let mut writer = ControlWriter::new(Vec::new(), false);
+            let mut state = ControlState::default();
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::ClientMessage {
+                        pane: None,
+                        kind: zz_protocol::ClientMessageKind::Warning,
+                        text: text.to_owned(),
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+            assert_eq!(writer.output, format!("%config-error {text}\n").as_bytes());
+            assert!(!state.client_failure);
+            assert_eq!(control_exit_code(0, &state), 0);
+        }
+    }
+
+    #[test]
     fn separate_nested_source_warnings_defer_separate_error_frames() {
         let mut writer = ControlWriter::new(Vec::new(), false);
         let frame = writer.begin_at(17, 1).unwrap();
@@ -1402,10 +1891,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["ls", "list-panes"]
         );
-        assert_eq!(
-            parse_line("bogus-command"),
-            ParsedLine::Error("parse error: unknown command: bogus-command".to_owned())
-        );
+        let ParsedLine::Commands(commands) = parse_line("bogus-command") else {
+            panic!("unknown command was rejected before live preparation");
+        };
+        assert_eq!(commands[0].name, "bogus-command");
         assert_eq!(
             parse_line("set 'oops"),
             ParsedLine::Error("parse error: unterminated quote".to_owned())
@@ -1415,6 +1904,35 @@ mod tests {
             panic!("literal variable command was not parsed");
         };
         assert_eq!(commands[0].args, ["-g", "CONTROL_LITERAL", "$FOO"]);
+    }
+
+    #[test]
+    fn prepared_response_matching_ignores_stale_request_ids() {
+        let stale = ProtocolMessage::PreparedCommandList {
+            request_id: 8,
+            commands: Vec::new(),
+        };
+        assert!(matches!(
+            match_prepared_response(stale, 9),
+            Err(ProtocolMessage::PreparedCommandList { request_id: 8, .. })
+        ));
+        let command = PreparedCommand {
+            invocation: CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            canonical_name: Some("list-sessions".to_owned()),
+            alias_matched: false,
+            result: PreparedCommandResult::Ready,
+        };
+        assert_eq!(
+            match_prepared_response(
+                ProtocolMessage::PreparedCommandList {
+                    request_id: 9,
+                    commands: vec![command.clone()],
+                },
+                9,
+            )
+            .unwrap(),
+            [command]
+        );
     }
 
     #[test]
@@ -1539,6 +2057,41 @@ mod tests {
         }
         assert!(state.wait_exit);
         assert_eq!(writer.output, b"%pause %7\n%continue %7\n");
+    }
+
+    #[test]
+    fn detach_and_server_stop_keep_distinct_exit_signals() {
+        let session = SessionId(7);
+        let mut state = ControlState {
+            attached_session: Some(session),
+            ..ControlState::default()
+        };
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        assert_eq!(
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::detached_requested(session, None),
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::Detached
+        );
+        assert_eq!(state.attached_session, None);
+        assert_eq!(
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 2,
+                    payload: EventPayload::ServerStopping,
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::Clean
+        );
     }
 
     #[test]
@@ -1696,9 +2249,22 @@ mod tests {
             "Cannot allocate memory: /tmp/mux.conf",
             "Pattern syntax error: /tmp/[",
             "too many nested files",
+            "Is a directory (os error 21): /tmp/a: b",
+            "stream did not contain valid UTF-8: /tmp/binary.conf",
         ] {
             assert!(is_source_error_message(text), "{text}");
             assert!(!is_config_message(text), "{text}");
+        }
+        assert!(!is_source_error_message(
+            "/tmp/mux.conf:51: too many nested files"
+        ));
+        assert!(is_config_message("/tmp/mux.conf:51: too many nested files"));
+        for text in [
+            "stream did not contain valid UTF-8: binary.conf",
+            "worker warning (os error 21)",
+            "No such file or directory: missing.conf\nstream did not contain valid UTF-8: binary.conf",
+        ] {
+            assert!(!is_source_error_message(text), "{text}");
         }
         assert!(!is_config_message(
             "Reloaded zz configuration; skipped 1 unsupported tmux command: focus-events"

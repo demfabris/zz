@@ -10,14 +10,15 @@ tags:
 - protocol
 - architecture
 - multi-client
-timestamp: 2026-08-15T00:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
 
-The shipped split landed on protocol v52; the live wire is v55. v53 added the agent runtime lane,
-v54 completed its session-control shape, and v55 added stable client identity for owned Agent draft
-recovery. `zz-protocol` owns the command catalog, key grammar, tables,
+The shipped split landed on protocol v52. v53 added the agent runtime lane, v54 completed its
+session-control shape, and v55 added stable client identity for owned Agent draft recovery. The
+live `PROTOCOL_VERSION` is 76; see the [wire protocol](/protocol/wire-protocol.md).
+`zz-protocol` owns the command catalog, key grammar, tables,
 and resolver; the daemon publishes every live table. `zz-client::ClientCore` reduces decoded
 messages into shared state and typed effects, while `ChromeKeymap` owns client-side chords. The TUI
 uses both directly. The GPUI `MuxClient` sends non-frame messages through the core but keeps terminal
@@ -162,16 +163,38 @@ is not chrome and not part of the contract.
 
 The shipped `#[no_mangle]` shim and hand-maintained header now cover connection, pollable event
 wake/drain, attach, typed mux snapshots, caller-owned styled terminal viewports, raw key and text
-input, command execution, resize, focus, scrolling, damage, appearance, and disconnect events. The
+input, command execution, resize, separate client-window and terminal pane focus, scrolling, damage,
+appearance, and disconnect events. The
 viewport is the render contract: a flat cell plane plus style table, grapheme arena, cursor, colors,
 and generation counters remain alive until the caller releases the handle. The reader stays inside
 the core and toolkits integrate its wake fd with GSource, `QSocketNotifier`, or DispatchSource; Rust
 threads never call toolkit code.
 
 The C smoke compiles and links the contract, creates sessions and panes, renders styled content,
-types through the raw-key path, kills the attached session, reattaches a survivor and recovers its
-viewport, then frees and reconnects in one process. Catalog and live key-table access, resolved
+types through the raw-key path, reports client focus and blur, kills the attached session, reattaches
+a survivor and recovers its viewport, then frees and reconnects in one process. Catalog and live key-table access, resolved
 chrome action events, history, Kitty images, and non-terminal viewport models remain outside the ABI.
+
+The desktop shell caches its desired window-focus state outside the pane-focus path. Construction
+seeds `true` only when the window is already active; an inactive window waits for its first real
+activation callback. The shell sends the desired state only after attachment is ready and replays it
+once after each `Attached` event, so a reconnect, host switch, or session attach receives a fresh
+client-focus notification even when the OS window never changes activation. A failed same-connection
+session attach restores the old ready epoch and flushes a focus change cached during the request.
+An unrelated request-zero error leaves both pending and ready focus epochs unchanged.
+`zz_client_attach` returning true confirms that the client wrote the request, not that the daemon
+attached it. FFI shells wait for `ZZ_EVENT_ATTACHED` before calling `zz_client_set_focused`. The
+iPhone client follows that contract for initial, selected-session, recovery, and recreated-session
+attachments without replaying pane focus.
+
+The TUI assumes its outer terminal is foregrounded when it enters focus-reporting mode. It caches
+later `FocusGained` and `FocusLost` events while attachment is pending, then sends the latest
+`ClientFocus` value once after each `Attached` event. A failed sidebar session attach restores the
+retained session's ready epoch. A separate protocol-owned attach-attempt marker owns missing-target
+retry and fallback, returns to idle on success or terminal failure, and ignores unrelated request-zero
+errors. Repeated reports with the same value do not send another client-focus notification.
+Attachment replay does not synthesize `TerminalViewAction::Focus`; real outer-terminal focus events
+retain pane focus when the active pane is a terminal.
 
 # What stays out of the core
 

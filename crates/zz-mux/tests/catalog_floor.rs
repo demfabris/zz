@@ -8,7 +8,7 @@ fn command(name: &str, args: &[&str]) -> CommandInvocation {
 fn assert_unknown_flag(command: &str, flag: &str, error: &ServerError) {
     assert_eq!(
         error,
-        &ServerError::InvalidCommand(format!("{command} does not support {flag}"))
+        &ServerError::CommandParse(format!("{command} does not support {flag}"))
     );
 }
 

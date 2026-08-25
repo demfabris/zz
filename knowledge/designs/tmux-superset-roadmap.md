@@ -10,8 +10,8 @@ tags:
 - cli
 - fleet
 - native-superset
-timestamp: 2026-08-09T00:00:00Z
-last_updated: 2026-08-24
+timestamp: 2026-08-25T00:00:00-03:00
+last_updated: 2026-08-25
 last_updated_by: Codex
 ---
 
@@ -125,10 +125,10 @@ by dependency rather than raw ease.
 | 2 | Prompt history commands | The existing separate rings and file policy needed command handlers plus serialized persistence. | **Shipped 2026-08-22.** Both commands, aliases, `-T`, output, errors, clears, and persistence are covered. |
 | 3 | Native command catalog cleanup | Five daemon-only verbs needed shared specs and consumer convergence. | **Shipped 2026-08-22.** All 19 native verbs are discoverable; no direct agent split was justified. |
 | 4 | Local parser and no-model flags | `unbind-key -a/-q`, `new-window -b`, and `kill-*-a -f` use state and formats the mux already owns. | **Two slices shipped 2026-08-22.** The 22-step local-flag fixture and 17-step kill-filter fixture are clean; pull further flags by corpus hit. |
-| 5 | Small state and format facts | Bare `list-keys` padding, `pane_dead_time`, `config_files`, client timestamps, missing hook producers with an existing event seam, and straightforward output formatting. | **Two pulls shipped.** The 2026-08-22 pull covered bare `list-keys`, explicit-startup `config_files`, and retained `pane_dead_time`. The 2026-08-24 pull added pin-ordered `show-options -H` hook rows and item-scoped `window-status-separator` expansion. |
+| 5 | Small state and format facts | Bare `list-keys` padding, `pane_dead_time`, `config_files`, client timestamps, missing hook producers with an existing event seam, and straightforward output formatting. | **Three pulls shipped.** The 2026-08-22 pull covered bare `list-keys`, explicit-startup `config_files`, and retained `pane_dead_time`. The 2026-08-24 pull added pin-ordered `show-options -H` hook rows and item-scoped `window-status-separator` expansion. The 2026-08-25 pull exposed retained session activity and corrected logical MRU ordering. |
 | 6 | Manual geometry | `resize-window` and `window-size manual` need a durable manual size plus clear precedence against per-client measurements. The command is small; the policy is not. | **Shipped 2026-08-22.** Absolute and relative practical forms, target/error precedence, manual formats, per-client precedence, and daemon PTY resize behavior are pinned. Client-derived `-A`/`-a` remain loud. |
 | 7 | Capture, chooser, prompt, and list fidelity | `capture-pane` routing/ranges, chooser formats, command-prompt chains, and exact `list-keys` rendering need attached-client and output fixtures. | **List and chooser presentation fidelity completed 2026-08-24.** The list selectors, positional key filter, stock repeat metadata, canonical Space spelling, and `-1` attached-client status route are pinned by a 46-step differential plus the attached fixture. Chooser static-filter fallback state now survives deltas, both clients show `filter: no matches`, and fully keyless lists omit the shortcut gutter; the attached fixture proves tree and buffer fallback on zz and tmux. Ordinary capture was extended 2026-08-23; trailing blank viewport rows and richer capture transports remain. |
-| 8 | Spawn and attach context | `attach-session -E/-c/-f/-x`, relative client cwd, client-sourced creation, and attach reseeding need one shared client context. | **The command-client cwd slice shipped 2026-08-23.** Protocol v72 carries a bounded local caller cwd, omits it over SSH, and resolves relative top-level `source-file` paths from it. Exact attached-client selection when its cwd differs from the session cwd remains in the shared attach-context tranche. Pane-local `-e/-E` and creation-time `new-session -e/-E` had already shipped; environment reseeding, attach flags, and eviction remain. |
+| 8 | Spawn and attach context | Attached cwd, client flags, sizes, environment refresh, client targeting, and exit actions cross different state owners. | **Six bounded slices have shipped.** Protocol v72 carries a bounded local caller cwd and omits it over SSH; nested source replay preserves its selected base. The first 2026-08-25 targeting slice made `detach-client -t`, bare/`-a`/`-s` selection, requested-versus-evicted reasons, normal local TUI tty publication, and `switch-client -c` tty aliases exact without a wire change. The review repair kept tty publication unconditional and added `client-nested-v1` only for a nonempty `$TMUX`, so nested refusal requires both intent and a matching tty while `env -u TMUX` forces attach and `new-session -A` without weakening selectors. The fourth slice aligned every implemented attached-client selector on exact name, full tty, exactly one leading `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order collision precedence while retaining zz's native aliases. Sequential daemon tests passed 598/598, and focused tests, debug build, strict clippy, fmt, and scoped zz and pinned-tmux tty guards passed. At that checkpoint, unrelated nested-attach interleaving prevented a full-harness claim. Unsupported `command-prompt -t`, `show-messages -t`, `send-keys -c`, `suspend-client -t`, and inert `set-buffer -t` remain outside the closure. The fifth slice closes `display-message` client-format fallback for valid unattached targets: an absent `-c`, a destination attached to another session, or an unresolved `-c` selector uses the globally most-active attached client, with oldest-created tie precedence; that client's attachment supplies `client_session` while the target keeps session, window, and pane facts. Zero clients and missing targets stay empty. Sequential daemon tests pass 599/599, and focused and pinned fallback probes pass. One independent run completed the attached-client harness, but later current runs passed the scoped fallback probes and then failed at unrelated nested-attach terminal-query interleaving. The full harness is not stably green, and this close makes no canonical-suite claim. An attached target without `-c` stays under `clients.context-formats`. The sixth slice gives local Control stdin-only tty identity and a nonempty-`$TMUX` nested marker without size, implicit geometry, TERM/name formats, or a wire bump. Existing attach and `-A` refusal requires both facts; fresh creation still succeeds. Sequential daemon tests pass 600/600, and focused Control CLI tests pass 30/30. The attached differential covers `attach-session` and `new-session -A` refusal, a fresh `-A` miss, and piped stdin. The daemon unit matrix covers `new-session -Ad`; the attached harness does not. The reviewed fresh-marker harness is sound. This close also makes no canonical-suite claim. The tracker separates remaining attach cwd/flags/sizing, client-environment reseeding, detach exec, context formats, and parent-HUP exit actions instead of blocking all of them on one aggregate. |
 | 9 | Interactive client behavior | Full `refresh-client`, `switch-mode`, mouse-targeted forms, pane marking, mode state, focus hooks, and client fanout cross daemon, protocol, TUI, and GUI ownership. | Implement only for named workloads. |
 | 10 | Binary streams and process control | `display-message -I`, `split-window -I`, buffer/source `-`, and lock execution require bounded transport, backpressure, cancellation, and process lifetime rules. | Separate design approval. |
 | 11 | tmux floating panes | `new-pane` and the parked `move-pane`/placement flags need a new mux-state model that is distinct from current native floating UI. | Park. |
@@ -138,7 +138,7 @@ The 21 theme/palette options and four tree-mode options are easy to store but no
 to make meaningful across native clients. They remain demand-driven rather than inflating an option
 percentage.
 
-# Implementation progress: 2026-08-23
+# Implementation progress: 2026-08-25
 
 The first eight ease ranks have shipped at least one evidence-driven slice:
 
@@ -169,6 +169,24 @@ The first eight ease ranks have shipped at least one evidence-driven slice:
   Control clients and a frozen timed status for Interactive clients. `config_files` reaches command,
   status, list, label, and renderer-style contexts and changes from startup selection to the file
   selected by native reload; retained panes expose `pane_dead_time` and clear it on revive/respawn.
+- `session_activity` now exposes retained Unix seconds initialized from session creation and refreshed
+  by the shared attach and terminal-input funnels. `S/t` and `list-sessions -O activity` use a
+  separate logical counter, preserving deterministic same-second MRU order. Client-derived
+  `session_active` and `session_path` remain in the shared attach-context tranche. Every attach now
+  advances latest geometry independently of `focus-events`; enabled FocusIn uses the same owner
+  seam. Read-only rejected native input updates activity and latest geometry without clearing bells,
+  while writable chooser input counts once, advances latest geometry, and preserves bells. Chooser
+  routing stays client-scoped. Read-only-safe local view actions bypass retained chooser and
+  display-panes surfaces without dismissing them. Display-panes valid selection and bare hover
+  consumption, unmatched key/Escape/non-hover mouse fallthrough, and timeout accounting are
+  explicit. Typed `send-keys -X` authorization, all-or-nothing binding preflight, and pane-focus
+  blocking are closed under `clients.read-only-local-view-actions`. Committed text now uses one
+  bounded ordered queue per client whose entries record pane and input lane: a matching Key-plus-Text
+  pair takes the Key result and contributes at most one activity/latest update, standalone read-only
+  terminal text accounts without PTY input or a bell clear, and writable modal consumption can
+  contribute zero. Cleanup and synchronous switch behavior are closed under
+  `formats.session-activity-text-input`; tmux's inapplicable suspended-client wake path is accepted
+  under `formats.session-activity-wake-lifecycle`.
 - `resize-window`/`resizew` now resize the durable layout extent, select a window-local manual
   sizing policy, expose the two manual-size formats, and outrank later client measurements. The
   16-step strict-geometry scenario covers absolute and relative sizes, option transitions, output,
@@ -185,11 +203,21 @@ The first eight ease ranks have shipped at least one evidence-driven slice:
   sourced values and attach-time reseeding remain open.
 
 Focused protocol, mux, daemon, TUI, completion, strict-Clippy, formatting, and differential tests
-cover the tranche. Gate 0 is complete. The attached-client fixture is part of the strict Linux CI
+cover the tranche. Gate 0's mechanism is complete; the fresh canonical summary is deferred and its
+named row drift is recorded below. The attached-client fixture is part of the strict Linux CI
 run and drives real zz and pinned-tmux attaches through outer PTYs. The packaged CLI fixture clones
 a verified macOS bundle through a path containing spaces and passes bare/new/attach against empty
 and existing daemons. It now also pins detached `-x`/`-y`, attached client dimensions, read-only
 input rejection with visible pane output, requested detach notices, and `attach -d` eviction notices.
+The attached-client fixture also targets the live zz and tmux clients by their real outer PTYs,
+requires their attached-client counts to reach zero, and thereby proves normal local TUI tty publication.
+It now also refuses attach and `new-session -A` with inherited `$TMUX`, then repeats both through
+`env -u TMUX` on the same retained tty and requires them to attach.
+The current attached fixture also runs local Control from each outer PTY. It requires terminal-backed
+`attach-session` and `new-session -A` refusal against existing sessions, permits a fresh `-A` miss,
+and proves piped stdin does not acquire a tty identity. The daemon unit matrix covers
+`new-session -Ad`; the attached fixture does not. The complete attached differential passed for zz
+and the pinned tmux; it does not refresh the canonical summary.
 The attached proof also exposed and closed a copy-mode ordering race where a queued yank could be
 canceled before the terminal processed it.
 
@@ -223,12 +251,16 @@ work queue. Select exact gap IDs from the generated report before starting a sli
 
 1. Revalidate `smoke/config-grammar`: the current tmux-only warning expectation is correct; the
    nested zz control client still does not emit `%config-error`.
-2. Run all 77 differential scenarios and persist the 1,263-step summary. **Complete:** every
-   persisted ordinary row is clean, each known row has exactly its one documented GEO difference
-   and no other difference, and the attached-client fixture passes. This combined refresh includes
-   the 79-step `status-options` and 34-step `show-options-hooks` scenarios.
-   CI checks scenario paths, step counts, every stored result cell, and the attached `PASS` before
-   the run, then diffs every result column after a complete strict run.
+2. Run all 79 differential scenarios and persist the 1,296-step summary. **Complete for the last
+   canonical snapshot:** every persisted ordinary row was clean, each known row had exactly its one
+   documented GEO difference and no other difference, and the attached-client fixture passed. A
+   fresh canonical run is deferred until the current slices settle. The drift check currently names
+   `buffer-path-format`, `command-item-format`, `display-message` (27 steps), `resize-directions`
+   (16 focused steps versus 8 stored), `send-keys-repeat`,
+   `smoke/cli-chain-parse-abort`, `smoke/control-alias-prepare`, `smoke/source-file-control`,
+   `smoke/source-file-diagnostics`, and `source-file-format`; root will replace those rows and the
+   totals from the final run. CI checks scenario paths, step counts, every stored result cell, and
+   the attached `PASS` before the run, then diffs every result column after a complete strict run.
 3. Add a drift check that fails when scenario files and checked-in result rows differ. **Complete:**
    `compat/run.sh --check-summary` compares exact scenario paths, step counts, and all seven stored
    row cells against the ordinary clean tuple or the tracker's registered known tuple. It also
@@ -257,25 +289,70 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    from an attested clean build at the exact pin. `just compat-check` runs the oracle and registry
    checks plus the full `zz-mux` library suite.
 
+   `mux.resize-pane-optional-values` closed on 2026-08-25 as a catalog-only reconciliation.
+   Runtime already accepted bare direction flags with amount 1 and attached or separated integer
+   amounts. The four direction entries now expose optional values to the manifest gate. Nine focused
+   resize tests, 175 protocol unit tests, 14 protocol framing tests, and the strict 16-step
+   `resize-directions` differential pass. No runtime path or wire version changed. `resize-pane -M`
+   and `-T` remain open under their existing owners.
+
    The Rust gate reconciles names, flag arities, positional bounds, native extensions, the guarded
    native-name roster, every pinned canonical prefix, zz-only defaults, every constant-backed
    format gap, every missing default key, and rendered command plus repeat metadata for every
    shared default binding. It also reconciles the three selected context rosters. zz implements all
    14 selected names:
    `formats.command-item-context` closed on 2026-08-24 once the mux dispatch chokepoint started
-   carrying the canonical entry name into every command it runs, and the daemon-preempted verbs
-   that build their own format hooks remain open under `formats.daemon-command-item-context`.
+   carrying the canonical entry name into every command it runs.
+   `formats.daemon-command-item-context` closed the same day by carrying that resolved name only
+   through daemon-owned item expansion, including the post-spawn `new-window`/`split-window -P -F`
+   pass that adds live pane facts. Typed blocks and delayed formats retain their own or empty item
+   context instead of inheriting a parent command.
 
-   `formats.command-argument-expansion` closed on 2026-08-24. Both rename names, both optional
-   show-option names, and `select-pane -T` expand in their resolved target contexts. The
+   `formats.command-argument-expansion` closed five paths on 2026-08-24. Both rename names, both
+   optional show-option names, and `select-pane -T` expand in their resolved target contexts. The
    differential fixture covers canonical names, tmux aliases, permitted unique prefixes, old
-   session/window facts, and directional pane-title application. The separate 29-step
+   session/window facts, and directional pane-title application. `formats.new-session-name-expansion`
+   closed on 2026-08-25: `new-session -s` now expands once before attach-or-create lookup, carries
+   only a genuinely attached client's target facts, preserves explicit command-item precedence,
+   and refuses a nested formatted `-A` attach before applying its effect while leaving a formatted
+   detached miss intact. `formats.name-validation-cleaning` then closed the adjacent pinned name
+   pipeline: `new-session -n` expands, validates, and vis-cleans before `-s`; `new-window -n`
+   expands once in its destination session context with session format type before the same helper;
+   both rename commands expand through their resolved active pane with pane format type and then use
+   that helper; and `break-pane -n` deliberately stays literal before validation and cleaning. Empty
+   names and valid Unicode survive, ASCII controls fail before
+   mutation, cleaned backslashes determine identity and collision or reuse behavior, and a detached
+   formatted `-A` miss is no longer refused merely because its raw format text names another
+   session. `formats.creation-name-edges` closed the last two edges on 2026-08-25. An unindexed
+   `new-window -S` performs the pin's second format pass over the cleaned first-pass value for lookup
+   while creation keeps the first-pass name. An explicit `break-pane -n` pins window-local
+   `automatic-rename off` on both placement paths. The full mux suite passes 379 tests, and the
+   125-step `command-item-format` plus 30-step `break-pane` differentials report zero differences and
+   no skips.
+   `formats.buffer-path-expansion` closed on 2026-08-25: `load-buffer` and `save-buffer` now expand
+   paths once through the shared daemon command hooks before home-directory handling and file I/O.
+   Client selection supplies the target session, focused window, and active pane; aliases and unique
+   prefixes retain the canonical command name, explicit item state wins, and replacement text is not
+   expanded again. `protocol.binary-streams`, `buffers.clipboard-write`,
+   `clients.context-formats`, and `buffers.client-file-context` retain the stream, clipboard,
+   client-fact, relative-path, attached-session, and remote transport work. The separate 29-step
    `native-prefix-isolation` fixture closes all 25 unique prefixes that native names had changed
    and checks ambiguous `list-commands` exit parity. The daemon authorizes one expanded alias
-   invocation and dispatches that same value; stored bindings repeat the sequence per command.
-   Non-exact attach prefixes use the daemon-backed interactive path. Exact attach aliases,
-   arbitrary live aliases that require client-side stdin, Control's static unknown-name precheck,
-   and failing aliases named `kill-server` remain under `aliases.client-preflight`.
+   invocation and dispatches that same value. Writable stored bindings resolve each command just
+   before dispatch, so an earlier command can change a later alias; read-only clients resolve and
+   authorize the whole chain before any effect. A typed alias result now keeps an exact empty,
+   multi-command, or unparsable match from falling through to the canonical or catalog-alias command
+   it shadows. Actual empty and multi-command execution remains under `aliases.command-bodies`.
+   Protocol v74 closes Control's static unknown-name precheck by preparing each complete input unit
+   under one daemon lock before framing. Prepared execution freezes only that alias lookup and still
+   reauthorizes normally. Local ordinary CLI commands now prepare the complete vector against an
+   existing compatible daemon. Canonical identity and alias-match state drive exact attach, TUI,
+   stdin, and kill recovery routing, and the TUI carries the immutable vector across its reconnect.
+   A typed name or alias-body error anywhere in the local prepared vector aborts before
+   preprocessing or execution; runtime failures retain tmux queue ordering. Remote `--host` routing
+   remains under `aliases.remote-client-preflight`; config replay alias snapshots stay under
+   `aliases.config-parse-unit`, while local argument validation and replay-group parse abort stay
+   under `mux.chain-parse-abort`.
 
    `tracker.semantic-coverage` tracks custom `args_parse` callbacks, open-ended or dynamic context
    formats, nonconstant formats, hook production, shared binding runtime behavior, `BEHAVES`
@@ -336,8 +413,13 @@ supported:
   accepted divergence.
 - `source-file` client-relative path resolution. **Complete for unattached command clients:**
   protocol v72 retains one local caller cwd, SSH omits it, and CLI coverage separates caller and
-  daemon cwd. Attached-client coverage pins the normal case where client and session cwd agree;
-  exact session-cwd selection when they differ remains under `clients.attach-context`.
+  daemon cwd. The daemon now keeps that selected base through nested replay, including after an
+  ordinary sourced command clears the mutable context cwd and when runtime `source-file` loads the
+  active default `zz/mux.conf` through the ordinary path. A direct zz-native `reload-config` carries
+  the same selected base for registered clients. Attached-client coverage pins the normal
+  case where client and session cwd agree; exact session-cwd selection when they differ remains under
+  `clients.attach-context`. Hooks raised by sourced ordinary commands, deferred event hooks, and
+  initial startup replay retain separate gaps.
 - command-prompt only where a real automation uses it.
 - exact exit, stdout, and stderr on the published workload.
 
@@ -350,12 +432,19 @@ The first tracked slice, `clients.cwd-context`, completed on 2026-08-23. Protoco
 bounded `ClientHello.working_directory`; local endpoints publish an absolute cwd and SSH endpoints
 omit their caller-host path. Non-UTF-8 or oversized local paths are omitted rather than breaking the
 connection. The daemon retains the accepted fact per client and resolves relative top-level
-`source-file` paths after `-F` expansion and before globbing. CLI coverage pins literal cwd glob
+`source-file` paths after `-F` expansion and before globbing. It snapshots that selected base for
+registered clients and carries it through nested replay, so a sourced ordinary command cannot erase
+the next nested source's cwd. Sourcing the active default config through the ordinary runtime loader
+forwards the same snapshot. A direct zz-native `reload-config` forwards that snapshot for registered
+clients. Startup keeps its separate clientless bootstrap gap. CLI coverage pins literal cwd glob
 metacharacters, glob order, declared-path order, quiet continuation, and declared missing-file
 diagnostics independently of the daemon cwd. Attached-client coverage pins those behaviors when the
 client and session cwd agree, while exact tmux session-cwd selection when they differ remains in
-`clients.attach-context`. Nested and event-hook current-client source bases plus the remaining
-cwd-selection differences remain tracked under `source-file.path-semantics`. The Unix POSIX glob
+`clients.attach-context`. Deferred event-hook client selection remains under
+`source-file.event-hook-client-cwd`, which depends on that attach context. Startup configuration
+still runs before the launching client registers, so `source-file.startup-client-cwd` tracks tmux's
+initial `cfg_client` cwd rule. `source-file.sourced-hook-client-cwd` tracks hooks raised by ordinary
+replayed commands because those commands still use `ClientId::MAX`. The Unix POSIX glob
 dialect slice is closed: source matching now uses `glob(3)` with tmux's bytewise cwd quoting,
 backslash rules, leading-dot exclusion, repeated-star behavior, malformed-pattern handling, and
 per-pattern order. The tilde slice is also closed: `source-file` leaves a literal leading tilde for
@@ -363,12 +452,23 @@ normal relative-path resolution, while tildes expanded by the config parser alre
 absolute paths. The nested declared-path slice is closed: loud no-match and glob errors reach the
 invoking client with the post-`-F` declared argument, while a quiet no-match stays silent. A direct
 Control all-miss aborts its line; a direct partial match ends with `%end` and continues; matched
-parser errors remain `%config-error`. Sourced replay is not closed. zz only synthesizes a standalone
-`%error` for recognized nested diagnostics, while tmux gives every sourced command its own guard,
-ends a nested partial match with `%end`, and reports a containing command's miss before deeper
-recursion. Missing per-command guards remain under `control-mode.sourced-command-frames`; nested
-termination and ordering remain under `source-file.nested-control-queue`. Nested cwd selection
-remains in `source-file.path-semantics`. The nesting limit is closed for depth wording, count, and
+parser errors remain `%config-error`. Protocol v76 now gives each replayed command that survives
+command-name resolution a tail-tag-47 `SourcedCommandGuard`. Unknown or ambiguous command names and
+malformed alias names publish a located Warning that Control renders as `%config-error`, without a
+guard. Ordinary success and quiet all-miss use an empty flags-1 `%end`;
+a mixed hit and miss keeps the declared-path diagnostic inside `%end`; and all-miss, flag or arity
+failure, runtime failure, or depth refusal ends `%error`. Runtime failures alone set
+`client_failure`, and the Control writer defers guards FIFO until the direct outer frame closes.
+Matched read failures follow as typed standalone Error events, including invalid UTF-8, numeric OS
+errors, and colon-space paths. Config and lexer Warning prose remains under
+`control-mode.diagnostic-typing`. The existing loader preflights every declared path for one source
+command before recursion. A focused regression and the strict six-step Control differential prove
+root missing-path guard, then middle missing-path guard, then leaf output guard, each exactly once.
+That closes `source-file.nested-control-queue` with no production change. A matched failed replay
+still returns a completed nonzero success that the Control front end does not retain across every EOF
+and detach ordering. `control-mode.source-file-exit-status` owns that client process-state matrix;
+source-command diagnostics do not become globally sticky. The nesting limit is closed for guard
+placement, depth wording, count, and
 later-line continuation: both sides run 50 concurrent source invocations counting the initial
 `source-file` as invocation 1, and refuse invocation 51 with `too many nested files` on the
 client-specific channel. A malformed invocation at that depth is diagnosed as malformed rather than
@@ -377,28 +477,60 @@ never consults its depth guard, and zz now runs its depth guard after the comman
 positional validation. Only the precedence, the stdout stream, and the exit status are closed there:
 the two sides still print different malformed text, which `mux.error-shapes` owns, and the pin then
 abandons the rest of the containing file where zz continues it, which `config.parser-edge-cases`
-owns. Exact Control placement is not part of that close either: the pin frames the refusal inside
-the rejected nested command's own flags-1 `%begin`/`%error` guard, which
-`control-mode.sourced-command-frames` and `source-file.nested-control-queue` own. Dropping a
-same-line `;` sibling inside the containing config file after the refusal is
-`config.same-line-error-group`. Startup accounting is closed: one budget spans every startup root,
-the roots do not count, source commands 1 through 50 run, and later source commands retain their
-declaring file and line while runtime sequential sources stay unbounded. zz still discards those
-startup causes before a client can see them, tracked in `config.startup-diagnostic-delivery`. A replayed command that
-fails for an ordinary runtime reason is a wider hole than any of those: zz drops the diagnostic and
-keeps the containing `source-file` at exit 0, tracked under `config.replayed-command-errors`. The
-config parser group separately retains tmux's first-error file abort and its unusual tilde expansion
-immediately after a closing quote.
-Control diagnostic classification is also still prose-based. `control-mode.diagnostic-typing`
-keeps localized or platform-specific source errors and future config wording visible until the
-protocol carries typed diagnostic identity.
+owns. The refused nested command now uses the same flags-1 `%begin`/`%error` guard as the pin.
+Same-line replay
+grouping is closed independently: synchronous invalid/runtime errors, depth refusal, and a loud
+zero-file source miss or glob error drop only later siblings on the same parser-owned source line,
+while later physical lines continue. Matched sources and asynchronous commands do not propagate
+child failures into their invoking line. The daemon retains a matched child read failure in the
+load report without using it to prune the parent group. Quiet zero-file misses succeed. In this
+slice zz-classified unsupported capability gaps changed from pruning later same-line siblings to
+skip-and-continue. That continuation is desirable for zz import capability gaps but remains
+pin-unproven because the corresponding commands are unsupported in zz. Replayed error delivery is
+closed for the pinned target and set-option failures on Command, Control, and attached clients.
+Successful replay output is now captured inside Control guards, while Command stdout, attached
+presentation, and physical interleaving with `-v` remain under `config.replayed-command-output`.
+Cross-depth nested ordering is closed. Control source-file EOF and detach status, parser abort, and
+error shapes remain with their named groups; the same-line close does not cover exact matched-read
+text.
+Startup accounting is closed: one
+budget spans every startup root, the roots do not count, source commands 1 through 50 run, and later
+source commands retain their declaring file and line while runtime sequential sources stay
+unbounded. zz still discards those startup causes before a client can see them, tracked in
+`config.startup-diagnostic-delivery`. Replayed runtime failures now retain encounter order, use the
+invoking client's error channel, set the Command or Control exit status, capitalize the attached
+warning, and continue later physical lines through an outer source. The config parser group
+separately retains tmux's first-error file abort and its unusual tilde expansion immediately after
+a closing quote.
+The `source-file.flags` slice is closed through the existing effect and replay-loader seam. `-n`
+parses without environment or command effects while keeping syntax diagnostics and optional verbose
+lines. `-t` resolves one pane context for path formats and replay, with a quiet empty context on a
+miss and no change to the invoking client cwd. `-v` preserves file and line order, inherits through
+nested sources, and stays suppressed for Control. Full tmux command, flag, and arity validation
+during parse remains under the parser, error-shape, and chain-abort groups. Exact attached verbose
+presentation and ordering relative to ordinary replay output remain under
+`config.replayed-command-output`. Runtime `source-file` now treats the active default config like
+every other matched path: declared default, after, and default files apply as `DAD`; a loud miss
+returns status 1 without stopping later matches; and ordinary diagnostics plus `-v` lines retain
+declared path and match order. Explicit native `reload-config`, startup first-existing discovery,
+and ordered explicit `-f` roots keep their separate behavior. Parse-only and nested paths are
+unchanged. Focused CLI and daemon tests, strict clippy, fmt, and the 12-step diagnostics, 40-step
+format, and six-step Control differentials pass with zero differences and no skips. This is not a
+canonical-suite claim.
+Control source diagnostics now use the existing Error kind and reach standalone `%error` frames
+without text classification. Config summaries still use Warning events, so
+`control-mode.diagnostic-typing` retains only future or localized config wording.
+The new client accepts the old daemon's known source Warning families. The reverse version mix can
+hide source diagnostics because the old client ignores Error events; downgrading the app requires a
+matching daemon restart.
 Byte-preserving non-UTF-8 Unix cwd transport remains separately visible under
 `clients.path-encoding` instead of making such a path a connection failure.
 
-Extend and consolidate the existing client tty/size context with cwd, the client's selected
-environment/update input, requested flags, and eviction state. Use that one shared model for
-`attach-session -E/-c/-f/-x`, the attach-side half of `new-session -E`, client-relative
-`source-file` paths, formats, and hooks; avoid one field per command. Creation-time
+Keep the remaining client work split by the state it actually needs. Attached cwd, requested client
+flags, and resize aggregation can extend the existing cwd/size facts. Environment seeding and
+refresh need a bounded client-environment snapshot of their own. `detach-client -E` and the
+parent-HUP trio (`attach-session -x`, attaching `new-session -X`, `detach-client -P`) need typed
+client exit actions and are not prerequisites for targeting or ordinary detach. Creation-time
 `new-session -e/-E` works without a wire change: explicit overlays persist and reach the first pane,
 while `-E` suppresses daemon-sourced update seeding. The accepted attach-side `new-session -E`
 cannot yet suppress reseeding because attach performs no client-environment reseed to begin with.
@@ -419,9 +551,9 @@ Two small-looking flags are not mux-only work:
   terminal API has no atomic action for the operation. It needs a terminal-owned action and result
   contract, not another layout branch.
 
-The remaining attach tranche is one client-state problem rather than four unrelated parser flags.
-Extend the v72 cwd pattern with environment reseeding/suppression, client flags, and eviction, then
-consume that shared state from the attach commands instead of adding command-specific wire fields.
+The remaining attach work is three bounded contracts: cwd/flags/sizing, environment refresh, and
+client exit actions. Reuse existing facts within each contract, but do not make one an artificial
+dependency of the others.
 
 ## Milestone 5: decide whether streams earn their cost
 
@@ -499,6 +631,11 @@ permanent product decision has been recorded for them.
   and Command and Control clients keep stdout. Stock copy tables now expose the pin's zero repeat
   metadata without changing runtime copy repetition. zz uses a documented total order where the
   pin's truncated comparator is non-total.
+- 2026-08-25: vi numeric counts moved onto one flat protocol-v75 terminal action. The first `send`
+  or `send-keys` command whose option prefix contains `-X` consumes the count. Its stored `-N` wins;
+  otherwise zz inserts separate `-N <count>` arguments before the option argument containing `-X`.
+  A list with no qualifying `-X` preserves the pending value. Raw terminal sends stop on
+  backpressure. Native browser sends clamp repeats to 9,999 on both sides of the wire.
 
 # Related
 

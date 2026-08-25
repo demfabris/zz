@@ -318,7 +318,9 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
             if option.unsupported {
                 continue;
             }
-            let actual = if option.attached_value {
+            let actual = if option.optional_value {
+                "optional"
+            } else if option.attached_value {
                 "attached-only"
             } else if option.value.is_some() {
                 "required"

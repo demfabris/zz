@@ -58,13 +58,16 @@ probe_chain() {
 probe_chain "$depth_root/allowed" 49 a SOURCE_DEPTH_ALLOWED
 probe_chain "$depth_root/refused" 50 r SOURCE_DEPTH_REFUSED
 
-cat >"$depth_root/line-groups.conf" <<'EOF'
+mkdir "$depth_root/matched-read-failure"
+cat >"$depth_root/line-groups.conf" <<EOF
 source-file missing-loud.conf ; set-option -g @source_line_loud_same yes
 set-option -g @source_line_loud_next yes
 source-file -q missing-quiet.conf ; set-option -g @source_line_quiet_same yes
 set-option -g @source_line_quiet_next yes
 kill-session -t =missing ; set-option -g @source_line_runtime_same yes
 set-option -g @source_line_runtime_next yes
+source-file '$depth_root/matched-read-failure' ; set-option -g @source_line_read_same yes
+set-option -g @source_line_read_next yes
 EOF
 
 tmux source-file "$depth_root/line-groups.conf" \
@@ -80,5 +83,5 @@ marker() {
 }
 
 tmux set-environment -g SOURCE_LINE_GROUPS \
-    "depth_same=$(marker @source_line_depth_same) depth_next=$(marker @source_line_depth_next) loud_same=$(marker @source_line_loud_same) loud_next=$(marker @source_line_loud_next) quiet_same=$(marker @source_line_quiet_same) quiet_next=$(marker @source_line_quiet_next) runtime_same=$(marker @source_line_runtime_same) runtime_next=$(marker @source_line_runtime_next)"
+    "depth_same=$(marker @source_line_depth_same) depth_next=$(marker @source_line_depth_next) loud_same=$(marker @source_line_loud_same) loud_next=$(marker @source_line_loud_next) quiet_same=$(marker @source_line_quiet_same) quiet_next=$(marker @source_line_quiet_next) runtime_same=$(marker @source_line_runtime_same) runtime_next=$(marker @source_line_runtime_next) read_same=$(marker @source_line_read_same) read_next=$(marker @source_line_read_next)"
 exit 0

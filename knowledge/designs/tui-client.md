@@ -9,7 +9,7 @@ tags:
 - browser
 - kitty-graphics
 - remote
-timestamp: 2026-08-09T00:00:00Z
+timestamp: 2026-08-25T00:00:00-03:00
 ---
 
 # Overview
@@ -103,6 +103,18 @@ compromise).
 
 # Input
 
+- Local CLI aliases that resolve to attach or attaching `new-session` enter the TUI with protocol
+  v74's complete prepared vector. The TUI executes each ready invocation with `prepared: true` on
+  its second connection and surfaces a typed preparation error without retrying alias lookup.
+- Outer-terminal focus reporting starts from an explicit foreground assumption. The TUI caches
+  `FocusGained` and `FocusLost` while attachment is pending and sends the latest client-window focus
+  once after each `Attached` event. Reconnect and host switch open new epochs. A protocol-owned
+  attach-attempt marker selects missing-target retry and fallback without consulting focus state,
+  then returns to idle on success or terminal failure. An unrelated request-zero error changes
+  neither state machine. A rejected sidebar session attach restores the retained session's ready
+  epoch instead of entering new-session fallback, and repeated reports with the same value do not
+  send another notification. Attachment replay does not emit pane focus. Real outer focus events add
+  pane/application focus when the active pane is a terminal.
 - SGR pixel mouse (mode 1016) gives pixel-precision coordinates in supporting
   terminals — no OS-level event helper needed (zenbu's Swift listener is their
   workaround for cell-granularity mice).

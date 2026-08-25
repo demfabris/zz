@@ -19,3 +19,16 @@ new-window -d -t fallback:2 -n tail
 select-window -t fallback:1
 break-pane -d -a -s fallback:0.1 -t fallback:8 -n moved
 out: list-windows -t fallback -F #{window_index}:#{window_name}
+
+# An explicit literal name pins automatic-rename off when break-pane relinks a
+# whole one-pane window and when it creates a new window for one pane.
+new-session -d -s named-relink -n source
+set-window-option -t =named-relink:0 automatic-rename on
+new-window -d -t =named-relink:1 -n anchor
+break-pane -d -s =named-relink:0.0 -t =named-relink:5 -n relinked
+out: show-window-options -v -t =named-relink:5 automatic-rename
+new-session -d -s named-create -n source
+set-window-option -t =named-create:0 automatic-rename on
+split-window -d -h -t =named-create:0.0
+break-pane -d -s =named-create:0.1 -t =named-create:5 -n created
+out: show-window-options -v -t =named-create:5 automatic-rename

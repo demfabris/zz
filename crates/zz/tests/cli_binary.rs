@@ -200,7 +200,7 @@ mod daemon_autostart {
 
     impl Drop for Fixture {
         fn drop(&mut self) {
-            let _ = self.run(&["kill-server"]);
+            let _ = self.run(&["--kill-server"]);
             let deadline = Instant::now() + Duration::from_secs(2);
             while self.socket.exists() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(10));
@@ -296,6 +296,7 @@ mod daemon_autostart {
             "show-options",
             "source-file",
             "kill-server",
+            "--kill-server",
         ] {
             let output = fixture.run(&[command]);
             assert_missing(&output, &fixture.missing_message());
@@ -534,6 +535,23 @@ mod daemon_autostart {
             b"set-option -g @cwd_order twenty\n",
         )
         .expect("write second relative source");
+        let nested_entry_directory = caller_cwd.join("a");
+        std::fs::create_dir(&nested_entry_directory).expect("nested source entry directory");
+        std::fs::write(
+            caller_cwd.join("leaf.conf"),
+            b"set-option -g @nested_client_cwd caller-root\n",
+        )
+        .expect("write caller-root nested source");
+        std::fs::write(
+            nested_entry_directory.join("leaf.conf"),
+            b"set-option -g @nested_client_cwd containing-file-decoy\n",
+        )
+        .expect("write containing-file nested source decoy");
+        std::fs::write(
+            nested_entry_directory.join("entry.conf"),
+            b"set-option -g @nested_replay_started yes\nsource-file leaf.conf\n",
+        )
+        .expect("write nested source entry");
         assert!(!daemon_cwd.join(relative_directory).exists());
 
         let started = fixture
@@ -577,6 +595,19 @@ mod daemon_autostart {
         assert_eq!(literal_tilde_value.status.code(), Some(0));
         assert_eq!(literal_tilde_value.stdout, b"caller-literal\n");
         assert!(literal_tilde_value.stderr.is_empty());
+
+        let nested = run_from_caller(&["source-file", "a/entry.conf"]);
+        assert_eq!(nested.status.code(), Some(0));
+        assert!(nested.stdout.is_empty());
+        assert!(nested.stderr.is_empty());
+        let nested_replay = run_from_caller(&["show-options", "-gqv", "@nested_replay_started"]);
+        assert_eq!(nested_replay.status.code(), Some(0));
+        assert_eq!(nested_replay.stdout, b"yes\n");
+        assert!(nested_replay.stderr.is_empty());
+        let nested_base = run_from_caller(&["show-options", "-gqv", "@nested_client_cwd"]);
+        assert_eq!(nested_base.status.code(), Some(0));
+        assert_eq!(nested_base.stdout, b"caller-root\n");
+        assert!(nested_base.stderr.is_empty());
 
         let globbed = run_from_caller(&["source-file", "-F", &glob]);
         assert_eq!(globbed.status.code(), Some(0));
@@ -702,18 +733,23 @@ mod daemon_autostart {
         );
         assert!(nested.stderr.is_empty());
 
-        let unsupported = write_source(
+        let verbose_leaf = write_source(
             &directory,
-            "unsupported.conf",
-            "source-file -v nested.conf\nset-option -g @loaded yes\n",
+            "verbose-leaf.conf",
+            "set-option -g @verbose-loaded yes\n",
         );
-        let skipped = fixture.run(&["source-file", &unsupported]);
-        assert_eq!(skipped.status.code(), Some(0));
-        assert!(skipped.stdout.is_empty());
+        let verbose_entry = write_source(
+            &directory,
+            "verbose.conf",
+            &format!("source-file -v {verbose_leaf}\nset-option -g @loaded yes\n"),
+        );
+        let verbose = fixture.run(&["source-file", &verbose_entry]);
+        assert_eq!(verbose.status.code(), Some(0));
         assert_eq!(
-            skipped.stderr,
-            b"skipped 1 unsupported tmux command: source-file -v\n"
+            verbose.stdout,
+            format!("{verbose_leaf}:1: set-option -g @verbose-loaded yes\n").into_bytes()
         );
+        assert!(verbose.stderr.is_empty());
         let loaded = fixture.run(&["show-options", "-gqv", "@loaded"]);
         assert_eq!(loaded.status.code(), Some(0));
         assert_eq!(loaded.stdout, b"yes\n");
@@ -747,11 +783,98 @@ mod daemon_autostart {
         assert_eq!(stopped.stderr, b"can't find window: nosuchwindow\n");
     }
 
+    #[test]
+    fn source_file_replayed_runtime_errors_are_bare_and_propagate_outward() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert_eq!(
+            fixture
+                .run(&["new-session", "-d", "-s", "replayed-errors"])
+                .status
+                .code(),
+            Some(0)
+        );
+        let directory = source_directory(&fixture, "replayed-errors");
+        let runtime = write_source(
+            &directory,
+            "runtime.conf",
+            "kill-session -t missing-runtime\n\
+             set-option -g nonexistent-option value\n\
+             set-environment -g \"\" value\n\
+             set-option -g @runtime-after yes\n",
+        );
+
+        let replayed = fixture.run(&["source-file", &runtime]);
+        assert_eq!(replayed.status.code(), Some(1));
+        assert!(replayed.stdout.is_empty());
+        assert_eq!(
+            replayed.stderr,
+            b"can't find session: missing-runtime\ninvalid option: nonexistent-option\nempty variable name\n"
+        );
+        let after = fixture.run(&["show-options", "-gqv", "@runtime-after"]);
+        assert_eq!(after.status.code(), Some(0));
+        assert_eq!(after.stdout, b"yes\n");
+
+        let inner = write_source(
+            &directory,
+            "inner.conf",
+            "kill-session -t missing-inner\nset-option -g @inner-after yes\n",
+        );
+        let outer = write_source(
+            &directory,
+            "outer.conf",
+            &format!("source-file '{inner}'\nset-option -g @outer-after yes\n"),
+        );
+        let nested = fixture.run(&["source-file", &outer]);
+        assert_eq!(nested.status.code(), Some(1));
+        assert!(nested.stdout.is_empty());
+        assert_eq!(nested.stderr, b"can't find session: missing-inner\n");
+        for option in ["@inner-after", "@outer-after"] {
+            let after = fixture.run(&["show-options", "-gqv", option]);
+            assert_eq!(after.status.code(), Some(0));
+            assert_eq!(after.stdout, b"yes\n");
+        }
+
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[100]",
+                    "source=new-window -t missing:",
+                ])
+                .status
+                .success()
+        );
+        let alias_root = write_source(
+            &directory,
+            "source-alias.conf",
+            "source ignored.conf\nset-option -g @source-alias-after yes\n",
+        );
+        let aliased = fixture.run(&["source-file", &alias_root]);
+        assert_eq!(aliased.status.code(), Some(1));
+        assert!(aliased.stdout.is_empty());
+        assert_eq!(aliased.stderr, b"can't find session: missing\n");
+        assert_eq!(
+            fixture
+                .run(&["show-options", "-gqv", "@source-alias-after"])
+                .stdout,
+            b"yes\n"
+        );
+    }
+
     fn write_source_chain(directory: &Path, invocations: usize) -> String {
+        let leaf = directory.join("leaf.conf");
         write_source_chain_with_deepest(
             directory,
             invocations,
-            "source-file leaf.conf\nsource-file -q leaf.conf\n",
+            &format!(
+                "source-file '{}'\nsource-file -q '{}'\n",
+                leaf.display(),
+                leaf.display()
+            ),
         )
     }
 
@@ -762,7 +885,10 @@ mod daemon_autostart {
     ) -> String {
         for level in 1..=invocations {
             let nested = if level < invocations {
-                format!("source-file f{}.conf\n", level + 1)
+                format!(
+                    "source-file '{}'\n",
+                    directory.join(format!("f{}.conf", level + 1)).display()
+                )
             } else {
                 deepest.to_owned()
             };
@@ -876,19 +1002,21 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn source_file_of_the_default_config_stays_silent() {
+    fn source_file_treats_the_default_config_as_an_ordinary_ordered_path() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
             return;
         }
-        let config_home = source_directory(&fixture, "xdg-config");
+        let config_home = source_directory(&fixture, "runtime-default-xdg");
+        let isolated_home = source_directory(&fixture, "runtime-default-home");
         let default_config = config_home.join("zz").join("mux.conf");
         std::fs::create_dir_all(default_config.parent().expect("default config parent"))
             .expect("default config directory");
-        std::fs::write(&default_config, b"wibble\n").expect("write default mux config");
+        std::fs::write(&default_config, b"wibble\n").expect("write invalid default mux config");
         let started = fixture
             .command()
             .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
             .arg("start-server")
             .output()
             .expect("run zz start-server");
@@ -897,13 +1025,196 @@ mod daemon_autostart {
         let sourced = fixture
             .command()
             .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
             .arg("source-file")
             .arg(&default_config)
             .output()
             .expect("run zz source-file on the default config");
-        assert_eq!(sourced.status.code(), Some(0));
-        assert!(sourced.stdout.is_empty());
+        assert_eq!(sourced.status.code(), Some(1));
+        assert_eq!(
+            sourced.stdout,
+            format!("{}:1: unknown command: wibble\n", default_config.display()).into_bytes()
+        );
         assert!(sourced.stderr.is_empty());
+
+        std::fs::write(&default_config, b"set-option -ag @default_order D\n")
+            .expect("write ordered default mux config");
+        let after = isolated_home.join("after.conf");
+        std::fs::write(&after, b"set-option -ag @default_order A\n")
+            .expect("write ordered after config");
+        let initialized = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .args(["set-option", "-g", "@default_order", ""])
+            .output()
+            .expect("initialize source order");
+        assert_eq!(initialized.status.code(), Some(0));
+        assert!(initialized.stdout.is_empty());
+        assert!(initialized.stderr.is_empty());
+        let missing = isolated_home.join("missing.conf");
+        let ordered = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .arg("source-file")
+            .arg("-v")
+            .arg(&default_config)
+            .arg(&missing)
+            .arg(&after)
+            .arg(&default_config)
+            .output()
+            .expect("run ordered default source");
+        assert_eq!(ordered.status.code(), Some(1));
+        assert_eq!(
+            ordered.stdout,
+            format!(
+                "{}:1: set-option -ag @default_order D\n\
+                 {}:1: set-option -ag @default_order A\n\
+                 {}:1: set-option -ag @default_order D\n",
+                default_config.display(),
+                after.display(),
+                default_config.display(),
+            )
+            .into_bytes()
+        );
+        assert_eq!(
+            ordered.stderr,
+            format!("No such file or directory: {}\n", missing.display()).into_bytes()
+        );
+        let order = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .args(["show-options", "-gqv", "@default_order"])
+            .output()
+            .expect("show default source order");
+        assert_eq!(order.status.code(), Some(0));
+        assert_eq!(order.stdout, b"DAD\n");
+        assert!(order.stderr.is_empty());
+    }
+
+    #[test]
+    fn reload_config_of_the_default_config_stays_silent_and_resets_keys() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let config_home = source_directory(&fixture, "reload-default-xdg");
+        let isolated_home = source_directory(&fixture, "reload-default-home");
+        let default_config = config_home.join("zz").join("mux.conf");
+        std::fs::create_dir_all(default_config.parent().expect("default config parent"))
+            .expect("default config directory");
+        let caller_cwd = std::fs::canonicalize(source_directory(
+            &fixture,
+            "default caller cwd [literal]*? with spaces",
+        ))
+        .expect("canonical default source caller cwd");
+        std::fs::write(
+            caller_cwd.join("leaf.conf"),
+            b"set-option -g @default_nested_client_cwd caller-root\n",
+        )
+        .expect("write default source caller-root leaf");
+        std::fs::write(
+            default_config
+                .parent()
+                .expect("default config parent")
+                .join("leaf.conf"),
+            b"set-option -g @default_nested_client_cwd containing-file-decoy\n",
+        )
+        .expect("write default source containing-file decoy");
+        std::fs::write(
+            &default_config,
+            b"set-option -g @default_nested_replay_started yes\nsource-file leaf.conf\nbind-key -T reload-loaded z display-message loaded\nwibble\n",
+        )
+        .expect("write default mux config");
+        let started = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .arg("start-server")
+            .output()
+            .expect("run zz start-server");
+        assert_eq!(started.status.code(), Some(0));
+        let bound = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .args([
+                "bind-key",
+                "-T",
+                "reload-stale",
+                "z",
+                "display-message",
+                "stale",
+            ])
+            .output()
+            .expect("bind stale reload key");
+        assert_eq!(bound.status.code(), Some(0));
+        assert!(bound.stdout.is_empty());
+        assert!(bound.stderr.is_empty());
+
+        let reloaded = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .current_dir(&caller_cwd)
+            .arg("reload-config")
+            .output()
+            .expect("run zz reload-config from the caller cwd");
+        assert_eq!(reloaded.status.code(), Some(0));
+        assert!(reloaded.stdout.is_empty());
+        assert!(reloaded.stderr.is_empty());
+        let replay_started = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .current_dir(&caller_cwd)
+            .args(["show-options", "-gqv", "@default_nested_replay_started"])
+            .output()
+            .expect("show direct reload replay marker");
+        assert_eq!(replay_started.status.code(), Some(0));
+        assert_eq!(replay_started.stdout, b"yes\n");
+        assert!(replay_started.stderr.is_empty());
+        let nested_base = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .current_dir(&caller_cwd)
+            .args(["show-options", "-gqv", "@default_nested_client_cwd"])
+            .output()
+            .expect("show direct reload nested base");
+        assert_eq!(nested_base.status.code(), Some(0));
+        assert_eq!(nested_base.stdout, b"caller-root\n");
+        assert!(nested_base.stderr.is_empty());
+        let stale = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .args(["list-keys", "-T", "reload-stale", "z"])
+            .output()
+            .expect("query stale reload key");
+        assert_eq!(stale.status.code(), Some(1));
+        assert!(stale.stdout.is_empty());
+        assert_eq!(stale.stderr, b"table reload-stale doesn't exist\n");
+        let loaded = fixture
+            .command()
+            .env("XDG_CONFIG_HOME", &config_home)
+            .env("HOME", &isolated_home)
+            .args([
+                "list-keys",
+                "-1",
+                "-T",
+                "reload-loaded",
+                "-F",
+                "#{key_table}:#{key_string}",
+                "z",
+            ])
+            .output()
+            .expect("query reloaded key");
+        assert_eq!(loaded.status.code(), Some(0));
+        assert_eq!(loaded.stdout, b"reload-loaded:z\n");
+        assert!(loaded.stderr.is_empty());
     }
 
     #[test]
@@ -1671,6 +1982,337 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn exact_attach_aliases_bypass_the_native_attach_wrapper() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "named"])
+                .status
+                .success()
+        );
+        for (index, command) in ["attach", "attach-session"].into_iter().enumerate() {
+            let marker = format!("{command}-shadow");
+            let alias = format!("{command}=display-message -p {marker}");
+            let option = format!("command-alias[{}]", 40 + index);
+            assert!(
+                fixture
+                    .run(&["set-option", "-s", &option, &alias])
+                    .status
+                    .success()
+            );
+            let output = fixture.run(&[command]);
+            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(output.stdout, format!("{marker}\n").as_bytes());
+            assert!(output.stderr.is_empty());
+        }
+    }
+
+    #[test]
+    fn arbitrary_attach_alias_uses_the_tui_path() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "named"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "go=attach-session -t named",
+                ])
+                .status
+                .success()
+        );
+        let output = fixture.run(&["go"]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
+    }
+
+    #[test]
+    fn live_agent_send_aliases_control_stdin_capture() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "agent-stdin"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "pipe=agent-send -t %0",
+                ])
+                .status
+                .success()
+        );
+        let aliased = fixture.run_with_stdin(&["pipe"], b"review this\n");
+        assert_eq!(aliased.status.code(), Some(1));
+        assert!(aliased.stdout.is_empty());
+        assert_eq!(
+            aliased.stderr,
+            b"target not found: no agent pane in the window holding %0\n"
+        );
+
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[41]",
+                    "agent-send=display-message -p shadow",
+                ])
+                .status
+                .success()
+        );
+        let shadowed = fixture.run_with_stdin(&["agent-send"], b"must stay unread\n");
+        assert_eq!(shadowed.status.code(), Some(0));
+        assert_eq!(shadowed.stdout, b"shadow\n");
+        assert!(shadowed.stderr.is_empty());
+    }
+
+    #[test]
+    fn failing_kill_server_alias_does_not_enter_recovery() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "alive"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "kill-server=has-session -t missing",
+                ])
+                .status
+                .success()
+        );
+        let killed = fixture.run(&["kill-server"]);
+        assert_eq!(killed.status.code(), Some(1));
+        assert!(fixture.socket.exists());
+        let alive = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(alive.status.code(), Some(0));
+        assert_eq!(alive.stdout, b"alive\n");
+        assert!(
+            fixture
+                .run(&["set-option", "-su", "command-alias[40]"])
+                .status
+                .success()
+        );
+    }
+
+    #[test]
+    fn prepared_kill_server_stops_the_daemon_without_recovery() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "alive"])
+                .status
+                .success()
+        );
+        let killed = fixture.run(&["kill-server"]);
+        assert_eq!(killed.status.code(), Some(0));
+        assert!(killed.stdout.is_empty());
+        assert!(killed.stderr.is_empty());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while fixture.socket.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!fixture.socket.exists());
+    }
+
+    #[test]
+    fn raw_kill_server_flag_ignores_the_live_alias_table() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "alive"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "kill-server=display-message -p shadow",
+                ])
+                .status
+                .success()
+        );
+        let killed = fixture.run(&["--kill-server"]);
+        assert_eq!(killed.status.code(), Some(0));
+        assert!(killed.stdout.is_empty());
+        assert!(killed.stderr.is_empty());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while fixture.socket.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!fixture.socket.exists());
+    }
+
+    #[test]
+    fn cli_prepare_freezes_aliases_for_the_whole_command_chain() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "snapshot"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "live=display-message -p old",
+                ])
+                .status
+                .success()
+        );
+        let frozen = fixture.run(&[
+            "set-option",
+            "-s",
+            "command-alias[40]",
+            "live=display-message -p new",
+            ";",
+            "live",
+        ]);
+        assert_eq!(frozen.status.code(), Some(0));
+        assert_eq!(frozen.stdout, b"old\n");
+        assert!(frozen.stderr.is_empty());
+        let next = fixture.run(&["live"]);
+        assert_eq!(next.status.code(), Some(0));
+        assert_eq!(next.stdout, b"new\n");
+    }
+
+    #[test]
+    fn prepared_cli_chain_rejects_later_alias_parse_errors_before_effects() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "atomic"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "broken=display-message 'unterminated",
+                ])
+                .status
+                .success()
+        );
+
+        let rejected = fixture.run(&[
+            "set-environment",
+            "-g",
+            "CLI_CHAIN_BEFORE",
+            "mutated",
+            ";",
+            "broken",
+        ]);
+        assert_eq!(rejected.status.code(), Some(1));
+        assert!(rejected.stdout.is_empty());
+        assert_eq!(rejected.stderr, b"unknown command: broken\n");
+
+        let marker = fixture.run(&["show-environment", "-g", "CLI_CHAIN_BEFORE"]);
+        assert_eq!(marker.status.code(), Some(1));
+        assert!(marker.stdout.is_empty());
+        assert_eq!(marker.stderr, b"unknown variable: CLI_CHAIN_BEFORE\n");
+
+        let alive = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(alive.status.code(), Some(0));
+        assert_eq!(alive.stdout, b"atomic\n");
+        assert!(alive.stderr.is_empty());
+    }
+
+    #[test]
+    fn tui_handoff_executes_the_prepared_alias_snapshot() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "seed"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "go=new-session -s frozen-old",
+                ])
+                .status
+                .success()
+        );
+        let frozen = fixture.run(&[
+            "set-option",
+            "-s",
+            "command-alias[40]",
+            "go=display-message -p changed",
+            ";",
+            "go",
+        ]);
+        assert_eq!(frozen.status.code(), Some(1));
+        assert_eq!(frozen.stderr, b"open terminal failed: not a terminal\n");
+        let sessions = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(sessions.status.code(), Some(0));
+        assert!(
+            !String::from_utf8_lossy(&sessions.stdout)
+                .lines()
+                .any(|session| session == "frozen-old")
+        );
+        let changed = fixture.run(&["go"]);
+        assert_eq!(changed.status.code(), Some(0));
+        assert_eq!(changed.stdout, b"changed\n");
+    }
+
+    #[test]
     fn agent_send_prefix_reads_stdin_before_dispatch() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -1697,7 +2339,7 @@ mod daemon_autostart {
         assert_eq!(created.status.code(), Some(0));
         for command in ["attach", "attach-session"] {
             let output = fixture.run(&[command, "-t", "bogus"]);
-            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(output.status.code(), Some(0));
             assert!(output.stdout.is_empty());
             assert_eq!(output.stderr, b"can't find session: bogus\n");
         }
@@ -1723,6 +2365,19 @@ mod daemon_autostart {
         assert_eq!(started.status.code(), Some(0));
         assert_eq!(started.stdout, b"started=YES\n");
         assert!(started.stderr.is_empty());
+    }
+
+    #[test]
+    fn attach_restart_daemon_survives_missing_preflight_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let output = fixture.run(&["attach", "--restart-daemon"]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, b"no sessions\n");
+        assert!(fixture.socket.exists());
     }
 
     #[test]
@@ -2446,6 +3101,76 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn control_initial_command_uses_a_live_daemon_alias() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", "aliased"])
+                    .status
+                    .success()
+            );
+            assert!(
+                fixture
+                    .run(&[
+                        "set-option",
+                        "-s",
+                        "command-alias[40]",
+                        "live=list-sessions -F 'alias-#{session_name}'",
+                    ])
+                    .status
+                    .success()
+            );
+            let output = fixture.run(&["-C", "live"]);
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 1);
+            assert_block(&stream.blocks[0], 1, 0, &["alias-aliased"], false);
+            assert_eq!(stream.outside, ["%exit"]);
+        }
+
+        #[test]
+        fn control_stdin_prepares_each_complete_alias_chain_once() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", "alias-chain"])
+                    .status
+                    .success()
+            );
+            assert!(
+                fixture
+                    .run(&[
+                        "set-option",
+                        "-s",
+                        "command-alias[40]",
+                        "live=display-message -p old",
+                    ])
+                    .status
+                    .success()
+            );
+            let output = fixture.run_with_stdin(
+                &["-C", "attach-session", "-t", "alias-chain"],
+                b"set-option -s command-alias[40] 'live=display-message -p new' ; live\nlive\n\n",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 4);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &["old"], false);
+            assert_block(&stream.blocks[3], 4, 1, &["new"], false);
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
         fn control_unknown_initial_command_is_bare_after_connect() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
@@ -2531,6 +3256,78 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn control_detach_discards_direct_errors_but_eof_preserves_them() {
+            let cases: &[(&str, &[u8], i32, &[&str], bool)] = &[
+                (
+                    "source-return-status",
+                    b"source-file top-level-return-missing.conf\n\n",
+                    0,
+                    &["No such file or directory: top-level-return-missing.conf"],
+                    true,
+                ),
+                (
+                    "kill-return-status",
+                    b"kill-session -t missing-return\n\n",
+                    0,
+                    &["can't find session: missing-return"],
+                    true,
+                ),
+                (
+                    "run-return-status",
+                    b"run-shell 'exit 3'\n\n",
+                    0,
+                    &["'exit 3' returned 3"],
+                    false,
+                ),
+                (
+                    "parse-return-status",
+                    b"wibble\n\n",
+                    0,
+                    &["parse error: unknown command: wibble"],
+                    true,
+                ),
+                (
+                    "flag-parse-return-status",
+                    b"list-sessions -Z\n\n",
+                    0,
+                    &["list-sessions does not support -Z"],
+                    true,
+                ),
+                (
+                    "arity-parse-eof-status",
+                    b"rename-session\n",
+                    0,
+                    &["rename-session requires exactly one new name"],
+                    true,
+                ),
+                (
+                    "semantic-eof-status",
+                    b"set-environment -g \"\" value\n",
+                    1,
+                    &["empty variable name"],
+                    true,
+                ),
+            ];
+            for (session, input, expected_status, expected_payload, expected_error) in cases {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
+                }
+                let output = fixture.run_with_stdin(
+                    &["-C", "new-session", "-s", session, "exec /bin/cat"],
+                    input,
+                );
+                assert_eq!(output.status.code(), Some(*expected_status), "{session}");
+                assert!(output.stderr.is_empty(), "{session}");
+                let stream = parse_stream(&output.stdout, false);
+                assert_eq!(stream.blocks.len(), 2, "{session}");
+                assert_block(&stream.blocks[0], 1, 0, &[], false);
+                assert_block(&stream.blocks[1], 2, 1, expected_payload, *expected_error);
+                assert_attached_startup(&stream.outside, session);
+            }
+        }
+
+        #[test]
         fn bare_control_defaults_to_attached_new_session() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
@@ -2569,10 +3366,8 @@ mod daemon_autostart {
             if !local_socket_bind_available(&fixture.socket) {
                 return;
             }
-            let output = fixture.run_with_stdin(
-                &["-C", "new-session", "-s", "parse-error"],
-                b"bogus-command\n\n",
-            );
+            let output =
+                fixture.run_with_stdin(&["-C", "new-session", "-s", "parse-error"], b"wibble\n\n");
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
@@ -2582,10 +3377,36 @@ mod daemon_autostart {
                 &stream.blocks[1],
                 2,
                 1,
-                &["parse error: unknown command: bogus-command"],
+                &["parse error: unknown command: wibble"],
                 true,
             );
             assert_attached_startup(&stream.outside, "parse-error");
+        }
+
+        #[test]
+        fn control_stdin_preflight_errors_abort_the_whole_line() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "preflight-error"],
+                b"set-option -g @should-not-run yes ; bogus-command\nshow-options -gqv @should-not-run\n\n",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 3);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(
+                &stream.blocks[1],
+                2,
+                1,
+                &["parse error: unknown command: bogus-command"],
+                true,
+            );
+            assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_attached_startup(&stream.outside, "preflight-error");
         }
 
         #[test]
@@ -2594,9 +3415,12 @@ mod daemon_autostart {
             if !local_socket_bind_available(&fixture.socket) {
                 return;
             }
-            let source = fixture._directory.path().join("config-error.conf");
-            std::fs::write(&source, "wibble\n").expect("write invalid config");
-            let input = format!("source-file {}\n\n", source.display());
+            let directory = fixture._directory.path().join("a: b");
+            std::fs::create_dir(&directory).expect("create config error directory");
+            let source = directory.join("mux.conf");
+            std::fs::write(&source, "wibble\ndisplay-message -p after-config-error\n")
+                .expect("write invalid config");
+            let input = format!("source-file '{}'\n\n", source.display());
             let output = fixture.run_with_stdin(
                 &["-C", "new-session", "-s", "config-error"],
                 input.as_bytes(),
@@ -2604,22 +3428,205 @@ mod daemon_autostart {
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 2);
+            assert_eq!(stream.blocks.len(), 3);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
-            assert!(stream.outside.contains(&format!(
+            assert_block(&stream.blocks[2], 3, 1, &["after-config-error"], false);
+            let diagnostic = format!(
                 "%config-error {}:1: unknown command: wibble",
                 source.display()
-            )));
-            assert_attached_startup(
-                &stream
-                    .outside
-                    .iter()
-                    .filter(|line| !line.starts_with("%config-error "))
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                "config-error",
             );
+            assert!(stream.outside.contains(&diagnostic));
+            let outside = stream
+                .outside
+                .into_iter()
+                .filter(|line| line != &diagnostic)
+                .collect::<Vec<_>>();
+            assert_attached_startup(&outside, "config-error");
+        }
+
+        #[test]
+        fn control_sourced_name_failures_and_loud_gaps_use_config_errors() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let source = fixture._directory.path().join("classification.conf");
+            std::fs::write(
+                &source,
+                "set-option -s command-alias[90] badalias=\n\
+                 set-option -s command-alias[91] source=\n\
+                 source ignored.conf\n\
+                 wibble\n\
+                 kill-s\n\
+                 badalias\n\
+                 set-environment -g\n\
+                 new-pane\n\
+                 display-message -p after-classification\n",
+            )
+            .expect("write sourced classification fixture");
+            let input = format!("source-file '{}'\n\n", source.display());
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "source-classification"],
+                input.as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 7);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_block(&stream.blocks[3], 4, 1, &[], false);
+            assert_block(
+                &stream.blocks[4],
+                5,
+                1,
+                &[&format!(
+                    "{}:7: set-environment needs a variable and optional value",
+                    source.display()
+                )],
+                true,
+            );
+            assert_block(&stream.blocks[5], 6, 1, &[], false);
+            assert_block(&stream.blocks[6], 7, 1, &["after-classification"], false);
+            let diagnostics = [
+                format!(
+                    "%config-error {}:3: unknown command: source",
+                    source.display()
+                ),
+                format!(
+                    "%config-error {}:4: unknown command: wibble",
+                    source.display()
+                ),
+                format!(
+                    "%config-error {}:5: ambiguous command: kill-s, could be: kill-server, kill-session",
+                    source.display()
+                ),
+                format!(
+                    "%config-error {}:6: unknown command: badalias",
+                    source.display()
+                ),
+                "%config-error skipped 1 unsupported tmux command: new-pane".to_owned(),
+            ];
+            for diagnostic in &diagnostics {
+                assert!(stream.outside.contains(diagnostic), "{diagnostic}");
+            }
+            let outside = stream
+                .outside
+                .into_iter()
+                .filter(|line| !diagnostics.contains(line))
+                .collect::<Vec<_>>();
+            assert_attached_startup(&outside, "source-classification");
+        }
+
+        #[test]
+        fn control_sourced_success_quiet_and_partial_guards_keep_fifo_status() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control sourced guards");
+            std::fs::create_dir(&directory).expect("create sourced guard directory");
+            let quiet = write_source(
+                &directory,
+                "quiet.conf",
+                "set-option -g @guard-success yes\nsource-file -q quiet-missing.conf\n",
+            );
+            let quiet_input = format!("source-file '{quiet}'\ndisplay-message -p quiet-fresh\n\n");
+            let quiet_output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "quiet-guards"],
+                quiet_input.as_bytes(),
+            );
+            assert_eq!(quiet_output.status.code(), Some(0));
+            assert!(quiet_output.stderr.is_empty());
+            let quiet_stream = parse_stream(&quiet_output.stdout, false);
+            assert_eq!(quiet_stream.blocks.len(), 5);
+            assert_block(&quiet_stream.blocks[0], 1, 0, &[], false);
+            assert_block(&quiet_stream.blocks[1], 2, 1, &[], false);
+            assert_block(&quiet_stream.blocks[2], 3, 1, &[], false);
+            assert_block(&quiet_stream.blocks[3], 4, 1, &[], false);
+            assert_block(&quiet_stream.blocks[4], 5, 1, &["quiet-fresh"], false);
+            assert_attached_startup(&quiet_stream.outside, "quiet-guards");
+
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control partial guards");
+            std::fs::create_dir(&directory).expect("create partial guard directory");
+            let leaf = write_source(
+                &directory,
+                "leaf.conf",
+                "set-option -g @guard-partial yes\n",
+            );
+            let entry = write_source(
+                &directory,
+                "entry.conf",
+                &format!(
+                    "source-file partial-missing.conf '{leaf}'\n\
+                     display-message -p sourced-output\n"
+                ),
+            );
+            let partial_input =
+                format!("source-file '{entry}'\ndisplay-message -p partial-fresh\n\n");
+            let partial_output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "partial-guards"],
+                partial_input.as_bytes(),
+            );
+            assert_eq!(partial_output.status.code(), Some(0));
+            assert!(partial_output.stderr.is_empty());
+            let partial_stream = parse_stream(&partial_output.stdout, false);
+            assert_eq!(partial_stream.blocks.len(), 6);
+            assert_block(&partial_stream.blocks[0], 1, 0, &[], false);
+            assert_block(&partial_stream.blocks[1], 2, 1, &[], false);
+            assert_block(
+                &partial_stream.blocks[2],
+                3,
+                1,
+                &["No such file or directory: partial-missing.conf"],
+                false,
+            );
+            assert_block(&partial_stream.blocks[3], 4, 1, &[], false);
+            assert_block(&partial_stream.blocks[4], 5, 1, &["sourced-output"], false);
+            assert_block(&partial_stream.blocks[5], 6, 1, &["partial-fresh"], false);
+            assert_attached_startup(&partial_stream.outside, "partial-guards");
+        }
+
+        #[test]
+        fn control_source_read_error_follows_the_parent_guard_and_is_sticky() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let unreadable = fixture._directory.path().join("source read directory");
+            std::fs::create_dir(&unreadable).expect("create unreadable source directory");
+            let entry = write_source(
+                fixture._directory.path(),
+                "read-entry.conf",
+                &format!("source-file '{}'\n", unreadable.display()),
+            );
+            let expected = format!(
+                "{}: {}",
+                std::fs::read_to_string(&unreadable)
+                    .expect_err("reading the source directory must fail"),
+                unreadable.display()
+            );
+            let input = format!("source-file '{entry}'\ndisplay-message -p after-read-error\n\n");
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "source-read-error"],
+                input.as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 5);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_block(&stream.blocks[3], 4, 1, &[&expected], true);
+            assert_block(&stream.blocks[4], 5, 1, &["after-read-error"], false);
+            assert_attached_startup(&stream.outside, "source-read-error");
         }
 
         #[test]
@@ -2651,7 +3658,7 @@ mod daemon_autostart {
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 9);
+            assert_eq!(stream.blocks.len(), 10);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(
@@ -2672,24 +3679,215 @@ mod daemon_autostart {
             assert_block(&stream.blocks[5], 6, 1, &[], false);
             assert_block(&stream.blocks[6], 7, 1, &["same-invalid"], false);
             assert_block(&stream.blocks[7], 8, 1, &[], false);
-            assert_block(&stream.blocks[8], 9, 1, &["fresh"], false);
-            assert!(stream.outside.contains(&format!(
+            assert_block(&stream.blocks[8], 9, 1, &[], false);
+            assert_block(&stream.blocks[9], 10, 1, &["fresh"], false);
+            let diagnostic = format!(
                 "%config-error {}:1: unknown command: wibble",
                 invalid.display()
-            )));
-            assert_attached_startup(
-                &stream
-                    .outside
-                    .iter()
-                    .filter(|line| !line.starts_with("%config-error "))
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                "nested-source-error",
             );
+            assert!(stream.outside.contains(&diagnostic));
+            let outside = stream
+                .outside
+                .into_iter()
+                .filter(|line| line != &diagnostic)
+                .collect::<Vec<_>>();
+            assert_attached_startup(&outside, "nested-source-error");
         }
 
         #[test]
-        fn control_nested_source_depth_limit_uses_zz_synthesized_error_frames() {
+        fn control_replayed_runtime_errors_use_bare_error_blocks_and_continue() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control replay errors");
+            std::fs::create_dir(&directory).expect("create control replay directory");
+            let source = write_source(
+                &directory,
+                "runtime.conf",
+                "kill-session -t missing-runtime\n\
+                 set-option -g nonexistent-option value\n\
+                 set-environment -g \"\" value\n\
+                 set-option -g @runtime-after yes\n",
+            );
+            let input = format!(
+                "source-file '{source}'\nshow-options -gqv @runtime-after\ndisplay-message -p fresh\n\n"
+            );
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "control-replay-errors"],
+                input.as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 8);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(
+                &stream.blocks[2],
+                3,
+                1,
+                &["can't find session: missing-runtime"],
+                true,
+            );
+            assert_block(
+                &stream.blocks[3],
+                4,
+                1,
+                &["invalid option: nonexistent-option"],
+                true,
+            );
+            assert_block(&stream.blocks[4], 5, 1, &["empty variable name"], true);
+            assert_block(&stream.blocks[5], 6, 1, &[], false);
+            assert_block(&stream.blocks[6], 7, 1, &["yes"], false);
+            assert_block(&stream.blocks[7], 8, 1, &["fresh"], false);
+            assert_attached_startup(&stream.outside, "control-replay-errors");
+        }
+
+        #[test]
+        fn control_sourced_sticky_survives_detach_return_and_server_stop() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control detach status");
+            std::fs::create_dir(&directory).expect("create control detach directory");
+            let source = write_source(
+                &directory,
+                "runtime.conf",
+                "kill-session -t missing-detach\nset-option -g @detach-after yes\n",
+            );
+
+            let (mut child, mut stdin) = fixture.spawn_with_open_stdin(&[
+                "-C",
+                "new-session",
+                "-s",
+                "explicit-detach-status",
+            ]);
+            writeln!(stdin, "source-file '{source}'").expect("write replay command");
+            writeln!(stdin, "detach-client").expect("write detach command");
+            stdin.flush().expect("flush detach commands");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = child.try_wait().expect("poll detached control") {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("kill stalled detached control");
+                    panic!("explicit detach did not close held-open control input");
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            drop(stdin);
+            let output = child.wait_with_output().expect("collect detached control");
+            assert_eq!(output.status, status);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert!(stream.blocks.iter().any(|block| {
+                block.error && block.payload == ["can't find session: missing-detach"]
+            }));
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+
+            let clean = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "clean-detach-status"],
+                b"detach-client\n",
+            );
+            assert_eq!(clean.status.code(), Some(0));
+            assert!(clean.stderr.is_empty());
+
+            let (mut child, mut stdin) = fixture.spawn_with_open_stdin(&[
+                "-C",
+                "new-session",
+                "-s",
+                "direct-runtime-detach-status",
+            ]);
+            writeln!(stdin, "kill-session -t missing-direct-detach")
+                .expect("write direct runtime error");
+            writeln!(stdin, "detach-client").expect("write direct runtime detach");
+            stdin.flush().expect("flush direct runtime commands");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = child.try_wait().expect("poll direct runtime detach") {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    child
+                        .kill()
+                        .expect("kill stalled direct runtime detach control");
+                    panic!("direct runtime detach did not close held-open control input");
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            drop(stdin);
+            let output = child
+                .wait_with_output()
+                .expect("collect direct runtime detached control");
+            assert_eq!(output.status, status);
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert!(stream.blocks.iter().any(|block| {
+                block.error && block.payload == ["can't find session: missing-direct-detach"]
+            }));
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+
+            let eof_input = format!("source-file '{source}'\n");
+            let eof = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "eof-detach-status"],
+                eof_input.as_bytes(),
+            );
+            assert_eq!(eof.status.code(), Some(1));
+            assert!(eof.stderr.is_empty());
+            let eof_stream = parse_stream(&eof.stdout, false);
+            assert!(eof_stream.blocks.iter().any(|block| {
+                block.error && block.payload == ["can't find session: missing-detach"]
+            }));
+
+            let return_input = format!("source-file '{source}'\n\n");
+            let returned = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "return-detach-status"],
+                return_input.as_bytes(),
+            );
+            assert_eq!(returned.status.code(), Some(1));
+            assert!(returned.stderr.is_empty());
+            let returned_stream = parse_stream(&returned.stdout, false);
+            assert!(returned_stream.blocks.iter().any(|block| {
+                block.error && block.payload == ["can't find session: missing-detach"]
+            }));
+
+            let (mut child, mut stdin) =
+                fixture.spawn_with_open_stdin(&["-C", "new-session", "-s", "server-stop-status"]);
+            writeln!(stdin, "source-file '{source}'").expect("write replay command");
+            writeln!(stdin, "kill-server").expect("write server stop command");
+            stdin.flush().expect("flush server stop commands");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = child.try_wait().expect("poll stopped control") {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    child
+                        .kill()
+                        .expect("kill stalled control after server stop");
+                    panic!("server stop did not close held-open control input");
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            drop(stdin);
+            let output = child.wait_with_output().expect("collect stopped control");
+            assert_eq!(output.status, status);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert!(stream.blocks.iter().any(|block| {
+                block.error && block.payload == ["can't find session: missing-detach"]
+            }));
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
+        fn control_nested_source_depth_limit_uses_sourced_command_guards() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
                 return;
@@ -2699,18 +3897,33 @@ mod daemon_autostart {
             let entry = write_source_chain(&directory, 50);
             let input = format!("source-file '{entry}' ; display-message -p after-the-limit\n\n");
             let output = fixture.run_with_stdin(
-                &["-C", "new-session", "-s", "control-depth"],
+                &["-C", "new-session", "-s", "control-depth", "exec /bin/cat"],
                 input.as_bytes(),
             );
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 5);
+            assert_eq!(stream.blocks.len(), 154);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
-            assert_block(&stream.blocks[2], 3, 1, &["too many nested files"], true);
-            assert_block(&stream.blocks[3], 4, 1, &["too many nested files"], true);
-            assert_block(&stream.blocks[4], 5, 1, &["after-the-limit"], false);
+            let errors = stream
+                .blocks
+                .iter()
+                .filter(|block| block.error)
+                .collect::<Vec<_>>();
+            assert_eq!(errors.len(), 2);
+            assert!(
+                errors
+                    .iter()
+                    .all(|block| block.payload == ["too many nested files"])
+            );
+            assert_block(
+                stream.blocks.last().expect("same-line continuation block"),
+                154,
+                1,
+                &["after-the-limit"],
+                false,
+            );
             assert_attached_startup(&stream.outside, "control-depth");
         }
 

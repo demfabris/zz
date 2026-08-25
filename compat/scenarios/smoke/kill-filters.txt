@@ -1,0 +1,18 @@
+corpus: none
+new-session -d -s keep
+new-session -d -s drop
+kill-session -a -t keep -f '#{==:#{session_name},drop}'
+out: list-sessions -F #{session_name} -O name
+rename-window -t keep:0 base
+new-window -d -t keep -n stay
+new-window -d -t keep -n drop
+kill-window -a -t keep:0 -f '#{==:#{window_name},drop}'
+out: list-windows -t keep -F #{window_name} -O name
+split-window -d -t keep:stay
+kill-pane -a -t keep:stay.0 -f '#{==:#{pane_index},1}'
+out: list-panes -t keep:stay -F #{pane_index}
+kill-session -t keep -f 1
+kill-session -a -C -t keep -f 1
+kill-window -t keep:0 -f 1
+kill-window -t missing -f 1
+kill-pane -t keep:stay.0 -f 1

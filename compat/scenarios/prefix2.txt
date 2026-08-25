@@ -4,7 +4,7 @@
 out: show-options -gv prefix2
 set-option -g prefix2 C-a
 out: show-options -gv prefix2
-set-option -g prefix2 Ctrl-b
+set-option -g prefix2 ^B
 out: show-options -gv prefix2
 set-option -g prefix2 C-a
 bind-key -T pfx2 z send-prefix -2

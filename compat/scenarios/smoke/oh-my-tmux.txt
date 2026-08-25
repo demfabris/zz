@@ -1,3 +1,4 @@
+corpus: required
 # Oh My Tmux (gpakosz/.tmux), the most common real-world config. Its .tmux.conf
 # pipes ITSELF through sh (`cut -c3- "$TMUX_CONF" | sh -s _apply_configuration`)
 # and locates itself as ~/.tmux.conf, so the corpus file is staged verbatim with

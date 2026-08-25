@@ -1,0 +1,11 @@
+new-session -d -s zoomcase -x 80 -y 24
+split-window -d -h -t zoomcase:0.0
+resize-pane -Z -t zoomcase:0.0
+out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}
+split-window -d -h -t zoomcase:0.0
+out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}
+split-window -d -hZ -t zoomcase:0.0
+out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}
+resize-pane -Z -t zoomcase:0.0
+split-window -hZ -t zoomcase:0.0
+out: list-panes -t zoomcase:0 -F #{pane_index}:#{pane_active}:#{window_zoomed_flag}

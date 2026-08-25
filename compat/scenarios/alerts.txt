@@ -20,6 +20,7 @@ out: show-options -gv visual-activity
 set-option -g visual-silence on
 out: show-options -gv visual-silence
 set-window-option -g monitor-silence 60
+set-window-option -g monitor-silence 60
 out: show-window-options -gv monitor-silence
 set-window-option -g -u monitor-silence
 out: show-window-options -gv monitor-silence
@@ -35,6 +36,10 @@ set-window-option -t w:1 monitor-activity on
 out: display-message -p -t w:1 #{window_activity_flag}#{window_bell_flag}#{window_silence_flag}
 send-keys -t w:1 -l ping
 out: display-message -p -t w:1 #{window_activity_flag}
+out: display-message -p -t w:0 #{session_activity_flag}|#{window_activity_flag}
+out: display-message -p -t w:1 #{session_activity_flag}|#{window_activity_flag}
+out: list-sessions -F #{session_activity_flag}|#{session_silence_flag}
+out: list-windows -t w -F #{window_index}|#{session_activity_flag}|#{session_silence_flag}
 out: display-message -p -t w:0 #{session_alerts}
 out: display-message -p -t w:0 #{session_alert}
 out: list-windows -t w -F #{window_index}|#{window_flags}

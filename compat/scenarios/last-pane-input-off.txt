@@ -1,0 +1,15 @@
+split-window -d -h -t w:0
+resize-pane -Z -t w:0.0
+out: list-panes -t w:0 -F #{pane_index}:#{pane_active}:#{pane_input_off}:#{window_zoomed_flag}
+last-pane -dZ -t w:0
+out: list-panes -t w:0 -F #{pane_index}:#{pane_active}:#{pane_input_off}:#{window_zoomed_flag}
+last-pane -de -t w:0
+out: list-panes -t w:0 -F #{pane_index}:#{pane_active}:#{pane_input_off}:#{window_zoomed_flag}
+last-pane -d -t w:0
+last-pane -ed -t w:0
+out: list-panes -t w:0 -F #{pane_index}:#{pane_active}:#{pane_input_off}:#{window_zoomed_flag}
+new-window -d -t w -n empty-history
+split-window -d -h -t w:empty-history
+split-window -d -v -t w:empty-history
+last-pane -d -t w:empty-history
+last-pane -de -t missing

@@ -4,7 +4,7 @@ title: Running the tmux compatibility harness
 description: How to run the pinned tmux differential corpus, read topology, geometry, format, and query-stdout results, and record known divergences.
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
-timestamp: 2026-08-16T00:00:00-03:00
+timestamp: 2026-08-24T00:00:00-03:00
 ---
 
 # Overview
@@ -18,16 +18,135 @@ differences fail under `--strict-geometry`, which is how CI runs the harness.
 
 `compat/run.sh` builds `target/debug/zz` with your normal environment before the scenario
 runner creates its scratch `HOME` and `XDG_CONFIG_HOME`. The tmux fetcher clones and builds
-the pin under `compat/.cache/`, then checks for `tmux next-3.8`. Set
-`ZZ_COMPAT_TMUX=/path/to/tmux` to use a prebuilt binary with that version.
+the pin under `compat/.cache/`. The canonical oracle check accepts `tmux next-3.8` only when the
+binary lives at the root of a clean source checkout at the exact pin and its companion build stamp
+matches the commit, version, fetch recipe, and binary checksum. `ZZ_COMPAT_TMUX` can select another
+cache built by the same fetcher, but a version-matching prebuilt or an unstamped clean checkout
+cannot satisfy the oracle.
+
+The cache stays valid while its source HEAD is clean at the pin and its build stamp matches the pin,
+version, fetch script, and binary. A mismatch rebuilds tmux before the gate runs; a dirty checkout
+is refused rather than attested.
+
+# Tracker and generated report
+
+`compat/tmux-gaps.json` is the sole live TODO and status source. Schema 3 assigns stable IDs to
+active gaps, stores the manifest date in `updated_on`, and keeps completed work in `closed`. The
+generated [tmux compatibility gap report](/tmux/gaps.md) is the readable view. Do not maintain
+counts or open-item rosters in the philosophy, roadmap, divergence matrix, or research snapshots.
+
+Run the fast gate before choosing or landing a compatibility slice:
+
+```sh
+just compat-check
+```
+
+The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
+and registry, asserts that both named manifest tests still exist, then runs the full `zz-mux`
+library suite. Linux CI runs the same command after restoring the pinned tmux cache. A full
+`compat/run.sh` checks the oracle and tracker before executing scenarios.
+
+Oracle schema 3 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
+valueless, 246 required-value, and 8 optional-value. Every command also carries its positional
+minimum and maximum. The remaining inventories contain 180 options, 198 global format-table names,
+14 source-enumerated names across the selected `command-item`, `list-commands`, and `list-keys`
+contexts, 68 hooks, and 303 default bindings across `root`, `prefix`, `copy-mode`, `copy-mode-vi`,
+and `move`.
+
+The Rust gate reconciles command and alias names, flag arities, positional bounds, option names,
+global and selected context-format names, and hook names. It also classifies native commands,
+native aliases, zz-only flags on tmux command names, and every zz-only default key. It derives the
+guarded native-name roster from the catalog minus the pinned oracle and checks every pinned
+canonical prefix against the resolver. It pairs every constant-backed format with a manifest item
+and tracks every missing default key across all five tmux tables. For each shared default key, it
+also reconciles the rendered command and repeat bit or requires a named `binding:` divergence. The
+three selected context rosters contain 1 `command-item` name, 3 `list-commands` names, and 10
+`list-keys` names. zz implements all 14. `formats.command-item-context` closed on 2026-08-24: the
+mux dispatch chokepoint carries the canonical entry name into every command it runs, so `#{command}`
+expands inside any command item and stays empty outside one. The daemon-preempted verbs that build
+their own format hooks remain open under `formats.daemon-command-item-context`.
+
+`formats.command-argument-expansion` closed on 2026-08-24. The 76-step
+`command-item-format` scenario covers the positional names for `rename-session` and
+`rename-window`, optional option names for both show commands, and `select-pane -T`. Its fixtures
+use exact non-current targets. `native-prefix-isolation` covers the 25 unique tmux prefixes that
+native names had changed, plus exact alias and user `command-alias` precedence.
+
+Those structural checks leave seven semantic discovery gaps: custom `args_parse` callbacks,
+open-ended or dynamic context-format names, nonconstant format behavior, hook production, runtime
+behavior for shared bindings, consumer truth for names in `BEHAVES`, and daemon runtime handling of
+invalid flags. `tracker.semantic-coverage` owns that work. Differential scenarios, attached-client
+fixtures, unit tests, and manual GUI checks remain the behavioral evidence.
+
+Regenerate the readable report after changing the manifest:
+
+```sh
+python3 compat/tmux-tracker.py write-report
+python3 compat/tmux-tracker.py check
+```
+
+Use the registry vocabulary consistently:
+
+- `decision` is `adopt` for tmux behavior zz will implement, `native` for a zz presentation or
+  ownership choice, `park` for work without current product demand, or `never` for a permanent
+  exclusion.
+- `status` records product disposition as `open`, `blocked`, or `accepted`. It does not describe
+  dependency readiness.
+- `depends_on` records delivery order between active gaps. An open gap may depend on another gap,
+  while a blocked gap may have no tracked dependency.
+- `priority` is `now`, `next`, `later`, or `none`; `ease` is `easy`, `medium`, `hard`, `hardest`, or
+  `none`. Accepted items use `none` for both.
+- `items` holds normalized upstream, arity, positional-bound, selected context-format,
+  native-extension, semantic, presentation, and protocol identifiers. The source gate reconciles
+  structural identifiers where code exposes an inventory. `evidence` points to source, tests, or
+  scenarios; `acceptance` states the condition that closes or accepts the gap.
+- `updated_on` changes with the manifest. Completed adopt work moves from `gaps` to `closed` with
+  the same ID, a closure date, evidence, and a short resolution.
+
+## Coverage freshness
+
+`compat/results/summary.md` records the canonical scenario paths and executable step counts. The
+expanded corpus pins capture routing and ranges, manual window geometry,
+join and break placement, pane-local and creation-time environments, empty panes, post-split zoom,
+last-pane input gating, buffer rename, source path formatting, and the small accepted-flag cluster.
+`list-keys-padding` contributes 46 byte-exact checks for default padding, note selectors, ordering,
+positional filtering, `-1` aggregates, stock repeat metadata, and canonical Space spellings;
+`smoke/cheap-flags` contributes 22 checks for `new-window -b` and `unbind-key -a/-q`; and
+`smoke/kill-filters` contributes 17 contextual `kill-session`/`kill-window`/`kill-pane -a -f`
+checks. `smoke/source-file-depth` contributes 3 command-client checks for the 50-invocation source
+limit and the refused 51st. `formats-values` also proves explicit startup `config_files`; both
+servers start with `-f /dev/null` so that fact is symmetric. `native-prefix-isolation` contributes
+28 byte-exact command-name queries without state or plugin-corpus dependencies.
+
+The latest complete strict run is canonical: every ordinary row has zero TOPO, GEO, FMT, OUT, and
+WARN differences, while each of the two `known/` rows has exactly its single documented GEO
+difference and zero TOPO, FMT, OUT, or WARN differences. The attached-client fixture passes in the
+same run.
+
+`compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
+all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
+requires its persisted attached-client status to be `PASS`. The check exits before building or
+running either server. Linux CI first asserts that `compat/results/summary.md` is tracked, then runs
+the inventory and result check after checkout. A named partial run, a headless-only full run, a failed
+run, or a run with a SKIP cannot overwrite the canonical report. After a complete strict run with
+`--attached-client`, CI diffs the full tracked summary, so changes to Steps, TOPO, GEO, FMT, OUT,
+WARN, or the attached proof fail the job. Per-scenario logs remain ignored scratch data, while the
+canonical summary stays versionable.
+
+`smoke/config-grammar` intentionally expects the invalid-octal `%config-error` from tmux only. The
+nested zz control client still does not publish that diagnostic; the state readbacks separately
+prove that both parsers abort the file at the same point.
 
 # Running the corpus
 
-Run the full corpus from the repository root:
+Run the strict corpus and attached-client contract from the repository root:
 
 ```sh
-compat/run.sh
+just compat --strict-geometry --attached-client
 ```
+
+`compat/run.sh` without flags remains the non-strict headless-only form. It prints the temporary
+report but leaves the canonical combined summary unchanged.
 
 Pass scenario names to run a subset. Names may include or omit `.txt`.
 
@@ -35,6 +154,32 @@ Pass scenario names to run a subset. Names may include or omit `.txt`.
 compat/run.sh windows panes
 compat/run.sh known/known-geometry-gap.txt
 ```
+
+Check only that the persisted inventory and attached proof are current:
+
+```sh
+compat/run.sh --check-summary
+```
+
+Run the real attached-client fixture separately after building zz and fetching the pin when
+debugging it in isolation:
+
+```sh
+compat/attached-client.sh target/debug/zz compat/.cache/tmux-src/tmux
+```
+
+Pinned tmux owns two isolated outer PTYs and drives an inner zz attach beside an inner tmux attach.
+The fixture polls semantic state rather than comparing native presentation. It covers readiness,
+root/prefix/prefix2 bindings, copy-mode entry/exit, prompt-driven window rename, choose-tree row
+keys, choose-buffer paste/deletion, exact nested-attach refusal, and the attached status message
+for a refused 51st `source-file` invocation. It also checks that `list-keys -1` shows a timed status
+without replacing the terminal with command output; the short result marker comes from the binding
+note and does not appear in the typed prompt. Failure output includes both
+outer screens and zz daemon stderr; cleanup removes outer servers before inner servers.
+`--attached-client` runs it after the headless scenarios and includes it in the overall exit status
+without adding a fake row or step count to the canonical summary. Its `PASS` status is persisted
+below the scenario rows. A fixture failure or an omitted fixture prevents that full run from
+replacing the prior combined summary.
 
 Geometry differences do not change the default exit status. Use strict mode when you want
 them to fail the run:
@@ -44,21 +189,26 @@ compat/run.sh --strict-geometry
 ```
 
 Strict mode is the CI contract: the Linux workflow leg runs `compat/run.sh
---strict-geometry`, so every scenario outside `known/` must stay TOPO-clean and GEO-clean
+--strict-geometry --attached-client`, so every scenario outside `known/` must stay TOPO-clean and GEO-clean
 against the pin. Since the cell-authoritative layout landed, a headless zz window is born
 at tmux's 80x24 and every layout operation runs the pin's integer arithmetic, which is what
 makes exact-geometry diffing possible.
 
 FMT and OUT differences fail in both modes. `--strict-geometry` changes only GEO handling.
 
-Smoke scenarios under `compat/scenarios/smoke/` are part of the default corpus. They require the
-pinned plugin cache from `compat/fetch-corpus.sh`; when it is absent or cannot be fetched, the run
-prints a visible SKIP for each affected scenario. A skipped smoke is never reported as a pass.
+Smoke scenarios under `compat/scenarios/smoke/` are part of the default corpus. Each declares
+`corpus: none` or `corpus: required`; placement controls smoke-mode byte-exact stdout/stderr checks,
+while this metadata alone controls plugin acquisition and offline eligibility. When the pinned
+plugin cache is absent or cannot be fetched, the run executes corpus-independent smoke scenarios
+and prints a visible SKIP for each plugin-dependent scenario. A skipped smoke is never reported as
+a pass. Any SKIP makes the run exit nonzero, discards its temporary report, and leaves the last
+complete canonical summary unchanged.
 
 # Reading results
 
-The runner writes `compat/results/summary.md`. Each row gives the number of executed steps,
-TOPO, FMT, OUT, and WARN status, plus the number of steps that produced a GEO difference.
+The combined full runner writes `compat/results/summary.md` only after the attached-client fixture
+passes. Each row gives the number of executed steps, TOPO, FMT, OUT, and WARN status, plus the number
+of steps that produced a GEO difference. The final section preserves the attached-client `PASS`.
 
 Open `compat/results/<scenario>.log` for the command status and per-step unified diffs:
 
@@ -80,18 +230,42 @@ Open `compat/results/<scenario>.log` for the command status and per-step unified
   The pin does not emit `%config-error` for every execution-time config failure, so both signals
   are required.
 
-The log captures each step's stdout and stderr. The runner ignores stdout for ordinary command
-lines; `fmt:` and `out:` lines enter their respective stdout comparisons.
+The log captures each step's stdout and stderr. In normal scenarios the runner ignores stdout for
+ordinary command lines; `fmt:` and `out:` lines enter their respective comparisons. Smoke scenarios
+also compare ordinary command stdout byte for byte.
 
 The runner starts zz on a short `/tmp/zzc-<pid>.sock` path and starts tmux with
 `-L zzc-<pid> -f /dev/null`. Its exit trap stops both servers and removes both socket files.
 
+The headless scenario rows do not prove copy mode, choose-tree, choose-buffer, command-prompt,
+default prefix behavior, packaged launcher attach, or native GUI rendering. The combined strict run
+adds the attached-client proof. On macOS, build and exercise the real app launcher separately:
+
+```sh
+just build mac
+compat/packaged-cli.sh dist/zz/zz.app
+```
+
+That fixture verifies CEF resources and the bundle signature, clones the whole app under a path
+containing spaces, and drives bare/new/attach against empty and existing daemons. Its PTY cases also
+pin detached `new-session -x`/`-y` geometry, attached client dimensions, read-only input rejection
+and output visibility, native detach, and `attach -d` peer eviction. The detach paths require exit
+status zero plus `[detached (from session NAME)]`; the read-only path processes a later copy-mode
+transition before checking that earlier typed input never reached the pane, avoiding a sleep-based
+negative assertion. It does not install or notarize the app. The macOS CI leg runs it after producing
+`target/cef-bundle/zz.app`. A local run proves the bundle currently in `dist/`; rebuild at the repo
+root with `just build mac` after production changes before treating it as fresh evidence. Native GUI
+rendering still needs visual smoke evidence; a clean headless summary must not be used as evidence
+for that surface.
+
 # Adding a scenario
 
-Add a `.txt` file under `compat/scenarios/`. Keep it to 12 commands or fewer. Put one tmux
-command on each line; the runner skips blank lines and lines beginning with `#`. Use commands
-and flags that both command catalogs support, and target panes by index rather than by raw
-`%N` IDs.
+Add a `.txt` file under `compat/scenarios/`. Keep each scenario focused on one behavior or one
+stateful command family, and split it when independent setup or assertions could fail for unrelated
+reasons. Long scenarios are appropriate when later assertions genuinely depend on the earlier
+state. Put one tmux command on each line; the runner skips blank lines and lines beginning with `#`.
+Use commands and flags that both command catalogs support, and target panes by index rather than by
+raw `%N` IDs.
 
 The runner handles shell quoting for command lines and rejects `$`, backtick, `;`, `&`, `|`, `<`,
 and `>` before parsing them. Prefix a command with `zz-only:` or `tmux-only:` when a scenario needs
@@ -112,6 +286,32 @@ Put values requiring spaces into an earlier ordinary setup command, then query t
 After each line, the harness runs the query trio. Scenario files should contain state changes plus
 explicit `fmt:` or `out:` assertions, not ordinary `list-*` assertions whose stdout is ignored.
 
+## Registering a discovered gap
+
+Register a gap before implementing it:
+
+1. Reproduce the behavior against the fetched pinned binary and identify the upstream command,
+   option, format, hook, key, presentation rule, or model that owns it.
+2. Add one stable ID to `compat/tmux-gaps.json`. Follow the existing entry shape and record the
+   decision, status, priority and ease, owning subsystem, affected workflow, `depends_on` ordering,
+   source evidence, and acceptance evidence. Keep the ID when status changes and update
+   `updated_on` with the manifest.
+3. Add the smallest failing test or differential scenario that proves the observation. Use a
+   `known/` scenario only for an accepted exact mismatch. Its first metadata comment must be
+   `# gap: <stable-gap-id>`, and the registry entry must declare the expected
+   `TOPO GEO FMT OUT WARN` tuple.
+4. Run `just compat-check`. Fix unclassified structural gaps, stale manifest entries, broken
+   evidence, and tuple mismatches before changing behavior.
+5. Implement the slice and run its focused evidence. Run the full strict corpus when the change can
+   affect shared command, topology, geometry, format, output, config, or attached-client behavior.
+6. If the implementation closes an adopt gap, pass its acceptance checks, then move the ID from
+   `gaps` to `closed`. Record its title, `closed_on`, evidence, and resolution. If work remains,
+   update the same active ID and its evidence. Regenerate `knowledge/tmux/gaps.md`, then run
+   `just compat-check` again.
+
+Use the generated report to choose the next slice. The roadmap supplies dependency order, and the
+divergence matrix supplies detailed rationale; neither owns live status.
+
 ## Adding a smoke scenario
 
 Add smoke configs and fixtures under `compat/scenarios/smoke/`. The smoke class boots both daemons
@@ -121,6 +321,8 @@ This makes literal `tmux` calls inside plugins hit the intended server on both s
 
 The smoke directives are:
 
+- `corpus: none` marks a self-contained smoke; `corpus: required` permits fixtures to use the eight
+  pinned plugin checkouts. Every smoke scenario declares exactly one of these values.
 - `conf: <path>` stages and sources a config after linking cached plugins into
   `~/.tmux/plugins/<name>`. A `~/`-prefixed path resolves against the scratch HOME, so a
   corpus file can be staged verbatim (`conf: ~/.tmux/plugins/oh-my-tmux/.tmux.conf`) —
@@ -160,14 +362,22 @@ Traps that produce false divergences:
 ## Known divergences
 
 Put a scenario with an accepted strict mismatch under `compat/scenarios/known/`. The runner
-still executes every step and writes its diffs, but that scenario does not fail the corpus.
+still executes every step and writes its diffs. It accepts the result only when the scenario's gap
+ID resolves to the exact registered `TOPO GEO FMT OUT WARN` tuple. An unregistered known scenario,
+a missing tuple, or any tuple drift fails the run.
 The two current entries pin the deliberate refusals of upstream layout bugs:
 `known-main-preset-two-panes.txt` (the pin never sizes the lone "other" pane) and
 `known-spread-mixed.txt` (the pin's `-E` corrupts a parent mixing leaf and node children).
-Both cite their divergence-matrix rows.
+They use `layout.main-horizontal-upstream-bug` and `layout.spread-mixed-upstream-bug`.
+
+Inspect a registered tuple directly with:
+
+```sh
+python3 compat/tmux-tracker.py known-tuple known/known-main-preset-two-panes.txt
+```
 
 Keep the `known/` set narrow. Move a scenario into the normal corpus when zz closes the gap. The
-known-scenario exemption never covers an FMT or OUT difference.
+tracker rejects known-scenario evidence that does not match its registry entry.
 
 `aggressive-resize.txt` covers stored option readback only. The harness has one short-lived CLI
 client per side, so multi-client viewer selection belongs to daemon and convergence tests rather
@@ -177,14 +387,20 @@ than this corpus.
 
 | File | Role |
 | --- | --- |
-| `compat/run.sh` | Builds both binaries, selects scenarios, and writes the summary |
-| `compat/fetch-tmux.sh` | Acquires and verifies the pinned tmux binary |
+| `compat/check.sh` | Runs the oracle, registry, and full `zz-mux` library gate |
+| `compat/tmux-gaps.json` | Owns active gaps, product status, ordering, evidence, and closed history |
+| `compat/tmux-oracle.json` | Records schema 3 source and runtime inventories from the pin |
+| `compat/tmux-oracle.py` | Captures and verifies the oracle from a clean pinned source checkout |
+| `compat/tmux-tracker.py` | Validates the registry and generates the readable gap report |
+| `compat/run.sh` | Builds both binaries and selects scenarios; a full run with `--attached-client` writes the canonical combined summary |
+| `compat/fetch-tmux.sh` | Acquires tmux and validates its source-aware build stamp |
 | `compat/fetch-corpus.sh` | Acquires and verifies the pinned plugin corpus |
 | `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, FMT, OUT, and WARN diffs |
 | `compat/scenarios/` | Holds the shared, smoke, and known-divergence corpora |
 
 # Related
 
+- [live tmux compatibility gaps](/tmux/gaps.md) . generated from the canonical registry
 - [tmux drop-in plan](/designs/tmux-drop-in.md) . phase ordering and compatibility target
 - [tmux divergence matrix](/tmux/divergences.md) . gaps the harness can turn into fixtures
 - [updating the tmux reference](/playbooks/updating-tmux-reference.md) . how to move the pin

@@ -1,4 +1,5 @@
 fmt: #{wrap_flag}|#{cursor_flag}|#{pane_format}|#{window_format}|#{session_format}
+fmt: #{config_files}
 fmt: #{!!:#{pane_current_path}}
 fmt: #{pane_current_path}
 fmt: #{p6:#{l:xy}}|#{e|+|:2,3}|#{e|m|:7,3}|#{e|%|:7,3}|#{a:65}|#{c:red}

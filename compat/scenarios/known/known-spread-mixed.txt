@@ -1,3 +1,4 @@
+# gap: layout.spread-mixed-upstream-bug
 # The pin's -E corrupts a parent mixing leaf and node children; zz refuses the spread.
 split-window -h -t w:0.0
 split-window -h -t w:0.1

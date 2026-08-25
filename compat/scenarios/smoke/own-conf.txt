@@ -1,3 +1,4 @@
+corpus: required
 # Array options are accepted as retained compatibility data even though zz does
 # not consume them yet; the warning assertion covers only loud skips.
 conf: fixtures/own.conf

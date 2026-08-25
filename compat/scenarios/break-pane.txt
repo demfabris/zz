@@ -1,3 +1,21 @@
-# Break a pane only while its source window still has another pane.
-split-window -h -t w:0.0
-break-pane -d -s w:0.1 -n moved
+# Break placement shuffles occupied indexes and falls back from an unused target index to the current window.
+split-window -d -h -t w:0.0
+new-window -d -t w:1 -n anchor
+new-window -d -t w:2 -n tail
+select-window -t w:1
+break-pane -d -a -s w:0.1 -t w:1 -n moved
+out: list-windows -t w -F #{window_index}:#{window_name}
+new-session -d -s before -n source
+split-window -d -h -t before:0.0
+new-window -d -t before:1 -n anchor
+new-window -d -t before:2 -n tail
+select-window -t before:1
+break-pane -d -a -b -s before:0.1 -t before:1 -n moved
+out: list-windows -t before -F #{window_index}:#{window_name}
+new-session -d -s fallback -n source
+split-window -d -h -t fallback:0.0
+new-window -d -t fallback:1 -n anchor
+new-window -d -t fallback:2 -n tail
+select-window -t fallback:1
+break-pane -d -a -s fallback:0.1 -t fallback:8 -n moved
+out: list-windows -t fallback -F #{window_index}:#{window_name}

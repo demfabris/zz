@@ -1,0 +1,16 @@
+out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+resize-window -t w:0 -x 90 -y 20
+out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+resizew -t w:0 -R 3
+resize-window -t w:0 -D 2
+resize-window -t w:0 -L
+resize-window -t w:0 -U
+out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+set-window-option -t w:0 window-size latest
+out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+set-window-option -t w:0 window-size manual
+out: display-message -p -t w:0 #{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}
+resize-window -t w:0 -x 0
+resize-window -t w:0 -x 10001
+resize-window -t w:0 banana
+resize-window -t missing -x bad

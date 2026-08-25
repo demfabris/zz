@@ -1,0 +1,23 @@
+corpus: none
+new-window -d -t w:2 -n two
+new-window -bd -t w:2 -n before
+new-window -abd -t w:2 -n both
+new-window -bd -t w:7 -n free
+bind-key -T cheap F1 new-window
+keys: cheap F1
+unbind-key -a -n -T cheap
+unbind-key -aq -T cheap
+unbind-key -q -T missing F1
+unbind-key -q not-a-key
+unbind-key -aq F1
+unbind-key -q
+unbind-key -T missing F1
+unbind-key not-a-key
+unbind-key -a F1
+unbind-key
+unbind-key -q F1 F2
+bind-key -T root F1 new-window
+unbind-key -an
+unbind-key -n F1
+unbind-key -a
+unbind-key F1

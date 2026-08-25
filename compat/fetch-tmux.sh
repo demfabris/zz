@@ -7,6 +7,8 @@ COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CACHE_DIR="$COMPAT_DIR/.cache"
 SOURCE_DIR="$CACHE_DIR/tmux-src"
 TMUX_BIN="$SOURCE_DIR/tmux"
+BUILD_STAMP="$CACHE_DIR/tmux-build.stamp"
+LEGACY_BUILD_STAMP="$SOURCE_DIR/.zz-build-stamp"
 TMUX_COMMIT="d77c9dc6aa021e4bc61f0da128c591af695e6466"
 TMUX_VERSION="tmux next-3.8"
 
@@ -25,6 +27,34 @@ verify_tmux() {
   [ "$version" = "$TMUX_VERSION" ]
 }
 
+build_stamp() {
+  local binary_checksum script_checksum
+
+  script_checksum="$(cksum <"${BASH_SOURCE[0]}")" || return 1
+  binary_checksum="$(cksum <"$TMUX_BIN")" || return 1
+  printf 'commit=%s\nversion=%s\nscript-cksum=%s\nbinary-cksum=%s\n' \
+    "$TMUX_COMMIT" "$TMUX_VERSION" "$script_checksum" "$binary_checksum"
+}
+
+verify_cached_tmux() {
+  local actual_commit actual_stamp dirty expected_stamp
+
+  verify_tmux "$TMUX_BIN" || return 1
+  [ -d "$SOURCE_DIR/.git" ] || return 1
+  actual_commit="$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
+  [ "$actual_commit" = "$TMUX_COMMIT" ] || return 1
+  dirty="$(git -C "$SOURCE_DIR" status --porcelain --untracked-files=all 2>/dev/null)" || return 1
+  [ -z "$dirty" ] || return 1
+  [ -f "$BUILD_STAMP" ] || return 1
+  actual_stamp="$(cat "$BUILD_STAMP")" || return 1
+  expected_stamp="$(build_stamp)" || return 1
+  [ "$actual_stamp" = "$expected_stamp" ]
+}
+
+if [ -f "$LEGACY_BUILD_STAMP" ]; then
+  mv "$LEGACY_BUILD_STAMP" "$BUILD_STAMP"
+fi
+
 if [ -n "${ZZ_COMPAT_TMUX:-}" ]; then
   if [[ "$ZZ_COMPAT_TMUX" == */* ]]; then
     override="$ZZ_COMPAT_TMUX"
@@ -39,7 +69,7 @@ if [ -n "${ZZ_COMPAT_TMUX:-}" ]; then
   exit 0
 fi
 
-if verify_tmux "$TMUX_BIN"; then
+if verify_cached_tmux; then
   printf '%s\n' "$TMUX_BIN"
   exit 0
 fi
@@ -80,6 +110,8 @@ fi
 
 log "checking out tmux commit $TMUX_COMMIT"
 git -C "$SOURCE_DIR" checkout --quiet --detach "$TMUX_COMMIT" >&2
+dirty="$(git -C "$SOURCE_DIR" status --porcelain --untracked-files=all)"
+[ -z "$dirty" ] || die "tmux source checkout is dirty; refusing to attest a non-pin build: $SOURCE_DIR"
 
 log "building $TMUX_VERSION"
 (
@@ -89,9 +121,13 @@ log "building $TMUX_VERSION"
   # harness diffs topology and geometry, never glyph widths, so pick the
   # dependency-free build everywhere.
   ./configure --disable-utf8proc
+  make clean
   make
 ) >&2
 
 verify_tmux "$TMUX_BIN" ||
   die "built tmux did not report '$TMUX_VERSION' from -V"
+stamp_tmp="$BUILD_STAMP.$$"
+build_stamp >"$stamp_tmp"
+mv "$stamp_tmp" "$BUILD_STAMP"
 printf '%s\n' "$TMUX_BIN"

@@ -1,0 +1,16 @@
+corpus: none
+# Counting the initial source-file as invocation 1, the pin runs 50 concurrent
+# source invocations and refuses the 51st with `too many nested files`. The
+# staged probe drives the plain CLI from a run-shell job so both sides compare
+# the command client's exit code, streams, reached depth, the containing file's
+# later-line continuation, and the leaf that invocation 51 never loads.
+# SOURCE_LINE_GROUPS isolates physical-line removal from the separately tracked
+# replayed-command error channels by inspecting only marker options after
+# redirecting the source invocation's stdout and stderr.
+# Nested paths are absolute so the separately tracked nested-source cwd gap
+# cannot decide the result.
+stage: fixtures/source-file-depth.sh ~/source-file-depth.sh
+run-shell 'sh ~/source-file-depth.sh'
+out: show-environment -g SOURCE_DEPTH_ALLOWED
+out: show-environment -g SOURCE_DEPTH_REFUSED
+out: show-environment -g SOURCE_LINE_GROUPS

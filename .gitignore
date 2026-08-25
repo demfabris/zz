@@ -24,7 +24,8 @@
 
 # tmux differential compatibility harness scratch and captured results.
 /compat/.cache/
-/compat/results/
+/compat/results/*
+!/compat/results/summary.md
 
 # Browser-rendering bench (see bench/browser-rendering/README.md):
 # screen captures are large and machine-specific; results are derived from them.

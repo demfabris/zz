@@ -1,0 +1,11 @@
+# Headless differential coverage proves exact empty output, aliases, selective
+# clear exit classes, and the pin's invalid-type error class. Populated-ring
+# behavior is covered by daemon tests until the attached-client fixture exists.
+out: show-prompt-history
+out: showphist -T command
+out: show-prompt-history -T search
+show-prompt-history -T invalid
+clear-prompt-history -T invalid
+clearphist -T command
+clear-prompt-history -T search
+out: show-prompt-history

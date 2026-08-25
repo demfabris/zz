@@ -1,0 +1,108 @@
+# #{command} is a command-queue-item fact, not a list-row fact: every executing
+# item that expands formats resolves it to the canonical entry name, a typed
+# alias, a unique prefix, or a user command-alias still reports that name, and
+# the list commands stay on a private key table and a named command so no stock
+# row can supply the value instead of the running item.
+fmt: [#{command}]
+out: display-message -p [#{command}]
+out: display -p [#{command}]
+out: display-mes -p [#{command}]
+out: display-message -p [#{?command,set,unset}]
+out: display-message -p [#{command}]|[#{command_list_name}]|[#{key_command}]
+set-option -s command-alias[30] zzitem=display-message
+out: show-options -sv command-alias[30]
+out: zzitem -p [#{command}]
+bind-key -T zzitem F1 next-window
+bind-key -T zzitem F2 previous-window
+out: list-keys -T zzitem -F [#{command}]|#{key_string}|#{key_command}
+out: lsk -T zzitem -F [#{command}]|#{key_table}|[#{key_note}]
+out: list-commands -F [#{command}]|#{command_list_name}|#{command_list_alias} list-keys
+out: lscm -F [#{command}]|#{command_list_name} display-message
+out: set-option -sF @zzitem-fopt [#{command}]
+out: show-options -sv @zzitem-fopt
+out: set-environment -gF ZZITEM [#{command}]
+out: show-environment -g ZZITEM
+# The running item outranks a generic name lookup: the pin adds `command` to
+# the item's own format tree and only falls back to the environment for a name
+# that tree does not carry, so a global entry named `command` cannot shadow the
+# item, and an option by that name is unreachable on both sides.
+out: set-environment -g command SHADOW
+out: display-message -p [#{command}]
+set-option -s command SHADOW
+# The one production expansion that is not a command item is the automatic
+# window rename, so it must report the name unset. The pin falls back to the
+# environment for a name its format tree does not carry and zz does not, so the
+# global entry is removed first and the rename is only enabled after the format
+# is in place: the pin re-derives the name when `automatic-rename` is set, not
+# when its format is.
+out: set-environment -gu command
+out: set-window-option -t =w:0 automatic-rename-format zzauto[#{command}]#{?command,SET,UNSET}
+out: show-options -wv -t =w:0 automatic-rename-format
+out: set-window-option -t =w:0 automatic-rename on
+out: display-message -p [#{window_name}]
+
+# These five command arguments use the resolved target's format context. Build
+# every target before switching the implicit context away, then keep each
+# lookup exact so prefix targeting cannot supply a false pass.
+new-session -d -s rs-c -n rs-window
+select-pane -t =rs-c:0.0 -T rs-pane
+new-session -d -s rs-a
+new-session -d -s rs-p
+new-session -d -s rw -n rw-c
+new-window -d -t =rw:1 -n rw-a
+new-window -d -t =rw:2 -n rw-p
+new-session -d -s so -n so-window
+select-pane -t =so:0.0 -T so-pane
+set-option -t =so:0.0 @so-so-window-so-pane-show-options so-target
+new-session -d -s swo -n swo-window
+select-pane -t =swo:0.0 -T swo-pane
+set-window-option -t =swo:0 @swo-swo-window-swo-pane-show-window-options swo-target
+new-session -d -s sp -n sp-window
+select-pane -t =sp:0.0 -T sp-origin
+split-window -d -h -t =sp:0.0
+select-pane -t =sp:0.1 -T sp-destination
+new-session -d -s argfmt-current -n current
+
+# rename-session expands after target resolution and before mutation. Its
+# session context descends through the target's active window and pane.
+rename-session -t =rs-c '#{session_name}-#{window_name}-#{pane_title}-#{command}'
+out: display-message -p -t =rs-c-rs-window-rs-pane-rename-session: [#{session_name}]
+rename -t =rs-a '#{session_name}-#{command}'
+out: display-message -p -t =rs-a-rename-session: [#{session_name}]
+rename-s -t =rs-p '#{session_name}-#{command}'
+out: display-message -p -t =rs-p-rename-session: [#{session_name}]
+
+# rename-window sees the old target name for canonical, alias, and permitted
+# unique-prefix spellings.
+rename-window -t =rw:0 '#{window_name}-#{command}'
+out: display-message -p -t =rw:0 [#{window_name}]
+renamew -t =rw:1 '#{window_name}-#{command}'
+out: display-message -p -t =rw:1 [#{window_name}]
+rename-w -t =rw:2 '#{window_name}-#{command}'
+out: display-message -p -t =rw:2 [#{window_name}]
+
+# Direct option queries expand the optional name in their target context before
+# matching. show-hooks forwards its expanded user option without a second pass.
+out: show-options -v -t =so:0.0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+out: show -v -t =so:0.0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+out: show-o -v -t =so:0.0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+out: show-window-options -v -t =swo:0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+out: showw -v -t =swo:0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+out: show-window-o -v -t =swo:0 @#{session_name}-#{window_name}-#{pane_title}-#{command}
+set-option -g @current CURRENT
+set-option -g @missing MISSING
+set-window-option -g @current-window CURRENT-WINDOW
+set-window-option -g @missing-window MISSING-WINDOW
+out: show-options -g -v -t =argfmt-absent @#{?session_name,current,missing}
+out: show-window-options -g -v -t =argfmt-absent:0 @#{?window_name,current-window,missing-window}
+set-option -g -t =so:0.0 -- '@##{session_name}' literal
+out: show-hooks -g -t =so:0.0 @##{session_name}
+
+# Directional -T expansion reads the original pane and writes the result to
+# the pane selected by geometry. select-pane has no unique prefix while the
+# native select-pane-kind name remains in the shared resolver.
+select-pane -t =sp:0.0 -R -T '#{pane_title}-#{command}'
+out: display-message -p -t =sp:0.1 [#{pane_title}]
+select-pane -t =sp:0.0 -T sp-alias
+selectp -t =sp:0.0 -R -T '#{pane_title}-#{command}'
+out: display-message -p -t =sp:0.1 [#{pane_title}]

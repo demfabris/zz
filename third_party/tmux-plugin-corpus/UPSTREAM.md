@@ -14,6 +14,7 @@ clones them into the gitignored `compat/.cache/plugins/` directory.
 | tmux-resurrect | [tmux-plugins/tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) | [`cff343cf9e81983d3da0c8562b01616f12e8d548`](https://github.com/tmux-plugins/tmux-resurrect/tree/cff343cf9e81983d3da0c8562b01616f12e8d548) | [MIT](tmux-resurrect/LICENSE.md) |
 | tmux-continuum | [tmux-plugins/tmux-continuum](https://github.com/tmux-plugins/tmux-continuum) | [`0698e8f4b17d6454c71bf5212895ec055c578da0`](https://github.com/tmux-plugins/tmux-continuum/tree/0698e8f4b17d6454c71bf5212895ec055c578da0) | [MIT](tmux-continuum/LICENSE.md) |
 | tmux-fpp | [tmux-plugins/tmux-fpp](https://github.com/tmux-plugins/tmux-fpp) | [`878302f228ee14f0fa59717f63743d396b327a21`](https://github.com/tmux-plugins/tmux-fpp/tree/878302f228ee14f0fa59717f63743d396b327a21) | [MIT](tmux-fpp/LICENSE.md) |
+| Oh My Tmux | [gpakosz/.tmux](https://github.com/gpakosz/.tmux) | [`58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7`](https://github.com/gpakosz/.tmux/tree/58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7) | [MIT](https://github.com/gpakosz/.tmux/blob/58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7/LICENSE.MIT), [WTFPLv2](https://github.com/gpakosz/.tmux/blob/58a3dcc0d718ec0fa1c0d5a2fddd640a1ad7a5b7/LICENSE.WTFPLv2) |
 
-The upstream license for each pinned checkout is retained verbatim beside this
-record for provenance.
+The seven original corpus licenses are retained verbatim beside this record. Oh My Tmux's two
+license files are linked at the pinned revision above.

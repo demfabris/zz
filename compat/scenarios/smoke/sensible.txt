@@ -1,3 +1,4 @@
+corpus: required
 # Pin starts history-limit at zz's deliberate 10000 default so sensible leaves
 # it unchanged on both sides. Both sides keep the pin's escape-time default of
 # 10, so sensible's changed-from-500 guard skips the update identically.

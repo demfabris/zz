@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/source-file-tilde-decoy.conf ~/.tmux/source-file-tilde-decoy.conf
+set-option -g @source_file_tilde literal
+source-file -q '~/.tmux/source-file-tilde-decoy.conf'
+out: show-options -gv @source_file_tilde

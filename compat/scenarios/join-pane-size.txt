@@ -1,0 +1,11 @@
+new-window -d -t w -n cells
+join-pane -h -p 25% -s w:cells.0 -t w:main.0
+move-pane -h -p 25 -s w:cells.0 -t w:main.0
+join-pane -h -l 10 -s w:cells.0 -t w:main.0
+new-window -d -t w -n percent
+join-pane -h -l 25% -s w:percent.0 -t w:main.0
+new-window -d -t w -n format
+join-pane -h -l '#{pane_height}' -s w:format.0 -t w:main.0
+split-window -d -v -p 50 -t w:main.0
+new-window -d -t w -n full
+join-pane -d -v -f -l 25% -s w:full.0 -t w:main.0

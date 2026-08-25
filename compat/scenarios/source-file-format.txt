@@ -1,0 +1,17 @@
+source-file -F 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-[12]0.conf'
+out: show-options -gv @source_file_format
+source-file -F 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-20.conf' 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-10.conf'
+out: show-options -gv @source_file_format
+source-file -Fq 'compat/scenarios/source-file-format-#{session_name}-missing.conf' 'compat/scenarios/source-file-format-#{session_name}-#{window_index}-#{pane_index}-20.conf'
+out: show-options -gv @source_file_format
+source-file 'compat/scenarios/source-file-glob/literal\q.conf'
+out: show-options -gv @source_file_backslash
+set-option -g @source_file_dotfile excluded
+source-file 'compat/scenarios/source-file-glob/*.conf'
+out: show-options -gv @source_file_dotfile
+set-option -g @source_file_double_star_deep excluded
+source-file 'compat/scenarios/source-file-glob/**/*.conf'
+out: show-options -gv @source_file_double_star_shallow
+out: show-options -gv @source_file_double_star_deep
+source-file 'compat/scenarios/source-file-glob/prefix-siblings/zz*/match.conf'
+out: show-options -gv @source_file_prefix_order

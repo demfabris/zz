@@ -53,6 +53,39 @@ esac
 if grep -Eq '^[[:space:]]*shim:[[:space:]]*$' "$SCENARIO_FILE"; then
   SMOKE_MODE=1
 fi
+CORPUS_MODE="$(awk '
+  {
+    line = $0
+    sub(/\r$/, "", line)
+    sub(/^[[:space:]]+/, "", line)
+    sub(/[[:space:]]+$/, "", line)
+    if (line !~ /^corpus:/) next
+    count++
+    sub(/^corpus:[[:space:]]*/, "", line)
+    mode = line
+  }
+  END {
+    if (count > 1 || (count == 1 && mode != "none" && mode != "required")) exit 2
+    if (count == 1) print mode
+  }
+' "$SCENARIO_FILE")" || {
+  echo "error: scenario has invalid corpus metadata: $scenario_relative" >&2
+  exit 2
+}
+case "$scenario_relative" in
+smoke/*)
+  [ -n "$CORPUS_MODE" ] || {
+    echo "error: smoke scenario must declare corpus: none or corpus: required: $scenario_relative" >&2
+    exit 2
+  }
+  ;;
+*)
+  [ -z "$CORPUS_MODE" ] || {
+    echo "error: corpus metadata is only valid for smoke scenarios: $scenario_relative" >&2
+    exit 2
+  }
+  ;;
+esac
 
 LOG_FILE="$RESULTS_DIR/$scenario_name.log"
 mkdir -p "$RESULTS_DIR" "$(dirname -- "$LOG_FILE")"
@@ -189,15 +222,17 @@ prepare_smoke() {
     tmux-continuum tmux-fpp oh-my-tmux
   )
 
-  [ -d "$CORPUS_DIR" ] || die "smoke corpus is missing: $CORPUS_DIR"
-  CORPUS_DIR="$(cd -- "$CORPUS_DIR" && pwd)"
   mkdir -p "$ZZ_SHIM_DIR" "$TMUX_SHIM_DIR" "$ZZ_HOME/.tmux/plugins" \
     "$ZZ_HOME/.tmux/bin"
-  for plugin in "${plugins[@]}"; do
-    [ -d "$CORPUS_DIR/$plugin/.git" ] ||
-      die "smoke corpus is missing $CORPUS_DIR/$plugin"
-    ln -s "$CORPUS_DIR/$plugin" "$ZZ_HOME/.tmux/plugins/$plugin"
-  done
+  if [ "$CORPUS_MODE" = "required" ]; then
+    [ -d "$CORPUS_DIR" ] || die "smoke corpus is missing: $CORPUS_DIR"
+    CORPUS_DIR="$(cd -- "$CORPUS_DIR" && pwd)"
+    for plugin in "${plugins[@]}"; do
+      [ -d "$CORPUS_DIR/$plugin/.git" ] ||
+        die "smoke corpus is missing $CORPUS_DIR/$plugin"
+      ln -s "$CORPUS_DIR/$plugin" "$ZZ_HOME/.tmux/plugins/$plugin"
+    done
+  fi
 
   printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -222,7 +257,7 @@ resolve_smoke_path() {
   local argument="$1"
 
   case "$argument" in
-  "~/"*) printf '%s/%s\n' "$ZZ_HOME" "${argument#"~/"}" ;;
+  \~/*) printf '%s/%s\n' "$ZZ_HOME" "${argument#"~/"}" ;;
   /*) printf '%s\n' "$argument" ;;
   *) printf '%s/%s\n' "$(dirname -- "$SCENARIO_FILE")" "$argument" ;;
   esac
@@ -490,6 +525,8 @@ if [ "$SMOKE_MODE" -eq 1 ]; then
     line="${raw_line#"${raw_line%%[![:space:]]*}"}"
     line="${line%"${line##*[![:space:]]}"}"
     case "$line" in
+    corpus:*)
+      ;;
     expect-warn:*)
       warning="${line#expect-warn:}"
       warning="${warning#"${warning%%[![:space:]]*}"}"
@@ -524,7 +561,7 @@ if [ "$SMOKE_MODE" -eq 1 ]; then
   done
 fi
 
-zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+zz_command -f /dev/null daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 ZZ_PID=$!
 
 socket_ready=0
@@ -587,7 +624,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   key_name=""
   command_text="$line"
   case "$line" in
-  shim:* | expect-warn:* | stage:*)
+  corpus:* | shim:* | expect-warn:* | stage:*)
     continue
     ;;
   conf:*)

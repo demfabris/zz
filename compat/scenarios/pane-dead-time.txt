@@ -1,0 +1,7 @@
+# Dead time is present only while remain-on-exit retains an exited pane.
+set-window-option remain-on-exit on
+respawn-pane -k -t w:0.0 false
+run-shell "sleep 1"
+out: display-message -p -t w:0.0 #{?pane_dead_time,set,unset}
+respawn-pane -E -t w:0.0
+out: display-message -p -t w:0.0 #{?pane_dead_time,set,unset}

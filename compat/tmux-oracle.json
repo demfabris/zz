@@ -1,0 +1,3854 @@
+{
+  "schema": 3,
+  "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
+  "version": "tmux next-3.8",
+  "commands": [
+    {
+      "name": "attach-session",
+      "aliases": [
+        "attach"
+      ],
+      "usage": "[-dErx] [-c working-directory] [-f flags] [-t target-session]",
+      "flags": {
+        "-E": "none",
+        "-c": "required",
+        "-d": "none",
+        "-f": "required",
+        "-r": "none",
+        "-t": "required",
+        "-x": "none"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "bind-key",
+      "aliases": [
+        "bind"
+      ],
+      "usage": "[-nr] [-T key-table] [-N note] key [command [argument ...]]",
+      "flags": {
+        "-N": "required",
+        "-T": "required",
+        "-n": "none",
+        "-r": "none"
+      },
+      "min_args": 1,
+      "max_args": null
+    },
+    {
+      "name": "break-pane",
+      "aliases": [
+        "breakp"
+      ],
+      "usage": "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",
+      "flags": {
+        "-F": "required",
+        "-P": "none",
+        "-W": "none",
+        "-X": "required",
+        "-Y": "required",
+        "-a": "none",
+        "-b": "none",
+        "-d": "none",
+        "-n": "required",
+        "-s": "required",
+        "-t": "required",
+        "-x": "required",
+        "-y": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "capture-pane",
+      "aliases": [
+        "capturep"
+      ],
+      "usage": "[-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+      "flags": {
+        "-C": "none",
+        "-E": "required",
+        "-F": "none",
+        "-H": "none",
+        "-J": "none",
+        "-L": "none",
+        "-M": "none",
+        "-N": "none",
+        "-P": "none",
+        "-R": "none",
+        "-S": "required",
+        "-T": "none",
+        "-a": "none",
+        "-b": "required",
+        "-e": "none",
+        "-p": "none",
+        "-q": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "choose-buffer",
+      "aliases": [],
+      "usage": "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+      "flags": {
+        "-F": "required",
+        "-K": "required",
+        "-N": "none",
+        "-O": "required",
+        "-Z": "none",
+        "-f": "required",
+        "-k": "none",
+        "-r": "none",
+        "-t": "required",
+        "-y": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "choose-client",
+      "aliases": [],
+      "usage": "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+      "flags": {
+        "-F": "required",
+        "-K": "required",
+        "-N": "none",
+        "-O": "required",
+        "-Z": "none",
+        "-f": "required",
+        "-h": "none",
+        "-i": "none",
+        "-k": "none",
+        "-r": "none",
+        "-t": "required",
+        "-y": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "choose-tree",
+      "aliases": [],
+      "usage": "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+      "flags": {
+        "-F": "required",
+        "-G": "none",
+        "-K": "required",
+        "-N": "none",
+        "-O": "required",
+        "-Z": "none",
+        "-f": "required",
+        "-h": "none",
+        "-k": "none",
+        "-r": "none",
+        "-s": "none",
+        "-t": "required",
+        "-w": "none",
+        "-y": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "clear-history",
+      "aliases": [
+        "clearhist"
+      ],
+      "usage": "[-H] [-t target-pane]",
+      "flags": {
+        "-H": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "clear-prompt-history",
+      "aliases": [
+        "clearphist"
+      ],
+      "usage": "[-T prompt-type]",
+      "flags": {
+        "-T": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "clock-mode",
+      "aliases": [],
+      "usage": "[-t target-pane]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "command-prompt",
+      "aliases": [],
+      "usage": "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
+      "flags": {
+        "-1": "none",
+        "-C": "none",
+        "-F": "none",
+        "-I": "required",
+        "-N": "none",
+        "-P": "none",
+        "-T": "required",
+        "-b": "none",
+        "-e": "none",
+        "-i": "none",
+        "-k": "none",
+        "-l": "none",
+        "-p": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "confirm-before",
+      "aliases": [
+        "confirm"
+      ],
+      "usage": "[-by] [-c confirm-key] [-p prompt] [-t target-client] command",
+      "flags": {
+        "-b": "none",
+        "-c": "required",
+        "-p": "required",
+        "-t": "required",
+        "-y": "none"
+      },
+      "min_args": 1,
+      "max_args": 1
+    },
+    {
+      "name": "copy-mode",
+      "aliases": [],
+      "usage": "[-dekHMqSu] [-s src-pane] [-t target-pane]",
+      "flags": {
+        "-H": "none",
+        "-M": "none",
+        "-S": "none",
+        "-d": "none",
+        "-e": "none",
+        "-k": "none",
+        "-q": "none",
+        "-s": "required",
+        "-t": "required",
+        "-u": "none"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "customize-mode",
+      "aliases": [],
+      "usage": "[-kNZ] [-F format] [-f filter] [-t target-pane]",
+      "flags": {
+        "-F": "required",
+        "-N": "none",
+        "-Z": "none",
+        "-f": "required",
+        "-k": "none",
+        "-t": "required",
+        "-y": "none"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "delete-buffer",
+      "aliases": [
+        "deleteb"
+      ],
+      "usage": "[-b buffer-name]",
+      "flags": {
+        "-b": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "detach-client",
+      "aliases": [
+        "detach"
+      ],
+      "usage": "[-aP] [-E shell-command] [-s target-session] [-t target-client]",
+      "flags": {
+        "-E": "required",
+        "-P": "none",
+        "-a": "none",
+        "-s": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "display-menu",
+      "aliases": [
+        "menu"
+      ],
+      "usage": "[-MO] [-b border-lines] [-c target-client] [-C starting-choice] [-H selected-style] [-s style] [-S border-style] [-t target-pane] [-T title] [-x position] [-y position] name [key] [command] ...",
+      "flags": {
+        "-C": "required",
+        "-H": "required",
+        "-M": "none",
+        "-O": "none",
+        "-S": "required",
+        "-T": "required",
+        "-b": "required",
+        "-c": "required",
+        "-s": "required",
+        "-t": "required",
+        "-x": "required",
+        "-y": "required"
+      },
+      "min_args": 1,
+      "max_args": null
+    },
+    {
+      "name": "display-message",
+      "aliases": [
+        "display"
+      ],
+      "usage": "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+      "flags": {
+        "-C": "none",
+        "-F": "required",
+        "-I": "none",
+        "-N": "none",
+        "-a": "none",
+        "-c": "required",
+        "-d": "required",
+        "-l": "none",
+        "-p": "none",
+        "-t": "required",
+        "-v": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "display-panes",
+      "aliases": [
+        "displayp"
+      ],
+      "usage": "[-bN] [-d duration] [-t target-client] [template]",
+      "flags": {
+        "-N": "none",
+        "-b": "none",
+        "-d": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "display-popup",
+      "aliases": [
+        "popup"
+      ],
+      "usage": "[-BCEkN] [-b border-lines] [-c target-client] [-d start-directory] [-e environment] [-h height] [-s style] [-S border-style] [-t target-pane] [-T title] [-w width] [-x position] [-y position] [shell-command [argument ...]]",
+      "flags": {
+        "-B": "none",
+        "-C": "none",
+        "-E": "none",
+        "-N": "none",
+        "-S": "required",
+        "-T": "required",
+        "-b": "required",
+        "-c": "required",
+        "-d": "required",
+        "-e": "required",
+        "-h": "required",
+        "-k": "none",
+        "-s": "required",
+        "-t": "required",
+        "-w": "required",
+        "-x": "required",
+        "-y": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "find-window",
+      "aliases": [
+        "findw"
+      ],
+      "usage": "[-CiNrTZ] [-t target-pane] match-string",
+      "flags": {
+        "-C": "none",
+        "-N": "none",
+        "-T": "none",
+        "-Z": "none",
+        "-i": "none",
+        "-r": "none",
+        "-t": "required"
+      },
+      "min_args": 1,
+      "max_args": 1
+    },
+    {
+      "name": "has-session",
+      "aliases": [
+        "has"
+      ],
+      "usage": "[-t target-session]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "if-shell",
+      "aliases": [
+        "if"
+      ],
+      "usage": "[-bF] [-t target-pane] shell-command command [command]",
+      "flags": {
+        "-F": "none",
+        "-b": "none",
+        "-t": "required"
+      },
+      "min_args": 2,
+      "max_args": 3
+    },
+    {
+      "name": "join-pane",
+      "aliases": [
+        "joinp"
+      ],
+      "usage": "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
+      "flags": {
+        "-b": "none",
+        "-d": "none",
+        "-f": "none",
+        "-h": "none",
+        "-l": "required",
+        "-p": "required",
+        "-s": "required",
+        "-t": "required",
+        "-v": "none"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "kill-pane",
+      "aliases": [
+        "killp"
+      ],
+      "usage": "[-a] [-f filter] [-t target-pane]",
+      "flags": {
+        "-a": "none",
+        "-f": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "kill-server",
+      "aliases": [],
+      "usage": "",
+      "flags": {},
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "kill-session",
+      "aliases": [],
+      "usage": "[-aCg] [-f filter] [-t target-session]",
+      "flags": {
+        "-C": "none",
+        "-a": "none",
+        "-f": "required",
+        "-g": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "kill-window",
+      "aliases": [
+        "killw"
+      ],
+      "usage": "[-a] [-f filter] [-t target-window]",
+      "flags": {
+        "-a": "none",
+        "-f": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "last-pane",
+      "aliases": [
+        "lastp"
+      ],
+      "usage": "[-deZ] [-t target-window]",
+      "flags": {
+        "-Z": "none",
+        "-d": "none",
+        "-e": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "last-window",
+      "aliases": [
+        "last"
+      ],
+      "usage": "[-t target-session]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "link-window",
+      "aliases": [
+        "linkw"
+      ],
+      "usage": "[-abdk] [-s src-window] [-t dst-window]",
+      "flags": {
+        "-a": "none",
+        "-b": "none",
+        "-d": "none",
+        "-k": "none",
+        "-s": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "list-buffers",
+      "aliases": [
+        "lsb"
+      ],
+      "usage": "[-F format] [-f filter] [-O order]",
+      "flags": {
+        "-F": "required",
+        "-O": "required",
+        "-f": "required",
+        "-r": "none"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "list-clients",
+      "aliases": [
+        "lsc"
+      ],
+      "usage": "[-F format] [-f filter] [-O order][-t target-session]",
+      "flags": {
+        "-F": "required",
+        "-O": "required",
+        "-f": "required",
+        "-r": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "list-commands",
+      "aliases": [
+        "lscm"
+      ],
+      "usage": "[-F format] [command]",
+      "flags": {
+        "-F": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "list-keys",
+      "aliases": [
+        "lsk"
+      ],
+      "usage": "[-1aNr] [-F format] [-O order] [-P prefix-string][-T key-table] [key]",
+      "flags": {
+        "-1": "none",
+        "-F": "required",
+        "-N": "none",
+        "-O": "required",
+        "-P": "required",
+        "-T": "required",
+        "-a": "none",
+        "-r": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "list-panes",
+      "aliases": [
+        "lsp"
+      ],
+      "usage": "[-asr] [-F format] [-f filter] [-O order][-t target-window]",
+      "flags": {
+        "-F": "required",
+        "-O": "required",
+        "-a": "none",
+        "-f": "required",
+        "-r": "none",
+        "-s": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "list-sessions",
+      "aliases": [
+        "ls"
+      ],
+      "usage": "[-r] [-F format] [-f filter] [-O order]",
+      "flags": {
+        "-F": "required",
+        "-O": "required",
+        "-f": "required",
+        "-r": "none"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "list-windows",
+      "aliases": [
+        "lsw"
+      ],
+      "usage": "[-ar] [-F format] [-f filter] [-O order][-t target-session]",
+      "flags": {
+        "-F": "required",
+        "-O": "required",
+        "-a": "none",
+        "-f": "required",
+        "-r": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "load-buffer",
+      "aliases": [
+        "loadb"
+      ],
+      "usage": "[-b buffer-name] [-t target-client] path",
+      "flags": {
+        "-b": "required",
+        "-t": "required",
+        "-w": "none"
+      },
+      "min_args": 1,
+      "max_args": 1
+    },
+    {
+      "name": "lock-client",
+      "aliases": [
+        "lockc"
+      ],
+      "usage": "[-t target-client]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "lock-server",
+      "aliases": [
+        "lock"
+      ],
+      "usage": "",
+      "flags": {},
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "lock-session",
+      "aliases": [
+        "locks"
+      ],
+      "usage": "[-t target-session]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "move-pane",
+      "aliases": [
+        "movep"
+      ],
+      "usage": "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
+      "flags": {
+        "-D": "optional",
+        "-L": "optional",
+        "-M": "none",
+        "-P": "required",
+        "-R": "optional",
+        "-U": "optional",
+        "-X": "required",
+        "-Y": "required",
+        "-b": "none",
+        "-d": "none",
+        "-f": "none",
+        "-h": "none",
+        "-l": "required",
+        "-s": "required",
+        "-t": "required",
+        "-v": "none",
+        "-z": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "move-window",
+      "aliases": [
+        "movew"
+      ],
+      "usage": "[-abdkr] [-s src-window] [-t dst-window]",
+      "flags": {
+        "-a": "none",
+        "-b": "none",
+        "-d": "none",
+        "-k": "none",
+        "-r": "none",
+        "-s": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "new-pane",
+      "aliases": [
+        "newp"
+      ],
+      "usage": "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
+      "flags": {
+        "-B": "required",
+        "-E": "none",
+        "-F": "required",
+        "-I": "none",
+        "-L": "none",
+        "-P": "none",
+        "-R": "required",
+        "-S": "required",
+        "-T": "required",
+        "-W": "none",
+        "-X": "required",
+        "-Y": "required",
+        "-Z": "none",
+        "-b": "none",
+        "-c": "required",
+        "-d": "none",
+        "-e": "required",
+        "-f": "none",
+        "-h": "none",
+        "-k": "none",
+        "-l": "required",
+        "-m": "required",
+        "-p": "required",
+        "-s": "required",
+        "-t": "required",
+        "-v": "none",
+        "-x": "required",
+        "-y": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "new-session",
+      "aliases": [
+        "new"
+      ],
+      "usage": "[-AdDEPX] [-c start-directory] [-e environment] [-F format] [-f flags] [-n window-name] [-s session-name] [-t target-session] [-x width] [-y height] [shell-command [argument ...]]",
+      "flags": {
+        "-A": "none",
+        "-D": "none",
+        "-E": "none",
+        "-F": "required",
+        "-P": "none",
+        "-X": "none",
+        "-c": "required",
+        "-d": "none",
+        "-e": "required",
+        "-f": "required",
+        "-n": "required",
+        "-s": "required",
+        "-t": "required",
+        "-x": "required",
+        "-y": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "new-window",
+      "aliases": [
+        "neww"
+      ],
+      "usage": "[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]",
+      "flags": {
+        "-E": "none",
+        "-F": "required",
+        "-P": "none",
+        "-S": "none",
+        "-a": "none",
+        "-b": "none",
+        "-c": "required",
+        "-d": "none",
+        "-e": "required",
+        "-k": "none",
+        "-n": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "next-layout",
+      "aliases": [
+        "nextl"
+      ],
+      "usage": "[-t target-window]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "next-window",
+      "aliases": [
+        "next"
+      ],
+      "usage": "[-a] [-t target-session]",
+      "flags": {
+        "-a": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "paste-buffer",
+      "aliases": [
+        "pasteb"
+      ],
+      "usage": "[-dprS] [-s separator] [-b buffer-name] [-t target-pane]",
+      "flags": {
+        "-S": "none",
+        "-b": "required",
+        "-d": "none",
+        "-p": "none",
+        "-r": "none",
+        "-s": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "pipe-pane",
+      "aliases": [
+        "pipep"
+      ],
+      "usage": "[-IOo] [-t target-pane] [shell-command]",
+      "flags": {
+        "-I": "none",
+        "-O": "none",
+        "-o": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "previous-layout",
+      "aliases": [
+        "prevl"
+      ],
+      "usage": "[-t target-window]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "previous-window",
+      "aliases": [
+        "prev"
+      ],
+      "usage": "[-a] [-t target-session]",
+      "flags": {
+        "-a": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "refresh-client",
+      "aliases": [
+        "refresh"
+      ],
+      "usage": "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]",
+      "flags": {
+        "-A": "required",
+        "-B": "required",
+        "-C": "required",
+        "-D": "none",
+        "-F": "required",
+        "-L": "none",
+        "-R": "none",
+        "-S": "none",
+        "-U": "none",
+        "-c": "none",
+        "-f": "required",
+        "-l": "none",
+        "-r": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "rename-session",
+      "aliases": [
+        "rename"
+      ],
+      "usage": "[-t target-session] new-name",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 1,
+      "max_args": 1
+    },
+    {
+      "name": "rename-window",
+      "aliases": [
+        "renamew"
+      ],
+      "usage": "[-t target-window] new-name",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 1,
+      "max_args": 1
+    },
+    {
+      "name": "resize-pane",
+      "aliases": [
+        "resizep"
+      ],
+      "usage": "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
+      "flags": {
+        "-D": "optional",
+        "-L": "optional",
+        "-M": "none",
+        "-R": "optional",
+        "-T": "none",
+        "-U": "optional",
+        "-Z": "none",
+        "-t": "required",
+        "-x": "required",
+        "-y": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "resize-window",
+      "aliases": [
+        "resizew"
+      ],
+      "usage": "[-aADLRU] [-x width] [-y height] [-t target-window] [adjustment]",
+      "flags": {
+        "-A": "none",
+        "-D": "none",
+        "-L": "none",
+        "-R": "none",
+        "-U": "none",
+        "-a": "none",
+        "-t": "required",
+        "-x": "required",
+        "-y": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "respawn-pane",
+      "aliases": [
+        "respawnp"
+      ],
+      "usage": "[-Ek] [-c start-directory] [-e environment] [-t target-pane] [shell-command [argument ...]]",
+      "flags": {
+        "-E": "none",
+        "-c": "required",
+        "-e": "required",
+        "-k": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "respawn-window",
+      "aliases": [
+        "respawnw"
+      ],
+      "usage": "[-Ek] [-c start-directory] [-e environment] [-t target-window] [shell-command [argument ...]]",
+      "flags": {
+        "-E": "none",
+        "-c": "required",
+        "-e": "required",
+        "-k": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "rotate-window",
+      "aliases": [
+        "rotatew"
+      ],
+      "usage": "[-DUZ] [-t target-window]",
+      "flags": {
+        "-D": "none",
+        "-U": "none",
+        "-Z": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "run-shell",
+      "aliases": [
+        "run"
+      ],
+      "usage": "[-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]",
+      "flags": {
+        "-C": "none",
+        "-E": "none",
+        "-b": "none",
+        "-c": "required",
+        "-d": "required",
+        "-s": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "save-buffer",
+      "aliases": [
+        "saveb"
+      ],
+      "usage": "[-a] [-b buffer-name] path",
+      "flags": {
+        "-a": "none",
+        "-b": "required"
+      },
+      "min_args": 1,
+      "max_args": 1
+    },
+    {
+      "name": "select-layout",
+      "aliases": [
+        "selectl"
+      ],
+      "usage": "[-Enop] [-t target-pane] [layout-name]",
+      "flags": {
+        "-E": "none",
+        "-n": "none",
+        "-o": "none",
+        "-p": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "select-pane",
+      "aliases": [
+        "selectp"
+      ],
+      "usage": "[-DdeLlMmRUZ] [-T title] [-t target-pane]",
+      "flags": {
+        "-D": "none",
+        "-L": "none",
+        "-M": "none",
+        "-P": "required",
+        "-R": "none",
+        "-T": "required",
+        "-U": "none",
+        "-Z": "none",
+        "-d": "none",
+        "-e": "none",
+        "-g": "none",
+        "-l": "none",
+        "-m": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "select-window",
+      "aliases": [
+        "selectw"
+      ],
+      "usage": "[-lnpT] [-t target-window]",
+      "flags": {
+        "-T": "none",
+        "-l": "none",
+        "-n": "none",
+        "-p": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "send-keys",
+      "aliases": [
+        "send"
+      ],
+      "usage": "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
+      "flags": {
+        "-F": "none",
+        "-H": "none",
+        "-K": "none",
+        "-M": "none",
+        "-N": "required",
+        "-R": "none",
+        "-X": "none",
+        "-c": "required",
+        "-l": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "send-prefix",
+      "aliases": [],
+      "usage": "[-2] [-t target-pane]",
+      "flags": {
+        "-2": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "server-access",
+      "aliases": [],
+      "usage": "[-adglrw] [-t target-pane] [user|group]",
+      "flags": {
+        "-a": "none",
+        "-d": "none",
+        "-g": "none",
+        "-l": "none",
+        "-r": "none",
+        "-w": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "set-buffer",
+      "aliases": [
+        "setb"
+      ],
+      "usage": "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
+      "flags": {
+        "-a": "none",
+        "-b": "required",
+        "-n": "required",
+        "-t": "required",
+        "-w": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "set-environment",
+      "aliases": [
+        "setenv"
+      ],
+      "usage": "[-Fhgru] [-t target-session] variable [value]",
+      "flags": {
+        "-F": "none",
+        "-g": "none",
+        "-h": "none",
+        "-r": "none",
+        "-t": "required",
+        "-u": "none"
+      },
+      "min_args": 1,
+      "max_args": 2
+    },
+    {
+      "name": "set-hook",
+      "aliases": [],
+      "usage": "[-agpRuw] [-B name:what:format] [-t target-pane] [hook] [command]",
+      "flags": {
+        "-B": "required",
+        "-R": "none",
+        "-a": "none",
+        "-g": "none",
+        "-p": "none",
+        "-t": "required",
+        "-u": "none",
+        "-w": "none"
+      },
+      "min_args": 0,
+      "max_args": 2
+    },
+    {
+      "name": "set-option",
+      "aliases": [
+        "set"
+      ],
+      "usage": "[-aFgopqsuUw] [-t target-pane] option [value]",
+      "flags": {
+        "-F": "none",
+        "-U": "none",
+        "-a": "none",
+        "-g": "none",
+        "-o": "none",
+        "-p": "none",
+        "-q": "none",
+        "-s": "none",
+        "-t": "required",
+        "-u": "none",
+        "-w": "none"
+      },
+      "min_args": 1,
+      "max_args": 2
+    },
+    {
+      "name": "set-window-option",
+      "aliases": [
+        "setw"
+      ],
+      "usage": "[-aFgoqu] [-t target-window] option [value]",
+      "flags": {
+        "-F": "none",
+        "-a": "none",
+        "-g": "none",
+        "-o": "none",
+        "-q": "none",
+        "-t": "required",
+        "-u": "none"
+      },
+      "min_args": 1,
+      "max_args": 2
+    },
+    {
+      "name": "show-buffer",
+      "aliases": [
+        "showb"
+      ],
+      "usage": "[-b buffer-name]",
+      "flags": {
+        "-b": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "show-environment",
+      "aliases": [
+        "showenv"
+      ],
+      "usage": "[-hgs] [-t target-session] [variable]",
+      "flags": {
+        "-g": "none",
+        "-h": "none",
+        "-s": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "show-hooks",
+      "aliases": [],
+      "usage": "[-Bgpw] [-t target-pane] [hook]",
+      "flags": {
+        "-B": "none",
+        "-g": "none",
+        "-p": "none",
+        "-t": "required",
+        "-w": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "show-messages",
+      "aliases": [
+        "showmsgs"
+      ],
+      "usage": "[-JT] [-t target-client]",
+      "flags": {
+        "-J": "none",
+        "-T": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "show-options",
+      "aliases": [
+        "show"
+      ],
+      "usage": "[-AgHpqsvw] [-t target-pane] [option]",
+      "flags": {
+        "-A": "none",
+        "-H": "none",
+        "-g": "none",
+        "-p": "none",
+        "-q": "none",
+        "-s": "none",
+        "-t": "required",
+        "-v": "none",
+        "-w": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "show-prompt-history",
+      "aliases": [
+        "showphist"
+      ],
+      "usage": "[-T prompt-type]",
+      "flags": {
+        "-T": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "show-window-options",
+      "aliases": [
+        "showw"
+      ],
+      "usage": "[-gv] [-t target-window] [option]",
+      "flags": {
+        "-g": "none",
+        "-t": "required",
+        "-v": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "source-file",
+      "aliases": [
+        "source"
+      ],
+      "usage": "[-Fnqv] [-t target-pane] path ...",
+      "flags": {
+        "-F": "none",
+        "-n": "none",
+        "-q": "none",
+        "-t": "required",
+        "-v": "none"
+      },
+      "min_args": 1,
+      "max_args": null
+    },
+    {
+      "name": "split-window",
+      "aliases": [
+        "splitw"
+      ],
+      "usage": "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
+      "flags": {
+        "-E": "none",
+        "-F": "required",
+        "-I": "none",
+        "-P": "none",
+        "-R": "required",
+        "-S": "required",
+        "-T": "required",
+        "-W": "none",
+        "-Z": "none",
+        "-b": "none",
+        "-c": "required",
+        "-d": "none",
+        "-e": "required",
+        "-f": "none",
+        "-h": "none",
+        "-k": "none",
+        "-l": "required",
+        "-m": "required",
+        "-p": "required",
+        "-s": "required",
+        "-t": "required",
+        "-v": "none"
+      },
+      "min_args": 0,
+      "max_args": null
+    },
+    {
+      "name": "start-server",
+      "aliases": [
+        "start"
+      ],
+      "usage": "",
+      "flags": {},
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "suspend-client",
+      "aliases": [
+        "suspendc"
+      ],
+      "usage": "[-t target-client]",
+      "flags": {
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "swap-pane",
+      "aliases": [
+        "swapp"
+      ],
+      "usage": "[-dDUZ] [-s src-pane] [-t dst-pane]",
+      "flags": {
+        "-D": "none",
+        "-U": "none",
+        "-Z": "none",
+        "-d": "none",
+        "-s": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "swap-window",
+      "aliases": [
+        "swapw"
+      ],
+      "usage": "[-d] [-s src-window] [-t dst-window]",
+      "flags": {
+        "-d": "none",
+        "-s": "required",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "switch-client",
+      "aliases": [
+        "switchc"
+      ],
+      "usage": "[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]",
+      "flags": {
+        "-E": "none",
+        "-F": "none",
+        "-O": "required",
+        "-T": "required",
+        "-Z": "none",
+        "-c": "required",
+        "-l": "none",
+        "-n": "none",
+        "-p": "none",
+        "-r": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "switch-mode",
+      "aliases": [],
+      "usage": "[-kswZ] [-F format] [-t target-pane] [command]",
+      "flags": {
+        "-F": "required",
+        "-Z": "none",
+        "-k": "none",
+        "-s": "none",
+        "-t": "required",
+        "-w": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "unbind-key",
+      "aliases": [
+        "unbind"
+      ],
+      "usage": "[-anq] [-T key-table] key",
+      "flags": {
+        "-T": "required",
+        "-a": "none",
+        "-n": "none",
+        "-q": "none"
+      },
+      "min_args": 0,
+      "max_args": 1
+    },
+    {
+      "name": "unlink-window",
+      "aliases": [
+        "unlinkw"
+      ],
+      "usage": "[-k] [-t target-window]",
+      "flags": {
+        "-k": "none",
+        "-t": "required"
+      },
+      "min_args": 0,
+      "max_args": 0
+    },
+    {
+      "name": "wait-for",
+      "aliases": [
+        "wait"
+      ],
+      "usage": "[-L|-S|-U] channel",
+      "flags": {
+        "-L": "none",
+        "-S": "none",
+        "-U": "none"
+      },
+      "min_args": 1,
+      "max_args": 1
+    }
+  ],
+  "options": [
+    "activity-action",
+    "aggressive-resize",
+    "allow-passthrough",
+    "allow-rename",
+    "allow-set-title",
+    "alternate-screen",
+    "assume-paste-time",
+    "automatic-rename",
+    "automatic-rename-format",
+    "backspace",
+    "base-index",
+    "bell-action",
+    "buffer-limit",
+    "clock-mode-colour",
+    "clock-mode-style",
+    "codepoint-widths",
+    "command-alias",
+    "copy-command",
+    "copy-mode-current-line-number-style",
+    "copy-mode-current-match-style",
+    "copy-mode-line-number-style",
+    "copy-mode-line-numbers",
+    "copy-mode-mark-style",
+    "copy-mode-match-style",
+    "copy-mode-position-format",
+    "copy-mode-position-style",
+    "copy-mode-selection-style",
+    "cursor-colour",
+    "cursor-style",
+    "dark-theme-black",
+    "dark-theme-blue",
+    "dark-theme-cyan",
+    "dark-theme-dark-grey",
+    "dark-theme-green",
+    "dark-theme-light-grey",
+    "dark-theme-magenta",
+    "dark-theme-red",
+    "dark-theme-white",
+    "dark-theme-yellow",
+    "default-client-command",
+    "default-command",
+    "default-shell",
+    "default-size",
+    "default-terminal",
+    "destroy-unattached",
+    "detach-on-destroy",
+    "display-panes-active-colour",
+    "display-panes-colour",
+    "display-panes-format",
+    "display-panes-time",
+    "display-time",
+    "editor",
+    "escape-time",
+    "exit-empty",
+    "exit-unattached",
+    "extended-keys",
+    "extended-keys-format",
+    "fill-character",
+    "focus-events",
+    "focus-follows-mouse",
+    "get-clipboard",
+    "history-file",
+    "history-limit",
+    "initial-repeat-time",
+    "input-buffer-size",
+    "key-table",
+    "light-theme-black",
+    "light-theme-blue",
+    "light-theme-cyan",
+    "light-theme-dark-grey",
+    "light-theme-green",
+    "light-theme-light-grey",
+    "light-theme-magenta",
+    "light-theme-red",
+    "light-theme-white",
+    "light-theme-yellow",
+    "lock-after-time",
+    "lock-command",
+    "main-pane-height",
+    "main-pane-width",
+    "menu-border-lines",
+    "menu-border-style",
+    "menu-selected-style",
+    "menu-style",
+    "message-command-style",
+    "message-format",
+    "message-limit",
+    "message-line",
+    "message-style",
+    "mode-keys",
+    "mode-style",
+    "monitor-activity",
+    "monitor-bell",
+    "monitor-silence",
+    "mouse",
+    "other-pane-height",
+    "other-pane-width",
+    "pane-active-border-style",
+    "pane-base-index",
+    "pane-border-format",
+    "pane-border-indicators",
+    "pane-border-lines",
+    "pane-border-status",
+    "pane-border-style",
+    "pane-colours",
+    "pane-scrollbars",
+    "pane-scrollbars-position",
+    "pane-scrollbars-style",
+    "pane-scrollbars-timeout",
+    "pane-status-current-style",
+    "pane-status-style",
+    "popup-border-lines",
+    "popup-border-style",
+    "popup-style",
+    "prefix",
+    "prefix-timeout",
+    "prefix2",
+    "prompt-command-cursor-colour",
+    "prompt-command-cursor-style",
+    "prompt-cursor-colour",
+    "prompt-cursor-style",
+    "prompt-history-limit",
+    "remain-on-exit",
+    "remain-on-exit-format",
+    "renumber-windows",
+    "repeat-time",
+    "scroll-on-clear",
+    "session-status-current-style",
+    "session-status-style",
+    "set-clipboard",
+    "set-titles",
+    "set-titles-string",
+    "silence-action",
+    "status",
+    "status-bg",
+    "status-fg",
+    "status-format",
+    "status-interval",
+    "status-justify",
+    "status-keys",
+    "status-left",
+    "status-left-length",
+    "status-left-style",
+    "status-position",
+    "status-right",
+    "status-right-length",
+    "status-right-style",
+    "status-style",
+    "switch-mode-match-style",
+    "synchronize-panes",
+    "terminal-features",
+    "terminal-overrides",
+    "theme",
+    "tiled-layout-max-columns",
+    "tree-mode-border-style",
+    "tree-mode-preview-format",
+    "tree-mode-preview-style",
+    "tree-mode-selection-style",
+    "update-environment",
+    "user-keys",
+    "variation-selector-always-wide",
+    "visual-activity",
+    "visual-bell",
+    "visual-silence",
+    "window-active-style",
+    "window-pane-current-status-format",
+    "window-pane-status-format",
+    "window-size",
+    "window-status-activity-style",
+    "window-status-bell-style",
+    "window-status-current-format",
+    "window-status-current-style",
+    "window-status-format",
+    "window-status-last-style",
+    "window-status-separator",
+    "window-status-style",
+    "window-style",
+    "word-separators",
+    "wrap-search",
+    "xterm-keys"
+  ],
+  "formats": [
+    "active_window_index",
+    "alternate_on",
+    "alternate_saved_x",
+    "alternate_saved_y",
+    "bracket_paste_flag",
+    "buffer_created",
+    "buffer_full",
+    "buffer_mode_format",
+    "buffer_name",
+    "buffer_sample",
+    "buffer_size",
+    "client_activity",
+    "client_cell_height",
+    "client_cell_width",
+    "client_colours",
+    "client_control_mode",
+    "client_created",
+    "client_discarded",
+    "client_flags",
+    "client_height",
+    "client_key_table",
+    "client_last_session",
+    "client_mode_format",
+    "client_name",
+    "client_pid",
+    "client_prefix",
+    "client_readonly",
+    "client_session",
+    "client_termfeatures",
+    "client_termname",
+    "client_termtype",
+    "client_theme",
+    "client_tty",
+    "client_uid",
+    "client_user",
+    "client_utf8",
+    "client_width",
+    "client_written",
+    "config_files",
+    "cursor_blinking",
+    "cursor_character",
+    "cursor_colour",
+    "cursor_flag",
+    "cursor_shape",
+    "cursor_very_visible",
+    "cursor_x",
+    "cursor_y",
+    "history_all_bytes",
+    "history_bytes",
+    "history_limit",
+    "history_size",
+    "host",
+    "host_short",
+    "insert_flag",
+    "keypad_cursor_flag",
+    "keypad_flag",
+    "last_window_index",
+    "mouse_all_flag",
+    "mouse_any_flag",
+    "mouse_button_flag",
+    "mouse_hyperlink",
+    "mouse_line",
+    "mouse_pane",
+    "mouse_sgr_flag",
+    "mouse_standard_flag",
+    "mouse_status_line",
+    "mouse_status_range",
+    "mouse_utf8_flag",
+    "mouse_word",
+    "mouse_x",
+    "mouse_y",
+    "next_session_id",
+    "origin_flag",
+    "pane_active",
+    "pane_at_bottom",
+    "pane_at_left",
+    "pane_at_right",
+    "pane_at_top",
+    "pane_bg",
+    "pane_bottom",
+    "pane_current_command",
+    "pane_current_path",
+    "pane_dead",
+    "pane_dead_signal",
+    "pane_dead_status",
+    "pane_dead_time",
+    "pane_fg",
+    "pane_flags",
+    "pane_floating_flag",
+    "pane_format",
+    "pane_height",
+    "pane_id",
+    "pane_in_mode",
+    "pane_index",
+    "pane_input_off",
+    "pane_key_mode",
+    "pane_last",
+    "pane_left",
+    "pane_marked",
+    "pane_marked_set",
+    "pane_mode",
+    "pane_path",
+    "pane_pb_progress",
+    "pane_pb_state",
+    "pane_pid",
+    "pane_pipe",
+    "pane_pipe_pid",
+    "pane_right",
+    "pane_search_string",
+    "pane_start_command",
+    "pane_start_command_list",
+    "pane_start_path",
+    "pane_synchronized",
+    "pane_tabs",
+    "pane_title",
+    "pane_top",
+    "pane_tty",
+    "pane_unseen_changes",
+    "pane_width",
+    "pane_x",
+    "pane_y",
+    "pane_z",
+    "pane_zoomed_flag",
+    "pid",
+    "scroll_region_lower",
+    "scroll_region_upper",
+    "server_sessions",
+    "session_active",
+    "session_activity",
+    "session_activity_flag",
+    "session_alert",
+    "session_alerts",
+    "session_attached",
+    "session_attached_list",
+    "session_bell_flag",
+    "session_created",
+    "session_format",
+    "session_group",
+    "session_group_attached",
+    "session_group_attached_list",
+    "session_group_list",
+    "session_group_many_attached",
+    "session_group_size",
+    "session_grouped",
+    "session_id",
+    "session_last_attached",
+    "session_many_attached",
+    "session_marked",
+    "session_name",
+    "session_path",
+    "session_silence_flag",
+    "session_stack",
+    "session_windows",
+    "sixel_support",
+    "socket_path",
+    "start_time",
+    "synchronized_output_flag",
+    "tree_mode_format",
+    "uid",
+    "user",
+    "version",
+    "window_active",
+    "window_active_clients",
+    "window_active_clients_list",
+    "window_active_sessions",
+    "window_active_sessions_list",
+    "window_activity",
+    "window_activity_flag",
+    "window_bell_flag",
+    "window_bigger",
+    "window_cell_height",
+    "window_cell_width",
+    "window_end_flag",
+    "window_flags",
+    "window_format",
+    "window_height",
+    "window_id",
+    "window_index",
+    "window_last_flag",
+    "window_layout",
+    "window_linked",
+    "window_linked_sessions",
+    "window_linked_sessions_list",
+    "window_manual_height",
+    "window_manual_width",
+    "window_marked_flag",
+    "window_name",
+    "window_offset_x",
+    "window_offset_y",
+    "window_panes",
+    "window_raw_flags",
+    "window_silence_flag",
+    "window_stack_index",
+    "window_start_flag",
+    "window_visible_layout",
+    "window_width",
+    "window_zoomed_flag",
+    "wrap_flag"
+  ],
+  "format_contexts": {
+    "command-item": [
+      "command"
+    ],
+    "list-commands": [
+      "command_list_alias",
+      "command_list_name",
+      "command_list_usage"
+    ],
+    "list-keys": [
+      "key_command",
+      "key_has_repeat",
+      "key_note",
+      "key_prefix",
+      "key_repeat",
+      "key_string",
+      "key_string_width",
+      "key_table",
+      "key_table_width",
+      "notes_only"
+    ]
+  },
+  "hooks": [
+    "after-bind-key",
+    "after-capture-pane",
+    "after-copy-mode",
+    "after-display-message",
+    "after-display-panes",
+    "after-kill-pane",
+    "after-list-buffers",
+    "after-list-clients",
+    "after-list-keys",
+    "after-list-panes",
+    "after-list-sessions",
+    "after-list-windows",
+    "after-load-buffer",
+    "after-lock-server",
+    "after-new-session",
+    "after-new-window",
+    "after-paste-buffer",
+    "after-pipe-pane",
+    "after-queue",
+    "after-refresh-client",
+    "after-rename-session",
+    "after-rename-window",
+    "after-resize-pane",
+    "after-resize-window",
+    "after-save-buffer",
+    "after-select-layout",
+    "after-select-pane",
+    "after-select-window",
+    "after-send-keys",
+    "after-set-buffer",
+    "after-set-environment",
+    "after-set-hook",
+    "after-set-option",
+    "after-show-environment",
+    "after-show-messages",
+    "after-show-options",
+    "after-split-window",
+    "after-unbind-key",
+    "alert-activity",
+    "alert-bell",
+    "alert-silence",
+    "client-active",
+    "client-attached",
+    "client-dark-theme",
+    "client-detached",
+    "client-focus-in",
+    "client-focus-out",
+    "client-light-theme",
+    "client-resized",
+    "client-session-changed",
+    "command-error",
+    "pane-died",
+    "pane-exited",
+    "pane-focus-in",
+    "pane-focus-out",
+    "pane-mode-changed",
+    "pane-set-clipboard",
+    "pane-title-changed",
+    "session-closed",
+    "session-created",
+    "session-renamed",
+    "session-window-changed",
+    "window-layout-changed",
+    "window-linked",
+    "window-pane-changed",
+    "window-renamed",
+    "window-resized",
+    "window-unlinked"
+  ],
+  "key_bindings": [
+    {
+      "table": "copy-mode",
+      "key": ",",
+      "repeat": false,
+      "command": "send-keys -X jump-reverse"
+    },
+    {
+      "table": "copy-mode",
+      "key": ";",
+      "repeat": false,
+      "command": "send-keys -X jump-again"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-Down",
+      "repeat": false,
+      "command": "send-keys -X scroll-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-M-Down",
+      "repeat": false,
+      "command": "send-keys -X next-prompt"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-M-Up",
+      "repeat": false,
+      "command": "send-keys -X previous-prompt"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-M-b",
+      "repeat": false,
+      "command": "send-keys -X previous-matching-bracket"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-M-f",
+      "repeat": false,
+      "command": "send-keys -X next-matching-bracket"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-Space",
+      "repeat": false,
+      "command": "send-keys -X begin-selection"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-Up",
+      "repeat": false,
+      "command": "send-keys -X scroll-up"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-[",
+      "repeat": false,
+      "command": "send-keys -X cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-a",
+      "repeat": false,
+      "command": "send-keys -X start-of-line"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-b",
+      "repeat": false,
+      "command": "send-keys -X cursor-left"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-c",
+      "repeat": false,
+      "command": "send-keys -X cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-e",
+      "repeat": false,
+      "command": "send-keys -X end-of-line"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-f",
+      "repeat": false,
+      "command": "send-keys -X cursor-right"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-g",
+      "repeat": false,
+      "command": "send-keys -X clear-selection"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-k",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-end-of-line-and-cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-l",
+      "repeat": false,
+      "command": "send-keys -X recentre-top-bottom"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-n",
+      "repeat": false,
+      "command": "send-keys -X cursor-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-p",
+      "repeat": false,
+      "command": "send-keys -X cursor-up"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-r",
+      "repeat": false,
+      "command": "command-prompt -Pi -I \"#{pane_search_string}\" -T search -p \"(search up)\" { send-keys -X search-backward-incremental -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-s",
+      "repeat": false,
+      "command": "command-prompt -Pi -I \"#{pane_search_string}\" -T search -p \"(search down)\" { send-keys -X search-forward-incremental -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-v",
+      "repeat": false,
+      "command": "send-keys -X page-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "C-w",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "DoubleClick1Pane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X select-word \\; run-shell -d 0.3 \\; send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "Down",
+      "repeat": false,
+      "command": "send-keys -X cursor-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "End",
+      "repeat": false,
+      "command": "send-keys -X end-of-line"
+    },
+    {
+      "table": "copy-mode",
+      "key": "Escape",
+      "repeat": false,
+      "command": "send-keys -X cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "F",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump backward)\" { send-keys -X jump-backward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "Home",
+      "repeat": false,
+      "command": "send-keys -X start-of-line"
+    },
+    {
+      "table": "copy-mode",
+      "key": "Left",
+      "repeat": false,
+      "command": "send-keys -X cursor-left"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-1",
+      "repeat": false,
+      "command": "command-prompt -NP -I 1 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-2",
+      "repeat": false,
+      "command": "command-prompt -NP -I 2 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-3",
+      "repeat": false,
+      "command": "command-prompt -NP -I 3 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-4",
+      "repeat": false,
+      "command": "command-prompt -NP -I 4 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-5",
+      "repeat": false,
+      "command": "command-prompt -NP -I 5 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-6",
+      "repeat": false,
+      "command": "command-prompt -NP -I 6 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-7",
+      "repeat": false,
+      "command": "command-prompt -NP -I 7 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-8",
+      "repeat": false,
+      "command": "command-prompt -NP -I 8 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-9",
+      "repeat": false,
+      "command": "command-prompt -NP -I 9 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-<",
+      "repeat": false,
+      "command": "send-keys -X history-top"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M->",
+      "repeat": false,
+      "command": "send-keys -X history-bottom"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-Down",
+      "repeat": false,
+      "command": "send-keys -X halfpage-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-R",
+      "repeat": false,
+      "command": "send-keys -X top-line"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-Up",
+      "repeat": false,
+      "command": "send-keys -X halfpage-up"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-b",
+      "repeat": false,
+      "command": "send-keys -X previous-word"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-f",
+      "repeat": false,
+      "command": "send-keys -X next-word-end"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-l",
+      "repeat": false,
+      "command": "send-keys -X cursor-centre-horizontal"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-m",
+      "repeat": false,
+      "command": "send-keys -X back-to-indentation"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-r",
+      "repeat": false,
+      "command": "send-keys -X middle-line"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-v",
+      "repeat": false,
+      "command": "send-keys -X page-up"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-w",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-x",
+      "repeat": false,
+      "command": "send-keys -X jump-to-mark"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-{",
+      "repeat": false,
+      "command": "send-keys -X previous-paragraph"
+    },
+    {
+      "table": "copy-mode",
+      "key": "M-}",
+      "repeat": false,
+      "command": "send-keys -X next-paragraph"
+    },
+    {
+      "table": "copy-mode",
+      "key": "MouseDown1Pane",
+      "repeat": false,
+      "command": "select-pane"
+    },
+    {
+      "table": "copy-mode",
+      "key": "MouseDrag1Pane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X begin-selection"
+    },
+    {
+      "table": "copy-mode",
+      "key": "MouseDragEnd1Pane",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "N",
+      "repeat": false,
+      "command": "send-keys -X search-reverse"
+    },
+    {
+      "table": "copy-mode",
+      "key": "NPage",
+      "repeat": false,
+      "command": "send-keys -X page-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "P",
+      "repeat": false,
+      "command": "send-keys -X toggle-position"
+    },
+    {
+      "table": "copy-mode",
+      "key": "PPage",
+      "repeat": false,
+      "command": "send-keys -X page-up"
+    },
+    {
+      "table": "copy-mode",
+      "key": "R",
+      "repeat": false,
+      "command": "send-keys -X rectangle-toggle"
+    },
+    {
+      "table": "copy-mode",
+      "key": "Right",
+      "repeat": false,
+      "command": "send-keys -X cursor-right"
+    },
+    {
+      "table": "copy-mode",
+      "key": "Space",
+      "repeat": false,
+      "command": "send-keys -X page-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "T",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump to backward)\" { send-keys -X jump-to-backward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "TripleClick1Pane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X select-line \\; run-shell -d 0.3 \\; send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "Up",
+      "repeat": false,
+      "command": "send-keys -X cursor-up"
+    },
+    {
+      "table": "copy-mode",
+      "key": "WheelDownPane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X -N 5 scroll-down"
+    },
+    {
+      "table": "copy-mode",
+      "key": "WheelUpPane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X -N 5 scroll-up"
+    },
+    {
+      "table": "copy-mode",
+      "key": "X",
+      "repeat": false,
+      "command": "send-keys -X set-mark"
+    },
+    {
+      "table": "copy-mode",
+      "key": "f",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump forward)\" { send-keys -X jump-forward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "g",
+      "repeat": false,
+      "command": "command-prompt -P -p \"(goto line)\" { send-keys -X goto-line -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode",
+      "key": "n",
+      "repeat": false,
+      "command": "send-keys -X search-again"
+    },
+    {
+      "table": "copy-mode",
+      "key": "q",
+      "repeat": false,
+      "command": "send-keys -X cancel"
+    },
+    {
+      "table": "copy-mode",
+      "key": "r",
+      "repeat": false,
+      "command": "send-keys -X refresh-toggle"
+    },
+    {
+      "table": "copy-mode",
+      "key": "t",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump to forward)\" { send-keys -X jump-to-forward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "#",
+      "repeat": false,
+      "command": "send-keys -FX search-backward -- \"#{copy_cursor_word}\""
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "$",
+      "repeat": false,
+      "command": "send-keys -X end-of-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "%",
+      "repeat": false,
+      "command": "send-keys -X next-matching-bracket"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "*",
+      "repeat": false,
+      "command": "send-keys -FX search-forward -- \"#{copy_cursor_word}\""
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": ",",
+      "repeat": false,
+      "command": "send-keys -X jump-reverse"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "/",
+      "repeat": false,
+      "command": "command-prompt -P -T search -p \"(search down)\" { send-keys -X search-forward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "0",
+      "repeat": false,
+      "command": "send-keys -X start-of-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "1",
+      "repeat": false,
+      "command": "command-prompt -NP -I 1 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "2",
+      "repeat": false,
+      "command": "command-prompt -NP -I 2 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "3",
+      "repeat": false,
+      "command": "command-prompt -NP -I 3 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "4",
+      "repeat": false,
+      "command": "command-prompt -NP -I 4 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "5",
+      "repeat": false,
+      "command": "command-prompt -NP -I 5 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "6",
+      "repeat": false,
+      "command": "command-prompt -NP -I 6 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "7",
+      "repeat": false,
+      "command": "command-prompt -NP -I 7 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "8",
+      "repeat": false,
+      "command": "command-prompt -NP -I 8 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "9",
+      "repeat": false,
+      "command": "command-prompt -NP -I 9 -p (repeat) { send-keys -N \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": ":",
+      "repeat": false,
+      "command": "command-prompt -P -p \"(goto line)\" { send-keys -X goto-line -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": ";",
+      "repeat": false,
+      "command": "send-keys -X jump-again"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "?",
+      "repeat": false,
+      "command": "command-prompt -P -T search -p \"(search up)\" { send-keys -X search-backward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "A",
+      "repeat": false,
+      "command": "send-keys -X append-selection-and-cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "B",
+      "repeat": false,
+      "command": "send-keys -X previous-space"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "BSpace",
+      "repeat": false,
+      "command": "send-keys -X cursor-left"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-Down",
+      "repeat": false,
+      "command": "send-keys -X scroll-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-Up",
+      "repeat": false,
+      "command": "send-keys -X scroll-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-[",
+      "repeat": false,
+      "command": "send-keys -X clear-selection"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-b",
+      "repeat": false,
+      "command": "send-keys -X page-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-c",
+      "repeat": false,
+      "command": "send-keys -X cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-d",
+      "repeat": false,
+      "command": "send-keys -X halfpage-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-e",
+      "repeat": false,
+      "command": "send-keys -X scroll-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-f",
+      "repeat": false,
+      "command": "send-keys -X page-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-h",
+      "repeat": false,
+      "command": "send-keys -X cursor-left"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-j",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-u",
+      "repeat": false,
+      "command": "send-keys -X halfpage-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-v",
+      "repeat": false,
+      "command": "send-keys -X rectangle-toggle"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "C-y",
+      "repeat": false,
+      "command": "send-keys -X scroll-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "D",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-end-of-line-and-cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "DoubleClick1Pane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X select-word \\; run-shell -d 0.3 \\; send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Down",
+      "repeat": false,
+      "command": "send-keys -X cursor-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "E",
+      "repeat": false,
+      "command": "send-keys -X next-space-end"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "End",
+      "repeat": false,
+      "command": "send-keys -X end-of-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Enter",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Escape",
+      "repeat": false,
+      "command": "send-keys -X clear-selection"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "F",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump backward)\" { send-keys -X jump-backward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "G",
+      "repeat": false,
+      "command": "send-keys -X history-bottom"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "H",
+      "repeat": false,
+      "command": "send-keys -X top-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Home",
+      "repeat": false,
+      "command": "send-keys -X start-of-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "J",
+      "repeat": false,
+      "command": "send-keys -X scroll-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "K",
+      "repeat": false,
+      "command": "send-keys -X scroll-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "L",
+      "repeat": false,
+      "command": "send-keys -X bottom-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Left",
+      "repeat": false,
+      "command": "send-keys -X cursor-left"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "M",
+      "repeat": false,
+      "command": "send-keys -X middle-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "M-x",
+      "repeat": false,
+      "command": "send-keys -X jump-to-mark"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "MouseDown1Pane",
+      "repeat": false,
+      "command": "select-pane"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "MouseDrag1Pane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X begin-selection"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "MouseDragEnd1Pane",
+      "repeat": false,
+      "command": "send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "N",
+      "repeat": false,
+      "command": "send-keys -X search-reverse"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "NPage",
+      "repeat": false,
+      "command": "send-keys -X page-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "P",
+      "repeat": false,
+      "command": "send-keys -X toggle-position"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "PPage",
+      "repeat": false,
+      "command": "send-keys -X page-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Right",
+      "repeat": false,
+      "command": "send-keys -X cursor-right"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Space",
+      "repeat": false,
+      "command": "send-keys -X begin-selection"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "T",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump to backward)\" { send-keys -X jump-to-backward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "TripleClick1Pane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X select-line \\; run-shell -d 0.3 \\; send-keys -X copy-pipe-and-cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "Up",
+      "repeat": false,
+      "command": "send-keys -X cursor-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "V",
+      "repeat": false,
+      "command": "send-keys -X select-line"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "W",
+      "repeat": false,
+      "command": "send-keys -X next-space"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "WheelDownPane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X -N 5 scroll-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "WheelUpPane",
+      "repeat": false,
+      "command": "select-pane \\; send-keys -X -N 5 scroll-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "X",
+      "repeat": false,
+      "command": "send-keys -X set-mark"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "^",
+      "repeat": false,
+      "command": "send-keys -X back-to-indentation"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "b",
+      "repeat": false,
+      "command": "send-keys -X previous-word"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "e",
+      "repeat": false,
+      "command": "send-keys -X next-word-end"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "f",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump forward)\" { send-keys -X jump-forward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "g",
+      "repeat": false,
+      "command": "send-keys -X history-top"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "h",
+      "repeat": false,
+      "command": "send-keys -X cursor-left"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "j",
+      "repeat": false,
+      "command": "send-keys -X cursor-down"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "k",
+      "repeat": false,
+      "command": "send-keys -X cursor-up"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "l",
+      "repeat": false,
+      "command": "send-keys -X cursor-right"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "n",
+      "repeat": false,
+      "command": "send-keys -X search-again"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "o",
+      "repeat": false,
+      "command": "send-keys -X other-end"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "q",
+      "repeat": false,
+      "command": "send-keys -X cancel"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "r",
+      "repeat": false,
+      "command": "send-keys -X refresh-toggle"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "t",
+      "repeat": false,
+      "command": "command-prompt -1P -p \"(jump to forward)\" { send-keys -X jump-to-forward -- \"%%\" }"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "v",
+      "repeat": false,
+      "command": "send-keys -X rectangle-toggle"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "w",
+      "repeat": false,
+      "command": "send-keys -X next-word"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "z",
+      "repeat": false,
+      "command": "send-keys -X scroll-middle"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "{",
+      "repeat": false,
+      "command": "send-keys -X previous-paragraph"
+    },
+    {
+      "table": "copy-mode-vi",
+      "key": "}",
+      "repeat": false,
+      "command": "send-keys -X next-paragraph"
+    },
+    {
+      "table": "move",
+      "key": ",",
+      "repeat": false,
+      "command": "if-shell -F \"#{pane_floating_flag}\" { display-menu -T \"#[align=centre]Move\" -x P -y P Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } }"
+    },
+    {
+      "table": "move",
+      "key": ".",
+      "repeat": false,
+      "command": "if-shell -F \"#{pane_floating_flag}\" { display-menu -T \"#[align=centre]Move & Resize\" -x P -y P Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } }"
+    },
+    {
+      "table": "move",
+      "key": "0",
+      "repeat": false,
+      "command": "resize-pane -x \"100%\" -y \"100%\" \\; move-pane -P top-left"
+    },
+    {
+      "table": "move",
+      "key": "1",
+      "repeat": false,
+      "command": "move-pane -P top-left"
+    },
+    {
+      "table": "move",
+      "key": "2",
+      "repeat": false,
+      "command": "move-pane -P top-right"
+    },
+    {
+      "table": "move",
+      "key": "3",
+      "repeat": false,
+      "command": "move-pane -P bottom-left"
+    },
+    {
+      "table": "move",
+      "key": "4",
+      "repeat": false,
+      "command": "move-pane -P bottom-right"
+    },
+    {
+      "table": "move",
+      "key": "Down",
+      "repeat": false,
+      "command": "move-pane -P bottom-centre"
+    },
+    {
+      "table": "move",
+      "key": "Left",
+      "repeat": false,
+      "command": "move-pane -P centre-left"
+    },
+    {
+      "table": "move",
+      "key": "M-1",
+      "repeat": false,
+      "command": "resize-pane -x \"50%\" -y \"50%\" \\; move-pane -P top-left"
+    },
+    {
+      "table": "move",
+      "key": "M-2",
+      "repeat": false,
+      "command": "resize-pane -x \"50%\" -y \"50%\" \\; move-pane -P top-right"
+    },
+    {
+      "table": "move",
+      "key": "M-3",
+      "repeat": false,
+      "command": "resize-pane -x \"50%\" -y \"50%\" \\; move-pane -P bottom-left"
+    },
+    {
+      "table": "move",
+      "key": "M-4",
+      "repeat": false,
+      "command": "resize-pane -x \"50%\" -y \"50%\" \\; move-pane -P bottom-right"
+    },
+    {
+      "table": "move",
+      "key": "M-Down",
+      "repeat": false,
+      "command": "resize-pane -x \"100%\" -y \"50%\" \\; move-pane -P bottom-centre"
+    },
+    {
+      "table": "move",
+      "key": "M-Left",
+      "repeat": false,
+      "command": "resize-pane -x \"50%\" -y \"100%\" \\; move-pane -P centre-left"
+    },
+    {
+      "table": "move",
+      "key": "M-Right",
+      "repeat": false,
+      "command": "resize-pane -x \"50%\" -y \"100%\" \\; move-pane -P centre-right"
+    },
+    {
+      "table": "move",
+      "key": "M-Up",
+      "repeat": false,
+      "command": "resize-pane -x \"100%\" -y \"50%\" \\; move-pane -P top-centre"
+    },
+    {
+      "table": "move",
+      "key": "Right",
+      "repeat": false,
+      "command": "move-pane -P centre-right"
+    },
+    {
+      "table": "move",
+      "key": "Up",
+      "repeat": false,
+      "command": "move-pane -P top-centre"
+    },
+    {
+      "table": "prefix",
+      "key": "!",
+      "repeat": false,
+      "command": "break-pane"
+    },
+    {
+      "table": "prefix",
+      "key": "\"",
+      "repeat": false,
+      "command": "split-window"
+    },
+    {
+      "table": "prefix",
+      "key": "#",
+      "repeat": false,
+      "command": "list-buffers"
+    },
+    {
+      "table": "prefix",
+      "key": "$",
+      "repeat": false,
+      "command": "command-prompt -I \"#S\" { rename-session \"%%\" }"
+    },
+    {
+      "table": "prefix",
+      "key": "%",
+      "repeat": false,
+      "command": "split-window -h"
+    },
+    {
+      "table": "prefix",
+      "key": "&",
+      "repeat": false,
+      "command": "confirm-before -p \"kill-window #W? (y/n)\" kill-window"
+    },
+    {
+      "table": "prefix",
+      "key": "'",
+      "repeat": false,
+      "command": "command-prompt -p index { select-window -t \":%%\" }"
+    },
+    {
+      "table": "prefix",
+      "key": "(",
+      "repeat": false,
+      "command": "switch-client -p"
+    },
+    {
+      "table": "prefix",
+      "key": ")",
+      "repeat": false,
+      "command": "switch-client -n"
+    },
+    {
+      "table": "prefix",
+      "key": "*",
+      "repeat": false,
+      "command": "new-pane"
+    },
+    {
+      "table": "prefix",
+      "key": ",",
+      "repeat": false,
+      "command": "command-prompt -I \"#W\" { rename-window \"%%\" }"
+    },
+    {
+      "table": "prefix",
+      "key": "-",
+      "repeat": false,
+      "command": "delete-buffer"
+    },
+    {
+      "table": "prefix",
+      "key": ".",
+      "repeat": false,
+      "command": "command-prompt { move-window -t \"%%\" }"
+    },
+    {
+      "table": "prefix",
+      "key": "/",
+      "repeat": false,
+      "command": "command-prompt -k -p key { list-keys -1N \"%%\" }"
+    },
+    {
+      "table": "prefix",
+      "key": "0",
+      "repeat": false,
+      "command": "select-window -t :=0"
+    },
+    {
+      "table": "prefix",
+      "key": "1",
+      "repeat": false,
+      "command": "select-window -t :=1"
+    },
+    {
+      "table": "prefix",
+      "key": "2",
+      "repeat": false,
+      "command": "select-window -t :=2"
+    },
+    {
+      "table": "prefix",
+      "key": "3",
+      "repeat": false,
+      "command": "select-window -t :=3"
+    },
+    {
+      "table": "prefix",
+      "key": "4",
+      "repeat": false,
+      "command": "select-window -t :=4"
+    },
+    {
+      "table": "prefix",
+      "key": "5",
+      "repeat": false,
+      "command": "select-window -t :=5"
+    },
+    {
+      "table": "prefix",
+      "key": "6",
+      "repeat": false,
+      "command": "select-window -t :=6"
+    },
+    {
+      "table": "prefix",
+      "key": "7",
+      "repeat": false,
+      "command": "select-window -t :=7"
+    },
+    {
+      "table": "prefix",
+      "key": "8",
+      "repeat": false,
+      "command": "select-window -t :=8"
+    },
+    {
+      "table": "prefix",
+      "key": "9",
+      "repeat": false,
+      "command": "select-window -t :=9"
+    },
+    {
+      "table": "prefix",
+      "key": ":",
+      "repeat": false,
+      "command": "command-prompt"
+    },
+    {
+      "table": "prefix",
+      "key": ";",
+      "repeat": false,
+      "command": "last-pane"
+    },
+    {
+      "table": "prefix",
+      "key": "<",
+      "repeat": false,
+      "command": "display-menu -T \"#[align=centre]#{window_index}:#{window_name}\" -x W -y W \"#{?#{>:#{session_windows},1},,-}Swap Left\" l { swap-window -t :-1 } \"#{?#{>:#{session_windows},1},,-}Swap Right\" r { swap-window -t :+1 } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-window } '' Kill X { kill-window } Respawn R { respawn-window -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } Rename n { command-prompt -F -I \"#W\" { rename-window -t \"#{window_id}\" \"%%\" } } '' \"New After\" w { new-window -a } \"New At End\" W { new-window }"
+    },
+    {
+      "table": "prefix",
+      "key": "=",
+      "repeat": false,
+      "command": "choose-buffer -Z"
+    },
+    {
+      "table": "prefix",
+      "key": ">",
+      "repeat": false,
+      "command": "display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -x P -y P \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z }"
+    },
+    {
+      "table": "prefix",
+      "key": "?",
+      "repeat": false,
+      "command": "list-keys -N"
+    },
+    {
+      "table": "prefix",
+      "key": "@",
+      "repeat": false,
+      "command": "if-shell -F \"#{pane_floating_flag}\" { join-pane } { break-pane -W }"
+    },
+    {
+      "table": "prefix",
+      "key": "BTab",
+      "repeat": false,
+      "command": "new-pane -E -X 0 -Y 0 -x \"75%\" -y \"30%\" \\; move-pane -P bottom-centre \\; switch-mode -ks"
+    },
+    {
+      "table": "prefix",
+      "key": "C",
+      "repeat": false,
+      "command": "customize-mode -Z"
+    },
+    {
+      "table": "prefix",
+      "key": "C-Down",
+      "repeat": true,
+      "command": "resize-pane -D --"
+    },
+    {
+      "table": "prefix",
+      "key": "C-Left",
+      "repeat": true,
+      "command": "if-shell -F \"#{?floating_pane_flag}\" { resize-pane -R -1 } { resize-pane -L -- }"
+    },
+    {
+      "table": "prefix",
+      "key": "C-Right",
+      "repeat": true,
+      "command": "resize-pane -R --"
+    },
+    {
+      "table": "prefix",
+      "key": "C-Up",
+      "repeat": true,
+      "command": "if-shell -F \"#{?floating_pane_flag}\" { resize-pane -D -1 } { resize-pane -U -- }"
+    },
+    {
+      "table": "prefix",
+      "key": "C-b",
+      "repeat": false,
+      "command": "send-prefix"
+    },
+    {
+      "table": "prefix",
+      "key": "C-o",
+      "repeat": false,
+      "command": "rotate-window"
+    },
+    {
+      "table": "prefix",
+      "key": "C-z",
+      "repeat": false,
+      "command": "suspend-client"
+    },
+    {
+      "table": "prefix",
+      "key": "D",
+      "repeat": false,
+      "command": "choose-client -Z"
+    },
+    {
+      "table": "prefix",
+      "key": "DC",
+      "repeat": true,
+      "command": "refresh-client -c"
+    },
+    {
+      "table": "prefix",
+      "key": "Down",
+      "repeat": true,
+      "command": "select-pane -D"
+    },
+    {
+      "table": "prefix",
+      "key": "E",
+      "repeat": false,
+      "command": "select-layout -E"
+    },
+    {
+      "table": "prefix",
+      "key": "L",
+      "repeat": false,
+      "command": "switch-client -l"
+    },
+    {
+      "table": "prefix",
+      "key": "Left",
+      "repeat": true,
+      "command": "select-pane -L"
+    },
+    {
+      "table": "prefix",
+      "key": "M",
+      "repeat": false,
+      "command": "select-pane -M"
+    },
+    {
+      "table": "prefix",
+      "key": "M-1",
+      "repeat": false,
+      "command": "select-layout even-horizontal"
+    },
+    {
+      "table": "prefix",
+      "key": "M-2",
+      "repeat": false,
+      "command": "select-layout even-vertical"
+    },
+    {
+      "table": "prefix",
+      "key": "M-3",
+      "repeat": false,
+      "command": "select-layout main-horizontal"
+    },
+    {
+      "table": "prefix",
+      "key": "M-4",
+      "repeat": false,
+      "command": "select-layout main-vertical"
+    },
+    {
+      "table": "prefix",
+      "key": "M-5",
+      "repeat": false,
+      "command": "select-layout tiled"
+    },
+    {
+      "table": "prefix",
+      "key": "M-6",
+      "repeat": false,
+      "command": "select-layout main-horizontal-mirrored"
+    },
+    {
+      "table": "prefix",
+      "key": "M-7",
+      "repeat": false,
+      "command": "select-layout main-vertical-mirrored"
+    },
+    {
+      "table": "prefix",
+      "key": "M-Down",
+      "repeat": true,
+      "command": "resize-pane -D 5"
+    },
+    {
+      "table": "prefix",
+      "key": "M-Left",
+      "repeat": true,
+      "command": "if-shell -F \"#{?floating_pane_flag}\" { resize-pane -R -5 } { resize-pane -L 5 }"
+    },
+    {
+      "table": "prefix",
+      "key": "M-Right",
+      "repeat": true,
+      "command": "resize-pane -R 5"
+    },
+    {
+      "table": "prefix",
+      "key": "M-Up",
+      "repeat": true,
+      "command": "if-shell -F \"#{?floating_pane_flag}\" { resize-pane -D -5 } { resize-pane -U 5 }"
+    },
+    {
+      "table": "prefix",
+      "key": "M-n",
+      "repeat": false,
+      "command": "next-window -a"
+    },
+    {
+      "table": "prefix",
+      "key": "M-o",
+      "repeat": false,
+      "command": "rotate-window -D"
+    },
+    {
+      "table": "prefix",
+      "key": "M-p",
+      "repeat": false,
+      "command": "previous-window -a"
+    },
+    {
+      "table": "prefix",
+      "key": "PPage",
+      "repeat": false,
+      "command": "copy-mode -u"
+    },
+    {
+      "table": "prefix",
+      "key": "Right",
+      "repeat": true,
+      "command": "select-pane -R"
+    },
+    {
+      "table": "prefix",
+      "key": "S-Down",
+      "repeat": true,
+      "command": "refresh-client -D 10"
+    },
+    {
+      "table": "prefix",
+      "key": "S-Left",
+      "repeat": true,
+      "command": "refresh-client -L 10"
+    },
+    {
+      "table": "prefix",
+      "key": "S-Right",
+      "repeat": true,
+      "command": "refresh-client -R 10"
+    },
+    {
+      "table": "prefix",
+      "key": "S-Up",
+      "repeat": true,
+      "command": "refresh-client -U 10"
+    },
+    {
+      "table": "prefix",
+      "key": "Space",
+      "repeat": false,
+      "command": "next-layout"
+    },
+    {
+      "table": "prefix",
+      "key": "Tab",
+      "repeat": false,
+      "command": "new-pane -E -X 0 -Y 0 -x \"75%\" -y \"30%\" \\; move-pane -P bottom-centre \\; switch-mode -kw"
+    },
+    {
+      "table": "prefix",
+      "key": "Up",
+      "repeat": true,
+      "command": "select-pane -U"
+    },
+    {
+      "table": "prefix",
+      "key": "[",
+      "repeat": false,
+      "command": "copy-mode"
+    },
+    {
+      "table": "prefix",
+      "key": "]",
+      "repeat": false,
+      "command": "paste-buffer -p"
+    },
+    {
+      "table": "prefix",
+      "key": "c",
+      "repeat": false,
+      "command": "new-window"
+    },
+    {
+      "table": "prefix",
+      "key": "d",
+      "repeat": false,
+      "command": "detach-client"
+    },
+    {
+      "table": "prefix",
+      "key": "f",
+      "repeat": false,
+      "command": "command-prompt { find-window -Z \"%%\" }"
+    },
+    {
+      "table": "prefix",
+      "key": "g",
+      "repeat": false,
+      "command": "switch-client -T move"
+    },
+    {
+      "table": "prefix",
+      "key": "i",
+      "repeat": false,
+      "command": "display-message"
+    },
+    {
+      "table": "prefix",
+      "key": "l",
+      "repeat": false,
+      "command": "last-window"
+    },
+    {
+      "table": "prefix",
+      "key": "m",
+      "repeat": false,
+      "command": "select-pane -m"
+    },
+    {
+      "table": "prefix",
+      "key": "n",
+      "repeat": false,
+      "command": "next-window"
+    },
+    {
+      "table": "prefix",
+      "key": "o",
+      "repeat": false,
+      "command": "select-pane -t :.+"
+    },
+    {
+      "table": "prefix",
+      "key": "p",
+      "repeat": false,
+      "command": "previous-window"
+    },
+    {
+      "table": "prefix",
+      "key": "q",
+      "repeat": false,
+      "command": "display-panes"
+    },
+    {
+      "table": "prefix",
+      "key": "r",
+      "repeat": false,
+      "command": "refresh-client"
+    },
+    {
+      "table": "prefix",
+      "key": "s",
+      "repeat": false,
+      "command": "choose-tree -Zs"
+    },
+    {
+      "table": "prefix",
+      "key": "t",
+      "repeat": false,
+      "command": "clock-mode"
+    },
+    {
+      "table": "prefix",
+      "key": "w",
+      "repeat": false,
+      "command": "choose-tree -Zw"
+    },
+    {
+      "table": "prefix",
+      "key": "x",
+      "repeat": false,
+      "command": "confirm-before -p \"kill-pane #P? (y/n)\" kill-pane"
+    },
+    {
+      "table": "prefix",
+      "key": "z",
+      "repeat": false,
+      "command": "resize-pane -Z"
+    },
+    {
+      "table": "prefix",
+      "key": "{",
+      "repeat": false,
+      "command": "swap-pane -U"
+    },
+    {
+      "table": "prefix",
+      "key": "}",
+      "repeat": false,
+      "command": "swap-pane -D"
+    },
+    {
+      "table": "prefix",
+      "key": "~",
+      "repeat": false,
+      "command": "show-messages"
+    },
+    {
+      "table": "root",
+      "key": "C-MouseDown1Pane",
+      "repeat": false,
+      "command": "swap-pane -s @"
+    },
+    {
+      "table": "root",
+      "key": "C-MouseDown1Status",
+      "repeat": false,
+      "command": "swap-window -t @"
+    },
+    {
+      "table": "root",
+      "key": "DoubleClick1Pane",
+      "repeat": false,
+      "command": "select-pane -t = \\; if-shell -F \"#{||:#{pane_in_mode},#{mouse_any_flag}}\" { send-keys -M } { copy-mode -H ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }"
+    },
+    {
+      "table": "root",
+      "key": "M-MouseDown3Pane",
+      "repeat": false,
+      "command": "display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z }"
+    },
+    {
+      "table": "root",
+      "key": "M-MouseDown3Status",
+      "repeat": false,
+      "command": "display-menu -T \"#[align=centre]#{window_index}:#{window_name}\" -t = -x W -y W \"#{?#{>:#{session_windows},1},,-}Swap Left\" l { swap-window -t :-1 } \"#{?#{>:#{session_windows},1},,-}Swap Right\" r { swap-window -t :+1 } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-window } '' Kill X { kill-window } Respawn R { respawn-window -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } Rename n { command-prompt -F -I \"#W\" { rename-window -t \"#{window_id}\" \"%%\" } } '' \"New After\" w { new-window -a } \"New At End\" W { new-window }"
+    },
+    {
+      "table": "root",
+      "key": "M-MouseDown3StatusLeft",
+      "repeat": false,
+      "command": "run-shell -C \"display-menu -t= -xM -yW -T '#[align=centre]#{session_name}'  #{S/t:#{?#{&&:#{<:#{loop_index},6},#{!:#{session_active}}},'Switch To #[underscore]#{session_name}' '' {switch-client -t=#{session_id}#} ,}} '' 'Renumber' 'N' {move-window -r} 'Rename' 'r' {command-prompt -I '#S' {rename-session -- '%%'}} 'Detach' 'd' {detach-client} '' 'New Session' 's' {new-session} 'New Window' 'w' {new-window}\""
+    },
+    {
+      "table": "root",
+      "key": "M-MouseDrag1Border",
+      "repeat": false,
+      "command": "move-pane -M"
+    },
+    {
+      "table": "root",
+      "key": "M-MouseDrag1Pane",
+      "repeat": false,
+      "command": "move-pane -M"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1Border",
+      "repeat": false,
+      "command": "select-pane -M"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1Control7",
+      "repeat": false,
+      "command": "if-shell -F -t = \"#{pane_floating_flag}\" { join-pane } { break-pane -W }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1Control8",
+      "repeat": false,
+      "command": "resize-pane -Z"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1Control9",
+      "repeat": false,
+      "command": "display-menu -O -T \"Kill pane #{pane_index}?\" -t = -x M -y M Yes y { kill-pane -t = } No n {  }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1Pane",
+      "repeat": false,
+      "command": "select-pane -t = \\; send-keys -M"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1ScrollbarDown",
+      "repeat": false,
+      "command": "if-shell -F -t = \"#{pane_in_mode}\" { send-keys -X page-down } { copy-mode -d }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1ScrollbarUp",
+      "repeat": false,
+      "command": "if-shell -F -t = \"#{pane_in_mode}\" { send-keys -X page-up } { copy-mode -u }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown1Status",
+      "repeat": false,
+      "command": "switch-client -t ="
+    },
+    {
+      "table": "root",
+      "key": "MouseDown2Pane",
+      "repeat": false,
+      "command": "select-pane -t = \\; if-shell -F \"#{||:#{pane_in_mode},#{mouse_any_flag}}\" { send-keys -M } { paste-buffer -p }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown3Pane",
+      "repeat": false,
+      "command": "if-shell -F -t = \"#{||:#{mouse_any_flag},#{&&:#{pane_in_mode},#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}}}\" { select-pane -t = ; send-keys -M } { display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z } }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown3Status",
+      "repeat": false,
+      "command": "display-menu -T \"#[align=centre]#{window_index}:#{window_name}\" -t = -x W -y W \"#{?#{>:#{session_windows},1},,-}Swap Left\" l { swap-window -t :-1 } \"#{?#{>:#{session_windows},1},,-}Swap Right\" r { swap-window -t :+1 } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-window } '' Kill X { kill-window } Respawn R { respawn-window -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } Rename n { command-prompt -F -I \"#W\" { rename-window -t \"#{window_id}\" \"%%\" } } '' \"New After\" w { new-window -a } \"New At End\" W { new-window }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDown3StatusLeft",
+      "repeat": false,
+      "command": "run-shell -C \"display-menu -t= -xM -yW -T '#[align=centre]#{session_name}'  #{S/t:#{?#{&&:#{<:#{loop_index},6},#{!:#{session_active}}},'Switch To #[underscore]#{session_name}' '' {switch-client -t=#{session_id}#} ,}} '' 'Renumber' 'N' {move-window -r} 'Rename' 'r' {command-prompt -I '#S' {rename-session -- '%%'}} 'Detach' 'd' {detach-client} '' 'New Session' 's' {new-session} 'New Window' 'w' {new-window}\""
+    },
+    {
+      "table": "root",
+      "key": "MouseDrag1Border",
+      "repeat": false,
+      "command": "resize-pane -M"
+    },
+    {
+      "table": "root",
+      "key": "MouseDrag1Pane",
+      "repeat": false,
+      "command": "if-shell -F \"#{||:#{pane_in_mode},#{mouse_any_flag}}\" { send-keys -M } { copy-mode -M }"
+    },
+    {
+      "table": "root",
+      "key": "MouseDrag1ScrollbarSlider",
+      "repeat": false,
+      "command": "if-shell -F -t = \"#{pane_in_mode}\" { send-keys -X scroll-to-mouse } { copy-mode -S }"
+    },
+    {
+      "table": "root",
+      "key": "TripleClick1Pane",
+      "repeat": false,
+      "command": "select-pane -t = \\; if-shell -F \"#{||:#{pane_in_mode},#{mouse_any_flag}}\" { send-keys -M } { copy-mode -H ; send-keys -X select-line ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }"
+    },
+    {
+      "table": "root",
+      "key": "WheelDownStatus",
+      "repeat": false,
+      "command": "next-window"
+    },
+    {
+      "table": "root",
+      "key": "WheelUpPane",
+      "repeat": false,
+      "command": "if-shell -F \"#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}\" { send-keys -M } { copy-mode -e }"
+    },
+    {
+      "table": "root",
+      "key": "WheelUpStatus",
+      "repeat": false,
+      "command": "previous-window"
+    }
+  ]
+}

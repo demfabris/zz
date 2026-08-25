@@ -1,0 +1,25 @@
+set-option -g remain-on-exit on
+new-window -d -t w -n env-window -e ZZ_PANE_ENV=first -e MALFORMED -e =ignored -e ZZ_PANE_ENV=last /usr/bin/printenv ZZ_PANE_ENV
+run-shell "sleep 0.2"
+out: capture-pane -p -S -1 -E -1 -t w:env-window.0
+split-window -d -t w:main.0 -e ZZ_SPLIT_ENV=first -e ZZ_SPLIT_ENV=last /usr/bin/printenv ZZ_SPLIT_ENV
+run-shell "sleep 0.2"
+out: capture-pane -p -S -1 -E -1 -t w:main.1
+new-window -d -t w -n empty-name-env-window -e =ignored /usr/bin/printenv ""
+run-shell "sleep 0.2"
+out: display-message -p -t w:empty-name-env-window.0 #{pane_dead_status}
+split-window -d -t w:empty-name-env-window.0 -e =ignored /usr/bin/printenv ""
+run-shell "sleep 0.2"
+out: display-message -p -t w:empty-name-env-window.1 #{pane_dead_status}
+new-window -d -t w -n empty-window -E
+out: list-panes -t w:empty-window -F #{pane_dead}:#{pane_pid}:#{pane_start_command}
+new-window -d -t w -n empty-window-argument -E ""
+out: list-panes -t w:empty-window-argument -F #{pane_dead}:#{pane_pid}:#{pane_start_command}
+split-window -d -t w:main.0 -E
+out: display-message -p -t w:main.1 #{pane_dead}:#{pane_pid}:#{pane_start_command}
+split-window -d -t w:main.0 -E ""
+out: display-message -p -t w:main.1 #{pane_dead}:#{pane_pid}:#{pane_start_command}
+new-window -d -t w -E echo nope
+split-window -d -t w:main.0 -E echo nope
+new-window -d -t missing: -E echo nope
+split-window -d -t missing: -E echo nope

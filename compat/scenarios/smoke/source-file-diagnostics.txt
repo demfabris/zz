@@ -1,15 +1,18 @@
+corpus: none
 # The fixture drives the PLAIN CLI's source-file diagnostics on both sides from
 # inside a run-shell job (the harness compares only the control-mode block for a
 # conf: step), normalizing the scratch directory out of both streams so the
 # stdout line, the stderr line, and the exit code diff byte-for-byte.
 #
-# Harness limitation, deliberately not forced: only ABSOLUTE source paths can be
-# compared. tmux prefixes a relative path with the CLIENT's cwd before globbing
-# and prints the resolved path, where zz globs against the DAEMON's cwd and
-# prints the path unresolved — a separate cwd-ownership divergence, ledgered in
-# knowledge/tmux/divergences.md.
+# Absolute paths keep this stream fixture independent of the harness launcher.
+# Relative caller-cwd resolution, glob escaping, and declared-path misses are
+# covered by the CLI and attached-client fixtures.
 conf: fixtures/source-file-diagnostics.conf
 out: show-environment -g SOURCE_INVALID
 out: show-environment -g SOURCE_MISS
 out: show-environment -g SOURCE_QUIET
 out: show-environment -g SOURCE_MIXED
+out: show-environment -g SOURCE_MALFORMED
+out: show-environment -g SOURCE_MALFORMED_QUIET
+out: show-environment -g SOURCE_NESTED_MISS
+out: show-environment -g SOURCE_NESTED_QUIET

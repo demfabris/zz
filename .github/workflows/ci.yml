@@ -33,11 +33,21 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
+      - name: Check tmux compatibility summary freshness
+        if: runner.os == 'Linux'
+        run: |
+          git ls-files --error-unmatch compat/results/summary.md
+          compat/run.sh --check-summary
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes autoconf automake bison cmake curl desktop-file-utils dpkg-dev libevent-dev libfontconfig-dev libncurses-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev ninja-build pkg-config
+
+      - name: Install macOS packaging smoke tools
+        if: runner.os == 'macOS'
+        run: brew install tmux
 
       - uses: mlugg/setup-zig@v2.2.1
         with:
@@ -54,7 +64,11 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/compat/.cache
-          key: tmux-d77c9dc6-${{ runner.os }}
+          key: tmux-${{ hashFiles('compat/tmux-oracle.json', 'compat/fetch-tmux.sh', 'compat/fetch-corpus.sh') }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Check tmux compatibility tracker
+        if: runner.os == 'Linux'
+        run: compat/check.sh
 
       - name: Check formatting
         if: runner.os == 'Linux'
@@ -81,13 +95,19 @@ jobs:
         timeout-minutes: 15
         run: cargo test --release -p zz-mux
 
-      - name: Run strict tmux compatibility harness
+      - name: Run strict tmux compatibility harness and attached client
         if: runner.os == 'Linux'
         timeout-minutes: 15
-        run: compat/run.sh --strict-geometry
+        run: |
+          compat/run.sh --strict-geometry --attached-client
+          git diff --exit-code -- compat/results/summary.md
 
       - name: Build and validate CEF bundle
         run: cargo xtask bundle-cef --release --output target/cef-bundle
+
+      - name: Smoke packaged macOS CLI
+        if: runner.os == 'macOS'
+        run: compat/packaged-cli.sh target/cef-bundle/zz.app
 
       - name: Download verified AppImage tools
         if: runner.os == 'Linux'

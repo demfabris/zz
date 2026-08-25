@@ -1,3 +1,4 @@
+corpus: required
 # Headless command clients cannot inject a root-table keypress. The final
 # if-shell therefore spot-checks the installed binding's non-vim payload after
 # making the right pane active; keys: separately checks the binding itself.

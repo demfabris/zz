@@ -1,2 +1,3 @@
+corpus: required
 conf: fixtures/continuum-init.conf
 out: show-options -gv status-right

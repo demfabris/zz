@@ -1,3 +1,4 @@
+corpus: none
 # The nested `tmux -C source-file` of the broken sub-config emits %config-error on
 # the pin only: zz's source-file swallows parse diagnostics (pre-existing gap,
 # ticketed in the drop-in plan — not part of the grammar wave). The abort SEMANTICS

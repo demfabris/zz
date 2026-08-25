@@ -1,3 +1,4 @@
+corpus: required
 # Promoted from crates/zz-mux/tests/fixtures/tmux.conf. The staged TPM directory
 # makes the guarded run-shell path execute on both sides.
 conf: fixtures/in-tree.conf

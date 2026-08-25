@@ -11,6 +11,12 @@ forks:
 fork-rebase name target="":
     @scripts/fork-sync.sh rebase {{ name }} {{ target }}
 
+compat *args:
+    @compat/run.sh {{ args }}
+
+compat-check:
+    @compat/check.sh
+
 # Build a release bundle for a supported platform (must run on that platform).
 # Extra args after `--` pass through to bundle-cef.
 build platform *args:

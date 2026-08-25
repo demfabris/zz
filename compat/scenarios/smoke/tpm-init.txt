@@ -1,3 +1,4 @@
+corpus: required
 # TPM initializes through the tmux PATH shim and its argv-level ';' probe.
 conf: fixtures/tpm-init.conf
 keys: prefix I

@@ -1,0 +1,35 @@
+# Native canonical names never enter tmux's abbreviation namespace. These 25
+# spellings were unique tmux prefixes before zz added its native command set.
+out: list-commands -F #{command_list_name} a
+out: list-commands -F #{command_list_name} ca
+out: list-commands -F #{command_list_name} cap
+out: list-commands -F #{command_list_name} capt
+out: list-commands -F #{command_list_name} captu
+out: list-commands -F #{command_list_name} captur
+out: list-commands -F #{command_list_name} capture
+out: list-commands -F #{command_list_name} capture-
+out: list-commands -F #{command_list_name} cop
+out: list-commands -F #{command_list_name} copy
+out: list-commands -F #{command_list_name} copy-
+out: list-commands -F #{command_list_name} copy-m
+out: list-commands -F #{command_list_name} copy-mo
+out: list-commands -F #{command_list_name} copy-mod
+out: list-commands -F #{command_list_name} f
+out: list-commands -F #{command_list_name} select-p
+out: list-commands -F #{command_list_name} select-pa
+out: list-commands -F #{command_list_name} select-pan
+out: list-commands -F #{command_list_name} set-b
+out: list-commands -F #{command_list_name} set-e
+out: list-commands -F #{command_list_name} sp
+out: list-commands -F #{command_list_name} spl
+out: list-commands -F #{command_list_name} spli
+out: list-commands -F #{command_list_name} split
+out: list-commands -F #{command_list_name} split-
+# Exact user aliases still expand before canonical command lookup.
+set-option -s command-alias[40] 'split=list-commands -F "#{command_list_name}" capture-pane'
+out: split
+# Exact tmux aliases still outrank prefix lookup.
+out: list-commands -F #{command_list_name} splitw
+# Ambiguous list-commands queries keep the resolver error instead of degrading
+# to unknown command.
+list-commands kill-s

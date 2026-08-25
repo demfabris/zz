@@ -1,3 +1,4 @@
+corpus: required
 # Save and restore execution are deliberately outside this initialization smoke.
 conf: fixtures/resurrect-init.conf
 keys: prefix C-s

@@ -1,0 +1,34 @@
+tmux-only: set-option -g history-limit 10000
+out: show-options -g
+out: show-options -gH
+out: show-options -gHv
+out: show-options -sH
+out: show-options -gwH
+out: show-options -AH
+out: show-options -pAH
+out: show-options -AH after-capture-pane
+show-window-options -H
+set-option -g @hook-row marker
+out: show-options -gH
+set-hook -g 'after-bind-key[0]' 'display-message global-zero'
+set-hook -g 'after-bind-key[named]' 'display-message global-named'
+out: show-options -g
+out: show-options -g after-bind-key
+out: show-options -gH after-bind-key
+out: show-options -g after-bind-key[named]
+out: show-options -gHv
+set-hook 'after-bind-key[local]' 'display-message local'
+out: show-options -A after-bind-key
+out: show-options -A after-bind-key[named]
+set-hook -u after-bind-key[local]
+out: show-options -A after-bind-key
+set-hook -u after-bind-key
+out: show-options -A after-bind-key
+set-hook -g 'pane-died[global]' 'display-message global-window'
+out: show-options -pA pane-died
+set-hook -w -t w:0 'pane-died[window]' 'display-message window'
+out: show-options -pA pane-died
+out: show-options -pA pane-died[global]
+set-hook -p -t w:0.0 'pane-died[pane]' 'display-message pane'
+out: show-options -pA pane-died
+out: show-options -pAH

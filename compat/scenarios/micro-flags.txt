@@ -1,0 +1,17 @@
+out: display-message -p
+out: display-message -p -l #{session_name}
+out: display-message -p -l -F #{pane_id}
+out: display-message -p -l
+display-message -p -l -t missing -d bad -F x y
+display-message -p -l -d bad -F x y
+display-message -p -l -d bad x
+set-buffer -t missing alpha
+out: list-buffers -F #{buffer_sample}
+load-buffer -t missing /dev/null
+new-window -d -t w -n send -- cat
+send-keys -F -t w:send VISIBLE Enter
+send-keys -C
+send-keys -P
+send-keys -o
+run-shell 'sleep 0.2'
+out: capture-pane -p -S 0 -E 1 -t w:send

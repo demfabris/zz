@@ -1,3 +1,4 @@
+corpus: required
 # Runtime needs a live picker and pane contents; initialization stores the note
 # and installs the binding checked here.
 conf: fixtures/fpp-init.conf

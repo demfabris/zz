@@ -1,0 +1,85 @@
+# tmux compatibility summary
+
+| Scenario | Steps | TOPO clean? | GEO divergences | FMT clean? | OUT clean? | WARN clean? |
+| --- | ---: | :---: | ---: | :---: | :---: | :---: |
+| aggressive-resize | 2 | yes | 0 | yes | yes | yes |
+| alerts | 62 | yes | 0 | yes | yes | yes |
+| bare-targets | 8 | yes | 0 | yes | yes | yes |
+| base-index | 11 | yes | 0 | yes | yes | yes |
+| behavior-options | 12 | yes | 0 | yes | yes | yes |
+| break-pane | 20 | yes | 0 | yes | yes | yes |
+| capture-pane | 23 | yes | 0 | yes | yes | yes |
+| collapse | 4 | yes | 0 | yes | yes | yes |
+| command-alias | 16 | yes | 0 | yes | yes | yes |
+| command-item-format | 76 | yes | 0 | yes | yes | yes |
+| display-message | 17 | yes | 0 | yes | yes | yes |
+| display-panes-format | 10 | yes | 0 | yes | yes | yes |
+| errors | 2 | yes | 0 | yes | yes | yes |
+| exec-family | 30 | yes | 0 | yes | yes | yes |
+| format-flags | 8 | yes | 0 | yes | yes | yes |
+| formats-values | 13 | yes | 0 | yes | yes | yes |
+| formats | 12 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-defaults | 18 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-errors | 17 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-layout | 9 | yes | 0 | yes | yes | yes |
+| honest-knobs-c1-readback | 21 | yes | 0 | yes | yes | yes |
+| honest-knobs-c2 | 27 | yes | 0 | yes | yes | yes |
+| join-pane-size | 11 | yes | 0 | yes | yes | yes |
+| lane2-store | 193 | yes | 0 | yes | yes | yes |
+| last-pane-input-off | 15 | yes | 0 | yes | yes | yes |
+| layout-strings | 6 | yes | 0 | yes | yes | yes |
+| list-keys-padding | 46 | yes | 0 | yes | yes | yes |
+| list-sort-filter | 12 | yes | 0 | yes | yes | yes |
+| micro-flags | 17 | yes | 0 | yes | yes | yes |
+| move-swap | 12 | yes | 0 | yes | yes | yes |
+| mru-activity | 11 | yes | 0 | yes | yes | yes |
+| native-prefix-isolation | 29 | yes | 0 | yes | yes | yes |
+| nested-splits | 4 | yes | 0 | yes | yes | yes |
+| new-session-environment | 18 | yes | 0 | yes | yes | yes |
+| options-readback | 15 | yes | 0 | yes | yes | yes |
+| pane-dead-time | 6 | yes | 0 | yes | yes | yes |
+| pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
+| panes | 9 | yes | 0 | yes | yes | yes |
+| prefix2 | 15 | yes | 0 | yes | yes | yes |
+| presets-mirrored | 6 | yes | 0 | yes | yes | yes |
+| presets | 7 | yes | 0 | yes | yes | yes |
+| prompt-history | 8 | yes | 0 | yes | yes | yes |
+| renderer-styles | 12 | yes | 0 | yes | yes | yes |
+| resize-directions | 8 | yes | 0 | yes | yes | yes |
+| resize-window | 16 | yes | 0 | yes | yes | yes |
+| resize | 6 | yes | 0 | yes | yes | yes |
+| sessions | 3 | yes | 0 | yes | yes | yes |
+| set-buffer-rename | 12 | yes | 0 | yes | yes | yes |
+| show-options-hooks | 34 | yes | 0 | yes | yes | yes |
+| source-file-format | 17 | yes | 0 | yes | yes | yes |
+| split-window-zoom | 11 | yes | 0 | yes | yes | yes |
+| splits-sized | 5 | yes | 0 | yes | yes | yes |
+| status-options | 79 | yes | 0 | yes | yes | yes |
+| switch-client | 6 | yes | 0 | yes | yes | yes |
+| targets | 16 | yes | 0 | yes | yes | yes |
+| update-environment | 6 | yes | 0 | yes | yes | yes |
+| windows | 9 | yes | 0 | yes | yes | yes |
+| zoom | 5 | yes | 0 | yes | yes | yes |
+| known/known-main-preset-two-panes | 2 | yes | 1 | yes | yes | yes |
+| known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
+| smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
+| smoke/config-grammar | 15 | yes | 0 | yes | yes | yes |
+| smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
+| smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
+| smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
+| smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
+| smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
+| smoke/own-conf | 6 | yes | 0 | yes | yes | yes |
+| smoke/resurrect-init | 3 | yes | 0 | yes | yes | yes |
+| smoke/sensible | 6 | yes | 0 | yes | yes | yes |
+| smoke/source-file-control | 3 | yes | 0 | yes | yes | yes |
+| smoke/source-file-depth | 3 | yes | 0 | yes | yes | yes |
+| smoke/source-file-diagnostics | 9 | yes | 0 | yes | yes | yes |
+| smoke/source-file-tilde | 3 | yes | 0 | yes | yes | yes |
+| smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |
+| smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
+| smoke/yank | 3 | yes | 0 | yes | yes | yes |
+
+## Attached-client fixture
+
+Status: `PASS`

@@ -1,0 +1,24 @@
+# capture-pane prints only with -p; otherwise it fills a named or automatic buffer.
+new-window -d -t w -n capture -- cat
+send-keys -t w:capture.0 alpha Enter
+send-keys -t w:capture.0 beta Enter
+send-keys -t w:capture.0 gamma Enter
+run-shell "sleep 0.2"
+out: capture-pane -p -S 0 -E 2 -t w:capture.0
+set-buffer -b pinned sentinel
+out: capture-pane -p -b pinned -S 0 -E 2 -t w:capture.0
+out: list-buffers -F #{buffer_size}:#{buffer_sample}
+capture-pane -b captured -S 0 -E 2 -t w:capture.0
+out: list-buffers -F #{buffer_size}:#{buffer_sample}
+capture-pane -S 0 -E 2 -t w:capture.0
+out: list-buffers -F #{buffer_size}:#{buffer_sample}
+out: capture-pane -p -S 2 -E 0 -t w:capture.0
+out: capture-pane -p -S 1 -E 1 -t w:capture.0
+out: capture-pane -pS -3 -E2 -t w:capture.0
+out: capture-pane -pS0 -E2 -t w:capture.0
+out: capture-pane -pS0 -pE5 -t w:capture.0
+out: capture-pane -pb pinned -S0 -E2 -t w:capture.0
+out: capture-pane -pSbogus -E2 -t w:capture.0
+capture-pane -pS0 -Ebogus -t w:capture.0
+out: capture-pane -pS#{?pane_active,1,bogus} -E2 -t w:capture.0
+out: capture-pane -pS0 -E#{?pane_active,1,bogus} -t w:capture.0

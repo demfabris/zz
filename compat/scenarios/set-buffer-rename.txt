@@ -1,0 +1,12 @@
+set-buffer -b source alpha
+set-buffer -b destination beta
+out: list-buffers -F #{buffer_name}:#{buffer_sample}
+set-buffer -b source -n destination ignored
+out: list-buffers -F #{buffer_name}:#{buffer_sample}
+set-buffer automatic
+set-buffer -an named-top ignored
+out: list-buffers -F #{buffer_name}:#{buffer_sample}
+set-buffer -b destination -n destination ignored
+out: list-buffers -F #{buffer_name}:#{buffer_sample}
+set-buffer -n nowhere ignored
+set-buffer -b missing -n '' ignored

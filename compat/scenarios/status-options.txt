@@ -70,3 +70,10 @@ out: show-options -g status-right-length
 out: show-options -g status-justify
 out: show-options -g status-position
 out: show-options -gw window-status-style
+new-window -d -t w -n separator
+set-option -gw window-status-format 'N#{window_index}:#{window_name}'
+set-option -gw window-status-current-format 'C#{window_index}:#{window_name}'
+set-option -gw window-status-separator '#{?#{==:#{window_index},0},#[fg=red]G#{window_index}:#{window_name},#[fg=blue]BAD}'
+fmt: #{W:#{T:window-status-format}#{?loop_last_flag,,#{E:window-status-separator}},#{T:window-status-current-format}#{?loop_last_flag,,#{E:window-status-separator}}}
+set-option -w -t w:0 window-status-separator '#{?#{==:#{window_index},0},#[bold]L#{window_index}:#{window_name},#[reverse]BAD}'
+fmt: #{W:#{T:window-status-format}#{?loop_last_flag,,#{E:window-status-separator}},#{T:window-status-current-format}#{?loop_last_flag,,#{E:window-status-separator}}}

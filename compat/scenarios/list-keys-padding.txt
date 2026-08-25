@@ -1,0 +1,47 @@
+# Default list-keys output aligns repeat, table, and key columns globally.
+bind-key -T zzpad 1 kill-pane
+bind-key -r -T zzpad C-a new-window
+out: list-keys -T zzpad
+out: list-keys -T zzpad -F #{key_string}|#{key_has_repeat}|#{key_string_width}|#{key_table_width}
+unbind-key -a -T prefix
+list-keys -T prefix
+unbind-key -aq -T root
+out: list-keys -T root
+bind-key -T prefix -N alpha-note a display-message alpha
+bind-key -T root b display-message beta
+bind-key -T root -N '' c display-message empty-note
+bind-key -T prefix -N zeta-note z display-message zeta
+bind-key -T root -N yankee-note y display-message yankee
+bind-key -T ignored -N ignored-note x display-message ignored
+out: list-keys -N
+out: list-keys -Na
+out: list-keys -NaPZZ
+out: list-keys -Na -O key -F #{key_table}:#{key_string}
+out: list-keys -Na -O key -r -F #{key_table}:#{key_string}
+bind-key -T zzlk a display-message alpha
+bind-key -T zzlk b display-message beta
+bind-key -r -T zzlk x display-message repeat
+bind-key -T zzlk z display-message zeta
+bind-key -T zzlk M-a display-message meta
+bind-key -T zzlk C-a display-message control
+out: list-keys -T zzlk -F #{key_string}|#{key_repeat}
+out: list-keys -r -T zzlk -F #{key_string}|#{key_repeat}
+out: list-keys -O order -T zzlk -F #{key_string}
+out: list-keys -O order -r -T zzlk -F #{key_string}
+unbind-key -T zzlk M-a
+unbind-key -T zzlk C-a
+out: list-keys -O key -T zzlk -F #{key_string}
+out: list-keys -O key -r -T zzlk -F #{key_string}
+out: list-keys -O key -O order -T zzlk -F #{key_string}
+out: list-keys -T zzlk -F #{key_table}:#{key_string} a
+out: list-keys -T zzlk -F #{key_table}:#{key_string} -- a
+out: list-keys -1 -O key -T zzlk -F #{key_string}|#{key_repeat}|#{key_has_repeat}|#{key_string_width}|#{key_table_width}
+out: list-keys -1 -T zzlk -F #{key_string}|#{key_repeat}|#{key_has_repeat}|#{key_string_width} x
+bind-key -T zzspace Space display-message space
+out: list-keys -T zzspace -F #{key_string}|#{key_string_width}
+out: list-keys -T zzspace -F #{key_string}|#{key_string_width} Space
+out: list-keys -T copy-mode -F #{key_string}|#{key_string_width} C-Space
+out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} Left
+out: list-keys -T copy-mode -F #{?key_repeat,REPEAT:#{key_string},}
+out: list-keys -1 -T copy-mode-vi -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} h
+out: list-keys -T copy-mode-vi -F #{?key_repeat,REPEAT:#{key_string},}

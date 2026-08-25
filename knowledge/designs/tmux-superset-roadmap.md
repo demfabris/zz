@@ -257,7 +257,8 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    fresh canonical run is deferred until the current slices settle. The drift check currently names
    `buffer-path-format`, `command-item-format`, `display-message` (27 steps), `resize-directions`
    (16 focused steps versus 8 stored), `send-keys-repeat`,
-   `smoke/cli-chain-parse-abort`, `smoke/control-alias-prepare`, `smoke/source-file-control`,
+   `smoke/cli-chain-parse-abort`, `smoke/control-alias-prepare`, `smoke/source-file-control`
+   (8 focused steps versus 3 stored),
    `smoke/source-file-diagnostics`, and `source-file-format`; root will replace those rows and the
    totals from the final run. CI checks scenario paths, step counts, every stored result cell, and
    the attached `PASS` before the run, then diffs every result column after a complete strict run.
@@ -469,12 +470,19 @@ failure, runtime failure, or depth refusal ends `%error`. Runtime failures alone
 Matched read failures follow as typed standalone Error events, including invalid UTF-8, numeric OS
 errors, and colon-space paths. Config and lexer Warning prose remains under
 `control-mode.diagnostic-typing`. The existing loader preflights every declared path for one source
-command before recursion. A focused regression and the strict six-step Control differential prove
+command before recursion. A focused regression and the then-six-step Control differential prove
 root missing-path guard, then middle missing-path guard, then leaf output guard, each exactly once.
-That closes `source-file.nested-control-queue` with no production change. A matched failed replay
-still returns a completed nonzero success that the Control front end does not retain across every EOF
-and detach ordering. `control-mode.source-file-exit-status` owns that client process-state matrix;
-source-command diagnostics do not become globally sticky. The nesting limit is closed for guard
+That closes `source-file.nested-control-queue` with no production change. The later
+`control-mode.source-file-exit-status` closure completes the long-lived Control matrix. Direct and
+sourced runtime errors plus nonruntime source failures set retval 1. Generic nonzero successes and
+flags-1 parse or preparation errors do not set or change it, so a fresh client stays at 0 while a
+prior sticky failure stays at 1. A blank line or EOF snapshots the current value. A Return captured
+while a preceding non-detach command waits precedes later queued stdin commands, including detach;
+a Return observed while self-detach itself waits is discarded on the caller's `Detached` event. Only
+a caller-targeted `Detached` event exits 0, so nonself and no-victim detach forms keep the loop alive.
+The command response closes before `%exit`. The strict
+current differential passes eight steps without making every source or config diagnostic sticky.
+The nesting limit is closed for guard
 placement, depth wording, count, and
 later-line continuation: both sides run 50 concurrent source invocations counting the initial
 `source-file` as invocation 1, and refuse invocation 51 with `too many nested files` on the
@@ -497,7 +505,7 @@ pin-unproven because the corresponding commands are unsupported in zz. Replayed 
 closed for the pinned target and set-option failures on Command, Control, and attached clients.
 Successful replay output is now captured inside Control guards, while Command stdout, attached
 presentation, and physical interleaving with `-v` remain under `config.replayed-command-output`.
-Cross-depth nested ordering is closed. Control source-file EOF and detach status, parser abort, and
+Cross-depth nested ordering and Control return-versus-detach precedence are closed. Parser abort and
 error shapes remain with their named groups; the same-line close does not cover exact matched-read
 text.
 Startup accounting is closed: one
@@ -522,8 +530,8 @@ returns status 1 without stopping later matches; and ordinary diagnostics plus `
 declared path and match order. Explicit native `reload-config`, startup first-existing discovery,
 and ordered explicit `-f` roots keep their separate behavior. Parse-only and nested paths are
 unchanged. Focused CLI and daemon tests, strict clippy, fmt, and the 12-step diagnostics, 40-step
-format, and six-step Control differentials pass with zero differences and no skips. This is not a
-canonical-suite claim.
+format, and then-six-step Control differentials pass with zero differences and no skips. The later
+Control return-status close grows that focused row to eight. Neither run is a canonical-suite claim.
 Control source diagnostics now use the existing Error kind and reach standalone `%error` frames
 without text classification. Config summaries still use Warning events, so
 `control-mode.diagnostic-typing` retains only future or localized config wording.

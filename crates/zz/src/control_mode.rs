@@ -108,7 +108,8 @@ fn drive<W: Write>(
             &mut pending_stdin,
         )?;
         return Ok(match prepared.exit {
-            ExitSignal::Clean | ExitSignal::Detached => control_exit_code(0, &state),
+            ExitSignal::Clean => state.return_code,
+            ExitSignal::Detached => 0,
             _ => 1,
         });
     }
@@ -136,6 +137,7 @@ fn drive<W: Write>(
         0,
         &mut state,
         &mut pending_stdin,
+        prepared.pending_return,
     )?;
     if initial_result.exit.is_some() {
         finish_exit(
@@ -149,7 +151,8 @@ fn drive<W: Write>(
             &mut pending_stdin,
         )?;
         return Ok(match initial_result.exit {
-            ExitSignal::Detached | ExitSignal::Clean => control_exit_code(0, &state),
+            ExitSignal::Detached => 0,
+            ExitSignal::Clean => state.return_code,
             _ => initial_result.exit_code,
         });
     }
@@ -164,11 +167,10 @@ fn drive<W: Write>(
             &receiver,
             &mut pending_stdin,
         )?;
-        return Ok(control_exit_code(initial_result.exit_code, &state));
+        return Ok(completed_exit_code(initial_result.exit_code, &state));
     }
 
     ensure_stdin_reader(&events, &mut stdin_started);
-    let mut client_exit_code = 0;
     loop {
         let event = pending_stdin.pop_front().map_or_else(
             || receiver.recv().unwrap_or(MainEvent::Disconnected),
@@ -176,25 +178,24 @@ fn drive<W: Write>(
         );
         match event {
             MainEvent::Stdin(StdinEvent::Line(line)) => match parse_line(&line) {
-                ParsedLine::Detach => {
-                    let _ = client.detach();
-                    drain_before_exit(&receiver, &mut state, output)?;
-                    finish_exit(
+                ParsedLine::Return => {
+                    return finish_control_return(
+                        client.as_ref(),
+                        PendingReturn::Blank {
+                            code: state.return_code,
+                        },
                         output,
-                        None,
-                        state.wait_exit,
-                        false,
+                        &mut state,
                         &events,
                         &mut stdin_started,
                         &receiver,
                         &mut pending_stdin,
-                    )?;
-                    return Ok(control_exit_code(0, &state));
+                    );
                 }
                 ParsedLine::Ignore => {}
                 ParsedLine::Error(error) => output.parse_error(&error)?,
                 ParsedLine::Commands(commands) => {
-                    let prepared = prepare_command_unit(
+                    let mut prepared = prepare_command_unit(
                         client.as_ref(),
                         &receiver,
                         output,
@@ -214,17 +215,35 @@ fn drive<W: Write>(
                             &mut pending_stdin,
                         )?;
                         return Ok(match prepared.exit {
-                            ExitSignal::Clean | ExitSignal::Detached => {
-                                control_exit_code(0, &state)
-                            }
+                            ExitSignal::Clean => state.return_code,
+                            ExitSignal::Detached => 0,
                             _ => 1,
                         });
                     }
                     if let Some(error) = prepared_error(&prepared.commands) {
                         output.parse_error(&format!("parse error: {}", error.tmux_message()))?;
+                        if let Some(pending_return) = prepared.pending_return.take() {
+                            return finish_control_return(
+                                client.as_ref(),
+                                pending_return,
+                                output,
+                                &mut state,
+                                &events,
+                                &mut stdin_started,
+                                &receiver,
+                                &mut pending_stdin,
+                            );
+                        }
                         continue;
                     }
-                    for command in prepared.commands {
+                    let first_is_detach = prepared
+                        .commands
+                        .first()
+                        .is_some_and(prepared_command_is_detach);
+                    if !first_is_detach {
+                        state.pending_return = prepared.pending_return.take();
+                    }
+                    for (index, command) in prepared.commands.into_iter().enumerate() {
                         let result = execute_prepared_command(
                             client.as_ref(),
                             &receiver,
@@ -233,6 +252,11 @@ fn drive<W: Write>(
                             1,
                             &mut state,
                             &mut pending_stdin,
+                            if index == 0 && first_is_detach {
+                                prepared.pending_return.take()
+                            } else {
+                                None
+                            },
                         )?;
                         if result.exit.is_some() {
                             finish_exit(
@@ -246,14 +270,22 @@ fn drive<W: Write>(
                                 &mut pending_stdin,
                             )?;
                             return Ok(match result.exit {
-                                ExitSignal::Detached | ExitSignal::Clean => {
-                                    control_exit_code(0, &state)
-                                }
+                                ExitSignal::Detached => 0,
+                                ExitSignal::Clean => state.return_code,
                                 _ => result.exit_code,
                             });
                         }
-                        if result.marks_client_failure {
-                            client_exit_code = 1;
+                        if let Some(pending_return) = state.pending_return.take() {
+                            return finish_control_return(
+                                client.as_ref(),
+                                pending_return,
+                                output,
+                                &mut state,
+                                &events,
+                                &mut stdin_started,
+                                &receiver,
+                                &mut pending_stdin,
+                            );
                         }
                         if result.abort_line {
                             break;
@@ -262,34 +294,30 @@ fn drive<W: Write>(
                 }
             },
             MainEvent::Stdin(StdinEvent::Eof) => {
-                let _ = client.detach();
-                drain_before_exit(&receiver, &mut state, output)?;
-                finish_exit(
+                return finish_control_return(
+                    client.as_ref(),
+                    PendingReturn::Eof {
+                        code: state.return_code,
+                    },
                     output,
-                    None,
-                    state.wait_exit,
-                    true,
+                    &mut state,
                     &events,
                     &mut stdin_started,
                     &receiver,
                     &mut pending_stdin,
-                )?;
-                return Ok(control_exit_code(client_exit_code, &state));
+                );
             }
             MainEvent::Stdin(StdinEvent::Error(error)) => {
-                eprintln!("zz: {error}");
-                let _ = client.detach();
-                finish_exit(
+                return finish_control_return(
+                    client.as_ref(),
+                    PendingReturn::InputError { message: error },
                     output,
-                    None,
-                    state.wait_exit,
-                    true,
+                    &mut state,
                     &events,
                     &mut stdin_started,
                     &receiver,
                     &mut pending_stdin,
-                )?;
-                return Ok(1);
+                );
             }
             MainEvent::Protocol(message) => {
                 let exit = handle_protocol(*message, &mut state, output)?;
@@ -305,7 +333,8 @@ fn drive<W: Write>(
                         &mut pending_stdin,
                     )?;
                     return Ok(match exit {
-                        ExitSignal::Detached | ExitSignal::Clean => control_exit_code(0, &state),
+                        ExitSignal::Detached => 0,
+                        ExitSignal::Clean => state.return_code,
                         _ => 1,
                     });
                 }
@@ -334,6 +363,11 @@ fn prepared_error(commands: &[PreparedCommand]) -> Option<&ServerError> {
     })
 }
 
+fn prepared_command_is_detach(command: &PreparedCommand) -> bool {
+    matches!(command.result, PreparedCommandResult::Ready)
+        && command.canonical_name.as_deref() == Some("detach-client")
+}
+
 fn prepare_command_unit<W: Write>(
     client: &InteractiveClient,
     receiver: &mpsc::Receiver<MainEvent>,
@@ -347,6 +381,7 @@ fn prepare_command_unit<W: Write>(
         .prepare_commands(commands)
         .map_err(io::Error::other)?;
     let mut exit = ExitSignal::None;
+    let mut pending_return = None;
     loop {
         match receiver.recv().unwrap_or(MainEvent::Disconnected) {
             MainEvent::Protocol(message) => match match_prepared_response(*message, request_id) {
@@ -357,16 +392,27 @@ fn prepare_command_unit<W: Write>(
                             "prepared command count mismatch",
                         ));
                     }
-                    return Ok(PreparedUnit { commands, exit });
+                    return Ok(PreparedUnit {
+                        commands,
+                        exit,
+                        pending_return,
+                    });
                 }
                 Err(message) => {
                     let signal = handle_protocol(message, state, output)?;
-                    if signal.is_some() {
+                    if signal.is_some() && exit != ExitSignal::Detached {
                         exit = signal;
                     }
                 }
             },
-            MainEvent::Stdin(stdin) => pending_stdin.push_back(stdin),
+            MainEvent::Stdin(stdin) => {
+                capture_pending_return(
+                    stdin,
+                    state.return_code,
+                    &mut pending_return,
+                    pending_stdin,
+                );
+            }
             MainEvent::Disconnected => {
                 return Ok(PreparedUnit {
                     commands: Vec::new(),
@@ -375,6 +421,7 @@ fn prepare_command_unit<W: Write>(
                     } else {
                         ExitSignal::Unexpected
                     },
+                    pending_return,
                 });
             }
         }
@@ -402,9 +449,11 @@ fn execute_prepared_command<W: Write>(
     flags: u8,
     state: &mut ControlState,
     pending_stdin: &mut VecDeque<StdinEvent>,
+    pending_return: Option<PendingReturn>,
 ) -> io::Result<CommandResult> {
     let PreparedCommand {
         invocation,
+        canonical_name,
         result: PreparedCommandResult::Ready,
         ..
     } = command
@@ -419,6 +468,8 @@ fn execute_prepared_command<W: Write>(
         flags,
         state,
         pending_stdin,
+        canonical_name.as_deref(),
+        pending_return,
     )
 }
 
@@ -430,7 +481,10 @@ fn execute_command<W: Write>(
     flags: u8,
     state: &mut ControlState,
     pending_stdin: &mut VecDeque<StdinEvent>,
+    canonical_name: Option<&str>,
+    mut deferred_return: Option<PendingReturn>,
 ) -> io::Result<CommandResult> {
+    let detach_command = canonical_name == Some("detach-client");
     let frame = output.begin(flags)?;
     let request_id = match client.execute_prepared(command) {
         Ok(request_id) => request_id,
@@ -440,7 +494,6 @@ fn execute_command<W: Write>(
                 exit_code: 1,
                 exit: ExitSignal::Unexpected,
                 abort_line: true,
-                marks_client_failure: false,
             });
         }
     };
@@ -452,14 +505,19 @@ fn execute_command<W: Write>(
                     if response_request_id(&response) == request_id =>
                 {
                     let abort_line = response_aborts_line(&response);
-                    let marks_client_failure =
-                        response_marks_client_failure(&response) || state.client_failure;
+                    if response_sets_return_code(canonical_name, &response) {
+                        state.return_code = 1;
+                    }
+                    settle_deferred_return(
+                        exit == ExitSignal::Detached,
+                        &mut deferred_return,
+                        state,
+                    );
                     let exit_code = output.response(&frame, response)?;
                     return Ok(CommandResult {
                         exit_code,
                         exit,
                         abort_line,
-                        marks_client_failure,
                     });
                 }
                 message => {
@@ -470,7 +528,6 @@ fn execute_command<W: Write>(
                             exit_code: 1,
                             exit: signal,
                             abort_line: true,
-                            marks_client_failure: false,
                         });
                     }
                     if signal.is_some() {
@@ -478,7 +535,23 @@ fn execute_command<W: Write>(
                     }
                 }
             },
-            MainEvent::Stdin(stdin) => pending_stdin.push_back(stdin),
+            MainEvent::Stdin(stdin) => {
+                if detach_command {
+                    capture_pending_return(
+                        stdin,
+                        state.return_code,
+                        &mut deferred_return,
+                        pending_stdin,
+                    );
+                } else {
+                    capture_pending_return(
+                        stdin,
+                        state.return_code,
+                        &mut state.pending_return,
+                        pending_stdin,
+                    );
+                }
+            }
             MainEvent::Disconnected => {
                 output.error(&frame, "server exited unexpectedly")?;
                 return Ok(CommandResult {
@@ -489,7 +562,6 @@ fn execute_command<W: Write>(
                         ExitSignal::Unexpected
                     },
                     abort_line: true,
-                    marks_client_failure: false,
                 });
             }
         }
@@ -503,7 +575,8 @@ struct ControlState {
     last_windows: BTreeMap<SessionId, WindowId>,
     self_name: Option<String>,
     wait_exit: bool,
-    client_failure: bool,
+    return_code: u8,
+    pending_return: Option<PendingReturn>,
 }
 
 impl ControlState {
@@ -648,7 +721,9 @@ fn handle_protocol<W: Write>(
                 error,
                 client_failure,
             } => {
-                state.client_failure |= client_failure;
+                if client_failure || (error && is_source_error_message(&text)) {
+                    state.return_code = 1;
+                }
                 output.sourced_command_guard(&text, error)?;
             }
             EventPayload::ClientMessage {
@@ -656,14 +731,16 @@ fn handle_protocol<W: Write>(
                 text,
                 ..
             } => {
-                state.client_failure |= is_source_error_message(&text);
+                if is_source_error_message(&text) {
+                    state.return_code = 1;
+                }
                 output.diagnostic_error(&text)?;
             }
             EventPayload::ClientMessage { kind, text, .. }
                 if kind == zz_protocol::ClientMessageKind::Warning
                     && is_source_error_message(&text) =>
             {
-                state.client_failure = true;
+                state.return_code = 1;
                 output.diagnostic_error(&text)?;
             }
             EventPayload::ClientMessage { kind, text, .. }
@@ -881,8 +958,13 @@ fn response_aborts_line(response: &CommandResponse) -> bool {
     matches!(response, CommandResponse::Error { .. })
 }
 
-fn response_marks_client_failure(response: &CommandResponse) -> bool {
-    matches!(response, CommandResponse::Error { error, .. } if !error.is_command_parse())
+fn response_sets_return_code(canonical_name: Option<&str>, response: &CommandResponse) -> bool {
+    match response {
+        CommandResponse::Error { error, .. } => !error.is_command_parse(),
+        CommandResponse::Success { exit_code, .. } => {
+            canonical_name == Some("source-file") && *exit_code != 0
+        }
+    }
 }
 
 fn response_request_id(response: &CommandResponse) -> u64 {
@@ -893,12 +975,76 @@ fn response_request_id(response: &CommandResponse) -> u64 {
     }
 }
 
-fn control_exit_code(command_exit_code: u8, state: &ControlState) -> u8 {
-    if command_exit_code == 0 && state.client_failure {
-        1
+fn completed_exit_code(command_exit_code: u8, state: &ControlState) -> u8 {
+    if command_exit_code == 0 {
+        state.return_code
     } else {
         command_exit_code
     }
+}
+
+fn capture_pending_return(
+    stdin: StdinEvent,
+    return_code: u8,
+    pending_return: &mut Option<PendingReturn>,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) {
+    match PendingReturn::from_stdin(stdin, return_code) {
+        Ok(return_event) => {
+            if pending_return.is_none() {
+                *pending_return = Some(return_event);
+            }
+        }
+        Err(stdin) => pending_stdin.push_back(stdin),
+    }
+}
+
+fn settle_deferred_return(
+    caller_detached: bool,
+    deferred_return: &mut Option<PendingReturn>,
+    state: &mut ControlState,
+) {
+    if caller_detached {
+        deferred_return.take();
+    } else if state.pending_return.is_none() {
+        state.pending_return = deferred_return.take();
+    }
+}
+
+fn finish_control_return<W: Write>(
+    client: &InteractiveClient,
+    pending_return: PendingReturn,
+    output: &mut ControlWriter<W>,
+    state: &mut ControlState,
+    events: &mpsc::SyncSender<MainEvent>,
+    stdin_started: &mut bool,
+    receiver: &mpsc::Receiver<MainEvent>,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) -> io::Result<u8> {
+    let code = pending_return.code();
+    let (input_closed, input_error) = match pending_return {
+        PendingReturn::Blank { .. } => (false, None),
+        PendingReturn::Eof { .. } => (true, None),
+        PendingReturn::InputError { message } => (true, Some(message)),
+    };
+    if let Some(error) = input_error.as_deref() {
+        eprintln!("zz: {error}");
+    }
+    let _ = client.detach();
+    if input_error.is_none() {
+        drain_before_exit(receiver, state, output)?;
+    }
+    finish_exit(
+        output,
+        None,
+        state.wait_exit,
+        input_closed,
+        events,
+        stdin_started,
+        receiver,
+        pending_stdin,
+    )?;
+    Ok(code)
 }
 
 fn drain_before_exit<W: Write>(
@@ -1029,7 +1175,7 @@ fn wait_for_exit_input(
 
 fn parse_line(line: &str) -> ParsedLine {
     if line.is_empty() {
-        return ParsedLine::Detach;
+        return ParsedLine::Return;
     }
     let parsed = zz_mux::MuxEngine::parse_config_without_variable_expansion("<control>", line);
     if let Some(diagnostic) = parsed.diagnostics.first() {
@@ -1303,12 +1449,12 @@ struct CommandResult {
     exit_code: u8,
     exit: ExitSignal,
     abort_line: bool,
-    marks_client_failure: bool,
 }
 
 struct PreparedUnit {
     commands: Vec<PreparedCommand>,
     exit: ExitSignal,
+    pending_return: Option<PendingReturn>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1346,9 +1492,33 @@ enum StdinEvent {
     Error(String),
 }
 
+enum PendingReturn {
+    Blank { code: u8 },
+    Eof { code: u8 },
+    InputError { message: String },
+}
+
+impl PendingReturn {
+    fn from_stdin(stdin: StdinEvent, return_code: u8) -> Result<Self, StdinEvent> {
+        match stdin {
+            StdinEvent::Line(line) if line.is_empty() => Ok(Self::Blank { code: return_code }),
+            StdinEvent::Eof => Ok(Self::Eof { code: return_code }),
+            StdinEvent::Error(message) => Ok(Self::InputError { message }),
+            stdin @ StdinEvent::Line(_) => Err(stdin),
+        }
+    }
+
+    fn code(&self) -> u8 {
+        match self {
+            Self::Blank { code } | Self::Eof { code } => *code,
+            Self::InputError { .. } => 1,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum ParsedLine {
-    Detach,
+    Return,
     Ignore,
     Commands(Vec<CommandInvocation>),
     Error(String),
@@ -1551,7 +1721,7 @@ mod tests {
     }
 
     #[test]
-    fn standalone_diagnostics_only_make_source_reads_sticky() {
+    fn standalone_diagnostics_only_set_source_read_return_codes() {
         let source_read = "stream did not contain valid UTF-8: /tmp/invalid-source.conf";
         for kind in [
             zz_protocol::ClientMessageKind::Error,
@@ -1572,8 +1742,8 @@ mod tests {
                 &mut source_writer,
             )
             .unwrap();
-            assert!(source_state.client_failure);
-            assert_eq!(control_exit_code(0, &source_state), 1);
+            assert_eq!(source_state.return_code, 1);
+            assert_eq!(completed_exit_code(0, &source_state), 1);
             let source_lines = std::str::from_utf8(&source_writer.output)
                 .unwrap()
                 .lines()
@@ -1597,8 +1767,8 @@ mod tests {
             &mut unrelated_writer,
         )
         .unwrap();
-        assert!(!unrelated_state.client_failure);
-        assert_eq!(control_exit_code(0, &unrelated_state), 0);
+        assert_eq!(unrelated_state.return_code, 0);
+        assert_eq!(completed_exit_code(0, &unrelated_state), 0);
         assert!(
             std::str::from_utf8(&unrelated_writer.output)
                 .unwrap()
@@ -1607,15 +1777,19 @@ mod tests {
     }
 
     #[test]
-    fn sourced_guard_stickiness_is_explicit_and_parse_errors_are_nonsticky() {
-        for (client_failure, expected) in [(false, 0), (true, 1)] {
+    fn sourced_guard_runtime_identity_sets_the_return_code() {
+        for (client_failure, output, expected) in [
+            (false, "diagnostic", 0),
+            (false, "No such file or directory: missing-source.conf", 1),
+            (true, "diagnostic", 1),
+        ] {
             let mut writer = ControlWriter::new(Vec::new(), false);
             let mut state = ControlState::default();
             handle_protocol(
                 ProtocolMessage::Event(zz_protocol::Event {
                     sequence: 1,
                     payload: EventPayload::SourcedCommandGuard {
-                        output: "diagnostic".to_owned(),
+                        output: output.to_owned(),
                         error: true,
                         client_failure,
                     },
@@ -1624,12 +1798,12 @@ mod tests {
                 &mut writer,
             )
             .unwrap();
-            assert_eq!(control_exit_code(0, &state), expected);
+            assert_eq!(state.return_code, expected);
             let lines = std::str::from_utf8(&writer.output)
                 .unwrap()
                 .lines()
                 .collect::<Vec<_>>();
-            assert_eq!(lines[1], "diagnostic");
+            assert_eq!(lines[1], output);
             assert_eq!(
                 lines[0].strip_prefix("%begin "),
                 lines[2].strip_prefix("%error ")
@@ -1691,19 +1865,70 @@ mod tests {
             output: String::new(),
         };
         assert!(response_aborts_line(&parse));
-        assert!(!response_marks_client_failure(&parse));
-        assert!(response_marks_client_failure(&CommandResponse::Error {
-            request_id: 4,
-            error: ServerError::SessionNotFound("missing".to_owned()),
-            output: String::new(),
-        }));
-        assert!(!response_marks_client_failure(&CommandResponse::Success {
+        assert!(!response_sets_return_code(Some("list-sessions"), &parse));
+        assert!(response_sets_return_code(
+            Some("kill-session"),
+            &CommandResponse::Error {
+                request_id: 4,
+                error: ServerError::SessionNotFound("missing".to_owned()),
+                output: String::new(),
+            }
+        ));
+        let nonzero = CommandResponse::Success {
             request_id: 5,
             output: String::new(),
             exit_code: 3,
             stderr: String::new(),
-        }));
-        assert_eq!(control_exit_code(3, &ControlState::default()), 3);
+        };
+        assert!(!response_sets_return_code(Some("run-shell"), &nonzero));
+        assert!(response_sets_return_code(Some("source-file"), &nonzero));
+        assert_eq!(completed_exit_code(3, &ControlState::default()), 3);
+    }
+
+    #[test]
+    fn pending_return_keeps_its_first_observed_code_and_precedes_queued_input() {
+        let mut pending_return = None;
+        let mut pending_stdin = VecDeque::new();
+        capture_pending_return(StdinEvent::Eof, 0, &mut pending_return, &mut pending_stdin);
+        capture_pending_return(
+            StdinEvent::Line("detach-client".to_owned()),
+            1,
+            &mut pending_return,
+            &mut pending_stdin,
+        );
+        capture_pending_return(
+            StdinEvent::Line(String::new()),
+            1,
+            &mut pending_return,
+            &mut pending_stdin,
+        );
+
+        assert_eq!(pending_return.as_ref().map(PendingReturn::code), Some(0));
+        assert!(matches!(
+            pending_stdin.pop_front(),
+            Some(StdinEvent::Line(line)) if line == "detach-client"
+        ));
+        assert!(pending_stdin.is_empty());
+    }
+
+    #[test]
+    fn authoritative_caller_detach_discards_return_observed_while_it_waits() {
+        let mut state = ControlState {
+            return_code: 1,
+            ..ControlState::default()
+        };
+        let mut deferred_return = Some(PendingReturn::Eof { code: 1 });
+        settle_deferred_return(true, &mut deferred_return, &mut state);
+        assert!(deferred_return.is_none());
+        assert!(state.pending_return.is_none());
+
+        deferred_return = Some(PendingReturn::Eof { code: 1 });
+        settle_deferred_return(false, &mut deferred_return, &mut state);
+        assert!(deferred_return.is_none());
+        assert_eq!(
+            state.pending_return.as_ref().map(PendingReturn::code),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1844,8 +2069,8 @@ mod tests {
             )
             .unwrap();
             assert_eq!(writer.output, format!("%config-error {text}\n").as_bytes());
-            assert!(!state.client_failure);
-            assert_eq!(control_exit_code(0, &state), 0);
+            assert_eq!(state.return_code, 0);
+            assert_eq!(completed_exit_code(0, &state), 0);
         }
     }
 
@@ -1877,8 +2102,8 @@ mod tests {
     }
 
     #[test]
-    fn parser_distinguishes_detach_ignores_chains_and_errors() {
-        assert_eq!(parse_line(""), ParsedLine::Detach);
+    fn parser_distinguishes_return_ignores_chains_and_errors() {
+        assert_eq!(parse_line(""), ParsedLine::Return);
         assert_eq!(parse_line("   "), ParsedLine::Ignore);
         assert_eq!(parse_line(" # ignored"), ParsedLine::Ignore);
         let ParsedLine::Commands(commands) = parse_line("ls ; list-panes") else {

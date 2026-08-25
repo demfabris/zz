@@ -94,15 +94,20 @@ guards, and the process exit code. Protocol v76 supplies one `SourcedCommandGuar
 command that survives command-name resolution. The writer emits those guards after the direct outer
 frame. Existing daemon preflight also guarantees root missing-path guard, then middle missing-path
 guard, then leaf output guard in a three-level replay, each exactly once. The focused nested queue
-regression and strict six-step differential closed that ordering with no production change.
+regression and then-six-step differential closed that ordering with no production change.
 
-One client-side status boundary remains. A matched source replay can complete with a nonzero
-`CommandResponse::Success` while its source-command guards correctly leave `client_failure` false.
-The long-lived Control loop does not retain that completed result across every stdin ordering. Pinned
-behavior is exit 1 for failed replay followed by EOF, exit 0 for explicit detach read after replay
-completion, and exit 1 when detach plus EOF were already queued while replay waited.
-`control-mode.source-file-exit-status` owns those three cases. It is not a request to make all source
-diagnostics sticky.
+`ControlState::return_code` now follows the pin's long-lived retval contract. Direct runtime errors,
+sourced runtime errors, nonruntime source failures returned through `source-file`, and typed source-read
+failures set it to 1. Generic nonzero successes and flags-1 parse or preparation failures do not set
+or change it, so a fresh client stays at 0 while a prior sticky failure stays at 1. A blank line or EOF
+captures the current value when that Return enters the queue. A Return captured while a preceding
+non-detach command waits keeps that snapshot and precedes later queued stdin, including detach. A
+Return observed while self-detach itself waits is discarded when the caller's `Detached` event
+arrives. An actual self-targeted `Detached` event exits 0 after the command response closes;
+`detach-client -a`, a target naming another client, an excluded
+or missing session, and aliases for those forms keep the caller alive and preserve the queued Return.
+This uses the existing response and detach messages. The strict eight-step `source-file-control`
+differential is clean, while the checked-in canonical row still records three steps.
 
 # Application configuration (`config/mod.rs`)
 

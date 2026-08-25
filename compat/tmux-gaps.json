@@ -760,36 +760,6 @@
       "reason": "Config diagnostics remain generic Warning events that Control classifies by English text. Source diagnostics use the existing Error kind and closed separately."
     },
     {
-      "id": "control-mode.source-file-exit-status",
-      "title": "Match source-file Control exit status at detach and EOF",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "client",
-      "items": [
-        "semantic:control-mode-source-file-completed-eof-status",
-        "semantic:control-mode-source-file-explicit-detach-status",
-        "semantic:control-mode-source-file-queued-detach-eof-status"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz/src/control_mode.rs",
-        "file:crates/zz/tests/cli_binary.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "A matched source replay that completes with failure and is followed by EOF makes the Control process exit 1.",
-        "An explicit detach-client read after that failed replay has completed makes the Control process exit 0.",
-        "A detach-client plus EOF already queued while that failed replay is waiting makes the Control process exit 1."
-      ],
-      "depends_on": [],
-      "reason": "The daemon already returns a completed nonzero CommandResponse::Success for a matched source replay that failed. The Control front end renders the response but does not retain that nonzero result in its long-lived EOF state, while source-command diagnostics intentionally leave SourcedCommandGuard.client_failure false. Completed replay followed by EOF and detach plus EOF queued during replay therefore return 0 instead of the pin's 1; an explicit detach observed only after replay completes already returns the pin's 0. This is source-file result and EOF ordering, not globally sticky diagnostics."
-    },
-    {
       "id": "copy-mode.action-fidelity",
       "title": "Complete the copy-mode action vocabulary",
       "decision": "adopt",
@@ -3146,7 +3116,7 @@
         "scenario:compat/scenarios/smoke/source-file-control.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "Config replay now keeps source diagnostics and command runtime failures in one ordered report stream. Typed target failures and semantic errors from a syntactically valid set-option or set-window-option command use the pin's bare message instead of a file-prefixed parser diagnostic. Command clients receive stderr and exit 1. Protocol v76 Control clients receive each failed replay command inside its own flags-1 error guard and retain exit 1 through a later clean detach. Attached clients receive the capitalized warning form. A containing source-file propagates the same message and exit status while inner and outer later lines still run. Unknown command names and lexer or malformed command diagnostics retain the existing file-prefixed `%config-error` path; generic Warning identity remains open under control-mode.diagnostic-typing. Clientless startup still retains no invoking error channel and remains under config.startup-diagnostic-delivery. Successful replay output stays open under config.replayed-command-output. At this close, the focused source-file-diagnostics and source-file-control scenarios passed 11 and 5 steps with no topology, geometry, format, output, or warning differences and no skips. Later default-order and nested-queue proofs grew the current focused rows to 12 and 6; none of those partial runs makes a canonical-suite claim."
+      "resolution": "Config replay now keeps source diagnostics and command runtime failures in one ordered report stream. Typed target failures and semantic errors from a syntactically valid set-option or set-window-option command use the pin's bare message instead of a file-prefixed parser diagnostic. Command clients receive stderr and exit 1. Protocol v76 Control clients receive each failed replay command inside its own flags-1 error guard and set retval 1 for a later blank line, EOF, or nonself detach. The later control-mode.source-file-exit-status closure proves that an actual self-detach exits 0 and that a pending Return captured during a preceding non-detach command keeps its arrival-time snapshot ahead of later queued stdin. A Return observed while self-detach itself waits is discarded when the caller's Detached event arrives. Attached clients receive the capitalized warning form. A containing source-file propagates the same message and exit status while inner and outer later lines still run. Unknown command names and lexer or malformed command diagnostics retain the existing file-prefixed `%config-error` path; generic Warning identity remains open under control-mode.diagnostic-typing. Clientless startup still retains no invoking error channel and remains under config.startup-diagnostic-delivery. Successful replay output stays open under config.replayed-command-output. At this close, the focused source-file-diagnostics and source-file-control scenarios passed 11 and 5 steps with no topology, geometry, format, output, or warning differences and no skips. Later default-order and nested-queue proofs grew the focused rows to 12 and 6; the return-status closure grew source-file-control to eight. None of those partial runs makes a canonical-suite claim."
     },
     {
       "id": "config.same-line-error-group",
@@ -3172,6 +3142,22 @@
       "resolution": "The daemon marks grouped source-read diagnostics sent to Control as ClientMessageKind::Error. The Control client routes those Error events to standalone %error frames without inspecting text, so invalid UTF-8, numeric OS errors, paths containing colon-space, and localized or platform-specific read errors cannot fall through or change classification with sibling order. Protocol v76 sourced-command guards separately carry the parsed source command's own no-match, glob, and depth diagnostics. Config summaries and lexer-owned diagnostics remain generic Warning events behind the prose classifier tracked under control-mode.diagnostic-typing. The known-family Warning fallback remains for legacy producers, while the exact protocol handshake rejects v75 and v76 client-daemon skew before either event path can mix."
     },
     {
+      "id": "control-mode.source-file-exit-status",
+      "title": "Match Control return status and detach precedence",
+      "closed_on": "2026-08-25",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/control_mode.rs",
+        "file:crates/zz/tests/cli_binary.rs",
+        "file:compat/scenarios/smoke/fixtures/source-file-control.sh",
+        "scenario:compat/scenarios/smoke/source-file-control.txt",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "The long-lived Control front end now matches the pin's return-status and detach precedence across all eight tracked cases. A direct runtime CommandResponse::Error sets retval 1 unless it is a parse or preparation error. Sourced runtime failures, nonruntime source-file failures returned as nonzero Success, and typed source-read failures also set retval 1 without making every %error or generic Warning sticky. EOF and a blank input line return the current retval snapshot. A generic nonzero Success such as run-shell exit 3 and flags-1 parse or preparation failures do not set or change retval: a fresh Control client therefore remains at 0, while a prior sticky failure stays at 1. Explicit self-detach after a completed failure exits 0. A self-detach queued while another command is open also exits 0 when stdin remains open. A self-detach plus EOF queued while a preceding non-detach command is waiting returns the pending EOF snapshot of 1 before the later queued detach runs. More generally, a Return captured while a preceding non-detach command waits keeps the retval observed at arrival and precedes later queued stdin commands, including detach. A Return observed while a self-detach command itself waits is discarded when the caller's Detached event arrives, and the self-detach exits 0. The front end treats only an actual caller-targeted Detached event as self-detach. detach-client -a, -t OTHER, -s that excludes the caller, a no-victim selector, and canonical or user aliases targeting other clients keep the Control loop alive and preserve any pending Return, while bare, built-in-alias, user-alias, explicit-self, and caller-including -s forms exit 0. The command response closes with %end before %exit even when the Detached event arrives first. This uses existing CommandResponse and Detached messages with no wire change. Twenty-seven Control units and 34 serialized Control CLI tests pass, including two race probes run five times each. Debug build, strict clippy, and formatting pass. The strict eight-step source-file-control differential has zero differences and no skips, and a manual detach-client -a probe matches the pin. The focused run does not refresh or prove the canonical suite, whose checked-in row still records three steps. Startup diagnostics, generic config diagnostic typing, and successful replay output on Command or attached clients plus -v interleaving remain under their existing open groups."
+    },
+    {
       "id": "control-mode.sourced-command-frames",
       "title": "Preserve frames for sourced Control commands",
       "closed_on": "2026-08-25",
@@ -3186,7 +3172,7 @@
         "resource:knowledge/tmux/conf-parser.md",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "Protocol v76 appends EventPayload::SourcedCommandGuard at tail tag 47 with output, error, and client_failure fields. Each replayed command that survives command-name resolution gets a guard in recursive file order. Unknown or ambiguous command names and malformed alias names publish a located Warning that Control renders as %config-error, without a guard. Ordinary success and quiet all-miss commands produce empty flags-1 %end guards. Successful command output stays inside that command's guard. A nested source hit plus miss carries its declared-path diagnostic inside %end, while an all-miss, flag or arity failure, runtime failure, and depth refusal end %error. Runtime failures set client_failure so a later clean detach retains exit 1; parse and source-command diagnostics can use %error without making that status sticky. A matched child read failure follows its parent guard as a typed standalone Error frame, including invalid UTF-8 and colon-space paths. Control defers guards FIFO until the direct outer command closes, allocates fresh frame numbers, and cannot leak them into the next input command. Other config command-name and lexer diagnostics remain Warning events on the existing %config-error prose-classification path, so this close does not claim typed lexer diagnostics. The daemon suite passes 593 tests, protocol tests pass 175 unit plus 14 framing tests, the Control cluster passes 31 tests, and the then-five-step source-file-control differential had zero differences and no skips. That partial scenario run did not refresh or prove the canonical suite. The later source-file.nested-control-queue closure proved cross-depth nested diagnostic order and grew the current focused row to six steps, also with zero differences and no skips. Successful replay output on Command and attached clients plus verbose interleaving remain open under config.replayed-command-output, while source-file Control process status at EOF and detach remains open under control-mode.source-file-exit-status."
+      "resolution": "Protocol v76 appends EventPayload::SourcedCommandGuard at tail tag 47 with output, error, and client_failure fields. Each replayed command that survives command-name resolution gets a guard in recursive file order. Unknown or ambiguous command names and malformed alias names publish a located Warning that Control renders as %config-error, without a guard. Ordinary success and quiet all-miss commands produce empty flags-1 %end guards. Successful command output stays inside that command's guard. A nested source hit plus miss carries its declared-path diagnostic inside %end, while an all-miss, flag or arity failure, runtime failure, and depth refusal end %error. Runtime failures set client_failure, which sets Control retval 1 independently of the frame terminator; parse and source-command diagnostics can use %error without doing so. A matched child read failure follows its parent guard as a typed standalone Error frame, including invalid UTF-8 and colon-space paths. Control defers guards FIFO until the direct outer command closes, allocates fresh frame numbers, and cannot leak them into the next input command. Other config command-name and lexer diagnostics remain Warning events on the existing %config-error prose-classification path, so this close does not claim typed lexer diagnostics. The daemon suite passes 593 tests, protocol tests pass 175 unit plus 14 framing tests, the Control cluster passes 31 tests, and the then-five-step source-file-control differential had zero differences and no skips. That partial scenario run did not refresh or prove the canonical suite. The later source-file.nested-control-queue closure proved cross-depth nested diagnostic order and grew the focused row to six steps. The later control-mode.source-file-exit-status closure completed Control return-status and detach precedence and grew the current focused row to eight steps, also with zero differences and no skips. Successful replay output on Command and attached clients plus verbose interleaving remain open under config.replayed-command-output."
     },
     {
       "id": "copy-mode.fixed-row-placement",
@@ -3640,7 +3626,7 @@
         "resource:knowledge/tmux/conf-parser.md",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "No production change was required. The existing source loader preflights all declared paths for one source-file command before recursing. In a three-level Control replay, the root command therefore publishes its missing-path guard first, the middle command publishes its missing-path guard second, and the leaf publishes its output guard last, each exactly once. The focused nested_source_control_guards_precede_deeper_replay regression passes, the daemon suite passes 601 tests, and the strict six-step source-file-control differential has zero differences and no skips. This close covers only cross-depth diagnostic and output guard ordering. Control process exit status at EOF and detach remains open under control-mode.source-file-exit-status, and this focused run makes no canonical-suite claim."
+      "resolution": "No production change was required. The existing source loader preflights all declared paths for one source-file command before recursing. In a three-level Control replay, the root command therefore publishes its missing-path guard first, the middle command publishes its missing-path guard second, and the leaf publishes its output guard last, each exactly once. The focused nested_source_control_guards_precede_deeper_replay regression passes, the daemon suite passes 601 tests, and the strict six-step source-file-control differential has zero differences and no skips. This close covers only cross-depth diagnostic and output guard ordering. The later control-mode.source-file-exit-status closure completed Control return-status and detach precedence and grew the current focused row to eight clean steps. Neither focused run makes a canonical-suite claim."
     },
     {
       "id": "source-file.nested-diagnostic-semantics",

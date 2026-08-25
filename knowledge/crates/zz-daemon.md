@@ -494,20 +494,25 @@ command that survives command-name resolution before it recurses to later comman
 ambiguous command names and malformed alias names publish a located Warning that Control renders as
 `%config-error`, without a guard. Ordinary success and quiet misses carry an
 empty success guard. A partial source match carries its misses but still ends `%end`; an all-miss,
-flag or arity failure, runtime failure, or depth refusal ends `%error`. Runtime failures set the separate
-`client_failure` bit so a later clean Control detach cannot reset exit 1. Successful command output
-is captured for that Control guard, but Command stdout, the attached-client view, and ordering
-against the collected `source-file -v` batch remain open under `config.replayed-command-output`.
+flag or arity failure, runtime failure, or depth refusal ends `%error`. Runtime failures set the
+separate `client_failure` bit, which sets Control retval 1 independently of the frame terminator.
+Successful command output is captured for that Control guard, but Command stdout, the attached-client
+view, and ordering against the collected `source-file -v` batch remain open under
+`config.replayed-command-output`.
 Matched child read failures follow the parent guard as typed Error events. Generic config and lexer
 warnings still use the Control client's prose classifier under `control-mode.diagnostic-typing`, and
 the existing loader preflights all paths for one source command before recursion. A focused regression,
-the 601-test daemon suite, and the strict six-step Control differential prove that a three-level replay
+the 601-test daemon suite, and the then-six-step Control differential prove that a three-level replay
 publishes the root missing-path guard, the middle missing-path guard, and the leaf output guard in that
-order, each once. No production change was required for that closure. A matched outer source with a
-failed replay already returns a completed nonzero `CommandResponse::Success`, but the Control front
-end does not retain that result through every EOF and detach ordering. The client-owned
-`control-mode.source-file-exit-status` group tracks that process-state gap without making source
-diagnostics globally sticky.
+order, each once. No production change was required for that closure. The Control front end now
+combines direct runtime errors, source guards, typed source-read errors, and a nonzero outer
+`source-file` success into the pin's retval. A Return captured while a preceding non-detach command
+waits keeps its arrival-time snapshot ahead of later queued stdin. The daemon sends `Detached` only to
+actual victims, so nonself and no-victim detach commands leave the caller running. A Return observed
+while self-detach waits is discarded on that event, and self-detach exits 0 after its response frame
+closes. No new protocol field or version was required.
+The strict current `source-file-control` differential passes eight steps. Startup delivery, successful
+Command and attached replay output, `-v` interleaving, and generic config Warning typing remain open.
 
 # Examples
 

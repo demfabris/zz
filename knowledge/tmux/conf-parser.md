@@ -84,15 +84,18 @@ publish a located Warning that Control renders as `%config-error`, without a gua
 and a quiet all-miss produce an empty flags-1 `%end` guard. A nested hit plus miss carries
 its declared-path diagnostic inside `%end`; an all-miss, flag or arity failure, runtime failure, or
 depth refusal ends `%error`. `client_failure` is separate from the terminator, so runtime failures
-retain exit 1 through a later clean detach while parse and source-command diagnostics can remain
-nonsticky. The Control writer defers guards FIFO until the direct outer frame closes. The existing
+set Control retval 1 while parse and source-command diagnostics can remain nonsticky. The Control
+writer defers guards FIFO until the direct outer frame closes. The existing
 loader preflights every declared path for one source command before recursion. A focused regression
-and the strict six-step Control differential prove the resulting root-miss guard, middle-miss guard,
+and the then-six-step Control differential prove the resulting root-miss guard, middle-miss guard,
 then leaf-output guard order, each exactly once; no production change was required. This closes
-`source-file.nested-control-queue` for ordering only. A matched source replay can still return a
-completed nonzero `CommandResponse::Success` that the Control front end does not retain through every
-EOF and detach ordering. `control-mode.source-file-exit-status` owns that client process-state gap;
-source-command diagnostics do not become globally sticky.
+`source-file.nested-control-queue` for ordering only. The later
+`control-mode.source-file-exit-status` closure retains direct and sourced runtime failures plus
+nonruntime source failures as retval 1. A Return captured while a preceding non-detach command waits
+keeps its arrival-time snapshot ahead of later queued stdin. A Return observed while self-detach waits
+is discarded when the caller's `Detached` event arrives. Nonself and no-victim detach commands keep
+the Control loop alive. The strict current differential passes eight steps without making generic
+source or config diagnostics sticky.
 
 Matched child read failures follow their parent source guard as typed standalone Error events.
 Invalid UTF-8, numeric OS errors, and colon-space paths use that path without text classification.

@@ -3025,6 +3025,158 @@ mod daemon_autostart {
             );
         }
 
+        fn wait_for_control_marker(path: &Path, child: &mut Child, label: &str) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !path.exists() {
+                if let Some(status) = child.try_wait().expect("poll control marker process") {
+                    panic!("control process exited before {label}: {status}");
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("kill stalled control marker process");
+                    panic!("control process did not reach {label}");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn wait_for_control_output_marker(
+            path: &Path,
+            marker: &str,
+            child: &mut Child,
+            label: &str,
+        ) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let output = std::fs::read(path).expect("read live control output");
+                let mut marker_seen = false;
+                let completed = String::from_utf8_lossy(&output).lines().any(|line| {
+                    if line == marker {
+                        marker_seen = true;
+                        false
+                    } else {
+                        marker_seen && line.starts_with("%end ")
+                    }
+                });
+                if completed {
+                    return;
+                }
+                if let Some(status) = child.try_wait().expect("poll control block process") {
+                    panic!("control process exited before {label}: {status}");
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("kill stalled control block process");
+                    panic!("control process did not reach {label}");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn spawn_control_to_file(
+            fixture: &Fixture,
+            arguments: &[&str],
+            output_path: &Path,
+        ) -> (Child, ChildStdin) {
+            let output_file = File::create(output_path).expect("create live control output");
+            let mut child = fixture
+                .command()
+                .args(arguments)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::from(output_file))
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn control with live output");
+            let stdin = child.stdin.take().expect("piped control stdin");
+            (child, stdin)
+        }
+
+        fn wait_for_control_clients(
+            fixture: &Fixture,
+            expected: usize,
+            label: &str,
+        ) -> Vec<String> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let listed =
+                    fixture.run(&["list-clients", "-F", "#{client_name}\t#{client_flags}"]);
+                let names = String::from_utf8_lossy(&listed.stdout)
+                    .lines()
+                    .filter_map(|line| {
+                        let (name, flags) = line.split_once('\t')?;
+                        flags.contains("control-mode").then(|| name.to_owned())
+                    })
+                    .collect::<Vec<_>>();
+                if listed.status.success() && names.len() == expected {
+                    return names;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "control clients did not settle for {label}: status={} stdout={} stderr={}",
+                    listed.status,
+                    String::from_utf8_lossy(&listed.stdout),
+                    String::from_utf8_lossy(&listed.stderr)
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn prime_control_return_code(
+            child: &mut Child,
+            stdin: &mut ChildStdin,
+            output_path: &Path,
+            marker: &str,
+            missing: &str,
+        ) {
+            writeln!(stdin, "kill-session -t {missing}").expect("write retval failure");
+            writeln!(stdin, "display-message -p {marker}").expect("write retval marker");
+            stdin.flush().expect("flush retval commands");
+            wait_for_control_output_marker(output_path, marker, child, marker);
+        }
+
+        fn collect_control_process(
+            mut child: Child,
+            stdin: Option<ChildStdin>,
+            label: &str,
+        ) -> Output {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let status = loop {
+                if let Some(status) = child.try_wait().expect("poll control process") {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("kill stalled control process");
+                    panic!("control process did not exit for {label}");
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            drop(stdin);
+            let output = child.wait_with_output().expect("collect control output");
+            assert_eq!(output.status, status, "{label}");
+            output
+        }
+
+        fn run_control_until_return(
+            fixture: &Fixture,
+            arguments: &[&str],
+            input: &str,
+            marker: &Path,
+            label: &str,
+        ) -> Output {
+            let (mut child, mut stdin) = fixture.spawn_with_open_stdin(arguments);
+            stdin
+                .write_all(input.as_bytes())
+                .expect("write control commands");
+            if !input.ends_with('\n') {
+                writeln!(stdin).expect("terminate control command line");
+            }
+            writeln!(stdin, "run-shell 'touch \"{}\"'", marker.display())
+                .expect("write control completion marker");
+            stdin.flush().expect("flush control commands");
+            wait_for_control_marker(marker, &mut child, label);
+            writeln!(stdin).expect("write control return");
+            stdin.flush().expect("flush control return");
+            collect_control_process(child, Some(stdin), label)
+        }
+
         #[test]
         fn control_read_only_connect_failure_has_no_framing_or_exit() {
             let fixture = Fixture::new();
@@ -3155,18 +3307,23 @@ mod daemon_autostart {
                     .status
                     .success()
             );
-            let output = fixture.run_with_stdin(
+            let marker = fixture._directory.path().join("alias-chain.complete");
+            let output = run_control_until_return(
+                &fixture,
                 &["-C", "attach-session", "-t", "alias-chain"],
-                b"set-option -s command-alias[40] 'live=display-message -p new' ; live\nlive\n\n",
+                "set-option -s command-alias[40] 'live=display-message -p new' ; live\nlive\n",
+                &marker,
+                "alias chain completion",
             );
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 4);
+            assert_eq!(stream.blocks.len(), 5);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(&stream.blocks[2], 3, 1, &["old"], false);
             assert_block(&stream.blocks[3], 4, 1, &["new"], false);
+            assert_block(&stream.blocks[4], 5, 1, &[], false);
             assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
         }
 
@@ -3233,14 +3390,25 @@ mod daemon_autostart {
             if !local_socket_bind_available(&fixture.socket) {
                 return;
             }
-            let output = fixture.run_with_stdin(
-                &["-C", "new-session", "-s", "chain"],
-                b"display-message -p one ; display-message -p two\nkill-session -t nosuch ; display-message -p skipped\ndisplay-message -p fresh\n\n",
-            );
-            assert_eq!(output.status.code(), Some(0));
+            let complete = fixture._directory.path().join("chain.complete");
+            let (mut child, mut stdin) =
+                fixture.spawn_with_open_stdin(&["-C", "new-session", "-s", "chain"]);
+            writeln!(stdin, "display-message -p one ; display-message -p two")
+                .expect("write successful chain");
+            writeln!(stdin, "kill-session -t nosuch ; display-message -p skipped")
+                .expect("write failing chain");
+            writeln!(stdin, "display-message -p fresh").expect("write fresh command");
+            writeln!(stdin, "run-shell 'touch \"{}\"'", complete.display())
+                .expect("write chain completion marker");
+            stdin.flush().expect("flush chain commands");
+            wait_for_control_marker(&complete, &mut child, "chain completion");
+            writeln!(stdin).expect("write chain return");
+            stdin.flush().expect("flush chain return");
+            let output = collect_control_process(child, Some(stdin), "chain return");
+            assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 5);
+            assert_eq!(stream.blocks.len(), 6);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &["one"], false);
             assert_block(&stream.blocks[2], 3, 1, &["two"], false);
@@ -3252,26 +3420,13 @@ mod daemon_autostart {
                 true,
             );
             assert_block(&stream.blocks[4], 5, 1, &["fresh"], false);
+            assert_block(&stream.blocks[5], 6, 1, &[], false);
             assert_attached_startup(&stream.outside, "chain");
         }
 
         #[test]
-        fn control_detach_discards_direct_errors_but_eof_preserves_them() {
+        fn control_parse_and_generic_nonzero_results_do_not_set_retval() {
             let cases: &[(&str, &[u8], i32, &[&str], bool)] = &[
-                (
-                    "source-return-status",
-                    b"source-file top-level-return-missing.conf\n\n",
-                    0,
-                    &["No such file or directory: top-level-return-missing.conf"],
-                    true,
-                ),
-                (
-                    "kill-return-status",
-                    b"kill-session -t missing-return\n\n",
-                    0,
-                    &["can't find session: missing-return"],
-                    true,
-                ),
                 (
                     "run-return-status",
                     b"run-shell 'exit 3'\n\n",
@@ -3298,13 +3453,6 @@ mod daemon_autostart {
                     b"rename-session\n",
                     0,
                     &["rename-session requires exactly one new name"],
-                    true,
-                ),
-                (
-                    "semantic-eof-status",
-                    b"set-environment -g \"\" value\n",
-                    1,
-                    &["empty variable name"],
                     true,
                 ),
             ];
@@ -3389,14 +3537,18 @@ mod daemon_autostart {
             if !local_socket_bind_available(&fixture.socket) {
                 return;
             }
-            let output = fixture.run_with_stdin(
+            let marker = fixture._directory.path().join("preflight.complete");
+            let output = run_control_until_return(
+                &fixture,
                 &["-C", "new-session", "-s", "preflight-error"],
-                b"set-option -g @should-not-run yes ; bogus-command\nshow-options -gqv @should-not-run\n\n",
+                "set-option -g @should-not-run yes ; bogus-command\nshow-options -gqv @should-not-run\n",
+                &marker,
+                "preflight completion",
             );
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 3);
+            assert_eq!(stream.blocks.len(), 4);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(
                 &stream.blocks[1],
@@ -3406,6 +3558,7 @@ mod daemon_autostart {
                 true,
             );
             assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_block(&stream.blocks[3], 4, 1, &[], false);
             assert_attached_startup(&stream.outside, "preflight-error");
         }
 
@@ -3533,20 +3686,25 @@ mod daemon_autostart {
                 "quiet.conf",
                 "set-option -g @guard-success yes\nsource-file -q quiet-missing.conf\n",
             );
-            let quiet_input = format!("source-file '{quiet}'\ndisplay-message -p quiet-fresh\n\n");
-            let quiet_output = fixture.run_with_stdin(
+            let quiet_input = format!("source-file '{quiet}'\ndisplay-message -p quiet-fresh\n");
+            let quiet_marker = directory.join("quiet.complete");
+            let quiet_output = run_control_until_return(
+                &fixture,
                 &["-C", "new-session", "-s", "quiet-guards"],
-                quiet_input.as_bytes(),
+                &quiet_input,
+                &quiet_marker,
+                "quiet guard completion",
             );
             assert_eq!(quiet_output.status.code(), Some(0));
             assert!(quiet_output.stderr.is_empty());
             let quiet_stream = parse_stream(&quiet_output.stdout, false);
-            assert_eq!(quiet_stream.blocks.len(), 5);
+            assert_eq!(quiet_stream.blocks.len(), 6);
             assert_block(&quiet_stream.blocks[0], 1, 0, &[], false);
             assert_block(&quiet_stream.blocks[1], 2, 1, &[], false);
             assert_block(&quiet_stream.blocks[2], 3, 1, &[], false);
             assert_block(&quiet_stream.blocks[3], 4, 1, &[], false);
             assert_block(&quiet_stream.blocks[4], 5, 1, &["quiet-fresh"], false);
+            assert_block(&quiet_stream.blocks[5], 6, 1, &[], false);
             assert_attached_startup(&quiet_stream.outside, "quiet-guards");
 
             let fixture = Fixture::new();
@@ -3569,15 +3727,19 @@ mod daemon_autostart {
                 ),
             );
             let partial_input =
-                format!("source-file '{entry}'\ndisplay-message -p partial-fresh\n\n");
-            let partial_output = fixture.run_with_stdin(
+                format!("source-file '{entry}'\ndisplay-message -p partial-fresh\n");
+            let partial_marker = directory.join("partial.complete");
+            let partial_output = run_control_until_return(
+                &fixture,
                 &["-C", "new-session", "-s", "partial-guards"],
-                partial_input.as_bytes(),
+                &partial_input,
+                &partial_marker,
+                "partial guard completion",
             );
-            assert_eq!(partial_output.status.code(), Some(0));
+            assert_eq!(partial_output.status.code(), Some(1));
             assert!(partial_output.stderr.is_empty());
             let partial_stream = parse_stream(&partial_output.stdout, false);
-            assert_eq!(partial_stream.blocks.len(), 6);
+            assert_eq!(partial_stream.blocks.len(), 7);
             assert_block(&partial_stream.blocks[0], 1, 0, &[], false);
             assert_block(&partial_stream.blocks[1], 2, 1, &[], false);
             assert_block(
@@ -3590,11 +3752,12 @@ mod daemon_autostart {
             assert_block(&partial_stream.blocks[3], 4, 1, &[], false);
             assert_block(&partial_stream.blocks[4], 5, 1, &["sourced-output"], false);
             assert_block(&partial_stream.blocks[5], 6, 1, &["partial-fresh"], false);
+            assert_block(&partial_stream.blocks[6], 7, 1, &[], false);
             assert_attached_startup(&partial_stream.outside, "partial-guards");
         }
 
         #[test]
-        fn control_source_read_error_follows_the_parent_guard_and_is_sticky() {
+        fn control_source_read_error_follows_the_parent_guard_and_sets_retval() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
                 return;
@@ -3612,20 +3775,25 @@ mod daemon_autostart {
                     .expect_err("reading the source directory must fail"),
                 unreadable.display()
             );
-            let input = format!("source-file '{entry}'\ndisplay-message -p after-read-error\n\n");
-            let output = fixture.run_with_stdin(
+            let input = format!("source-file '{entry}'\ndisplay-message -p after-read-error\n");
+            let marker = fixture._directory.path().join("source-read.complete");
+            let output = run_control_until_return(
+                &fixture,
                 &["-C", "new-session", "-s", "source-read-error"],
-                input.as_bytes(),
+                &input,
+                &marker,
+                "source read completion",
             );
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 5);
+            assert_eq!(stream.blocks.len(), 6);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(&stream.blocks[2], 3, 1, &[], false);
             assert_block(&stream.blocks[3], 4, 1, &[&expected], true);
             assert_block(&stream.blocks[4], 5, 1, &["after-read-error"], false);
+            assert_block(&stream.blocks[5], 6, 1, &[], false);
             assert_attached_startup(&stream.outside, "source-read-error");
         }
 
@@ -3646,19 +3814,23 @@ mod daemon_autostart {
                 .expect("write quiet nested source");
             std::fs::write(&invalid, "wibble\n").expect("write invalid source");
             let input = format!(
-                "source-file '{}' ; display-message -p same-nested\nsource-file top-missing.conf ; display-message -p same-top-missing\nsource-file '{}' ; display-message -p same-invalid\nsource-file '{}'\ndisplay-message -p fresh\n\n",
+                "source-file '{}' ; display-message -p same-nested\nsource-file top-missing.conf ; display-message -p same-top-missing\nsource-file '{}' ; display-message -p same-invalid\nsource-file '{}'\ndisplay-message -p fresh\n",
                 loud.display(),
                 invalid.display(),
                 quiet.display()
             );
-            let output = fixture.run_with_stdin(
+            let marker = directory.join("source-diagnostics.complete");
+            let output = run_control_until_return(
+                &fixture,
                 &["-C", "new-session", "-s", "nested-source-error"],
-                input.as_bytes(),
+                &input,
+                &marker,
+                "source diagnostic completion",
             );
-            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 10);
+            assert_eq!(stream.blocks.len(), 11);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(
@@ -3681,6 +3853,7 @@ mod daemon_autostart {
             assert_block(&stream.blocks[7], 8, 1, &[], false);
             assert_block(&stream.blocks[8], 9, 1, &[], false);
             assert_block(&stream.blocks[9], 10, 1, &["fresh"], false);
+            assert_block(&stream.blocks[10], 11, 1, &[], false);
             let diagnostic = format!(
                 "%config-error {}:1: unknown command: wibble",
                 invalid.display()
@@ -3711,16 +3884,20 @@ mod daemon_autostart {
                  set-option -g @runtime-after yes\n",
             );
             let input = format!(
-                "source-file '{source}'\nshow-options -gqv @runtime-after\ndisplay-message -p fresh\n\n"
+                "source-file '{source}'\nshow-options -gqv @runtime-after\ndisplay-message -p fresh\n"
             );
-            let output = fixture.run_with_stdin(
+            let marker = directory.join("runtime.complete");
+            let output = run_control_until_return(
+                &fixture,
                 &["-C", "new-session", "-s", "control-replay-errors"],
-                input.as_bytes(),
+                &input,
+                &marker,
+                "runtime replay completion",
             );
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 8);
+            assert_eq!(stream.blocks.len(), 9);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(
@@ -3741,147 +3918,565 @@ mod daemon_autostart {
             assert_block(&stream.blocks[5], 6, 1, &[], false);
             assert_block(&stream.blocks[6], 7, 1, &["yes"], false);
             assert_block(&stream.blocks[7], 8, 1, &["fresh"], false);
+            assert_block(&stream.blocks[8], 9, 1, &[], false);
             assert_attached_startup(&stream.outside, "control-replay-errors");
         }
 
         #[test]
-        fn control_sourced_sticky_survives_detach_return_and_server_stop() {
+        fn control_return_and_explicit_detach_follow_the_full_retval_matrix() {
+            #[derive(Clone, Copy)]
+            enum ExitPath {
+                Eof,
+                Blank,
+                DetachCompleted,
+                DetachQueuedOpen,
+                DetachQueuedEof,
+            }
+
+            struct Row {
+                name: &'static str,
+                command: String,
+                return_code: i32,
+                payload: &'static str,
+                error: bool,
+            }
+
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
                 return;
             }
-            let directory = fixture._directory.path().join("control detach status");
-            std::fs::create_dir(&directory).expect("create control detach directory");
-            let source = write_source(
+            let directory = fixture._directory.path().join("control return matrix");
+            std::fs::create_dir(&directory).expect("create control return matrix directory");
+            let runtime_source = write_source(
                 &directory,
                 "runtime.conf",
-                "kill-session -t missing-detach\nset-option -g @detach-after yes\n",
+                "kill-session -t matrix-sourced-runtime\n",
             );
+            let source_failure = write_source(
+                &directory,
+                "source-failure.conf",
+                "source-file matrix-nested-missing.conf\n",
+            );
+            let rows = [
+                Row {
+                    name: "direct-runtime",
+                    command: "kill-session -t matrix-direct-runtime".to_owned(),
+                    return_code: 1,
+                    payload: "can't find session: matrix-direct-runtime",
+                    error: true,
+                },
+                Row {
+                    name: "sourced-runtime",
+                    command: format!("source-file '{runtime_source}'"),
+                    return_code: 1,
+                    payload: "can't find session: matrix-sourced-runtime",
+                    error: true,
+                },
+                Row {
+                    name: "sourced-command",
+                    command: format!("source-file '{source_failure}'"),
+                    return_code: 1,
+                    payload: "No such file or directory: matrix-nested-missing.conf",
+                    error: true,
+                },
+                Row {
+                    name: "generic-nonzero",
+                    command: "run-shell 'exit 3'".to_owned(),
+                    return_code: 0,
+                    payload: "'exit 3' returned 3",
+                    error: false,
+                },
+            ];
+            let exits = [
+                ("eof", ExitPath::Eof),
+                ("blank", ExitPath::Blank),
+                ("detach-completed", ExitPath::DetachCompleted),
+                ("detach-queued-open", ExitPath::DetachQueuedOpen),
+                ("detach-queued-eof", ExitPath::DetachQueuedEof),
+            ];
 
-            let (mut child, mut stdin) = fixture.spawn_with_open_stdin(&[
-                "-C",
-                "new-session",
-                "-s",
-                "explicit-detach-status",
-            ]);
-            writeln!(stdin, "source-file '{source}'").expect("write replay command");
-            writeln!(stdin, "detach-client").expect("write detach command");
-            stdin.flush().expect("flush detach commands");
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let status = loop {
-                if let Some(status) = child.try_wait().expect("poll detached control") {
-                    break status;
+            for (row_index, row) in rows.iter().enumerate() {
+                for (exit_index, (exit_name, exit_path)) in exits.iter().enumerate() {
+                    let label = format!("{}-{exit_name}", row.name);
+                    let session = format!("matrix-{row_index}-{exit_index}");
+                    let ready = directory.join(format!("{label}.ready"));
+                    let release = directory.join(format!("{label}.release"));
+                    let output_path = directory.join(format!("{label}.output"));
+                    let (mut child, mut stdin) = spawn_control_to_file(
+                        &fixture,
+                        &["-C", "new-session", "-s", &session, "exec /bin/cat"],
+                        &output_path,
+                    );
+                    writeln!(stdin, "{}", row.command).expect("write matrix command");
+
+                    match exit_path {
+                        ExitPath::Eof | ExitPath::Blank | ExitPath::DetachCompleted => {
+                            let complete = format!("MATRIX_COMPLETE_{row_index}_{exit_index}");
+                            writeln!(stdin, "display-message -p {complete}")
+                                .expect("write completion marker command");
+                            stdin.flush().expect("flush completed matrix commands");
+                            wait_for_control_output_marker(
+                                &output_path,
+                                &complete,
+                                &mut child,
+                                &label,
+                            );
+                        }
+                        ExitPath::DetachQueuedOpen | ExitPath::DetachQueuedEof => {
+                            writeln!(
+                                stdin,
+                                "run-shell 'touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.01; done'",
+                                ready.display(),
+                                release.display()
+                            )
+                            .expect("write held matrix command");
+                            stdin.flush().expect("flush held matrix commands");
+                            wait_for_control_marker(&ready, &mut child, &label);
+                        }
+                    }
+
+                    let output = match exit_path {
+                        ExitPath::Eof => {
+                            drop(stdin);
+                            collect_control_process(child, None, &label)
+                        }
+                        ExitPath::Blank => {
+                            writeln!(stdin).expect("write matrix blank return");
+                            stdin.flush().expect("flush matrix blank return");
+                            collect_control_process(child, Some(stdin), &label)
+                        }
+                        ExitPath::DetachCompleted => {
+                            writeln!(stdin, "detach-client").expect("write completed detach");
+                            stdin.flush().expect("flush completed detach");
+                            collect_control_process(child, Some(stdin), &label)
+                        }
+                        ExitPath::DetachQueuedOpen => {
+                            writeln!(stdin, "detach-client").expect("queue held-open detach");
+                            stdin.flush().expect("flush held-open detach");
+                            std::fs::write(&release, b"").expect("release held-open command");
+                            collect_control_process(child, Some(stdin), &label)
+                        }
+                        ExitPath::DetachQueuedEof => {
+                            writeln!(stdin, "detach-client").expect("queue detach before EOF");
+                            stdin.flush().expect("flush detach before EOF");
+                            drop(stdin);
+                            thread::sleep(Duration::from_millis(100));
+                            std::fs::write(&release, b"").expect("release EOF-held command");
+                            collect_control_process(child, None, &label)
+                        }
+                    };
+                    let expected_status = match exit_path {
+                        ExitPath::Eof | ExitPath::Blank | ExitPath::DetachQueuedEof => {
+                            row.return_code
+                        }
+                        ExitPath::DetachCompleted | ExitPath::DetachQueuedOpen => 0,
+                    };
+                    assert_eq!(output.status.code(), Some(expected_status), "{label}");
+                    assert!(output.stderr.is_empty(), "{label}");
+                    let stdout = std::fs::read(&output_path).expect("read matrix control output");
+                    let stream = parse_stream(&stdout, false);
+                    assert!(
+                        stream.blocks.iter().any(|block| {
+                            block.error == row.error
+                                && block.payload.iter().any(|line| line == row.payload)
+                        }),
+                        "{label}: {stream:?}"
+                    );
+                    assert_eq!(
+                        stream.outside.last().map(String::as_str),
+                        Some("%exit"),
+                        "{label}"
+                    );
                 }
-                if Instant::now() >= deadline {
-                    child.kill().expect("kill stalled detached control");
-                    panic!("explicit detach did not close held-open control input");
+            }
+        }
+
+        #[test]
+        fn control_nonself_detach_stays_attached_and_preserves_queued_return() {
+            for (label, detach, create_other, blank_return) in [
+                ("detach-others", "detach-client -a", false, true),
+                (
+                    "detach-other-session",
+                    "detach-client -s =scope-other",
+                    true,
+                    false,
+                ),
+                (
+                    "detach-missing-session",
+                    "detach-client -s =scope-missing",
+                    false,
+                    false,
+                ),
+            ] {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
                 }
-                thread::sleep(Duration::from_millis(10));
-            };
-            drop(stdin);
-            let output = child.wait_with_output().expect("collect detached control");
-            assert_eq!(output.status, status);
+                assert!(
+                    fixture
+                        .run(&["new-session", "-d", "-s", "scope-caller", "exec /bin/cat",])
+                        .status
+                        .success()
+                );
+                if create_other {
+                    assert!(
+                        fixture
+                            .run(&["new-session", "-d", "-s", "scope-other", "exec /bin/cat",])
+                            .status
+                            .success()
+                    );
+                }
+                let output_path = fixture._directory.path().join(format!("{label}.output"));
+                let (mut child, mut stdin) = spawn_control_to_file(
+                    &fixture,
+                    &["-C", "attach-session", "-t", "=scope-caller"],
+                    &output_path,
+                );
+                wait_for_control_clients(&fixture, 1, label);
+                let ready = format!("{}_READY", label.replace('-', "_").to_uppercase());
+                prime_control_return_code(
+                    &mut child,
+                    &mut stdin,
+                    &output_path,
+                    &ready,
+                    &format!("{label}-missing"),
+                );
+                let after = format!("{}_AFTER", label.replace('-', "_").to_uppercase());
+                writeln!(stdin, "{detach}").expect("write nonself detach");
+                writeln!(stdin, "display-message -p {after}")
+                    .expect("write command after nonself detach");
+                stdin.flush().expect("flush nonself detach commands");
+                wait_for_control_output_marker(&output_path, &after, &mut child, label);
+                let output = if blank_return {
+                    writeln!(stdin).expect("write nonself blank return");
+                    stdin.flush().expect("flush nonself blank return");
+                    collect_control_process(child, Some(stdin), label)
+                } else {
+                    drop(stdin);
+                    collect_control_process(child, None, label)
+                };
+                assert_eq!(output.status.code(), Some(1), "{label}");
+                assert!(output.stderr.is_empty(), "{label}");
+                let stdout = std::fs::read(&output_path).expect("read nonself detach output");
+                let stream = parse_stream(&stdout, false);
+                assert!(
+                    stream
+                        .blocks
+                        .iter()
+                        .any(|block| block.payload == [after.as_str()]),
+                    "{label}: {stream:?}"
+                );
+                assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+            }
+
+            for (label, blank_return, continue_after) in [
+                ("target-other-eof", false, false),
+                ("target-other-blank", true, false),
+                ("target-other-continue", true, true),
+            ] {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
+                }
+                assert!(
+                    fixture
+                        .run(&["new-session", "-d", "-s", "target-other", "exec /bin/cat",])
+                        .status
+                        .success()
+                );
+                let (peer, peer_stdin) =
+                    fixture.spawn_with_open_stdin(&["-C", "attach-session", "-t", "=target-other"]);
+                let peer_name = wait_for_control_clients(&fixture, 1, label)
+                    .into_iter()
+                    .next()
+                    .expect("peer control client");
+                let output_path = fixture._directory.path().join(format!("{label}.output"));
+                let (mut child, mut stdin) = spawn_control_to_file(
+                    &fixture,
+                    &["-C", "attach-session", "-t", "=target-other"],
+                    &output_path,
+                );
+                let clients = wait_for_control_clients(&fixture, 2, label);
+                assert!(clients.contains(&peer_name), "{label}: {clients:?}");
+                let ready = format!("{}_READY", label.replace('-', "_").to_uppercase());
+                prime_control_return_code(
+                    &mut child,
+                    &mut stdin,
+                    &output_path,
+                    &ready,
+                    &format!("{label}-missing"),
+                );
+                writeln!(stdin, "detach-client -t '{peer_name}'")
+                    .expect("write target-other detach");
+                let output = if continue_after {
+                    writeln!(stdin, "display-message -p TARGET_OTHER_AFTER")
+                        .expect("write command after target-other detach");
+                    stdin.flush().expect("flush target-other continuation");
+                    wait_for_control_output_marker(
+                        &output_path,
+                        "TARGET_OTHER_AFTER",
+                        &mut child,
+                        label,
+                    );
+                    writeln!(stdin).expect("write target-other continuation return");
+                    stdin
+                        .flush()
+                        .expect("flush target-other continuation return");
+                    collect_control_process(child, Some(stdin), label)
+                } else if blank_return {
+                    writeln!(stdin).expect("write target-other blank return");
+                    stdin.flush().expect("flush target-other blank return");
+                    collect_control_process(child, Some(stdin), label)
+                } else {
+                    stdin.flush().expect("flush target-other detach");
+                    drop(stdin);
+                    collect_control_process(child, None, label)
+                };
+                assert_eq!(output.status.code(), Some(1), "{label}");
+                assert!(output.stderr.is_empty(), "{label}");
+                let peer_output = collect_control_process(peer, Some(peer_stdin), label);
+                assert_eq!(peer_output.status.code(), Some(0), "{label}");
+                assert!(peer_output.stderr.is_empty(), "{label}");
+            }
+        }
+
+        #[test]
+        fn control_detach_aliases_follow_the_authoritative_self_victim() {
+            for (label, command, install_alias) in [
+                ("bare-self-detach", "detach-client".to_owned(), false),
+                ("built-in-alias-self-detach", "detach".to_owned(), false),
+                ("alias-self-detach", "dc".to_owned(), true),
+                (
+                    "scoped-self-detach",
+                    "detach-client -s =scoped-self-detach".to_owned(),
+                    false,
+                ),
+            ] {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
+                }
+                assert!(
+                    fixture
+                        .run(&["new-session", "-d", "-s", label, "exec /bin/cat",])
+                        .status
+                        .success()
+                );
+                if install_alias {
+                    assert!(
+                        fixture
+                            .run(&["set-option", "-s", "command-alias[40]", "dc=detach-client",])
+                            .status
+                            .success()
+                    );
+                }
+                let output_path = fixture._directory.path().join(format!("{label}.output"));
+                let (mut child, mut stdin) = spawn_control_to_file(
+                    &fixture,
+                    &["-C", "attach-session", "-t", &format!("={label}")],
+                    &output_path,
+                );
+                wait_for_control_clients(&fixture, 1, label);
+                let ready = format!("{}_READY", label.replace('-', "_").to_uppercase());
+                prime_control_return_code(
+                    &mut child,
+                    &mut stdin,
+                    &output_path,
+                    &ready,
+                    &format!("{label}-missing"),
+                );
+                writeln!(stdin, "{command}").expect("write self detach");
+                stdin.flush().expect("flush self detach");
+                drop(stdin);
+                let output = collect_control_process(child, None, label);
+                assert_eq!(output.status.code(), Some(0), "{label}");
+                assert!(output.stderr.is_empty(), "{label}");
+                let stdout = std::fs::read(&output_path).expect("read self-detach output");
+                let stream = parse_stream(&stdout, false);
+                assert_block(
+                    stream.blocks.last().expect("self-detach response block"),
+                    4,
+                    1,
+                    &[],
+                    false,
+                );
+                assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+            }
+
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            assert!(
+                fixture
+                    .run(&[
+                        "new-session",
+                        "-d",
+                        "-s",
+                        "alias-other-detach",
+                        "exec /bin/cat",
+                    ])
+                    .status
+                    .success()
+            );
+            assert!(
+                fixture
+                    .run(&["set-option", "-s", "command-alias[40]", "dc=detach-client",])
+                    .status
+                    .success()
+            );
+            let output_path = fixture._directory.path().join("alias-other-detach.output");
+            let (mut child, mut stdin) = spawn_control_to_file(
+                &fixture,
+                &["-C", "attach-session", "-t", "=alias-other-detach"],
+                &output_path,
+            );
+            wait_for_control_clients(&fixture, 1, "alias other detach");
+            prime_control_return_code(
+                &mut child,
+                &mut stdin,
+                &output_path,
+                "ALIAS_OTHER_READY",
+                "alias-other-missing",
+            );
+            writeln!(stdin, "dc -a").expect("write aliased nonself detach");
+            writeln!(stdin, "display-message -p ALIAS_OTHER_AFTER")
+                .expect("write command after aliased nonself detach");
+            stdin.flush().expect("flush aliased nonself detach");
+            wait_for_control_output_marker(
+                &output_path,
+                "ALIAS_OTHER_AFTER",
+                &mut child,
+                "alias other detach",
+            );
+            writeln!(stdin).expect("write aliased nonself blank return");
+            stdin.flush().expect("flush aliased nonself blank return");
+            let output =
+                collect_control_process(child, Some(stdin), "aliased nonself detach return");
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
-            assert!(stream.blocks.iter().any(|block| {
-                block.error && block.payload == ["can't find session: missing-detach"]
-            }));
-            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
 
-            let clean = fixture.run_with_stdin(
-                &["-C", "new-session", "-s", "clean-detach-status"],
-                b"detach-client\n",
+        #[test]
+        fn control_return_snapshot_precedes_later_failure_and_detach_eof_is_zero() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control return precedence");
+            std::fs::create_dir(&directory).expect("create return precedence directory");
+            let ready = directory.join("pre-failure.ready");
+            let release = directory.join("pre-failure.release");
+            let delayed_command = format!(
+                "if-shell 'touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.01; done; true' 'kill-session -t pre-failure-missing'",
+                ready.display(),
+                release.display()
             );
-            assert_eq!(clean.status.code(), Some(0));
-            assert!(clean.stderr.is_empty());
-
             let (mut child, mut stdin) = fixture.spawn_with_open_stdin(&[
                 "-C",
                 "new-session",
                 "-s",
-                "direct-runtime-detach-status",
+                "pre-failure-return",
+                "exec /bin/cat",
             ]);
-            writeln!(stdin, "kill-session -t missing-direct-detach")
-                .expect("write direct runtime error");
-            writeln!(stdin, "detach-client").expect("write direct runtime detach");
-            stdin.flush().expect("flush direct runtime commands");
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let status = loop {
-                if let Some(status) = child.try_wait().expect("poll direct runtime detach") {
-                    break status;
-                }
-                if Instant::now() >= deadline {
-                    child
-                        .kill()
-                        .expect("kill stalled direct runtime detach control");
-                    panic!("direct runtime detach did not close held-open control input");
-                }
-                thread::sleep(Duration::from_millis(10));
-            };
+            writeln!(stdin, "{delayed_command}").expect("write delayed command");
+            stdin.flush().expect("flush delayed command");
+            wait_for_control_marker(&ready, &mut child, "pre-failure command wait");
             drop(stdin);
-            let output = child
-                .wait_with_output()
-                .expect("collect direct runtime detached control");
-            assert_eq!(output.status, status);
+            thread::sleep(Duration::from_millis(100));
+            std::fs::write(&release, b"").expect("release delayed source");
+            let output = collect_control_process(child, None, "pre-failure EOF snapshot");
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert!(stream.blocks.iter().any(|block| {
-                block.error && block.payload == ["can't find session: missing-direct-detach"]
-            }));
             assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
 
-            let eof_input = format!("source-file '{source}'\n");
-            let eof = fixture.run_with_stdin(
-                &["-C", "new-session", "-s", "eof-detach-status"],
-                eof_input.as_bytes(),
+            let runtime_source = write_source(
+                &directory,
+                "detach-runtime.conf",
+                "kill-session -t post-detach-missing\n",
             );
-            assert_eq!(eof.status.code(), Some(1));
-            assert!(eof.stderr.is_empty());
-            let eof_stream = parse_stream(&eof.stdout, false);
-            assert!(eof_stream.blocks.iter().any(|block| {
-                block.error && block.payload == ["can't find session: missing-detach"]
-            }));
-
-            let return_input = format!("source-file '{source}'\n\n");
-            let returned = fixture.run_with_stdin(
-                &["-C", "new-session", "-s", "return-detach-status"],
-                return_input.as_bytes(),
+            let complete = "POST_DETACH_COMPLETE";
+            let output_path = directory.join("post-detach.output");
+            let output_file = File::create(&output_path).expect("create live control output");
+            let mut child = fixture
+                .command()
+                .args([
+                    "-C",
+                    "new-session",
+                    "-s",
+                    "post-detach-eof",
+                    "exec /bin/cat",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::from(output_file))
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn post-detach control");
+            let mut stdin = child.stdin.take().expect("piped control stdin");
+            writeln!(stdin, "source-file '{runtime_source}'").expect("write detach source");
+            writeln!(stdin, "display-message -p {complete}")
+                .expect("write detach completion marker");
+            stdin.flush().expect("flush detach completion commands");
+            wait_for_control_output_marker(
+                &output_path,
+                complete,
+                &mut child,
+                "post-detach completed frame",
             );
-            assert_eq!(returned.status.code(), Some(1));
-            assert!(returned.stderr.is_empty());
-            let returned_stream = parse_stream(&returned.stdout, false);
-            assert!(returned_stream.blocks.iter().any(|block| {
-                block.error && block.payload == ["can't find session: missing-detach"]
-            }));
-
-            let (mut child, mut stdin) =
-                fixture.spawn_with_open_stdin(&["-C", "new-session", "-s", "server-stop-status"]);
-            writeln!(stdin, "source-file '{source}'").expect("write replay command");
-            writeln!(stdin, "kill-server").expect("write server stop command");
-            stdin.flush().expect("flush server stop commands");
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let status = loop {
-                if let Some(status) = child.try_wait().expect("poll stopped control") {
-                    break status;
-                }
-                if Instant::now() >= deadline {
-                    child
-                        .kill()
-                        .expect("kill stalled control after server stop");
-                    panic!("server stop did not close held-open control input");
-                }
-                thread::sleep(Duration::from_millis(10));
-            };
+            writeln!(stdin, "detach-client").expect("write post-completion detach");
+            stdin.flush().expect("flush post-completion detach");
             drop(stdin);
-            let output = child.wait_with_output().expect("collect stopped control");
-            assert_eq!(output.status, status);
+            let output = collect_control_process(child, None, "post-detach immediate EOF");
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "stdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&std::fs::read(&output_path).expect("read control output")),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(output.stderr.is_empty());
+            let stdout = std::fs::read(output_path).expect("read completed control output");
+            let stream = parse_stream(&stdout, false);
+            assert!(stream.blocks.iter().any(|block| {
+                block.error && block.payload == ["can't find session: post-detach-missing"]
+            }));
+        }
+
+        #[test]
+        fn control_server_stop_preserves_the_completed_return_code() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control server stop status");
+            std::fs::create_dir(&directory).expect("create server stop status directory");
+            let source = write_source(
+                &directory,
+                "runtime.conf",
+                "kill-session -t server-stop-missing\n",
+            );
+            let complete = directory.join("runtime.complete");
+            let (mut child, mut stdin) = fixture.spawn_with_open_stdin(&[
+                "-C",
+                "new-session",
+                "-s",
+                "server-stop-status",
+                "exec /bin/cat",
+            ]);
+            writeln!(stdin, "source-file '{source}'").expect("write server stop source");
+            writeln!(stdin, "run-shell 'touch \"{}\"'", complete.display())
+                .expect("write server stop completion marker");
+            stdin.flush().expect("flush server stop setup");
+            wait_for_control_marker(&complete, &mut child, "server stop completion");
+            writeln!(stdin, "kill-server").expect("write server stop command");
+            stdin.flush().expect("flush server stop command");
+            let output = collect_control_process(child, Some(stdin), "server stop status");
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
             assert!(stream.blocks.iter().any(|block| {
-                block.error && block.payload == ["can't find session: missing-detach"]
+                block.error && block.payload == ["can't find session: server-stop-missing"]
             }));
             assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
         }
@@ -3895,15 +4490,19 @@ mod daemon_autostart {
             let directory = fixture._directory.path().join("control depth");
             std::fs::create_dir(&directory).expect("create control depth directory");
             let entry = write_source_chain(&directory, 50);
-            let input = format!("source-file '{entry}' ; display-message -p after-the-limit\n\n");
-            let output = fixture.run_with_stdin(
+            let input = format!("source-file '{entry}' ; display-message -p after-the-limit\n");
+            let marker = directory.join("depth.complete");
+            let output = run_control_until_return(
+                &fixture,
                 &["-C", "new-session", "-s", "control-depth", "exec /bin/cat"],
-                input.as_bytes(),
+                &input,
+                &marker,
+                "nested source depth completion",
             );
-            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 154);
+            assert_eq!(stream.blocks.len(), 155);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             let errors = stream
@@ -3917,13 +4516,8 @@ mod daemon_autostart {
                     .iter()
                     .all(|block| block.payload == ["too many nested files"])
             );
-            assert_block(
-                stream.blocks.last().expect("same-line continuation block"),
-                154,
-                1,
-                &["after-the-limit"],
-                false,
-            );
+            assert_block(&stream.blocks[153], 154, 1, &["after-the-limit"], false);
+            assert_block(&stream.blocks[154], 155, 1, &[], false);
             assert_attached_startup(&stream.outside, "control-depth");
         }
 

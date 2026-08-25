@@ -17,3 +17,5 @@ out: show-environment -g SOURCE_FILE_CONTROL_NESTED_QUEUE
 # continuation of the typed outer line, the reached depth, the containing file's
 # later-line continuation, the leaf that never loads, and the client's status.
 out: show-environment -g SOURCE_FILE_CONTROL_DEPTH
+out: show-environment -g SOURCE_FILE_CONTROL_STATUS_MATRIX
+out: show-environment -g SOURCE_FILE_CONTROL_RETURN_PRECEDENCE

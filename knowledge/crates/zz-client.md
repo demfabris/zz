@@ -34,10 +34,11 @@ adds no implicit geometry or renderer state here.
 
 `ClientCore` accepts and ignores the Control-only `SourcedCommandGuard` event. It does not own `-C`
 frame rendering, stdin ordering, or process exit state; `crates/zz/src/control_mode.rs` owns those
-front-end concerns. The daemon already returns a completed nonzero success for a matched source replay
-that failed, but the Control front end does not retain that result through every EOF and detach order.
-`control-mode.source-file-exit-status` tracks the exact source-file matrix. It does not ask this shared
-interactive core to make diagnostics globally sticky.
+front-end concerns. That front end now closes `control-mode.source-file-exit-status` by retaining the
+pin's bounded retval. A Return captured during a preceding non-detach command precedes later queued
+stdin, while a Return observed during self-detach is discarded when the caller receives its own
+`Detached` event. The shared interactive reducer needs no new state or wire message. Generic config
+Warning typing remains separate.
 
 # Desktop hot-path boundary
 

@@ -98,7 +98,8 @@ difference and every other channel clean. A fresh canonical run is deferred unti
 settle. The checked-in summary is intentionally stale for `buffer-path-format`,
 `command-item-format`, `display-message` (27 steps), `resize-directions` (16 focused steps versus 8
 stored), `send-keys-repeat`, `smoke/cli-chain-parse-abort`,
-`smoke/control-alias-prepare`, `smoke/source-file-control`, `smoke/source-file-diagnostics`, and
+`smoke/control-alias-prepare`, `smoke/source-file-control` (8 focused steps versus 3 stored),
+`smoke/source-file-diagnostics`, and
 `source-file-format`; root will replace the totals and rows from that final run rather than hand-edit
 them. The combined summary still records the attached-client fixture separately as `PASS`, and the
 drift check is correctly failing on those named rows meanwhile.
@@ -848,7 +849,7 @@ from a `run-shell` job and diffs stdout, stderr, exit code, runtime errors, and 
 byte-for-byte. `source-file -`
 remains in the separate G6 streaming contract; it now refuses on stderr at rc 1.
 
-The six-step `smoke/source-file-control` scenario separately preserves attached Control frame
+The current eight-step `smoke/source-file-control` scenario separately preserves attached Control frame
 boundaries. Protocol v76 now emits one tail-tag-47 `SourcedCommandGuard` for each replayed command
 that survives command-name resolution. Unknown or ambiguous command names and malformed alias names
 publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary success
@@ -858,10 +859,19 @@ ends `%error`. Runtime failures alone set `client_failure`. The writer defers th
 the direct outer frame closes, without leaking a guard into the next command. Existing source preflight
 collects one command's path diagnostics before recursion. A focused daemon regression and the fifth
 scenario check prove root missing-path guard, then middle missing-path guard, then leaf output guard,
-each exactly once. That closes cross-depth ordering with no production change. A matched failed replay
-still returns a completed nonzero success that the Control front end does not retain across every EOF
-and detach order. `control-mode.source-file-exit-status` owns that client process-state matrix without
-making source-command diagnostics globally sticky. The asynchronous
+each exactly once. That closed cross-depth ordering with no production change when the scenario had
+six steps. The later return-status checks close the full client process-state matrix without making
+source-command diagnostics globally sticky. Direct runtime failures, sourced runtime failures,
+nonruntime source failures, and typed source-read failures set retained retval 1. EOF and blank input
+return the current snapshot. Generic nonzero success and flags-1 parse or preparation failures do not
+set or change retval, so a fresh client remains at 0 while a prior sticky failure stays at 1. Actual
+self-detach exits 0, including when queued while another command is open. A Return captured while a
+preceding non-detach command waits keeps its arrival-time snapshot and precedes later queued stdin,
+including detach. A Return observed while self-detach itself waits is discarded when the caller's
+`Detached` event arrives. Detaching another client, excluding the caller with
+`-s`, finding no victim, or using an alias that targets another client keeps the caller alive and
+preserves the queued Return; self-targeting aliases exit 0. The response `%end` precedes `%exit`.
+The asynchronous
 `run-shell` exit text itself is excluded from the slice because zz still emits it inside the completed
 response where tmux prints it unframed after `%end`; `control-mode.async-command-output` tracks that
 gap, and the scenario header names the exclusion. Its sixth step runs a second control client over
@@ -907,9 +917,9 @@ publish a located Warning that Control renders as `%config-error`, without a gua
 quiet commands get an empty `%end`, nested partial matches retain diagnostics inside
 `%end`, and all-miss or execution failures end `%error`. Guards stay in FIFO order after the direct
 outer frame. The existing per-command preflight publishes the containing command's guards before
-deeper replay; the strict six-step scenario and focused daemon regression prove that order with no
-production change. Registered-client nested cwd rebasing is closed. Control process status for a
-failed matched replay at EOF or detach remains under `control-mode.source-file-exit-status`.
+deeper replay; the then-six-step scenario and focused daemon regression prove that order with no
+production change. Registered-client nested cwd rebasing is closed. The later eight-step scenario
+closes Control return status and detach precedence without changing the wire.
 The nesting limit is closed for depth wording, count, and continuation. Counting the initial
 `source-file` as invocation 1, both sides run 50 concurrent source invocations and refuse invocation
 51 before any of its paths are matched or loaded: Command stderr at rc 1, the same lowercase text on
@@ -929,8 +939,8 @@ read failures in `ConfigLoadReport`. Quiet zero-file misses, asynchronous comman
 capability gaps retain continuation. Replayed target and set-option runtime failures now keep their
 encounter order, use the invoking client's error channel, set the Command or Control status to 1,
 capitalize attached warnings, and continue later physical lines through an outer source. Control
-guard framing and cross-depth ordering are closed; source-file Control EOF and detach status plus
-parser abort behavior remain open under their named gaps. Startup accounting
+guard framing, cross-depth ordering, and return-versus-detach status are closed. Parser abort
+behavior remains open under its named gap. Startup accounting
 now matches the pin: one budget spans
 every startup root, top-level roots do not count, and source commands after the first 50 retain their
 declaring file and line. zz still discards those causes before Control or attached clients can read
@@ -945,8 +955,8 @@ later matches load; and ordinary diagnostics plus `-v` lines retain path and mat
 native `reload-config` keeps rediscovery, key-table and appearance reset, and stored override replay.
 Startup first-existing discovery, ordered explicit `-f`, parse-only, and nested paths retain their
 existing contracts. The focused CLI and daemon gates plus the 12-step diagnostics, 40-step format,
-and six-step Control differential pass without skips or differences. This closure makes no
-canonical-suite claim.
+and then-six-step Control differential pass without skips or differences. The later status proof
+grows the current Control row to eight clean steps. Neither focused run makes a canonical-suite claim.
 `source-file` no longer performs a second tilde rewrite after parsing, so parser-expanded tildes
 stay absolute and literal tildes follow the selected relative-path base. SSH
 omission is covered at the endpoint-facts helper but still lacks an end-to-end remote fixture. The

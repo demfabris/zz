@@ -237,8 +237,8 @@ The daemon sends it only to the Control client that invoked `source-file`. Each 
 that survives command-name resolution gets one in recursive file order. Unknown or ambiguous
 command names and malformed alias names publish a located Warning that Control renders as
 `%config-error`, without a guard. `output` is the command's captured output or source diagnostic;
-`error` selects `%error` instead of `%end`; `client_failure` independently makes the Control
-client's final status sticky at 1. A runtime failure sets both booleans. A flag, arity, source
+`error` selects `%error` instead of `%end`; `client_failure` independently sets the Control
+client's retained retval to 1. A runtime failure sets both booleans. A flag, arity, source
 all-miss, or depth failure can end `%error` without making later clean completion sticky. Ordinary
 success and quiet all-miss commands produce empty flags-1 `%end` guards, and a partial source match
 keeps its missing-path text inside `%end`. The Control writer defers these guards FIFO until the
@@ -250,11 +250,16 @@ ignores the Control-only event, while `crates/zz/src/control_mode.rs` renders th
 The daemon preflights every declared path for one source command before it recurses, so a three-level
 replay publishes the root command's missing-path guard, the middle command's missing-path guard, and
 the leaf output guard in that order, each exactly once. Proving that order required no wire change.
-The daemon can still return a completed nonzero `CommandResponse::Success` for the outer source while
-source-command guards leave `client_failure` false. The Control front end does not yet retain that
-result across every EOF and detach ordering. `control-mode.source-file-exit-status` owns the exact
-completed-EOF, explicit-detach, and queued-detach-plus-EOF matrix; this is not a global diagnostic
-stickiness rule.
+The Control front end combines that event with existing `CommandResponse` and `Detached` messages.
+Direct runtime errors, sourced runtime errors, nonruntime source failures, and typed source-read errors
+set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not set or change
+it, so a fresh client remains at 0 while a prior sticky failure stays at 1. A Return captured while a
+preceding non-detach command waits keeps its arrival-time snapshot and precedes later queued stdin. A
+Return observed while self-detach waits is discarded when the caller-targeted `Detached` event arrives.
+Nonself and no-victim detach commands preserve a pending Return and keep the client alive. The command
+response closes before `%exit`. This closed
+`control-mode.source-file-exit-status` without a wire change. Generic config Warning typing, startup
+diagnostic delivery, and replay output outside Control guards remain open.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other

@@ -28,22 +28,6 @@ pub(crate) enum AgentControllerEvent {
     },
 }
 
-/// Mirrors the real fleet rollup; always the zero partition here.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct AgentAttention {
-    pub(crate) waiting: usize,
-    pub(crate) failed: usize,
-    pub(crate) running: usize,
-    pub(crate) waiting_pane: Option<PaneId>,
-    pub(crate) failed_pane: Option<PaneId>,
-}
-
-impl AgentAttention {
-    pub(crate) fn is_quiet(&self) -> bool {
-        true
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AgentPreferences;
 
@@ -85,10 +69,6 @@ impl AgentController {
         _retained: &std::collections::BTreeSet<PaneId>,
         _cx: &mut Context<Self>,
     ) {
-    }
-
-    pub(crate) fn attention(&self) -> AgentAttention {
-        AgentAttention::default()
     }
 
     pub(crate) const fn pane_status(&self, _pane: PaneId) -> Option<AgentPaneStatus> {

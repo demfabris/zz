@@ -245,7 +245,7 @@ impl Render for Notification {
                     .group_hover("", |this| this.visible())
                     .child(
                         Button::new("close")
-                            .icon(IconName::Close)
+                            .icon(IconName::Xmark)
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(|this, _, window, cx| {

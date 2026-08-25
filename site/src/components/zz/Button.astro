@@ -6,7 +6,8 @@ import Icon from './Icon.astro';
 interface Props {
 	variant?: 'ghost' | 'default';
 	size?: 'xsmall' | 'small' | 'medium';
-	/** Lucide name; an icon with no slot content makes the button a square. */
+	iconSize?: number;
+	/** Icon file stem; an icon with no slot content makes the button a square. */
 	icon?: string;
 	label: string;
 	pressed?: boolean;
@@ -19,6 +20,7 @@ interface Props {
 const {
 	variant = 'ghost',
 	size = 'xsmall',
+	iconSize: requestedIconSize,
 	icon,
 	label,
 	pressed,
@@ -27,7 +29,7 @@ const {
 	...rest
 } = Astro.props;
 
-const iconSize = { xsmall: 12, small: 14, medium: 16 }[size];
+const iconSize = requestedIconSize ?? { xsmall: 12, small: 14, medium: 16 }[size];
 const iconOnly = icon && !Astro.slots.has('default');
 const classes = [
 	'zz-btn',

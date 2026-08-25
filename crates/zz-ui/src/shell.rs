@@ -5,43 +5,53 @@ use gpui::{
     Styled as _, WindowControlArea, div,
 };
 
-/// Main-window composition: a `sidebar` column beside a content column of
-/// `titlebar` over `workspace`, with `overlays` on top. Both slots may be
-/// empty, in which case the panes reach the top edge of the window.
+/// Main-window composition: a `sidebar` beside `titlebar` over `workspace`,
+/// with an optional full-width bottom strip and `overlays` on top.
 pub fn app_shell_surface(
     id: impl Into<ElementId>,
     sidebar: impl IntoElement,
     titlebar: Option<AnyElement>,
     workspace: impl IntoElement,
+    bottom: Option<AnyElement>,
     overlays: impl IntoIterator<Item = AnyElement>,
 ) -> Stateful<gpui::Div> {
     div()
         .id(id)
         .relative()
         .flex()
-        .flex_row()
+        .flex_col()
         .size_full()
         .overflow_hidden()
-        .child(sidebar)
         .child(
             div()
                 .flex()
-                .flex_col()
+                .flex_row()
                 .flex_1()
                 .min_w_0()
                 .min_h_0()
                 .overflow_hidden()
-                .children(titlebar)
+                .child(sidebar)
                 .child(
                     div()
                         .flex()
+                        .flex_col()
                         .flex_1()
                         .min_w_0()
                         .min_h_0()
                         .overflow_hidden()
-                        .child(workspace),
+                        .children(titlebar)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_1()
+                                .min_w_0()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .child(workspace),
+                        ),
                 ),
         )
+        .children(bottom)
         .children(overlays)
 }
 

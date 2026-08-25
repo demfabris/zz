@@ -108,10 +108,7 @@ fn indent_guide_is_active(layout: &IndentGuideLayout, active_row: usize, depths:
     let end_row = layout.start_row.saturating_add(layout.row_count);
     let active_depth = depths.get(active_row).copied().unwrap_or_default();
 
-    layout.level > 0
-        && layout.level < active_depth
-        && layout.start_row <= active_row
-        && active_row < end_row
+    layout.level + 1 == active_depth && layout.start_row <= active_row && active_row < end_row
 }
 
 struct RenderedIndentGuide {
@@ -309,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn active_path_lights_every_non_root_ancestor_guide() {
+    fn active_path_lights_only_the_deepest_ancestor_guide() {
         let depths = [0, 1, 2, 3, 3, 3, 1, 2, 3];
         let active = sorted(compute_indent_guides(&depths, 0, false))
             .into_iter()
@@ -317,6 +314,6 @@ mod tests {
             .map(|layout| (layout.level, layout.start_row, layout.row_count))
             .collect::<Vec<_>>();
 
-        assert_eq!(active, vec![(1, 2, 4), (2, 3, 3)]);
+        assert_eq!(active, vec![(2, 3, 3)]);
     }
 }

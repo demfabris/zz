@@ -590,16 +590,6 @@ pub fn session_label(name: &str, id: SessionId) -> String {
     }
 }
 
-/// The single character standing in for a session: the first letter of its
-/// label, uppercased.
-#[must_use]
-pub fn session_initial(label: &str) -> SharedString {
-    label.trim().chars().next().map_or_else(
-        || SharedString::from("?"),
-        |first| first.to_uppercase().to_string().into(),
-    )
-}
-
 /// Open every ancestor of `node`, so attaching anywhere in the fleet reveals
 /// the row the mux moved to.
 pub fn expand_path_to(expanded: &mut BTreeSet<TreeNode>, model: &MuxTreeModel, node: TreeNode) {

@@ -1,13 +1,13 @@
 use crate::{
-    ActiveTheme as _, Colorize as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
-    MACOS_TRAFFIC_LIGHT_SPAN, Sizable as _, TITLE_BAR_HEIGHT, UiZoom,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, MACOS_TRAFFIC_LIGHT_INSET,
+    MACOS_TRAFFIC_LIGHT_SPAN, TITLE_BAR_HEIGHT, UiZoom,
+    button::{Button, COMPACT_ICON_BUTTON_SIZE},
     rems_from_px,
     tooltip::Tooltip,
 };
 use gpui::{
-    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement as _, Pixels, SharedString,
-    Stateful, StatefulInteractiveElement as _, Styled as _, div, prelude::*, px,
+    App, ElementId, Hsla, IntoElement, ParentElement as _, Pixels, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::*, px,
 };
 
 pub const WORKSPACE_TREE_ROW_HEIGHT: f32 = 32.0;
@@ -21,68 +21,188 @@ pub const WORKSPACE_TREE_MARKER_SLOT_WIDTH: f32 = 18.0;
 pub const WORKSPACE_TREE_NODE_ICON_SIZE: f32 = 14.0;
 pub const WORKSPACE_TREE_MARKER_LABEL_GAP: f32 = 6.0;
 const WORKSPACE_TREE_FILL_INSET: f32 = 4.0;
+const WORKSPACE_TREE_FILL_VERTICAL_INSET: f32 = 1.0;
 pub const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 256.0;
-/// Vertical padding around the sidebar's status section.
-pub const WORKSPACE_SIDEBAR_STATUS_PADDING: f32 = 6.0;
-pub const WORKSPACE_STRIP_GAP: f32 = 6.0;
-const WORKSPACE_STRIP_CHIP_HEIGHT: f32 = 24.0;
-const WORKSPACE_STRIP_CHIP_CONNECTOR_WIDTH: f32 = 8.0;
-const WORKSPACE_STRIP_WINDOW_PILL_WIDTH: f32 = 104.0;
-/// Leading inset the titlebar strip keeps clear on macOS for the traffic
-/// lights: their own leading margin, the cluster, then that margin again, so
-/// the lights sit in equal gaps between the window edge and the first control.
-pub const WORKSPACE_STRIP_TRAFFIC_LIGHT_INSET: f32 =
+pub const WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET: f32 =
     2.0 * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN;
+const WORKSPACE_CHROME_CONTROL_GAP: f32 = 4.0;
+pub const WORKSPACE_STATUS_CONTENT_HEIGHT: Pixels = px(24.0);
+const WORKSPACE_STATUS_LINE_HEIGHT: Pixels = px(16.0);
+const WORKSPACE_STATUS_ITEM_MAX_WIDTH: Pixels = px(180.0);
+const WORKSPACE_STATUS_WINDOW_MAX_WIDTH: Pixels = px(180.0);
+const WORKSPACE_STATUS_WINDOW_MIN_WIDTH: Pixels = px(36.0);
+const WORKSPACE_STATUS_ICON_SIZE: Pixels = px(13.0);
+const WORKSPACE_STATUS_ICON_DROP: Pixels = px(0.5);
 
-/// Where a titlebar-height strip may start putting controls of its own: past
-/// the macOS traffic lights, or at the plain content inset elsewhere. Both
-/// chromes start their cluster here, so it holds its axis across a chrome flip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WorkspaceStatusWindowState {
+    pub connected: bool,
+    pub active: bool,
+    pub zoomed: bool,
+    pub bell: bool,
+}
+
 #[must_use]
 pub fn workspace_controls_leading_inset(cx: &App) -> Pixels {
     if cfg!(target_os = "macos") {
-        UiZoom::unzoomed(px(WORKSPACE_STRIP_TRAFFIC_LIGHT_INSET), cx)
+        UiZoom::unzoomed(px(WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET), cx)
     } else {
         px(WORKSPACE_TREE_CONTENT_INSET)
     }
 }
 
-/// The workspace-layout menu trigger, in the sidebar's titlebar strip and again
-/// in the strip that replaces the sidebar.
 #[must_use]
 pub fn workspace_layout_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id)
-        .ghost()
-        .small()
-        .compact()
-        .icon(IconName::PanelsTopLeft)
-        .tooltip("Workspace layout")
+    workspace_chrome_button(id, IconName::PanelsTopLeft, "Toggle sidebar")
 }
 
-/// The settings entry beside the workspace-layout menu, sized to match
-/// [`workspace_layout_button`].
 #[must_use]
-pub fn sidebar_settings_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id)
-        .ghost()
-        .small()
-        .compact()
-        .icon(IconName::Settings)
-        .tooltip("Settings")
+pub fn workspace_settings_button(id: impl Into<ElementId>) -> Button {
+    workspace_chrome_button(id, IconName::Settings, "Settings")
 }
 
-/// The settings/layout pair, in either chrome. Both start it at
-/// [`workspace_controls_leading_inset`], so it holds position across a flip.
+fn workspace_chrome_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    tooltip: &'static str,
+) -> Button {
+    Button::compact_icon(id, icon).tooltip(tooltip)
+}
+
 #[must_use]
-pub fn workspace_sidebar_controls(
+pub fn workspace_chrome_controls(
     settings: impl IntoElement,
-    toggle: impl IntoElement,
+    layout: Option<gpui::AnyElement>,
 ) -> gpui::Div {
     div()
         .flex()
         .items_center()
         .gap_1()
         .child(settings)
-        .child(toggle)
+        .children(layout)
+}
+
+#[must_use]
+pub fn workspace_chrome_controls_width(has_layout: bool, window: &Window) -> Pixels {
+    let width = if has_layout {
+        2.0 * COMPACT_ICON_BUTTON_SIZE + WORKSPACE_CHROME_CONTROL_GAP
+    } else {
+        COMPACT_ICON_BUTTON_SIZE
+    };
+    rems_from_px(width).to_pixels(window.rem_size())
+}
+
+#[must_use]
+pub fn workspace_status_item(
+    id: impl Into<ElementId>,
+    icon: Option<IconName>,
+    text: SharedString,
+    cx: &App,
+) -> Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_1()
+        .min_w_0()
+        .max_w(WORKSPACE_STATUS_ITEM_MAX_WIDTH)
+        .h(WORKSPACE_STATUS_CONTENT_HEIGHT)
+        .items_center()
+        .gap(px(5.0))
+        .overflow_hidden()
+        .text_color(cx.theme().foreground.muted())
+        .text_size(rems_from_px(12.0))
+        .line_height(WORKSPACE_STATUS_LINE_HEIGHT)
+        .children(icon.map(|icon| {
+            div()
+                .flex_none()
+                .relative()
+                .top(WORKSPACE_STATUS_ICON_DROP)
+                .child(Icon::new(icon).size(WORKSPACE_STATUS_ICON_SIZE))
+        }))
+        .child(
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(text),
+        )
+}
+
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn workspace_status_window(
+    id: impl Into<ElementId>,
+    index: SharedString,
+    name: SharedString,
+    tooltip: SharedString,
+    state: WorkspaceStatusWindowState,
+    cx: &App,
+) -> Stateful<gpui::Div> {
+    let foreground = cx.theme().foreground;
+    let highlight = workspace_row_highlight(cx);
+    let text_color = if state.active {
+        foreground
+    } else {
+        foreground.muted()
+    };
+    div()
+        .id(id)
+        .relative()
+        .flex()
+        .flex_shrink_1()
+        .min_w(WORKSPACE_STATUS_WINDOW_MIN_WIDTH)
+        .max_w(WORKSPACE_STATUS_WINDOW_MAX_WIDTH)
+        .h(WORKSPACE_STATUS_CONTENT_HEIGHT)
+        .items_center()
+        .gap(px(5.0))
+        .px(px(9.0))
+        .rounded(cx.theme().radius)
+        .overflow_hidden()
+        .when(state.active, |item| item.bg(highlight))
+        .text_color(text_color)
+        .text_size(rems_from_px(13.0))
+        .line_height(WORKSPACE_STATUS_LINE_HEIGHT)
+        .when(state.connected, |item| {
+            item.cursor_pointer()
+                .hover(move |item| item.bg(highlight).text_color(foreground))
+        })
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .child(
+            div()
+                .flex_none()
+                .text_size(rems_from_px(12.0))
+                .text_color(foreground.muted())
+                .child(index),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(name),
+        )
+        .children(state.zoomed.then(|| {
+            div()
+                .flex_none()
+                .relative()
+                .top(WORKSPACE_STATUS_ICON_DROP)
+                .text_color(foreground.muted())
+                .child(Icon::new(IconName::ZoomIn).size(WORKSPACE_STATUS_ICON_SIZE))
+        }))
+        .when(state.bell, |item| {
+            item.child(
+                div()
+                    .absolute()
+                    .top(px(4.0))
+                    .right(px(4.0))
+                    .size(px(5.0))
+                    .rounded_full()
+                    .bg(cx.theme().warning),
+            )
+        })
 }
 
 /// Titlebar-height strip at the top of the full-height workspace sidebar,
@@ -110,24 +230,21 @@ pub fn workspace_sidebar_divider(cx: &App) -> Hsla {
     cx.theme().border.raised(2)
 }
 
-/// The fill that says "this one" anywhere the workspace is navigated: a tree
-/// row under the pointer, the keyboard cursor or the mux, and a strip chip in
-/// the same three states. Washed, so a highlighted row keeps the desktop blur.
+/// The fill that says "this one" in the workspace tree: a row under the
+/// pointer, the keyboard cursor, or the mux.
 #[must_use]
 pub fn workspace_row_highlight(cx: &App) -> Hsla {
     cx.theme().background.washed(2)
 }
 
 /// Full-height sidebar interior. Native callers attach window dragging to the
-/// titlebar slot and wrap the surface with resize handling. `status` is the
-/// optional bottom section a tmux status line renders into.
+/// titlebar slot and wrap the surface with resize handling.
 #[must_use]
 pub fn workspace_sidebar_surface(
     id: impl Into<ElementId>,
     width: f32,
     titlebar: impl IntoElement,
     navigation: impl IntoElement,
-    status: Option<AnyElement>,
     cx: &App,
 ) -> Stateful<gpui::Div> {
     div()
@@ -155,70 +272,6 @@ pub fn workspace_sidebar_surface(
                 .pb(px(8.0))
                 .child(navigation),
         )
-        .children(status)
-}
-
-/// The sidebar's bottom section, one line like the tmux status bar it stands
-/// in for: the attention rollup and `left` at the left, `right` at the right.
-/// Every slot may be empty, and `left` ellipsizes first.
-#[must_use]
-pub fn workspace_sidebar_status(
-    id: impl Into<ElementId>,
-    attention: Option<AnyElement>,
-    left: SharedString,
-    right: SharedString,
-    cx: &App,
-) -> Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .w_full()
-        .gap(px(6.0))
-        .px(px(WORKSPACE_TREE_CONTENT_INSET))
-        .py(px(WORKSPACE_SIDEBAR_STATUS_PADDING))
-        .border_t_1()
-        .border_color(cx.theme().border)
-        .overflow_hidden()
-        .text_xs()
-        .text_color(cx.theme().foreground.muted())
-        .children(attention)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(left),
-        )
-        .child(div().flex_none().whitespace_nowrap().child(right))
-}
-
-/// One segment of the status section's attention rollup: a status-colored dot
-/// and a count, e.g. "2 running". `clickable` adds the hover invitation.
-#[must_use]
-pub fn workspace_sidebar_attention(
-    id: impl Into<ElementId>,
-    label: SharedString,
-    color: Hsla,
-    clickable: bool,
-    cx: &App,
-) -> Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(4.0))
-        .whitespace_nowrap()
-        .child(div().flex_none().size(px(6.0)).rounded_full().bg(color))
-        .child(label)
-        .when(clickable, |this| {
-            this.cursor_pointer()
-                .hover(|this| this.text_color(cx.theme().foreground))
-        })
 }
 
 // Six independent row states, not a config object waiting to be extracted.
@@ -248,8 +301,8 @@ pub fn workspace_tree_row(
     let fill_color = workspace_row_highlight(cx);
     let fill = div()
         .absolute()
-        .top_0()
-        .bottom_0()
+        .top(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
+        .bottom(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
         .left(fill_inset)
         .right(fill_inset)
         .rounded(radius)
@@ -266,6 +319,59 @@ pub fn workspace_tree_row(
                 .group_hover(row_group.clone(), gpui::Styled::visible)
         })
         .child(actions);
+    workspace_tree_row_frame(id, depth)
+        .group(row_group)
+        .child(fill)
+        .text_color(if connected {
+            cx.theme().foreground
+        } else {
+            cx.theme().foreground.muted()
+        })
+        .when(active, crate::StyledExt::font_medium)
+        .when(clickable, gpui::Styled::cursor_pointer)
+        .child(marker)
+        .child(workspace_tree_row_label(label))
+        .child(trailing)
+}
+
+#[must_use]
+pub fn workspace_tree_action_row(
+    id: impl Into<ElementId>,
+    depth: u8,
+    icon: IconName,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<gpui::Div> {
+    let foreground = cx.theme().foreground;
+    workspace_tree_row_frame(id, depth)
+        .text_color(foreground.muted())
+        .cursor_pointer()
+        .hover(move |row| row.text_color(foreground))
+        .child(workspace_tree_marker(
+            Icon::new(icon)
+                .size(rems_from_px(WORKSPACE_TREE_NODE_ICON_SIZE))
+                .text_color(foreground.muted()),
+        ))
+        .child(workspace_tree_row_label(div().child(label.into())))
+}
+
+#[must_use]
+pub fn workspace_tree_action_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    tooltip: impl Into<SharedString>,
+    disabled: bool,
+    cx: &App,
+) -> Button {
+    Button::compact_icon(id, icon)
+        .when(!disabled, |button| {
+            button.text_color(cx.theme().foreground.muted())
+        })
+        .tooltip(tooltip)
+        .disabled(disabled)
+}
+
+fn workspace_tree_row_frame(id: impl Into<ElementId>, depth: u8) -> Stateful<gpui::Div> {
     div()
         .id(id)
         .w_full()
@@ -280,30 +386,20 @@ pub fn workspace_tree_row(
         ))
         .pr(px(WORKSPACE_TREE_CONTENT_INSET))
         .text_sm()
-        .group(row_group)
-        .child(fill)
-        .text_color(if connected {
-            cx.theme().foreground
-        } else {
-            cx.theme().foreground.muted()
-        })
-        .when(active, crate::StyledExt::font_medium)
-        .when(clickable, gpui::Styled::cursor_pointer)
-        .child(marker)
-        .child(
-            div()
-                .min_w_0()
-                .flex_1()
-                .ml(px(WORKSPACE_TREE_MARKER_LABEL_GAP))
-                .flex()
-                .items_center()
-                .gap_2()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label),
-        )
-        .child(trailing)
+}
+
+fn workspace_tree_row_label(label: impl IntoElement) -> gpui::Div {
+    div()
+        .min_w_0()
+        .flex_1()
+        .ml(px(WORKSPACE_TREE_MARKER_LABEL_GAP))
+        .flex()
+        .items_center()
+        .gap_2()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .child(label)
 }
 
 #[must_use]
@@ -323,19 +419,21 @@ pub fn workspace_tree_marker(marker: impl IntoElement) -> gpui::Div {
 /// caller wires the click and passes the [`workspace_tree_marker`] it built.
 #[must_use]
 pub fn workspace_tree_disclosure(
+    id: impl Into<ElementId>,
     marker: impl IntoElement,
     expanded: bool,
     row_group: SharedString,
     cx: &App,
-) -> gpui::Div {
+) -> Stateful<gpui::Div> {
+    let foreground = cx.theme().foreground;
     let chevron = Icon::new(if expanded {
         IconName::ChevronDown
     } else {
         IconName::ChevronRight
     })
-    .size(rems_from_px(WORKSPACE_TREE_NODE_ICON_SIZE))
-    .text_color(cx.theme().foreground.muted());
+    .size(rems_from_px(WORKSPACE_TREE_NODE_ICON_SIZE));
     div()
+        .id(id)
         .relative()
         .h_full()
         .flex()
@@ -343,6 +441,8 @@ pub fn workspace_tree_disclosure(
         .items_center()
         .justify_center()
         .cursor_pointer()
+        .text_color(foreground.muted())
+        .hover(move |this| this.text_color(foreground))
         .child(
             div()
                 .h_full()
@@ -362,181 +462,5 @@ pub fn workspace_tree_disclosure(
                 .invisible()
                 .group_hover(row_group, gpui::Styled::visible)
                 .child(chevron),
-        )
-}
-
-/// Titlebar-height strip spanning the whole window, standing in for the
-/// sidebar column. `leading` starts at [`workspace_controls_leading_inset`],
-/// `content` clips, and `trailing` holds any window-control buttons.
-#[must_use]
-pub fn workspace_titlebar_strip(
-    id: impl Into<ElementId>,
-    leading: impl IntoElement,
-    content: impl IntoElement,
-    trailing: impl IntoElement,
-    cx: &App,
-) -> Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .w_full()
-        .h(TITLE_BAR_HEIGHT)
-        .items_center()
-        .gap(px(WORKSPACE_STRIP_GAP))
-        .child(
-            div()
-                .flex_none()
-                .flex()
-                .h_full()
-                .items_center()
-                .child(
-                    div()
-                        .flex_none()
-                        .h_full()
-                        .w(workspace_controls_leading_inset(cx))
-                        .window_control_area(gpui::WindowControlArea::Drag),
-                )
-                .child(leading),
-        )
-        .child(
-            div()
-                .flex_1()
-                .h_full()
-                .min_w_0()
-                .flex()
-                .items_center()
-                .overflow_hidden()
-                .window_control_area(gpui::WindowControlArea::Drag)
-                .child(content),
-        )
-        .child(
-            div()
-                .flex_none()
-                .flex()
-                .h_full()
-                .items_center()
-                .child(trailing),
-        )
-}
-
-/// The rule between the strip's controls and the chips that name the fleet.
-#[must_use]
-pub fn workspace_strip_group_separator(cx: &App) -> gpui::Div {
-    div()
-        .flex_none()
-        .w(px(1.0))
-        .h(px(16.0))
-        .bg(cx.theme().border)
-}
-
-/// The dash joining one strip chip to the next. It is the whole distance
-/// between two chips, so the strip adds no gap of its own.
-#[must_use]
-pub fn workspace_strip_chip_connector(cx: &App) -> gpui::Div {
-    div()
-        .flex_none()
-        .w(px(WORKSPACE_STRIP_CHIP_CONNECTOR_WIDTH))
-        .h(px(1.0))
-        .bg(cx.theme().border)
-}
-
-/// A session's one-letter badge in the titlebar strip. The attached session
-/// takes [`workspace_row_highlight`] and full-strength text; parked ones sit
-/// dimmed, as does every badge while the daemon is disconnected.
-#[must_use]
-pub fn workspace_strip_session_badge(
-    id: impl Into<ElementId>,
-    initial: SharedString,
-    tooltip: impl Into<SharedString>,
-    attached: bool,
-    connected: bool,
-    cx: &App,
-) -> Stateful<gpui::Div> {
-    let tooltip = tooltip.into();
-    let rest = cx.theme().background.washed(1);
-    let highlight = workspace_row_highlight(cx);
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .h(px(WORKSPACE_STRIP_CHIP_HEIGHT))
-        .min_w(px(WORKSPACE_STRIP_CHIP_HEIGHT))
-        .px(px(6.0))
-        .rounded(cx.theme().radius)
-        .bg(if attached && connected {
-            highlight
-        } else {
-            rest
-        })
-        .text_size(rems_from_px(11.0))
-        .text_color(if attached && connected {
-            cx.theme().foreground
-        } else {
-            cx.theme().foreground.muted()
-        })
-        .when(connected, |this| {
-            this.cursor_pointer().hover(move |this| this.bg(highlight))
-        })
-        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-        .child(initial)
-}
-
-/// One window of the attached session in the titlebar strip: the same chip as
-/// [`workspace_strip_session_badge`], with `label` ellipsized into the tooltip
-/// at a fixed width and `delete` revealed on hover of `group`, unique per chip.
-#[must_use]
-pub fn workspace_strip_window_pill(
-    id: impl Into<ElementId>,
-    group: SharedString,
-    label: SharedString,
-    active: bool,
-    connected: bool,
-    delete: impl IntoElement,
-    cx: &App,
-) -> Stateful<gpui::Div> {
-    let tooltip = label.clone();
-    let rest = cx.theme().background.washed(1);
-    let highlight = workspace_row_highlight(cx);
-    div()
-        .id(id)
-        .group(group.clone())
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(2.0))
-        .h(px(WORKSPACE_STRIP_CHIP_HEIGHT))
-        .w(px(WORKSPACE_STRIP_WINDOW_PILL_WIDTH))
-        .pl(px(10.0))
-        .pr(px(4.0))
-        .rounded(cx.theme().radius)
-        .bg(if active && connected { highlight } else { rest })
-        .text_size(rems_from_px(11.0))
-        .text_color(if active && connected {
-            cx.theme().foreground
-        } else {
-            cx.theme().foreground.muted()
-        })
-        .when(connected, |this| {
-            this.cursor_pointer().hover(move |this| this.bg(highlight))
-        })
-        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label),
-        )
-        .child(
-            div()
-                .flex_none()
-                .invisible()
-                .group_hover(group, gpui::Styled::visible)
-                .child(delete),
         )
 }

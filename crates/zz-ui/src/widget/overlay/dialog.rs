@@ -439,7 +439,7 @@ impl RenderOnce for Dialog {
                     .right(px(8.))
                     .small()
                     .ghost()
-                    .icon(IconName::Close)
+                    .icon(IconName::Xmark)
                     .on_click(move |_, window, cx| {
                         window.close_dialog(cx);
                         on_cancel(&ClickEvent::default(), window, cx);

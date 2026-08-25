@@ -78,14 +78,14 @@
 	--zz-gap: 6px;                 /* CHROME_GAP, foundation/theme.rs:17 */
 	--zz-pane-margin: 6px;         /* DEFAULT_PANE_MARGIN, config/mod.rs:55 */
 	--zz-pane-border: 1px;
-	--zz-titlebar-h: 38px;         /* TITLE_BAR_HEIGHT, title_bar/mod.rs:23 */
+	--zz-titlebar-h: 35px;         /* TITLE_BAR_HEIGHT, title_bar/mod.rs:23 */
 	--zz-control-h: 36px;
 	--zz-row-h: 32px;              /* WORKSPACE_TREE_ROW_HEIGHT, navigation.rs:12 */
 	--zz-indent: 20px;             /* WORKSPACE_TREE_INDENT_WIDTH */
 	--zz-inset: 8px;               /* WORKSPACE_TREE_CONTENT_INSET */
 	--zz-marker-slot: 18px;
 	--zz-sidebar-w: 256px;
-	--zz-traffic-inset: 80px;      /* AppKit spans x = 9..69, rounded up (navigation.rs:32) */
+	--zz-traffic-inset: 81px;      /* 2 * 10.5px inset + 60px AppKit span */
 
 	/* type */
 	--zz-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -219,8 +219,8 @@
 }
 
 /* ── icons ───────────────────────────────────────────────────────────────── */
-/* Iconoir at 24px with stroke-width 1.5 — at 14px the effective stroke is
-   0.88px, at 16px 1px. Lighter than the Lucide set that came before. */
+/* Tabler outline at 24px with stroke-width 2 — at 14px the effective stroke
+   is 1.17px, at 16px 1.33px. */
 .zz-icon {
 	display: inline-flex;
 	flex: none;

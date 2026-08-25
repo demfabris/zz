@@ -208,6 +208,7 @@ pub(crate) struct SettingsView {
     browser_search_provider: Entity<SelectState<Vec<SettingsSelectItem>>>,
     ui_zoom: Entity<InputState>,
     observed_ui_zoom: u32,
+    pane_inactive_opacity: Entity<InputState>,
     pane_corner_radius: Entity<InputState>,
     pane_margin: Entity<InputState>,
     editor_font_size: Entity<InputState>,
@@ -235,39 +236,52 @@ impl SettingsView {
         let browser_search_provider =
             search_provider_select(observed_browser.search_provider.value, window, cx);
         let ui_zoom = ui_zoom_input(window, cx);
-        let pane_corner_radius = geometry_value_input(
+        let pane_inactive_opacity = numeric_value_input(
+            ConfigKey::PaneInactiveOpacity,
+            observed.pane_inactive_opacity.value,
+            0.05,
+            window,
+            cx,
+        );
+        let pane_corner_radius = numeric_value_input(
             ConfigKey::PaneCornerRadius,
             observed.pane_corner_radius.value,
+            1.0,
             window,
             cx,
         );
-        let pane_margin = geometry_value_input(
+        let pane_margin = numeric_value_input(
             ConfigKey::PaneMargin,
             observed.pane_margin.value,
+            1.0,
             window,
             cx,
         );
-        let editor_font_size = geometry_value_input(
+        let editor_font_size = numeric_value_input(
             ConfigKey::EditorFontSize,
             observed.editor_font_size.value,
+            1.0,
             window,
             cx,
         );
-        let pane_border_width = geometry_value_input(
+        let pane_border_width = numeric_value_input(
             ConfigKey::PaneBorderWidth,
             observed.pane_border_width.value,
+            1.0,
             window,
             cx,
         );
-        let widget_corner_radius = geometry_value_input(
+        let widget_corner_radius = numeric_value_input(
             ConfigKey::WidgetCornerRadius,
             observed.widget_corner_radius.value,
+            1.0,
             window,
             cx,
         );
-        let window_corner_radius = geometry_value_input(
+        let window_corner_radius = numeric_value_input(
             ConfigKey::WindowCornerRadius,
             observed.window_corner_radius.value,
+            1.0,
             window,
             cx,
         );
@@ -278,21 +292,27 @@ impl SettingsView {
             browser_hotkey_subscription(&browser_element_selector_hotkey, window, cx),
             search_provider_subscription(&browser_search_provider, window, cx),
             ui_zoom_subscription(&ui_zoom, window, cx),
-            geometry_input_subscription(
+            numeric_input_subscription(
+                &pane_inactive_opacity,
+                ConfigKey::PaneInactiveOpacity,
+                window,
+                cx,
+            ),
+            numeric_input_subscription(
                 &pane_corner_radius,
                 ConfigKey::PaneCornerRadius,
                 window,
                 cx,
             ),
-            geometry_input_subscription(&pane_margin, ConfigKey::PaneMargin, window, cx),
-            geometry_input_subscription(&pane_border_width, ConfigKey::PaneBorderWidth, window, cx),
-            geometry_input_subscription(
+            numeric_input_subscription(&pane_margin, ConfigKey::PaneMargin, window, cx),
+            numeric_input_subscription(&pane_border_width, ConfigKey::PaneBorderWidth, window, cx),
+            numeric_input_subscription(
                 &widget_corner_radius,
                 ConfigKey::WidgetCornerRadius,
                 window,
                 cx,
             ),
-            geometry_input_subscription(
+            numeric_input_subscription(
                 &window_corner_radius,
                 ConfigKey::WindowCornerRadius,
                 window,
@@ -309,6 +329,7 @@ impl SettingsView {
             browser_search_provider,
             ui_zoom,
             observed_ui_zoom: crate::ui_scale::percent(cx),
+            pane_inactive_opacity,
             pane_corner_radius,
             pane_margin,
             editor_font_size,
@@ -452,7 +473,7 @@ impl SettingsView {
         cx.notify();
     }
 
-    fn synchronize_geometry_inputs(
+    fn synchronize_numeric_inputs(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -460,6 +481,12 @@ impl SettingsView {
         let resolved = config::resolved_config(cx);
         if resolved != self.observed {
             self.observed = resolved;
+            synchronize_f32_input(
+                &self.pane_inactive_opacity,
+                resolved.pane_inactive_opacity.value,
+                window,
+                cx,
+            );
             synchronize_f32_input(
                 &self.pane_corner_radius,
                 resolved.pane_corner_radius.value,
@@ -575,7 +602,7 @@ impl SettingsView {
         }
     }
 
-    fn commit_geometry_input(
+    fn commit_numeric_input(
         &mut self,
         key: ConfigKey,
         input: &Entity<InputState>,
@@ -583,14 +610,14 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) {
         let candidate = input.read(cx).value().to_string();
-        let value = match validate_geometry_value(key, &candidate) {
+        let value = match validate_numeric_value(key, &candidate) {
             Ok(value) => value,
             Err(message) => {
                 toast::push(
                     Notification::error(format!("Invalid {}: {message}", key.as_str())),
                     cx,
                 );
-                let effective = geometry_config_value(self.observed, key).to_string();
+                let effective = numeric_config_value(self.observed, key).to_string();
                 input.update(cx, |input, cx| input.set_value(effective, window, cx));
                 return;
             }
@@ -656,7 +683,7 @@ impl SettingsView {
             )
     }
 
-    fn geometry_setting(
+    fn numeric_setting(
         key: ConfigKey,
         title: &'static str,
         description: &'static str,
@@ -737,7 +764,7 @@ impl SettingsView {
                 resolved.animations,
                 cx,
             ),
-            AppearancePageItem::WidgetCornerRadius => Self::geometry_setting(
+            AppearancePageItem::WidgetCornerRadius => Self::numeric_setting(
                 ConfigKey::WidgetCornerRadius,
                 "Widget corner radius",
                 "Rounds every widget: buttons, inputs, tags, menus, dialogs.",
@@ -753,7 +780,7 @@ impl SettingsView {
                 cx,
             ),
             #[cfg(target_os = "linux")]
-            AppearancePageItem::WindowCornerRadius => Self::geometry_setting(
+            AppearancePageItem::WindowCornerRadius => Self::numeric_setting(
                 ConfigKey::WindowCornerRadius,
                 "Window corner radius",
                 "Rounds the frame zz draws with client-side decorations.\
@@ -1022,7 +1049,7 @@ impl SettingsView {
                         Button::new(format!("settings-remove-host-{name}"))
                             .small()
                             .ghost()
-                            .icon(IconName::Delete)
+                            .icon(IconName::Xmark)
                             .tooltip(format!("Remove host ({})", state.label()))
                             .on_click(move |_, _, cx| {
                                 let host_id = remove_mux.read(cx).fleet_hosts().find_map(
@@ -1348,11 +1375,19 @@ impl SettingsView {
                 resolved.pane_gaps,
                 cx,
             )))
+            .child(SettingsStack::titled("Focus").child(Self::numeric_setting(
+                ConfigKey::PaneInactiveOpacity,
+                "Inactive pane opacity",
+                "Visible strength of inactive pane content and chrome (0–1). Set to 1 to disable dimming.",
+                resolved.pane_inactive_opacity,
+                &self.pane_inactive_opacity,
+                cx,
+            )))
             .child(
                 SettingsStack::titled("Frame")
                     .description("Applies only while pane gaps are enabled.")
                     .child(
-                        Self::geometry_setting(
+                        Self::numeric_setting(
                             ConfigKey::PaneMargin,
                             "Pane margin",
                             "Space around each pane on all platforms, in logical pixels (0–32).",
@@ -1363,7 +1398,7 @@ impl SettingsView {
                         .disabled(!gaps),
                     )
                     .child(
-                        Self::geometry_setting(
+                        Self::numeric_setting(
                             ConfigKey::PaneCornerRadius,
                             "Pane corner radius",
                             "Rounds every pane corner on all platforms, in logical pixels (0–32).",
@@ -1374,7 +1409,7 @@ impl SettingsView {
                         .disabled(!gaps),
                     )
                     .child(
-                        Self::geometry_setting(
+                        Self::numeric_setting(
                             ConfigKey::PaneBorderWidth,
                             "Pane border width",
                             "Border width for gapped panes, in logical pixels (0–8). Set to 0 to \
@@ -1398,7 +1433,7 @@ impl SettingsView {
                         "The editor inherits the terminal's mono font family; only the size is \
                          its own.",
                     )
-                    .child(Self::geometry_setting(
+                    .child(Self::numeric_setting(
                         ConfigKey::EditorFontSize,
                         "Font size",
                         "Editor pane type size in logical pixels (8–32).",
@@ -1679,7 +1714,7 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _ = self.ensure_section_state(self.section, window, cx);
-        let resolved = self.synchronize_geometry_inputs(window, cx);
+        let resolved = self.synchronize_numeric_inputs(window, cx);
         let browser = self.synchronize_browser_input(window, cx);
         self.synchronize_ui_zoom_input(window, cx);
         self.synchronize_terminal_editor(window, cx);
@@ -1954,17 +1989,18 @@ fn search_provider_subscription(
     )
 }
 
-fn geometry_value_input(
+fn numeric_value_input(
     key: ConfigKey,
     value: f32,
+    step: f64,
     window: &mut Window,
     cx: &mut Context<SettingsView>,
 ) -> Entity<InputState> {
-    let (min, max) = geometry_range(key);
+    let (min, max) = numeric_range(key);
     cx.new(|cx| {
         InputState::new(window, cx)
             .default_value(value.to_string())
-            .step(1.0)
+            .step(step)
             .min(f64::from(min))
             .max(f64::from(max))
     })
@@ -1999,7 +2035,7 @@ fn ui_zoom_subscription(
     )
 }
 
-fn geometry_input_subscription(
+fn numeric_input_subscription(
     input: &Entity<InputState>,
     key: ConfigKey,
     window: &mut Window,
@@ -2010,7 +2046,7 @@ fn geometry_input_subscription(
         window,
         move |settings, input, event: &InputEvent, window, cx| {
             if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                settings.commit_geometry_input(key, input, window, cx);
+                settings.commit_numeric_input(key, input, window, cx);
             }
         },
     )
@@ -2041,13 +2077,13 @@ fn synchronize_text_input(
     }
 }
 
-fn geometry_range(key: ConfigKey) -> (f32, f32) {
-    key.geometry_range()
-        .expect("every Settings geometry field edits a geometry key")
+fn numeric_range(key: ConfigKey) -> (f32, f32) {
+    key.numeric_range()
+        .expect("every Settings numeric field edits a numeric key")
 }
 
-fn validate_geometry_value(key: ConfigKey, value: &str) -> Result<f32, String> {
-    let (min, max) = geometry_range(key);
+fn validate_numeric_value(key: ConfigKey, value: &str) -> Result<f32, String> {
+    let (min, max) = numeric_range(key);
     let rejected = || format!("enter a number between {min} and {max}");
     let value = value.parse::<f32>().map_err(|_| rejected())?;
     if !value.is_finite() || !(min..=max).contains(&value) {
@@ -2056,8 +2092,9 @@ fn validate_geometry_value(key: ConfigKey, value: &str) -> Result<f32, String> {
     Ok(value)
 }
 
-fn geometry_config_value(config: AppConfig, key: ConfigKey) -> f32 {
+fn numeric_config_value(config: AppConfig, key: ConfigKey) -> f32 {
     match key {
+        ConfigKey::PaneInactiveOpacity => config.pane_inactive_opacity.value,
         ConfigKey::PaneCornerRadius => config.pane_corner_radius.value,
         ConfigKey::PaneMargin => config.pane_margin.value,
         ConfigKey::PaneBorderWidth => config.pane_border_width.value,
@@ -2085,7 +2122,7 @@ fn geometry_config_value(config: AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::AppIcon
         | ConfigKey::ChromePreset
         | ConfigKey::Chrome(_) => {
-            unreachable!("only geometry settings use numeric inputs")
+            unreachable!("only numeric settings use numeric inputs")
         }
     }
 }

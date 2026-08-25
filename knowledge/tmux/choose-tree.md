@@ -9,9 +9,10 @@ timestamp: 2026-07-30T21:21:06Z
 
 # Overview
 
-zz has two distinct navigation surfaces. `focus-sidebar` opens the persistent workspace tree;
-collapsing it parks a narrow rail rather than removing it. The default `C-b s` and `C-b w`
-bindings call this zz-native command directly.
+zz has two distinct navigation surfaces. `focus-sidebar` opens the persistent workspace tree. In
+titlebar mode the tree leaves the layout and the native status bar moves to the top; focusing the
+sidebar raises the same tree as a slideover. The default `C-b s` and `C-b w` bindings call this
+zz-native command.
 
 Every `choose-tree` form and `choose-buffer` opens a tmux-style chooser rendered as a
 daemon-owned native GPUI overlay, not terminal escape content. In
@@ -32,37 +33,43 @@ activate targets in another session, and closes when its underlying data empties
 | `choose-tree -s` | `Windows` | session rows, each expandable through windows to panes |
 | `choose-tree -w` | `Windows` | expanded sessions with window rows, each window expandable to panes |
 
-Supported flags are `-s`, `-w`, `-Z` (zoom), `-t` (target pane), `-f` (format filter),
-`-O` (sort order), and `-r` (reverse). The pin accepts `-s` and `-w` together and gives
-`-s` precedence. These flags change only the initial collapse depth; every form retains the
-complete hierarchy. A default chooser opened from a one-pane source window initially selects that
-window row. Positional command templates are rejected. The accepted sort names are case-insensitive:
+Supported flags are `-s`, `-w`, `-Z` (zoom), `-t` (target pane), `-f` (format filter), `-K`
+(per-row shortcut-key format), `-N` (no preview), `-O` (sort order), and `-r` (reverse). One `-N`
+is already zz's only chooser layout; repeated `-NN`, tmux's large-preview mode, is rejected. The pin
+accepts `-s` and `-w` together and gives `-s` precedence. These flags change only the initial
+collapse depth; every form retains the complete hierarchy. A default chooser opened from a
+one-pane source window initially selects that window row. Positional command templates are
+rejected. The accepted sort names are case-insensitive:
 `activity`, `creation`, `index`/`key`, `modifier`, `name`/`title`, `order`, `size`,
 and `z`. The tree defaults to index order, so `-r` alone reverses it. The same criterion
 sorts sessions, each session's windows, and each window's panes independently.
 
 The filter is evaluated once per pane with complete session/window/pane format context. Windows
 and sessions with no matching descendant are pruned. If nothing matches, zz restores the
-unfiltered tree like tmux; the native overlay does not yet show tmux's
-`filter: no matches` status.
+unfiltered tree like tmux and shows `filter: no matches` above the still-selectable rows. That state
+is recomputed on every full daemon rebuild and survives incremental search and selection updates.
 
 When focused, the sidebar selects and reveals the active pane. A collapsed sidebar is expanded first,
 so the keyboard contract below is the only one. Arrow keys or `hjkl` move and collapse/expand tree
 branches, `g`/`G` jump to the first/last visible row, Enter activates the selected target and
 returns focus to the active pane, `r` opens the existing native rename prompt for a selected session
 or window, and `q`/Escape returns focus without activation. Because `focus-sidebar` initially selects
-the active pane, `r` on a pane row targets its containing window. Row fills appear only while the
-sidebar owns focus: the **keyboard-selected** row takes a washed `background.raised(2)`, while the
-**mux-active** row takes the solid one, so a row that is both reads active. Returning focus to a pane
-removes both fills. The attached session, its active window, and its focused pane still use the theme
+the active pane, `r` on a pane row targets its containing window. Pointer hover, keyboard selection,
+and the focused mux row share the translucent `background.washed(2)` fill; active weight and
+foreground color carry the hierarchy without an opaque second signal. A 1px vertical inset leaves a
+tiny seam between adjacent rounded fills. Returning focus to a pane removes the selected and active
+fills. The attached session, its active window, and its focused pane still use the theme
 foreground for their icons and labels; all sibling nodes use the muted foreground. Indent guides
-below the workspace root follow that same active hierarchy, while the root-to-session guide stays
-neutral. Row labels ellipsis-truncate inside a reserved action gutter, so revealing a row's hover
-actions never reflows the text.
+keep the host-to-session and session-to-window rails neutral; only the active window-to-pane rail
+uses the stronger foreground. Row labels ellipsis-truncate inside a reserved action gutter, so
+revealing a row's hover actions never reflows the text. Host rows reveal one plus button for a new
+session. The final muted Add host row opens the host dialog and highlights only its label on hover.
+Window rows expose one overflow menu with Split right, Split bottom, and Delete; destructive actions
+use the same Tabler Xmark as the rest of the application.
 
-The parked rail is pointer-only: the attached session's windows become tab groups holding their
-panes as tabs, clicking a tab selects that pane, and tooltips carry the window and pane names. It is
-also where the expand toggle lives, since the rail is too narrow for the sidebar's control cluster.
+The settings and sidebar-toggle controls share the leading titlebar cluster. The toggle changes
+between the full-height tree with a bottom status bar and the full-width workspace with a top status
+bar. It opens no action menu.
 
 Pane labels are live metadata rather than manual window names: terminal OSC titles flow from the
 daemon-owned viewport into `PaneSnapshot.title`, while browser `TitleChanged` events use tmux's
@@ -85,7 +92,8 @@ a `depth`, an optional `pane_kind` (`ChooseTreePaneKind::Terminal`/`Browser`/`Ag
 
 In the GPUI overlay these map to: arrow keys or `hjkl` navigate and collapse/expand, Enter or
 double-click activates, `/` and `?` search, `n`/`N` repeat the search, `q`/Escape closes. Custom
-row formats (`-F`), command templates, `-G`/`-h`/`-K`/`-k`/`-N`/`-y`, tagging, previews,
+row formats (`-F`), command templates, `-G`/`-h`/`-k`/`-y`, tagging, previews beyond the
+already-previewless `-N` form,
 kill/swap actions, and `choose-client` are explicitly unsupported.
 
 # choose-buffer
@@ -100,7 +108,10 @@ pastes through the same synchronized-input path as `paste-buffer`, `d` deletes, 
 names and full server-side contents, and `q`/Escape closes. Buffers default to creation order,
 newest first; `-r` alone makes that oldest first. Filters receive the source
 session/window/pane context plus buffer facts, and a zero-match filter falls back to the
-unfiltered chooser. Custom row formats (`-F`), `-K`/`-k`/`-N`/`-y`, tagging, editor
+unfiltered chooser with the same `filter: no matches` status. `-K` expands one shortcut key per row
+and one `-N` selects the already-native previewless layout; repeated `-NN` remains unsupported.
+Both clients reserve a shortcut gutter only when at least one rendered row has a key, so a fully
+keyless list uses the full row width. Custom row formats (`-F`), `-k`/`-y`, tagging, editor
 integration, and custom command templates remain rejected.
 
 # Key files
@@ -109,7 +120,7 @@ integration, and custom command templates remain rejected.
 | --- | --- |
 | `crates/zz-mux/src/command.rs` | `focus_sidebar`, `choose_tree`, and `choose_buffer` validation plus their effects. |
 | `crates/zz-protocol/src/message.rs` | `FocusSidebar`, `ChooseTreeKind`, `ChooseTreeItem`/`State`/`Action`, and choose-buffer types. |
-| `crates/zz/src/workspace/sidebar.rs` | Persistent tree projection, the collapsed rail, focus/reveal lifecycle, vim-style navigation, selection, and activation. |
+| `crates/zz/src/workspace/sidebar.rs` | Persistent tree projection, titlebar-mode slideover, focus/reveal lifecycle, vim-style navigation, selection, and activation. |
 
 # Related
 

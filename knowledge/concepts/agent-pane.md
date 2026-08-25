@@ -24,7 +24,7 @@ JSON blob with a byte cap, which the client deserializes into the shape its redu
 
 | Layer | Representation | Responsibility |
 | --- | --- | --- |
-| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (70) |
+| protocol | `PaneKindSnapshot::Agent(AgentDescriptor)` | Versioned pane identity plus `provider`, `cwd`, and opaque ACP `session_id`; introduced across v22–v32. The live wire version is `PROTOCOL_VERSION` (72) |
 | mux | `PaneKind::Agent(AgentDescriptor)` | Stable layout leaf, targeting, titles, and validated restore-metadata updates |
 | server | one ACP adapter child per pane, on its own thread | Spawns and owns the child (`zz-daemon/src/agent/host.rs`), auto-approves permissions, queues mid-turn prompts, captures bounded worktree summaries, journals standard session updates, adopts the session ID the adapter returns, and coalesces the stream onto a per-pane outbound lane (`fanout.rs`) |
 | app | shared `Entity<AgentController>` | Reduces the daemon's stream into a flat transcript, tracks the per-pane replay cursor, restores selector preferences, normalizes pasted attachments, and turns user gestures into `AgentRequest` sends |
@@ -679,8 +679,8 @@ finds, text before images, so an image copied from a browser (which also offers 
 pastes as that text. Screenshots and image-only boards are unaffected.
 
 The provider picker lives in the pane header. It offers Codex and Claude Code under their vendors'
-marks (the OpenAI and Claude glyphs, Simple Icons artwork beside the Iconoir set that `zz-ui`
-otherwise ships, since Iconoir draws no vendor logos), is disabled during an active turn, and starts
+marks (the OpenAI and Claude glyphs, Simple Icons artwork beside the Tabler set that `zz-ui`
+otherwise ships, since Tabler draws no vendor logos), is disabled during an active turn, and starts
 a fresh provider-bound thread on selection. The mux persists the choice via `set-agent-provider`,
 clears the old opaque session ID, and replaces the daemon-owned ACP child. Retry uses the same
 restart effect. Each replacement receives a new runtime generation, which prevents late output from

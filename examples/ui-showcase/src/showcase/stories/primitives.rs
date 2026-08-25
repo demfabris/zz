@@ -87,7 +87,7 @@ pub(super) fn buttons(cx: &mut Context<Showcase>) -> AnyElement {
                     ))
                     .child(specimen(
                         "ghost · close",
-                        Button::new("i-close").ghost().icon(IconName::Close),
+                        Button::new("i-close").ghost().icon(IconName::Xmark),
                         cx,
                     ))
                     .child(specimen(
@@ -101,10 +101,8 @@ pub(super) fn buttons(cx: &mut Context<Showcase>) -> AnyElement {
                         cx,
                     ))
                     .child(specimen(
-                        "danger delete",
-                        Button::new("i-delete")
-                            .ghost()
-                            .icon(Icon::new(IconName::Delete).text_color(cx.theme().danger)),
+                        "ghost · delete",
+                        Button::new("i-delete").ghost().icon(IconName::Xmark),
                         cx,
                     ))
                     .child(specimen(

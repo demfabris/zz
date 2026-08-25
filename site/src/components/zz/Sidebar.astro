@@ -50,19 +50,14 @@ const PANE_ICON = {
 	picker: 'plus',
 } as const;
 
-// Delete is danger-tinted in the app; every action but the host's ⋯ is hover-only
-// (sidebar.rs:1474, 1652-1669).
 const ACTIONS = {
-	host: [{ icon: 'ellipsis', label: 'Host actions' }],
+	host: [{ icon: 'plus', label: 'New session' }],
 	session: [
 		{ icon: 'plus', label: 'New window' },
-		{ icon: 'trash-2', label: 'Delete session' },
+		{ icon: 'xmark', label: 'Delete session' },
 	],
-	window: [
-		{ icon: 'plus', label: 'Add pane' },
-		{ icon: 'trash-2', label: 'Delete window' },
-	],
-	pane: [{ icon: 'trash-2', label: 'Delete pane' }],
+	window: [{ icon: 'ellipsis', label: 'Window actions' }],
+	pane: [{ icon: 'xmark', label: 'Delete pane' }],
 } as const;
 
 function marker(node: ZzNode): string {
@@ -83,8 +78,20 @@ function marker(node: ZzNode): string {
 					<i />
 				</span>
 				<div class="controls">
-					<Button icon="settings" label="Settings" />
-					<Button icon="panels-top-left" label="Workspace layout" />
+					<Button
+						icon="settings"
+						label="Settings"
+						size="xsmall"
+						iconSize={14}
+						class="titlebar-control"
+					/>
+					<Button
+						icon="panels-top-left"
+						label="Toggle sidebar"
+						size="xsmall"
+						iconSize={14}
+						class="titlebar-control"
+					/>
 				</div>
 			</div>
 
@@ -108,7 +115,7 @@ function marker(node: ZzNode): string {
 					<span class="row-fill" aria-hidden="true" />
 					<span class="marker"><Icon name="square-terminal" size={14} /></span>
 					<span class="label">bash</span>
-					<span class="trailing"><Button icon="trash-2" label="Delete pane" /></span>
+					<span class="trailing"><Button icon="xmark" label="Delete pane" size="xsmall" iconSize={14} class="row-action" /></span>
 				</div>
 			</template>
 
@@ -125,7 +132,7 @@ function marker(node: ZzNode): string {
 					<span class="row-fill" aria-hidden="true" />
 					<span class="marker"><Icon name="globe" size={14} /></span>
 					<span class="label">New Tab</span>
-					<span class="trailing"><Button icon="trash-2" label="Delete pane" /></span>
+					<span class="trailing"><Button icon="xmark" label="Delete pane" size="xsmall" iconSize={14} class="row-action" /></span>
 				</div>
 			</template>
 
@@ -142,12 +149,13 @@ function marker(node: ZzNode): string {
 					<span class="row-fill" aria-hidden="true" />
 					<span class="marker"><Icon name="plus" size={14} /></span>
 					<span class="label">new pane</span>
-					<span class="trailing"><Button icon="trash-2" label="Delete pane" /></span>
+					<span class="trailing"><Button icon="xmark" label="Delete pane" size="xsmall" iconSize={14} class="row-action" /></span>
 				</div>
 			</template>
 		</aside>
 	) : (
-		tree.map((node) => (
+		<Fragment>
+		{tree.map((node) => (
 			<Fragment>
 				<div
 					class="row"
@@ -170,7 +178,13 @@ function marker(node: ZzNode): string {
 					<span class="label">{node.label}</span>
 					<span class="trailing">
 						{ACTIONS[node.kind].map((a) => (
-							<Button icon={a.icon} label={a.label} />
+							<Button
+								icon={a.icon}
+								label={a.label}
+								size="xsmall"
+								iconSize={14}
+								class="row-action"
+							/>
 						))}
 					</span>
 				</div>
@@ -179,14 +193,29 @@ function marker(node: ZzNode): string {
 					<div
 						class="subtree"
 						role="group"
-						data-active={depth > 0 && node.active ? '' : undefined}
+						data-active={depth > 1 && node.active ? '' : undefined}
 					>
 						<span class="guide" style={`left:${17 + depth * 20}px`} aria-hidden="true" />
 						<Self tree={node.children} depth={depth + 1} />
 					</div>
 				) : null}
 			</Fragment>
-		))
+		))}
+		{depth === 0 && (
+			<div
+				class="row"
+				role="treeitem"
+				aria-level={1}
+				data-kind="add-host"
+				data-tone="muted"
+				style="padding-left:8px"
+			>
+				<span class="marker"><Icon name="plus" size={14} /></span>
+				<span class="label">Add host</span>
+				<span class="trailing" />
+			</div>
+		)}
+		</Fragment>
 	)
 }
 
@@ -212,7 +241,7 @@ function marker(node: ZzNode): string {
 		corner-shape: squircle;
 	}
 
-	/* Header strip clears the traffic lights: AppKit owns x = 9..69 (navigation.rs:32). */
+	/* Header strip clears the traffic lights: AppKit owns x = 10.5..70.5. */
 	.strip {
 		position: relative;
 		display: flex;
@@ -224,14 +253,14 @@ function marker(node: ZzNode): string {
 	}
 	.lights {
 		position: absolute;
-		top: 9px;
-		left: 9px;
+		top: 10.5px;
+		left: 10.5px;
 		display: flex;
-		gap: 11px;
+		gap: 9px;
 	}
 	.lights i {
-		width: 12px;
-		height: 12px;
+		width: 14px;
+		height: 14px;
 		border-radius: 50%;
 		corner-shape: round;
 	}
@@ -242,6 +271,14 @@ function marker(node: ZzNode): string {
 		display: flex;
 		align-items: center;
 		gap: 4px;
+	}
+	.controls :global(.titlebar-control .zz-icon) {
+		position: relative;
+		top: 0.5px;
+	}
+	:global(.row-action .zz-icon) {
+		position: relative;
+		top: 0.5px;
 	}
 
 	.body {
@@ -293,14 +330,15 @@ function marker(node: ZzNode): string {
 	/* The highlight is its own layer, inset 4px each side (navigation.rs:246). */
 	.row-fill {
 		position: absolute;
-		top: 0;
-		bottom: 0;
+		top: 1px;
+		bottom: 1px;
 		left: 4px;
 		right: 4px;
 		border-radius: var(--zz-radius);
 		corner-shape: squircle;
 	}
 	.row:hover .row-fill { background: var(--zz-wash-2); }
+	.row[data-kind='add-host']:hover .label { color: var(--zz-fg); }
 
 	.marker {
 		position: relative;
@@ -341,6 +379,5 @@ function marker(node: ZzNode): string {
 		padding-right: 4px;
 		visibility: hidden;
 	}
-	.row[data-kind='host'] .trailing,
 	.row:hover .trailing { visibility: visible; }
 </style>

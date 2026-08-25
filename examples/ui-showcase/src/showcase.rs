@@ -125,9 +125,7 @@ impl StoryId {
             }
             Self::Browser => "Toolbar buttons, the address bar, recent rows, and recovery states.",
             Self::Editor => "The native rope-backed editor with Rust syntax highlighting.",
-            Self::Agent => {
-                "The agent pane header and its flat ACP transcript rows."
-            }
+            Self::Agent => "The agent pane header and its flat ACP transcript rows.",
             Self::Settings => "Navigation buttons, setting cards, rows, badges, and reset actions.",
             Self::Feedback => {
                 "The shared confirmation dialogs, the prompt dialogs, and the four notification tones."

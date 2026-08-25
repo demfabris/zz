@@ -6,31 +6,27 @@ use std::{
 use gpui::{
     AnyElement, App, AppContext as _, Context, CursorStyle, Entity, EventEmitter, FocusHandle,
     Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListSizingBehavior, MouseButton,
-    ParentElement as _, Render, RenderOnce, ScrollStrategy, SharedString,
-    StatefulInteractiveElement as _, Styled as _, UniformListScrollHandle, Window,
-    WindowControlArea, div, img, prelude::FluentBuilder as _, px, uniform_list,
+    ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
+    Styled as _, UniformListScrollHandle, Window, WindowControlArea, div, img,
+    prelude::FluentBuilder as _, px, uniform_list,
 };
 use zz_client::{ChromeAction, SIDEBAR_TABLE};
-use zz_mux::parse_styled_segments;
-use zz_protocol::{
-    Axis, CommandInvocation, MuxSnapshot, PaneId, SessionId, StatusLine, WindowId, WindowSnapshot,
-};
+use zz_protocol::{Axis, CommandInvocation, MuxSnapshot, PaneId, SessionId, WindowId};
 use zz_ui::menu::DropdownMenu as _;
 use zz_ui::navigation::{
-    WORKSPACE_SIDEBAR_DEFAULT_WIDTH as SIDEBAR_DEFAULT_WIDTH, WORKSPACE_SIDEBAR_STATUS_PADDING,
-    WORKSPACE_STRIP_GAP as STRIP_GAP, WORKSPACE_TREE_ACTION_INSET as TREE_ACTION_INSET,
+    WORKSPACE_SIDEBAR_DEFAULT_WIDTH as SIDEBAR_DEFAULT_WIDTH,
+    WORKSPACE_TREE_ACTION_INSET as TREE_ACTION_INSET,
     WORKSPACE_TREE_CONTENT_INSET as TREE_CONTENT_INSET,
     WORKSPACE_TREE_INDENT_WIDTH as TREE_INDENT_WIDTH,
     WORKSPACE_TREE_MARKER_SLOT_WIDTH as TREE_MARKER_SLOT_WIDTH,
-    WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE, sidebar_settings_button,
-    workspace_layout_button, workspace_row_highlight, workspace_sidebar_attention,
-    workspace_sidebar_divider, workspace_sidebar_surface, workspace_sidebar_titlebar,
-    workspace_strip_chip_connector, workspace_strip_group_separator, workspace_strip_session_badge,
-    workspace_tree_disclosure, workspace_tree_marker, workspace_tree_row,
+    WORKSPACE_TREE_NODE_ICON_SIZE as TREE_NODE_ICON_SIZE, workspace_chrome_controls,
+    workspace_layout_button, workspace_settings_button, workspace_sidebar_divider,
+    workspace_sidebar_surface, workspace_sidebar_titlebar, workspace_tree_action_button,
+    workspace_tree_action_row, workspace_tree_disclosure, workspace_tree_marker,
+    workspace_tree_row,
 };
 use zz_ui::{
-    ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Sizable as _,
-    WindowExt as _,
+    ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     menu::{ContextMenuExt as _, PopupMenuItem},
     notification::Notification,
@@ -43,7 +39,7 @@ use zz_ui::{
 
 use crate::{
     agent::{
-        AgentAttention, AgentController,
+        AgentController,
         sound::{AgentAttentionTracker, AgentBadge, AgentPaneStatus},
     },
     config::{frame_content_corner_radius, pane_gaps, settings::SettingsView},
@@ -53,19 +49,18 @@ use crate::{
         hosts::{HostId, HostState},
         nav::{
             HostIndicator, MuxTreeHost, MuxTreeModel, MuxTreePaneKind, MuxTreeWindow, TreeNode,
-            TreeNodeKind, TreeTarget, activate_nav as activate_sidebar, activation_for_target,
-            active_tree_target, expand_path_to, kill_target_command, new_window_command,
-            select_window_command, session_initial, session_label, split_picker_command,
+            TreeNodeKind, TreeTarget, activate_nav as activate_sidebar, active_tree_target,
+            expand_path_to, kill_target_command, new_window_command, split_picker_command,
         },
     },
-    theme::{TmuxStyledText, tmux_styled_text},
     window::{corners::WindowCorners, drag::window_drag_handle},
     workspace::tree::{IndentGuideColors, WorkspaceIndentGuides},
 };
 
 #[cfg(test)]
 use crate::mux::nav::{
-    MuxTreePane, NavActivation as SidebarActivation, rename_prompt_command, select_pane_command,
+    MuxTreePane, NavActivation as SidebarActivation, activation_for_target, rename_prompt_command,
+    select_pane_command, select_window_command, session_label,
 };
 
 const SIDEBAR_MIN_WIDTH: f32 = 160.0;
@@ -74,8 +69,6 @@ const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 8.0;
 const TREE_INDENT_GUIDE_OFFSET: f32 = TREE_MARKER_SLOT_WIDTH / 2.0;
 const TREE_INDENT_GUIDE_PADDING: f32 = 4.0;
 const TREE_KEY_CONTEXT: &str = "WorkspaceTree";
-const STRIP_WINDOW_PILL_HEIGHT: f32 = 24.0;
-const STRIP_WINDOW_PILL_WIDTH: f32 = 104.0;
 
 gpui::actions!(
     workspace_tree,
@@ -173,7 +166,6 @@ pub struct WorkspaceSidebar {
     slideover: bool,
     width: f32,
     local_hostname: SharedString,
-    attention: AgentAttention,
     badges: Rc<BTreeMap<(HostId, PaneId), AgentBadge>>,
     tracker: AgentAttentionTracker<(HostId, PaneId)>,
 }
@@ -199,11 +191,9 @@ impl WorkspaceSidebar {
             sidebar.reconcile_attention(&agents, cx);
         })
         .detach();
-        let attention = agents.read(cx).attention();
         Self {
             mux,
             agents: agents.clone(),
-            attention,
             tree_model: Rc::new(MuxTreeModel::default()),
             visible_entries: Rc::from([]),
             visible_indices: BTreeMap::new(),
@@ -224,10 +214,7 @@ impl WorkspaceSidebar {
         }
     }
 
-    /// The fleet rollup and the per-pane badges land here together: one pass
-    /// over the agent panes feeds the same transition detector that chimes.
     fn reconcile_attention(&mut self, agents: &Entity<AgentController>, cx: &mut Context<Self>) {
-        let attention = agents.read(cx).attention();
         let attached_host = self.mux.read(cx).attached_host();
         let statuses = self.agent_pane_statuses(agents, cx);
         let watched = self.watched_pane(cx).map(|pane| (attached_host, pane));
@@ -238,8 +225,7 @@ impl WorkspaceSidebar {
             .iter()
             .filter_map(|(&pane, &status)| Some((pane, self.tracker.badge(pane, status)?)))
             .collect::<BTreeMap<_, _>>();
-        if attention != self.attention || badges != *self.badges {
-            self.attention = attention;
+        if badges != *self.badges {
             self.badges = Rc::new(badges);
             cx.notify();
         }
@@ -269,80 +255,6 @@ impl WorkspaceSidebar {
         cx.active_window()?;
         let mux = self.mux.read(cx);
         active_pane_for_split(&mux.snapshot(), mux.attached_session())
-    }
-
-    fn render_attention(
-        &self,
-        attached_host: HostId,
-        attached: Option<SessionId>,
-        connected: bool,
-        cx: &App,
-    ) -> Option<AnyElement> {
-        let attention = self.attention;
-        if attention.is_quiet() {
-            return None;
-        }
-        let snapshot = self.mux.read(cx).snapshot();
-        let mut segments: Vec<AnyElement> = Vec::new();
-        let mut segment =
-            |id: &'static str, count: usize, word: &str, color: Hsla, pane: Option<PaneId>| {
-                if count == 0 {
-                    return;
-                }
-                let label = SharedString::from(format!("{count} {word}"));
-                let element = workspace_sidebar_attention(id, label, color, pane.is_some(), cx);
-                segments.push(match pane {
-                    Some(pane) => {
-                        let mux = self.mux.clone();
-                        let owner = session_owning_pane(&snapshot, pane);
-                        element
-                            .on_click(move |_, _, cx| {
-                                if let Some(activation) = activation_for_target(
-                                    attached_host,
-                                    TreeTarget::Pane(pane),
-                                    owner,
-                                    attached_host,
-                                    attached,
-                                    connected,
-                                ) {
-                                    activate_sidebar(&mux, activation, cx);
-                                }
-                            })
-                            .into_any_element()
-                    }
-                    None => element.into_any_element(),
-                });
-            };
-        segment(
-            "sidebar-agents-waiting",
-            attention.waiting,
-            "waiting",
-            cx.theme().warning,
-            attention.waiting_pane,
-        );
-        segment(
-            "sidebar-agents-failed",
-            attention.failed,
-            "failed",
-            cx.theme().danger,
-            attention.failed_pane,
-        );
-        segment(
-            "sidebar-agents-running",
-            attention.running,
-            "running",
-            cx.theme().foreground.muted(),
-            None,
-        );
-        Some(
-            div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(px(8.0))
-                .children(segments)
-                .into_any_element(),
-        )
     }
 
     pub(crate) const fn mode(&self) -> ChromeMode {
@@ -753,215 +665,23 @@ impl WorkspaceSidebar {
             .into_any_element()
     }
 
-    fn render_controls(
-        &self,
-        sidebar: &Entity<Self>,
-        settings_id: &'static str,
-        layout_id: &'static str,
-        cx: &App,
-    ) -> AnyElement {
+    pub(crate) fn render_controls(&self, sidebar: &Entity<Self>, cx: &App) -> AnyElement {
         let settings_sidebar = sidebar.clone();
-        let settings = sidebar_settings_button(settings_id)
+        let settings = workspace_settings_button("workspace-settings")
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
-                let route = settings_sidebar.read(cx).route();
-                settings_sidebar.update(cx, |sidebar, cx| match route {
-                    WorkspaceRoute::App => sidebar.open_settings(window, cx),
-                    WorkspaceRoute::Settings => sidebar.close_settings(window, cx),
-                });
+                settings_sidebar.update(cx, |sidebar, cx| sidebar.open_settings(window, cx));
             });
         let mode_sidebar = sidebar.clone();
-        let split_mux = self.mux.clone();
-        let active_pane = {
-            let mux = self.mux.read(cx);
-            mux.is_connected()
-                .then(|| active_pane_for_split(&mux.snapshot(), mux.attached_session()))
-                .flatten()
-        };
-        let layout = workspace_layout_button(layout_id).dropdown_menu(move |menu, _, _| {
-            let mode_sidebar = mode_sidebar.clone();
-            let right_mux = split_mux.clone();
-            let bottom_mux = split_mux.clone();
-            menu.item(
-                PopupMenuItem::new("Toggle sidebar")
-                    .icon(IconName::PanelLeft)
-                    .on_click(move |_, _, cx| {
-                        mode_sidebar.update(cx, WorkspaceSidebar::toggle_mode);
-                    }),
-            )
-            .item(
-                PopupMenuItem::new("Split right")
-                    .icon(IconName::PanelRight)
-                    .disabled(active_pane.is_none())
-                    .on_click(move |_, _, cx| {
-                        if let Some(pane) = active_pane {
-                            right_mux
-                                .read(cx)
-                                .execute(split_picker_command(pane, Axis::Horizontal));
-                        }
-                    }),
-            )
-            .item(
-                PopupMenuItem::new("Split bottom")
-                    .icon(IconName::PanelBottom)
-                    .disabled(active_pane.is_none())
-                    .on_click(move |_, _, cx| {
-                        if let Some(pane) = active_pane {
-                            bottom_mux
-                                .read(cx)
-                                .execute(split_picker_command(pane, Axis::Vertical));
-                        }
-                    }),
-            )
-        });
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(settings)
-            .when(!crate::profile::profile(cx).fixed_window, |controls| {
-                controls.child(layout)
-            })
-            .into_any_element()
-    }
-
-    pub(crate) fn render_strip_controls(&self, sidebar: &Entity<Self>, cx: &App) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(STRIP_GAP))
-            .child(self.render_controls(
-                sidebar,
-                "workspace-strip-settings",
-                "workspace-strip-toggle",
-                cx,
-            ))
-            .child(workspace_strip_group_separator(cx))
-            .into_any_element()
-    }
-
-    fn render_strip_window_delete(&self, window: WindowId, connected: bool, cx: &App) -> Button {
-        let delete_mux = self.mux.clone();
-        Button::new(("workspace-strip-window-delete", window.0))
-            .ghost()
-            .with_size(px(18.0))
-            .icon(Icon::new(IconName::Delete).text_color(cx.theme().danger))
-            .tooltip("Delete window")
-            .disabled(!connected)
+        let layout = workspace_layout_button("workspace-layout")
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
-                delete_mux
-                    .read(cx)
-                    .execute(kill_target_command(TreeTarget::Window(window)));
-            })
-    }
-
-    pub(crate) fn render_strip_content(&self, cx: &App) -> (AnyElement, AnyElement) {
-        let mux = self.mux.read(cx);
-        let snapshot = mux.snapshot();
-        let attached_host = mux.attached_host();
-        let attached = mux.attached_session();
-        let connected = mux.is_connected();
-
-        let badges = snapshot
-            .sessions
-            .iter()
-            .map(|session| {
-                let label = SharedString::from(session_label(&session.name, session.id));
-                let id = session.id;
-                let attach_mux = self.mux.clone();
-                let badge = node_agent_badge(
-                    &self.tree_model,
-                    &self.badges,
-                    TreeNode::Target(attached_host, TreeTarget::Session(id)),
-                );
-                let chip = workspace_strip_session_badge(
-                    ("workspace-strip-session", id.0),
-                    session_initial(&label),
-                    label,
-                    Some(id) == attached,
-                    connected,
-                    cx,
-                )
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    if let Some(activation) = activation_for_target(
-                        attached_host,
-                        TreeTarget::Session(id),
-                        Some(id),
-                        attached_host,
-                        attached,
-                        connected,
-                    ) {
-                        activate_sidebar(&attach_mux, activation, cx);
-                    }
-                })
-                .into_any_element();
-                with_strip_agent_badge(chip, badge, cx)
-            })
-            .collect::<Vec<_>>();
-
-        let mut pills = Vec::new();
-        if let Some(session) = snapshot
-            .sessions
-            .iter()
-            .find(|session| Some(session.id) == attached)
-        {
-            let focused_window = snapshot.focused_window_for(session);
-            for window in &session.windows {
-                let id = window.id;
-                let select_mux = self.mux.clone();
-                let badge = node_agent_badge(
-                    &self.tree_model,
-                    &self.badges,
-                    TreeNode::Target(attached_host, TreeTarget::Window(id)),
-                );
-                let chip = render_strip_window_pill(
-                    ("workspace-strip-window", id.0),
-                    format!("workspace-strip-window-{}", id.0).into(),
-                    window,
-                    id == focused_window,
-                    connected,
-                    self.render_strip_window_delete(id, connected, cx),
-                    cx,
-                )
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    select_mux.read(cx).execute(select_window_command(id));
-                })
-                .into_any_element();
-                pills.push(with_strip_agent_badge(chip, badge, cx));
-            }
-        }
-
-        let mut chips = Vec::with_capacity((badges.len() + pills.len()) * 2);
-        for chip in badges.into_iter().chain(pills) {
-            if !chips.is_empty() {
-                chips.push(workspace_strip_chip_connector(cx).into_any_element());
-            }
-            chips.push(chip);
-        }
-        let leading = div()
-            .flex()
-            .items_center()
-            .min_w_0()
-            .overflow_hidden()
-            .children(chips)
-            .into_any_element();
-
-        let trailing = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(STRIP_GAP))
-            .children(self.render_attention(attached_host, attached, connected, cx))
-            .children(render_strip_status(mux.status(), cx))
-            .into_any_element();
-
-        (leading, trailing)
+                mode_sidebar.update(cx, WorkspaceSidebar::toggle_mode);
+            });
+        let layout = (!crate::profile::profile(cx).fixed_window).then(|| layout.into_any_element());
+        workspace_chrome_controls(settings, layout).into_any_element()
     }
 }
 
@@ -1040,26 +760,6 @@ fn agent_badge_dot(badge: AgentBadge, cx: &App) -> gpui::Div {
         .bg(agent_badge_color(badge, cx))
 }
 
-/// The strip chips are fixed-size, so the flag rides the leading corner rather
-/// than the trailing one the hover-revealed delete button owns.
-fn with_strip_agent_badge(chip: AnyElement, badge: Option<AgentBadge>, cx: &App) -> AnyElement {
-    let Some(badge) = badge else {
-        return chip;
-    };
-    div()
-        .relative()
-        .flex()
-        .flex_none()
-        .child(chip)
-        .child(
-            agent_badge_dot(badge, cx)
-                .absolute()
-                .top(px(3.0))
-                .left(px(3.0)),
-        )
-        .into_any_element()
-}
-
 fn expand_new_hosts(
     expanded: &mut BTreeSet<TreeNode>,
     previous: &MuxTreeModel,
@@ -1080,13 +780,12 @@ fn expand_new_hosts(
 
 impl Render for WorkspaceSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (model, attached_host, attached, connected) = {
+        let (model, attached_host, attached) = {
             let mux = self.mux.read(cx);
             (
                 MuxTreeModel::from_mux(mux),
                 mux.attached_host(),
                 mux.attached_session(),
-                mux.is_connected(),
             )
         };
         if self.reconcile_tree(model) {
@@ -1102,17 +801,10 @@ impl Render for WorkspaceSidebar {
         } else {
             self.render_navigation(&sidebar, attached_host, attached, window, cx)
         };
-        let status = if settings_route {
-            None
-        } else {
-            let attention = self.render_attention(attached_host, attached, connected, cx);
-            render_status_section(attention, self.mux.read(cx).status(), cx)
-        }
-        .map(IntoElement::into_any_element);
         let controls = if settings_route {
             div().into_any_element()
         } else {
-            self.render_controls(&sidebar, "sidebar-settings", "sidebar-toggle", cx)
+            self.render_controls(&sidebar, cx)
         };
         let titlebar = workspace_sidebar_titlebar("workspace-sidebar-titlebar", controls, cx)
             .window_control_area(WindowControlArea::Drag);
@@ -1121,11 +813,15 @@ impl Render for WorkspaceSidebar {
         } else {
             window_drag_handle("workspace-sidebar-titlebar-drag", titlebar, window, cx)
         };
-        let corners = WindowCorners::for_window(window).left();
+        let corners = if !settings_route && self.mode() == ChromeMode::Sidebar {
+            WindowCorners::for_window(window).left().top()
+        } else {
+            WindowCorners::for_window(window).left()
+        };
         let divider_hidden =
             (settings_route || matches!(self.mode(), ChromeMode::Sidebar)) && pane_gaps(cx);
         let shell = corners.round_div(
-            workspace_sidebar_surface("workspace-sidebar", width, titlebar, navigation, status, cx)
+            workspace_sidebar_surface("workspace-sidebar", width, titlebar, navigation, cx)
                 .bg(crate::theme::chrome_background(cx))
                 .when(divider_hidden, |this| {
                     this.border_color(gpui::transparent_black())
@@ -1168,89 +864,6 @@ impl Render for WorkspaceSidebar {
 impl EventEmitter<SidebarReleaseFocus> for WorkspaceSidebar {}
 impl EventEmitter<SidebarModeChanged> for WorkspaceSidebar {}
 impl EventEmitter<SidebarRouteChanged> for WorkspaceSidebar {}
-
-fn strip_window_label(window: &WindowSnapshot) -> String {
-    let label = parse_styled_segments(&window.status_label)
-        .into_iter()
-        .map(|segment| segment.text)
-        .collect::<String>();
-    if label.is_empty() {
-        format!("{}:{}", window.index, window.name)
-    } else {
-        label
-    }
-}
-
-fn render_strip_window_pill(
-    id: impl Into<gpui::ElementId>,
-    group: SharedString,
-    window: &WindowSnapshot,
-    active: bool,
-    connected: bool,
-    delete: impl IntoElement,
-    cx: &App,
-) -> gpui::Stateful<gpui::Div> {
-    let rest = cx.theme().background.washed(1);
-    let highlight = workspace_row_highlight(cx);
-    let pill_background = if active && connected { highlight } else { rest };
-    let foreground = if active && connected {
-        cx.theme().foreground
-    } else {
-        cx.theme().foreground.muted()
-    };
-    let mut label = tmux_styled_text(&window.status_label, foreground, pill_background, cx);
-    if label.text.is_empty() {
-        let fallback = strip_window_label(window);
-        label = tmux_styled_text(&fallback, foreground, pill_background, cx);
-    }
-    let tooltip = label.text.clone();
-    let tint = label.take_explicit_background_color();
-
-    div()
-        .id(id)
-        .group(group.clone())
-        .relative()
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(2.0))
-        .h(px(STRIP_WINDOW_PILL_HEIGHT))
-        .w(px(STRIP_WINDOW_PILL_WIDTH))
-        .pl(px(10.0))
-        .pr(px(4.0))
-        .rounded(cx.theme().radius)
-        .bg(pill_background)
-        .text_size(rems_from_px(11.0))
-        .text_color(foreground)
-        .when(connected, |this| {
-            this.cursor_pointer().hover(move |this| this.bg(highlight))
-        })
-        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-        .children(tint.map(|tint| {
-            div()
-                .absolute()
-                .inset_0()
-                .rounded(cx.theme().radius)
-                .bg(tint.fill())
-                .group_hover(group.clone(), move |this| this.bg(highlight))
-        }))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label.into_styled_text()),
-        )
-        .child(
-            div()
-                .flex_none()
-                .invisible()
-                .group_hover(group, gpui::Styled::visible)
-                .child(delete),
-        )
-}
 
 #[derive(Clone, Debug)]
 struct VisibleTreeEntry {
@@ -1470,127 +1083,6 @@ struct TreeRowRuntime {
     badges: Rc<BTreeMap<(HostId, PaneId), AgentBadge>>,
 }
 
-#[derive(IntoElement)]
-struct StatusSectionElement {
-    attention: Option<AnyElement>,
-    left: TmuxStyledText,
-    right: TmuxStyledText,
-}
-
-impl RenderOnce for StatusSectionElement {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let left = self.left.into_styled_text();
-        let right = self.right.into_styled_text();
-
-        div()
-            .id("workspace-sidebar-status")
-            .flex()
-            .flex_none()
-            .items_center()
-            .w_full()
-            .gap(px(6.0))
-            .px(px(TREE_CONTENT_INSET))
-            .py(px(WORKSPACE_SIDEBAR_STATUS_PADDING))
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .overflow_hidden()
-            .text_xs()
-            .text_color(cx.theme().foreground.muted())
-            .children(self.attention)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(left),
-            )
-            .child(div().flex_none().whitespace_nowrap().child(right))
-    }
-}
-
-fn render_status_section(
-    attention: Option<AnyElement>,
-    status: &StatusLine,
-    cx: &App,
-) -> Option<StatusSectionElement> {
-    if attention.is_none() && status.left.is_empty() && status.right.is_empty() {
-        return None;
-    }
-    let [left, right] = styled_status_halves(status, cx);
-    Some(StatusSectionElement {
-        attention,
-        left,
-        right,
-    })
-}
-
-#[derive(IntoElement)]
-struct StripStatusElement {
-    left: Option<TmuxStyledText>,
-    right: Option<TmuxStyledText>,
-}
-
-impl RenderOnce for StripStatusElement {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let left = self.left.map(|left| {
-            div()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(left.into_styled_text())
-        });
-        let right = self.right.map(|right| {
-            div()
-                .flex_none()
-                .whitespace_nowrap()
-                .child(right.into_styled_text())
-        });
-
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(STRIP_GAP))
-            .text_xs()
-            .text_color(cx.theme().foreground.muted())
-            .children(left)
-            .children(right)
-    }
-}
-
-fn render_strip_status(status: &StatusLine, cx: &App) -> Option<StripStatusElement> {
-    if status.left.is_empty() && status.right.is_empty() {
-        return None;
-    }
-    let [left, right] = styled_status_halves(status, cx);
-    Some(StripStatusElement {
-        left: (!status.left.is_empty()).then_some(left),
-        right: (!status.right.is_empty()).then_some(right),
-    })
-}
-
-fn styled_status_halves(status: &StatusLine, cx: &App) -> [TmuxStyledText; 2] {
-    let foreground = cx.theme().foreground.muted();
-    let background = cx.theme().background;
-    [&status.left, &status.right].map(|half| tmux_styled_text(half, foreground, background, cx))
-}
-
-fn session_owning_pane(snapshot: &MuxSnapshot, pane: PaneId) -> Option<SessionId> {
-    snapshot
-        .sessions
-        .iter()
-        .find(|session| {
-            session
-                .windows
-                .iter()
-                .any(|window| window.panes.contains_key(&pane))
-        })
-        .map(|session| session.id)
-}
-
 fn render_expanded_navigation(
     entries: &Rc<[VisibleTreeEntry]>,
     scroll_handle: &UniformListScrollHandle,
@@ -1598,11 +1090,12 @@ fn render_expanded_navigation(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let depths: Rc<[usize]> = entries
+    let mut depths = entries
         .iter()
         .map(|entry| usize::from(entry.depth))
-        .collect::<Vec<_>>()
-        .into();
+        .collect::<Vec<_>>();
+    depths.push(0);
+    let depths: Rc<[usize]> = depths.into();
     let active_row = if runtime.active_target.is_some_and(|node| {
         runtime
             .tree_model
@@ -1627,15 +1120,21 @@ fn render_expanded_navigation(
     );
     let row_entries = Rc::clone(entries);
     let row_runtime = runtime.clone();
-    let rows = uniform_list("workspace-tree-rows", entries.len(), move |range, _, cx| {
-        range
-            .filter_map(|index| {
-                row_entries
-                    .get(index)
-                    .map(|entry| render_tree_row(index, entry, &row_runtime, cx))
-            })
-            .collect::<Vec<_>>()
-    })
+    let rows = uniform_list(
+        "workspace-tree-rows",
+        entries.len() + 1,
+        move |range, _, cx| {
+            range
+                .map(|index| {
+                    if let Some(entry) = row_entries.get(index) {
+                        render_tree_row(index, entry, &row_runtime, cx)
+                    } else {
+                        render_add_host_row(cx)
+                    }
+                })
+                .collect::<Vec<_>>()
+        },
+    )
     .size_full()
     .with_sizing_behavior(ListSizingBehavior::Auto)
     .track_scroll(scroll_handle)
@@ -1691,7 +1190,8 @@ fn render_tree_row(
     );
     let active = row_is_active(runtime.active_target, node);
     let selected = runtime.focused && runtime.selected == Some(node);
-    let host_indicator = if matches!(&entry.kind, TreeNodeKind::Host) {
+    let is_host = matches!(&entry.kind, TreeNodeKind::Host);
+    let host_indicator = if is_host {
         runtime
             .tree_model
             .host(node.host())
@@ -1723,6 +1223,17 @@ fn render_tree_row(
                     entry.label.clone()
                 }),
         );
+    let actions = render_node_actions(entry, runtime, cx);
+    let actions = if is_host {
+        div()
+            .flex_none()
+            .invisible()
+            .group_hover(row_group.clone(), gpui::Styled::visible)
+            .child(actions)
+            .into_any_element()
+    } else {
+        actions
+    };
     let trailing = div()
         .flex()
         .items_center()
@@ -1730,7 +1241,7 @@ fn render_tree_row(
         .when_some(host_indicator, |this, indicator| {
             this.child(render_host_indicator(index, indicator, cx))
         })
-        .child(render_node_actions(entry, runtime, cx));
+        .child(actions);
     let marker = render_node_marker(
         entry,
         connected && entry.on_active_path,
@@ -1740,19 +1251,24 @@ fn render_tree_row(
     );
     let marker = if expandable {
         let toggle_sidebar = runtime.sidebar.clone();
-        workspace_tree_disclosure(marker, entry.expanded, row_group.clone(), cx)
-            .id(("workspace-tree-disclosure", index))
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                toggle_sidebar.update(cx, |sidebar, cx| {
-                    sidebar.select_or_toggle_node(node, cx);
-                });
-            })
-            .into_any_element()
+        workspace_tree_disclosure(
+            format!("workspace-tree-disclosure-{}", node.tree_id()),
+            marker,
+            entry.expanded,
+            row_group.clone(),
+            cx,
+        )
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            toggle_sidebar.update(cx, |sidebar, cx| {
+                sidebar.select_or_toggle_node(node, cx);
+            });
+        })
+        .into_any_element()
     } else {
         marker
     };
-    let hover_actions = !matches!(&entry.kind, TreeNodeKind::Host);
+    let hover_actions = !is_host;
     let row = workspace_tree_row(
         ("workspace-tree-row", index),
         entry.depth,
@@ -1789,6 +1305,15 @@ fn render_tree_row(
     render_tree_row_context_menu(row, target, runtime)
 }
 
+fn render_add_host_row(cx: &mut App) -> AnyElement {
+    workspace_tree_action_row("workspace-tree-add-host", 0, IconName::Plus, "Add host", cx)
+        .on_click(move |_, window, cx| {
+            crate::workspace::add_host::open(window, cx);
+            cx.stop_propagation();
+        })
+        .into_any_element()
+}
+
 fn render_host_indicator(index: usize, indicator: HostIndicator, cx: &mut App) -> AnyElement {
     match indicator {
         HostIndicator::Connecting => Spinner::new()
@@ -1808,11 +1333,7 @@ fn render_host_indicator(index: usize, indicator: HostIndicator, cx: &mut App) -
                         window.push_notification(Notification::warning(toast_detail.clone()), cx);
                     })
             })
-            .child(
-                Icon::new(IconName::Close)
-                    .xsmall()
-                    .text_color(cx.theme().danger),
-            )
+            .child(Icon::new(IconName::Xmark).xsmall())
             .into_any_element(),
     }
 }
@@ -1941,27 +1462,31 @@ fn sidebar_hostname(hostname: Option<&str>) -> SharedString {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NodeAction {
-    HostMenu(HostId),
+    NewSession(HostId),
     NewWindow(HostId, SessionId),
-    NewPane(HostId, WindowId, PaneId),
+    WindowLayout(HostId, WindowId, PaneId),
     Delete(HostId, TreeTarget),
 }
 
 fn node_actions(entry: &VisibleTreeEntry) -> Vec<NodeAction> {
     let mut actions = Vec::with_capacity(2);
     match (&entry.kind, entry.node) {
-        (TreeNodeKind::Host, TreeNode::Host(host)) => actions.push(NodeAction::HostMenu(host)),
+        (TreeNodeKind::Host, TreeNode::Host(host)) => actions.push(NodeAction::NewSession(host)),
         (TreeNodeKind::Session, TreeNode::Target(host, TreeTarget::Session(session))) => {
             actions.push(NodeAction::NewWindow(host, session));
+            actions.push(NodeAction::Delete(host, TreeTarget::Session(session)));
         }
         (
             TreeNodeKind::Window { active_pane },
             TreeNode::Target(host, TreeTarget::Window(window)),
-        ) => actions.push(NodeAction::NewPane(host, window, *active_pane)),
+        ) => {
+            actions.push(NodeAction::WindowLayout(host, window, *active_pane));
+            actions.push(NodeAction::Delete(host, TreeTarget::Window(window)));
+        }
+        (TreeNodeKind::Pane { .. }, TreeNode::Target(host, target @ TreeTarget::Pane(_))) => {
+            actions.push(NodeAction::Delete(host, target));
+        }
         _ => {}
-    }
-    if let Some((host, target)) = entry.target() {
-        actions.push(NodeAction::Delete(host, target));
     }
     actions
 }
@@ -1974,12 +1499,12 @@ fn render_node_actions(
     let actions = node_actions(entry)
         .into_iter()
         .map(|action| match action {
-            NodeAction::HostMenu(host) => render_host_actions(host, runtime),
+            NodeAction::NewSession(host) => render_new_session_action(host, runtime, cx),
             NodeAction::NewWindow(host, session) => {
-                render_new_window_action(host, session, runtime)
+                render_new_window_action(host, session, runtime, cx)
             }
-            NodeAction::NewPane(host, window, active_pane) => {
-                render_new_pane_action(host, window, active_pane, runtime)
+            NodeAction::WindowLayout(host, window, active_pane) => {
+                render_window_layout_action(host, window, active_pane, runtime, cx)
             }
             NodeAction::Delete(host, target) => render_delete_action(host, target, runtime, cx),
         })
@@ -1999,81 +1524,22 @@ fn render_node_actions(
         .into_any_element()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HostMenuAction {
-    CloseHost,
-    NewSession,
-    AddHost,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct HostMenuItem {
-    action: HostMenuAction,
-    enabled: bool,
-}
-
-impl HostMenuAction {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::CloseHost => "Close host",
-            Self::NewSession => "New session",
-            Self::AddHost => "Add host",
-        }
-    }
-}
-
-fn host_menu_items(host: HostId, connected: bool) -> Vec<HostMenuItem> {
-    let new_session = HostMenuItem {
-        action: HostMenuAction::NewSession,
-        enabled: connected,
-    };
-    if host == HostId::LOCAL {
-        return vec![
-            new_session,
-            HostMenuItem {
-                action: HostMenuAction::AddHost,
-                enabled: true,
-            },
-        ];
-    }
-    vec![
-        HostMenuItem {
-            action: HostMenuAction::CloseHost,
-            enabled: true,
-        },
-        new_session,
-    ]
-}
-
-fn render_host_actions(host: HostId, runtime: &TreeRowRuntime) -> AnyElement {
-    let tree_host = runtime.tree_model.host(host);
-    let connected = tree_host.is_some_and(MuxTreeHost::connected);
-    let name = SharedString::from(tree_host.map(|host| host.name.clone()).unwrap_or_default());
-    let items = host_menu_items(host, connected);
-    let menu_mux = runtime.mux.clone();
-    Button::new(format!(
-        "sidebar-host-actions-{}",
-        TreeNode::Host(host).tree_id()
-    ))
-    .ghost()
-    .xsmall()
-    .icon(IconName::Ellipsis)
-    .tooltip("Host actions")
-    .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-        items.iter().fold(menu, |menu, item| {
-            let item_mux = menu_mux.clone();
-            let name = name.clone();
-            let action = item.action;
-            menu.item(
-                PopupMenuItem::new(action.label())
-                    .disabled(!item.enabled)
-                    .on_click(move |_, window, cx| match action {
-                        HostMenuAction::CloseHost => close_host(&item_mux, host, &name, cx),
-                        HostMenuAction::NewSession => item_mux.read(cx).new_session(host),
-                        HostMenuAction::AddHost => crate::workspace::add_host::open(window, cx),
-                    }),
-            )
-        })
+fn render_new_session_action(host: HostId, runtime: &TreeRowRuntime, cx: &App) -> AnyElement {
+    let connected = runtime
+        .tree_model
+        .host(host)
+        .is_some_and(MuxTreeHost::connected);
+    let mux = runtime.mux.clone();
+    workspace_tree_action_button(
+        format!("sidebar-new-session-{}", TreeNode::Host(host).tree_id()),
+        IconName::Plus,
+        "New session",
+        !connected,
+        cx,
+    )
+    .on_click(move |_, _, cx| {
+        cx.stop_propagation();
+        mux.read(cx).new_session(host);
     })
     .into_any_element()
 }
@@ -2092,21 +1558,22 @@ fn render_new_window_action(
     host: HostId,
     session: SessionId,
     runtime: &TreeRowRuntime,
+    cx: &App,
 ) -> AnyElement {
+    let connected = runtime
+        .tree_model
+        .host(host)
+        .is_some_and(MuxTreeHost::connected);
     let new_window_mux = runtime.mux.clone();
-    Button::new(format!(
-        "sidebar-new-window-{}",
-        TreeNode::Target(host, TreeTarget::Session(session)).tree_id()
-    ))
-    .ghost()
-    .xsmall()
-    .icon(IconName::Plus)
-    .tooltip("New window")
-    .disabled(
-        !runtime
-            .tree_model
-            .host(host)
-            .is_some_and(MuxTreeHost::connected),
+    workspace_tree_action_button(
+        format!(
+            "sidebar-new-window-{}",
+            TreeNode::Target(host, TreeTarget::Session(session)).tree_id()
+        ),
+        IconName::Plus,
+        "New window",
+        !connected,
+        cx,
     )
     .on_click(move |_, _, cx| {
         cx.stop_propagation();
@@ -2117,31 +1584,56 @@ fn render_new_window_action(
     .into_any_element()
 }
 
-fn render_new_pane_action(
+fn render_window_layout_action(
     host: HostId,
     window: WindowId,
     active_pane: PaneId,
     runtime: &TreeRowRuntime,
+    cx: &App,
 ) -> AnyElement {
-    let mux = runtime.mux.clone();
-    Button::new(format!(
-        "sidebar-add-pane-{}",
-        TreeNode::Target(host, TreeTarget::Window(window)).tree_id()
-    ))
-    .ghost()
-    .xsmall()
-    .icon(IconName::Plus)
-    .tooltip("Add pane")
-    .disabled(
-        !runtime
-            .tree_model
-            .host(host)
-            .is_some_and(MuxTreeHost::connected),
+    let connected = runtime
+        .tree_model
+        .host(host)
+        .is_some_and(MuxTreeHost::connected);
+    let split_right_mux = runtime.mux.clone();
+    let split_bottom_mux = runtime.mux.clone();
+    workspace_tree_action_button(
+        format!(
+            "sidebar-window-layout-{}",
+            TreeNode::Target(host, TreeTarget::Window(window)).tree_id()
+        ),
+        IconName::LayoutColumns,
+        "Window layout",
+        !connected,
+        cx,
     )
-    .on_click(move |_, _, cx| {
-        cx.stop_propagation();
-        mux.read(cx)
-            .execute_on_host(host, split_picker_command(active_pane, Axis::Horizontal));
+    .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+        menu.item(
+            PopupMenuItem::new("Split right")
+                .icon(IconName::PanelRight)
+                .on_click({
+                    let mux = split_right_mux.clone();
+                    move |_, _, cx| {
+                        mux.read(cx).execute_on_host(
+                            host,
+                            split_picker_command(active_pane, Axis::Horizontal),
+                        );
+                    }
+                }),
+        )
+        .item(
+            PopupMenuItem::new("Split bottom")
+                .icon(IconName::PanelBottom)
+                .on_click({
+                    let mux = split_bottom_mux.clone();
+                    move |_, _, cx| {
+                        mux.read(cx).execute_on_host(
+                            host,
+                            split_picker_command(active_pane, Axis::Vertical),
+                        );
+                    }
+                }),
+        )
     })
     .into_any_element()
 }
@@ -2153,23 +1645,23 @@ fn render_delete_action(
     cx: &mut App,
 ) -> AnyElement {
     let delete_mux = runtime.mux.clone();
-    Button::new(format!(
-        "sidebar-delete-{}",
-        TreeNode::Target(host, target).tree_id()
-    ))
-    .ghost()
-    .xsmall()
-    .icon(Icon::new(IconName::Delete).text_color(cx.theme().danger))
-    .tooltip(match target {
-        TreeTarget::Session(_) => "Delete session",
-        TreeTarget::Window(_) => "Delete window",
-        TreeTarget::Pane(_) => "Delete pane",
-    })
-    .disabled(
-        !runtime
-            .tree_model
-            .host(host)
-            .is_some_and(MuxTreeHost::connected),
+    let connected = runtime
+        .tree_model
+        .host(host)
+        .is_some_and(MuxTreeHost::connected);
+    workspace_tree_action_button(
+        format!(
+            "sidebar-delete-{}",
+            TreeNode::Target(host, target).tree_id()
+        ),
+        IconName::Xmark,
+        match target {
+            TreeTarget::Session(_) => "Delete session",
+            TreeTarget::Window(_) => "Delete window",
+            TreeTarget::Pane(_) => "Delete pane",
+        },
+        !connected,
+        cx,
     )
     .on_click(move |_, _, cx| {
         cx.stop_propagation();
@@ -2478,20 +1970,6 @@ mod tests {
     }
 
     #[test]
-    fn attention_owner_resolves_from_the_live_snapshot() {
-        let snapshot = snapshot_with_two_panes();
-        assert_eq!(
-            session_owning_pane(&snapshot, PaneId(101)),
-            Some(SessionId(1))
-        );
-        assert_eq!(
-            session_owning_pane(&snapshot, PaneId(202)),
-            Some(SessionId(1))
-        );
-        assert_eq!(session_owning_pane(&snapshot, PaneId(999)), None);
-    }
-
-    #[test]
     fn agent_badges_bubble_to_every_collapsed_ancestor() {
         let snapshot = snapshot_with_two_panes();
         let model = local_model(&snapshot, Some(SessionId(1)));
@@ -2559,126 +2037,9 @@ mod tests {
     }
 
     #[test]
-    fn strip_chips_name_every_session_even_an_unnamed_one() {
+    fn session_labels_keep_unnamed_sessions_readable() {
         assert_eq!(session_label("builds", SessionId(3)), "builds");
         assert_eq!(session_label("   ", SessionId(3)), "session $3");
-        assert_eq!(session_initial("builds").as_ref(), "B");
-        assert_eq!(session_initial("  research").as_ref(), "R");
-        assert_eq!(session_initial("").as_ref(), "?");
-    }
-
-    #[test]
-    fn strip_window_chips_use_the_engine_window_name() {
-        let snapshot = snapshot_with_two_panes();
-        let window = &snapshot.sessions[0].windows[0];
-        assert_eq!(strip_window_label(window), "2:work");
-        let mut pinned = window.clone();
-        pinned.automatic_rename = false;
-        assert_eq!(strip_window_label(&pinned), "2:work");
-        assert_eq!(
-            strip_window_label(&mux_window(4, 1, "agents", 9)),
-            "1:agents"
-        );
-
-        let mut orphaned = mux_window(5, 3, "scratch", 12);
-        orphaned.panes.clear();
-        assert_eq!(strip_window_label(&orphaned), "3:scratch");
-
-        let mut formatted = window.clone();
-        formatted.status_label = "#[fg=green] 2:formatted* ".to_owned();
-        assert_eq!(strip_window_label(&formatted), " 2:formatted* ");
-        formatted.status_label = "#[bold]".to_owned();
-        assert_eq!(strip_window_label(&formatted), "2:work");
-    }
-
-    #[gpui::test]
-    fn status_render_paths_draw_styled_runs_without_trimming_spaces(cx: &mut TestAppContext) {
-        cx.update(zz_ui::init);
-        let status = StatusLine {
-            left: "  #[fg=red,bold]left  ".to_owned(),
-            right: "#[bg=blue]right  ".to_owned(),
-            ..StatusLine::default()
-        };
-        let cx = cx.add_empty_window();
-
-        cx.update(|_, cx| {
-            let strip = render_strip_status(&status, cx).expect("status strip");
-            let left = strip.left.as_ref().expect("left strip half");
-            let right = strip.right.as_ref().expect("right strip half");
-            assert_eq!(left.text.as_ref(), "  left  ");
-            assert_eq!(right.text.as_ref(), "right  ");
-            assert_eq!(left.highlights.len(), 1);
-            assert_eq!(left.highlights[0].0, 2..8);
-            assert_eq!(
-                left.highlights[0].1.font_weight,
-                Some(gpui::FontWeight::BOLD)
-            );
-            assert_eq!(right.highlights.len(), 1);
-            assert_eq!(right.highlights[0].0, 0..7);
-            assert!(right.highlights[0].1.background_color.is_some());
-
-            let section = render_status_section(None, &status, cx).expect("status section");
-            assert_eq!(section.left.text.as_ref(), "  left  ");
-            assert_eq!(section.right.text.as_ref(), "right  ");
-            assert_eq!(section.left.highlights, left.highlights);
-            assert_eq!(section.right.highlights, right.highlights);
-        });
-
-        cx.draw(
-            gpui::Point::default(),
-            gpui::size(px(320.0), px(40.0)),
-            |_, cx| {
-                render_strip_status(&status, cx)
-                    .expect("status strip")
-                    .into_element()
-            },
-        );
-        cx.draw(
-            gpui::Point::default(),
-            gpui::size(px(320.0), px(40.0)),
-            |_, cx| {
-                render_status_section(None, &status, cx)
-                    .expect("status section")
-                    .into_element()
-            },
-        );
-    }
-
-    #[gpui::test]
-    fn native_status_surfaces_key_on_halves_not_the_rows_authoritative_is_empty(
-        cx: &mut TestAppContext,
-    ) {
-        cx.update(zz_ui::init);
-        let default_shaped = StatusLine {
-            left: "[work] 0:main* ".to_owned(),
-            right: "12:00 21-Aug-26".to_owned(),
-            rows: vec!["[work] 0:main*   12:00".to_owned()],
-            ..StatusLine::default()
-        };
-        let rows_only = StatusLine {
-            rows: vec!["#[align=right]clock".to_owned()],
-            ..StatusLine::default()
-        };
-        let off = StatusLine::default();
-        let cx = cx.add_empty_window();
-
-        cx.update(|_, cx| {
-            assert!(!default_shaped.is_empty());
-            assert!(
-                render_strip_status(&default_shaped, cx).is_some(),
-                "a default daemon publication keeps the native strip"
-            );
-            assert!(render_status_section(None, &default_shaped, cx).is_some());
-
-            assert!(!rows_only.is_empty(), "rows alone mean status is on");
-            assert!(
-                render_strip_status(&rows_only, cx).is_none(),
-                "empty halves never resurrect the native strip"
-            );
-
-            assert!(off.is_empty(), "zero rows mean status off");
-            assert!(render_strip_status(&off, cx).is_none());
-        });
     }
 
     #[test]
@@ -3095,7 +2456,7 @@ mod tests {
 
         assert_eq!(
             actions(TreeNode::Host(remote)),
-            [NodeAction::HostMenu(remote)]
+            [NodeAction::NewSession(remote)]
         );
         assert_eq!(
             actions(TreeNode::Target(remote, TreeTarget::Session(SessionId(9)))),
@@ -3107,7 +2468,7 @@ mod tests {
         assert_eq!(
             actions(TreeNode::Target(remote, TreeTarget::Window(WindowId(21)))),
             [
-                NodeAction::NewPane(remote, WindowId(21), PaneId(303)),
+                NodeAction::WindowLayout(remote, WindowId(21), PaneId(303)),
                 NodeAction::Delete(remote, TreeTarget::Window(WindowId(21))),
             ]
         );
@@ -3121,7 +2482,7 @@ mod tests {
                 TreeTarget::Window(WindowId(11))
             )),
             [
-                NodeAction::NewPane(HostId::LOCAL, WindowId(11), PaneId(202)),
+                NodeAction::WindowLayout(HostId::LOCAL, WindowId(11), PaneId(202)),
                 NodeAction::Delete(HostId::LOCAL, TreeTarget::Window(WindowId(11))),
             ]
         );
@@ -3213,41 +2574,6 @@ mod tests {
             assert!(model.has_pending_bell(node), "missing bell on {node:?}");
         }
         assert!(!model.has_pending_bell(TreeNode::Host(HostId::LOCAL)));
-    }
-
-    #[test]
-    fn the_host_menu_gates_only_the_item_that_needs_a_live_connection() {
-        let remote = host_ids(&["studio"])[0];
-        let item = |action, enabled| HostMenuItem { action, enabled };
-
-        assert_eq!(
-            host_menu_items(remote, true),
-            [
-                item(HostMenuAction::CloseHost, true),
-                item(HostMenuAction::NewSession, true),
-            ]
-        );
-        assert_eq!(
-            host_menu_items(remote, false),
-            [
-                item(HostMenuAction::CloseHost, true),
-                item(HostMenuAction::NewSession, false),
-            ]
-        );
-        assert_eq!(
-            host_menu_items(HostId::LOCAL, true),
-            [
-                item(HostMenuAction::NewSession, true),
-                item(HostMenuAction::AddHost, true),
-            ]
-        );
-        assert_eq!(
-            host_menu_items(HostId::LOCAL, false),
-            [
-                item(HostMenuAction::NewSession, false),
-                item(HostMenuAction::AddHost, true),
-            ]
-        );
     }
 
     #[test]

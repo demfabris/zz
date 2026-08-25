@@ -16,7 +16,7 @@ timestamp: 2026-08-14T00:00:00Z
 
 The GUI process loads the first existing `zz/config` file from the user's platform configuration
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
-closure, parses thirty-two client-local behavior/layout/diagnostic/theme/browser knobs into typed
+closure, parses thirty-three client-local behavior/layout/diagnostic/theme/browser knobs into typed
 `AppConfig` and `BrowserConfig` values, parses the one app-owned ACP key into `AgentConfig`,
 collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
@@ -24,14 +24,14 @@ daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Cli
 of that: validated via `zz_daemon::Endpoint::parse`, published through a dedicated `FleetHosts`
 global (not `AppConfig`, which stays `Copy`), and never forwarded to any daemon.
 Three surfaces write these lines and nothing else: `zz fleet add <name> <ssh-destination>` from the
-CLI, the sidebar host menu's **Add host** dialog, and the inline form in **Settings › Hosts**. The
+CLI, the sidebar's final **Add host** row, and the inline form in **Settings › Hosts**. The
 two GUI fields share the same `parse_add_host` validation and name the entry after the destination's
 host component. The underlying writer replaces an existing `host-<name>` value in place while
 preserving every other byte, comments included; the GUI fields reject a duplicate name before they
 call it. `zz fleet list` prints name and endpoint; `zz fleet remove <name>` deletes every matching
 host line, as does a remote row's **Close host** . which additionally republishes `FleetHosts`
 (`config::remove_fleet_host_live`) so the running fleet drops the machine immediately. There is no bootstrap step, no key pinning, and no daemon-side setup . ssh already owns
-identity. The thirty-two local
+identity. The thirty-three local
 knobs retain `Default`/`Override` provenance. Daemon-owned value grammar deliberately stays in the zz-terminal appearance loader or
 mux `set-option` engine.
 
@@ -78,14 +78,14 @@ candidate exists, edits continue to target the first existing file selected by n
 `chrome-unbind = <table>:<key>` removes one. The allowed tables are `ui`, `sidebar`, `browser`, and
 `terminal`; action names come from `zz_client::ChromeAction`. Keys use the chrome grammar from
 `zz-client`, including `D-` for Command/Super and `S-` for Shift. These directives may appear more
-than once, preserve file order, and stay client-side. They are separate from the thirty-two scalar
+than once, preserve file order, and stay client-side. They are separate from the thirty-three scalar
 knobs below and from the daemon-owned tmux tables in `zz/mux.conf`.
 
 ## Client-local keys
 
-The client-local schema is **thirty-two keys: fifteen switches, six logical-pixel geometry
-controls, four enumerated selectors (theme mode, app icon, chrome preset, and browser search
-engine), one browser-local hotkey, and six chrome colors.**
+The client-local schema is **thirty-three keys: fifteen switches, six logical-pixel geometry
+controls, one pane-opacity factor, four enumerated selectors (theme mode, app icon, chrome preset,
+and browser search engine), one browser-local hotkey, and six chrome colors.**
 
 | Key | Default | Valid range | Consumer |
 | --- | ---: | --- | --- |
@@ -100,6 +100,7 @@ engine), one browser-local hotkey, and six chrome colors.**
 | `experimental-agent-pane` | `false` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
 | `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
+| `pane-inactive-opacity` | `0.7` | `0..=1` | Retained strength of inactive pane content and chrome; `1` disables dimming |
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
 | `pane-border-width` | `1` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
@@ -294,7 +295,13 @@ is built in; the retired `pane-shadow` key produces the normal unsupported-key d
 Split divider visuals disappear in this mode because the gap is the separator, but the unchanged
 16px drag target still resizes the split.
 
-All four pane keys render app-side and therefore apply on every platform. While the effective margin
+`pane-inactive-opacity` is independent of pane gaps. The default `0.7` preserves the previous 30%
+fade. Terminal panes apply it to glyphs and decorations while keeping their background unchanged.
+Browser panes apply it to the toolbar while keeping Chromium page pixels unchanged. Other native
+pane surfaces fade toward the opaque window background. Setting it to `1` removes every inactive
+pane dimming treatment.
+
+All four frame keys render app-side and therefore apply on every platform. While the effective margin
 is zero, window-exposed pane corners keep the larger of the pane radius and derived frame-content
 curve; a nonzero margin detaches panes from the frame, so the pane radius alone shapes all four
 corners. The margin is single-counted everywhere: the layout root insets the window edge by one
@@ -495,15 +502,15 @@ Each page is a column of `SettingsGroup`s (a titled run of cards) rather than a 
 The group is also where a *dependency* is expressed: `SettingCard::disabled` dims a card and lays an
 occluding sheet over it, which is how the Frame group shows that `pane-margin`,
 `pane-corner-radius`, and `pane-border-width` are all inert while `pane-gaps` is off
-(`config` forces them to `0` there). Layout holds the `pane-gaps` switch alone, because it
-is the only row on the page that is always live.
+(`config` forces them to `0` there). Layout holds the `pane-gaps` switch alone. Focus holds the
+always-live inactive-opacity factor.
 
 | Page | Groups |
 | --- | --- |
 | Interface | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`animations`, `widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
-| Panes | **Layout** (`pane-gaps`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
+| Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |
 | Hosts | **Machines** (configured hosts, live connection state, Remove) · **Add host** (an inline ssh destination field) |
 | System | **Tray** (`tray`, only where the profile has one) · **Daemon** (`quit-daemon-on-exit`) · **Diagnostics** (`show-fps`) · **Experimental** (`experimental-editor-pane`, `experimental-agent-pane`, each row present only with its cargo feature). `auto-restart-stale-daemon` is a file key with no Settings row |
 | Multiplexer | Full-file editor for `zz/mux.conf`, with Save and donor-specific **Import tmux…** |
@@ -588,6 +595,9 @@ animations = false
 
 # The toggle uses a 6px margin, 13.5px radius, 1px border, and surface ring.
 pane-gaps = true
+
+# Keep inactive pane content at 70% strength. Set 1 to disable dimming.
+pane-inactive-opacity = 0.7
 
 # Optional explicit chrome overrides
 pane-margin = 8

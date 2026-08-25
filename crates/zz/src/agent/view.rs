@@ -19,10 +19,10 @@ use zz_protocol::{AgentDescriptor, AgentGitSummary, AgentProvider, CommandInvoca
 #[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
-    AGENT_CHROME_CONTROL_HEIGHT, AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentTimeline,
-    AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
-    AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow,
-    TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
+    AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentTimeline, AgentTimelineStore,
+    AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText,
+    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick,
+    agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
     append_timeline_row, fold_timeline_rows, timeline_group_kind,
 };
 use zz_ui::command::palette_shortcut_hint;
@@ -65,9 +65,7 @@ const COMPOSER_OUTER_PADDING: f32 = 12.0;
 const COMPOSER_SECTION_GAP: f32 = 8.0;
 const COMPOSER_INPUT_PADDING_TOP: f32 = 12.0;
 const COMPOSER_INPUT_PADDING_X: f32 = 14.0;
-const COMPOSER_ACTION_SIZE: f32 = 28.0;
 const COMPOSER_MAX_WIDTH: f32 = AGENT_CONTENT_MAX_WIDTH + 2.0;
-const CHROME_BUTTON_HEIGHT: f32 = AGENT_CHROME_CONTROL_HEIGHT;
 /// Labelled chrome pills sit a step under the square icon buttons: the
 /// label carries them, so the box does not have to.
 const CHROME_PILL_HEIGHT: f32 = 24.0;
@@ -1498,13 +1496,10 @@ impl AgentView {
                         ))
                         .child(
                             div().absolute().top(px(-6.0)).right(px(-6.0)).child(
-                                Button::new(format!(
-                                    "agent-attachment-remove-{}-{index}",
-                                    self.pane.0
-                                ))
-                                .ghost()
-                                .xsmall()
-                                .icon(Icon::new(IconName::Close))
+                                Button::compact_icon(
+                                    format!("agent-attachment-remove-{}-{index}", self.pane.0),
+                                    IconName::Xmark,
+                                )
                                 .tooltip("Remove this image")
                                 .on_click(move |_, _, cx| {
                                     remove_view.update(cx, |view, cx| {
@@ -1874,8 +1869,7 @@ impl AgentView {
         view: Entity<Self>,
     ) -> impl IntoElement {
         let enabled = state.connection.accepts_prompt();
-        agent_chrome_icon_button(("agent-session-new", self.pane.0))
-            .icon(IconName::ChatPlus)
+        Button::compact_icon(("agent-session-new", self.pane.0), IconName::ChatPlus)
             .tooltip(if enabled {
                 "Start a new session"
             } else {
@@ -1894,8 +1888,7 @@ impl AgentView {
         view: Entity<Self>,
     ) -> impl IntoElement {
         let enabled = state.session_capabilities.list && state.connection.accepts_prompt();
-        agent_chrome_icon_button(("agent-session-history", self.pane.0))
-            .icon(IconName::History)
+        Button::compact_icon(("agent-session-history", self.pane.0), IconName::History)
             .tooltip(if enabled {
                 "Browse sessions stored by this agent"
             } else if state.session_capabilities.list {
@@ -2126,15 +2119,12 @@ impl AgentView {
                                 )
                                 .when(can_delete && !is_current, |this| {
                                     this.child(
-                                        Button::new(format!(
-                                            "agent-history-delete-{}-{result_index}",
-                                            pane.0
-                                        ))
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(
-                                            Icon::new(IconName::Delete)
-                                                .text_color(cx.theme().danger),
+                                        Button::compact_icon(
+                                            format!(
+                                                "agent-history-delete-{}-{result_index}",
+                                                pane.0
+                                            ),
+                                            IconName::Xmark,
                                         )
                                         .tooltip("Delete this session")
                                         .disabled(loading)
@@ -2669,19 +2659,15 @@ impl AgentView {
         cx: &mut gpui::App,
     ) -> impl IntoElement {
         let can_submit = state.connection.accepts_prompt();
-        let button = Button::new(format!("agent-action-{}", self.pane.0))
-            .small()
-            .size(px(COMPOSER_ACTION_SIZE))
-            .rounded_full();
         let action = match composer_action(
             state.connection.has_active_turn(),
             self.composer_has_content(),
         ) {
             ComposerAction::Send => {
                 let submit_view = view.clone();
-                button
+                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::ArrowUp)
                     .primary()
-                    .icon(IconName::ArrowUp)
+                    .rounded_full()
                     .tooltip("Send message")
                     .disabled(!can_submit || !self.composer_has_content())
                     .on_click(move |_, window, cx| {
@@ -2690,9 +2676,9 @@ impl AgentView {
             }
             ComposerAction::Queue => {
                 let submit_view = view.clone();
-                button
+                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::Plus)
                     .secondary()
-                    .icon(IconName::Plus)
+                    .rounded_full()
                     .tooltip("Queue this as the next turn")
                     .on_click(move |_, window, cx| {
                         submit_view.update(cx, |view, cx| view.submit(window, cx));
@@ -2701,9 +2687,8 @@ impl AgentView {
             ComposerAction::Stop => {
                 let controller = self.controller.clone();
                 let pane = self.pane;
-                button
-                    .danger()
-                    .icon(IconName::Close)
+                Button::compact_icon(format!("agent-action-{}", self.pane.0), IconName::Xmark)
+                    .rounded_full()
                     .tooltip("Stop the current turn")
                     .on_click(move |_, _, cx| {
                         controller.update(cx, |controller, cx| controller.cancel(pane, cx));
@@ -3316,13 +3301,6 @@ fn agent_chrome_button(id: impl Into<ElementId>) -> Button {
         .xsmall()
         .h(px(CHROME_PILL_HEIGHT))
         .px_2()
-}
-
-/// A square icon-only chrome button. The size variant is left at its default
-/// so the glyph comes out at 16px: `size` pins the box, so the variant only
-/// picks the icon here.
-fn agent_chrome_icon_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id).ghost().size(px(CHROME_BUTTON_HEIGHT)).p_0()
 }
 
 fn session_directory_label(cwd: &Path) -> String {

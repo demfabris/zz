@@ -1,12 +1,21 @@
 //! Icons: the glyph set, and the element that draws one.
 //!
-//! The artwork in `assets/icons/` is [Iconoir](https://iconoir.com) regular
-//! (MIT, `assets/icons/LICENSE-ICONOIR`), plus the `openai` and `claude` brand
-//! marks from [Simple Icons](https://simpleicons.org) (CC0-1.0) and the four
-//! hand-drawn `window-*` control glyphs. Iconoir draws only the left panel, so
-//! `panel-right` and `panel-bottom` are `sidebar-collapse` with a mirror and a
-//! rotation baked into the file — lossless, because that glyph's rect is a
-//! true square, so the stroke stays 1.5px on every edge.
+//! The artwork in `assets/icons/` is [Tabler Icons](https://tabler.io/icons)
+//! outline (MIT, `assets/icons/LICENSE-TABLER`): 2px stroke on a 24 grid. File
+//! names stay on the old Lucide/Iconoir paths so no call site moves. The
+//! `openai` and `claude` brand marks are [Simple Icons](https://simpleicons.org)
+//! (CC0-1.0). Names that differ from the file stem: `bot` is `robot`,
+//! `case-sensitive` is `letter-case`, `chat-plus` is `message-plus`,
+//! `circle-user` is `user-circle`, `ellipsis`/`ellipsis-vertical` are `dots`/
+//! `dots-vertical`, `gallery-vertical-end` is `columns-3`, `hard-drive` is
+//! `server`, `info` is `info-circle`, `inspector` is `click`, `layers` is
+//! `stack-2`, `loader` is `loader-2`, `panel-left`/`panels-top-left` are
+//! `layout-sidebar`, `panel-right`/`panel-bottom` are `layout-sidebar-right`/
+//! `layout-bottombar`, `redo-2`/`undo-2` are
+//! `arrow-forward-up`/`arrow-back-up`, `square-terminal` is `terminal-2`,
+//! `triangle-alert` is `alert-triangle`, `window-close` and `xmark` are `x`,
+//! `window-maximize` is `square`, `window-minimize` is `minus`,
+//! `window-restore` is `copy`.
 
 mod assets;
 
@@ -121,6 +130,8 @@ pub enum IconName {
     AppWindow,
     Bell,
     Bot,
+    BrandChrome,
+    Calendar,
     CaseSensitive,
     ChatPlus,
     Check,
@@ -130,11 +141,11 @@ pub enum IconName {
     CircleCheck,
     CircleUser,
     CircleX,
+    Clock,
     Claude,
-    Close,
+    Xmark,
     Copy,
     Cpu,
-    Delete,
     Ellipsis,
     EllipsisVertical,
     ExternalLink,
@@ -149,6 +160,7 @@ pub enum IconName {
     Info,
     Inspector,
     Layers,
+    LayoutColumns,
     LayoutDashboard,
     Loader,
     Minus,
@@ -161,6 +173,7 @@ pub enum IconName {
     PanelsTopLeft,
     Plus,
     Redo2,
+    RobotFace,
     Search,
     Settings,
     SquareTerminal,
@@ -173,6 +186,7 @@ pub enum IconName {
     WindowMaximize,
     WindowMinimize,
     WindowRestore,
+    ZoomIn,
 }
 
 impl IconName {
@@ -186,6 +200,8 @@ impl IconName {
         Self::AppWindow,
         Self::Bell,
         Self::Bot,
+        Self::BrandChrome,
+        Self::Calendar,
         Self::CaseSensitive,
         Self::ChatPlus,
         Self::Check,
@@ -195,11 +211,11 @@ impl IconName {
         Self::CircleCheck,
         Self::CircleUser,
         Self::CircleX,
+        Self::Clock,
         Self::Claude,
-        Self::Close,
+        Self::Xmark,
         Self::Copy,
         Self::Cpu,
-        Self::Delete,
         Self::Ellipsis,
         Self::EllipsisVertical,
         Self::ExternalLink,
@@ -214,6 +230,7 @@ impl IconName {
         Self::Info,
         Self::Inspector,
         Self::Layers,
+        Self::LayoutColumns,
         Self::LayoutDashboard,
         Self::Loader,
         Self::Minus,
@@ -226,6 +243,7 @@ impl IconName {
         Self::PanelsTopLeft,
         Self::Plus,
         Self::Redo2,
+        Self::RobotFace,
         Self::Search,
         Self::Settings,
         Self::SquareTerminal,
@@ -238,6 +256,7 @@ impl IconName {
         Self::WindowMaximize,
         Self::WindowMinimize,
         Self::WindowRestore,
+        Self::ZoomIn,
     ];
 
     /// The icon's asset path, such as `icons/arrow-down.svg`. Resolved through
@@ -253,6 +272,8 @@ impl IconName {
             Self::AppWindow => "icons/app-window.svg",
             Self::Bell => "icons/bell.svg",
             Self::Bot => "icons/bot.svg",
+            Self::BrandChrome => "icons/brand-chrome.svg",
+            Self::Calendar => "icons/calendar.svg",
             Self::CaseSensitive => "icons/case-sensitive.svg",
             Self::ChatPlus => "icons/chat-plus.svg",
             Self::Check => "icons/check.svg",
@@ -262,11 +283,11 @@ impl IconName {
             Self::CircleCheck => "icons/circle-check.svg",
             Self::CircleUser => "icons/circle-user.svg",
             Self::CircleX => "icons/circle-x.svg",
+            Self::Clock => "icons/clock.svg",
             Self::Claude => "icons/claude.svg",
-            Self::Close => "icons/close.svg",
+            Self::Xmark => "icons/xmark.svg",
             Self::Copy => "icons/copy.svg",
             Self::Cpu => "icons/cpu.svg",
-            Self::Delete => "icons/delete.svg",
             Self::Ellipsis => "icons/ellipsis.svg",
             Self::EllipsisVertical => "icons/ellipsis-vertical.svg",
             Self::ExternalLink => "icons/external-link.svg",
@@ -281,6 +302,7 @@ impl IconName {
             Self::Info => "icons/info.svg",
             Self::Inspector => "icons/inspector.svg",
             Self::Layers => "icons/layers.svg",
+            Self::LayoutColumns => "icons/layout-columns.svg",
             Self::LayoutDashboard => "icons/layout-dashboard.svg",
             Self::Loader => "icons/loader.svg",
             Self::Minus => "icons/minus.svg",
@@ -293,6 +315,7 @@ impl IconName {
             Self::PanelsTopLeft => "icons/panels-top-left.svg",
             Self::Plus => "icons/plus.svg",
             Self::Redo2 => "icons/redo-2.svg",
+            Self::RobotFace => "icons/robot-face.svg",
             Self::Search => "icons/search.svg",
             Self::Settings => "icons/settings.svg",
             Self::SquareTerminal => "icons/square-terminal.svg",
@@ -305,6 +328,7 @@ impl IconName {
             Self::WindowMaximize => "icons/window-maximize.svg",
             Self::WindowMinimize => "icons/window-minimize.svg",
             Self::WindowRestore => "icons/window-restore.svg",
+            Self::ZoomIn => "icons/zoom-in.svg",
         }
     }
 }

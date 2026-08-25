@@ -1,13 +1,12 @@
 use gpui::{
     AnyElement, App, Context, DragMoveEvent, Entity, IntoElement, KeyUpEvent, MouseButton, Render,
-    Window, div, prelude::*, px,
-};
-use zz_ui::navigation::{
-    WORKSPACE_STRIP_GAP, WORKSPACE_TREE_ACTION_INSET, WORKSPACE_TREE_CONTENT_INSET,
-    workspace_titlebar_strip,
+    Window, div, prelude::*,
 };
 use zz_ui::shell::{app_shell_surface, app_titlebar_strip};
-use zz_ui::{ActiveTheme as _, Root, WindowControls, draws_window_controls};
+use zz_ui::{
+    ActiveTheme as _, Root, WindowControls, draws_window_controls,
+    navigation::workspace_chrome_controls_width,
+};
 
 #[cfg(target_os = "macos")]
 use crate::macos_app::{CloseWindow, Minimize, Zoom};
@@ -18,7 +17,9 @@ use crate::{
     browser::controller::BrowserController,
     config::{frame_content_corner_radius, resolved_config, settings::OpenSettings},
     diagnostics::fps::app_fps_overlay,
+    mux::client::MuxClient,
     request_window_close,
+    status_bar::{GuiStatusPlacement, render_gui_status_bar},
     window::{corners::WindowCorners, drag::window_drag_handle},
     workspace::{
         AppView, ClosePane,
@@ -36,6 +37,7 @@ pub struct AppShell {
     controller: Entity<BrowserController>,
     agent_controller: Entity<AgentController>,
     sidebar: Entity<WorkspaceSidebar>,
+    mux: Entity<MuxClient>,
     app_fps_meter: Entity<AppFpsMeter>,
 }
 
@@ -48,16 +50,40 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Self {
         let sidebar = workspace.read(cx).sidebar();
+        let mux = workspace.read(cx).mux();
         cx.subscribe(&sidebar, |_, _, _: &SidebarModeChanged, cx| cx.notify())
             .detach();
         cx.subscribe(&sidebar, |_, _, _: &SidebarRouteChanged, cx| cx.notify())
             .detach();
+        let mut status_revision = mux.read(cx).status_revision();
+        let mut snapshot_generation = mux.read(cx).snapshot().generation;
+        let mut attachment = (
+            mux.read(cx).attached_host(),
+            mux.read(cx).attached_session(),
+        );
+        cx.observe(&mux, move |_, mux, cx| {
+            let mux = mux.read(cx);
+            let next_status_revision = mux.status_revision();
+            let next_snapshot_generation = mux.snapshot().generation;
+            let next_attachment = (mux.attached_host(), mux.attached_session());
+            if next_status_revision != status_revision
+                || next_snapshot_generation != snapshot_generation
+                || next_attachment != attachment
+            {
+                status_revision = next_status_revision;
+                snapshot_generation = next_snapshot_generation;
+                attachment = next_attachment;
+                cx.notify();
+            }
+        })
+        .detach();
         let app_fps_meter = cx.new(|cx| AppFpsMeter::new(window, cx));
         Self {
             workspace,
             controller,
             agent_controller,
             sidebar,
+            mux,
             app_fps_meter,
         }
     }
@@ -102,38 +128,42 @@ impl AppShell {
         })
     }
 
-    fn render_workspace_strip(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        let leading = self
-            .sidebar
-            .read(cx)
-            .render_strip_controls(&self.sidebar, cx);
-        let (content, status) = self.sidebar.read(cx).render_strip_content(cx);
-        let trailing = div()
-            .flex()
-            .flex_none()
-            .h_full()
-            .items_center()
-            .gap(px(WORKSPACE_STRIP_GAP))
-            .child(status)
-            .map(|cluster| {
-                if draws_window_controls(window) {
-                    cluster.child(self.window_controls())
-                } else {
-                    cluster.pr(px(
-                        WORKSPACE_TREE_CONTENT_INSET + WORKSPACE_TREE_ACTION_INSET
-                    ))
-                }
-            });
-        let strip = WindowCorners::for_window(window).top().round_div(
-            workspace_titlebar_strip("workspace-strip", leading, content, trailing, cx)
-                .bg(crate::theme::chrome_background(cx)),
-            frame_content_corner_radius(cx),
-        );
-        if crate::profile::profile(cx).fixed_window {
-            strip.into_any_element()
-        } else {
-            window_drag_handle("workspace-strip-drag", strip, window, cx).into_any_element()
+    fn render_status_bar(
+        &self,
+        placement: GuiStatusPlacement,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let status = self.mux.read(cx).status().clone();
+        if placement == GuiStatusPlacement::Bottom && status.is_empty() {
+            return None;
         }
+        let titlebar_controls = (placement == GuiStatusPlacement::Titlebar).then(|| {
+            let has_layout = !crate::profile::profile(cx).fixed_window;
+            let width = workspace_chrome_controls_width(has_layout, window);
+            let controls = self.sidebar.read(cx).render_controls(&self.sidebar, cx);
+            (controls, width)
+        });
+        let controls = (placement == GuiStatusPlacement::Titlebar)
+            .then(|| self.window_controls().into_any_element());
+        let bar = render_gui_status_bar(
+            placement,
+            &status,
+            &self.mux,
+            titlebar_controls,
+            controls,
+            window,
+            cx,
+        );
+        let corners = match placement {
+            GuiStatusPlacement::Bottom => WindowCorners::for_window(window).bottom(),
+            GuiStatusPlacement::Titlebar => WindowCorners::for_window(window).top(),
+        };
+        let bar = corners.round_div(bar, frame_content_corner_radius(cx));
+        if placement == GuiStatusPlacement::Bottom || crate::profile::profile(cx).fixed_window {
+            return Some(bar.into_any_element());
+        }
+        Some(window_drag_handle("gui-status-titlebar-drag", bar, window, cx).into_any_element())
     }
 
     fn render_slideover(&self, cx: &App) -> AnyElement {
@@ -170,19 +200,22 @@ impl Render for AppShell {
             let sidebar = self.sidebar.read(cx);
             (sidebar.route(), sidebar.mode())
         };
-        let (sidebar, titlebar) = match route {
+        let (sidebar, titlebar, bottom) = match route {
             WorkspaceRoute::Settings => (
                 self.sidebar.clone().into_any_element(),
                 self.render_control_strip(window, cx),
+                None,
             ),
             WorkspaceRoute::App => match mode {
                 ChromeMode::Sidebar => (
                     self.sidebar.clone().into_any_element(),
                     self.render_control_strip(window, cx),
+                    self.render_status_bar(GuiStatusPlacement::Bottom, window, cx),
                 ),
                 ChromeMode::Titlebar => (
                     div().into_any_element(),
-                    Some(self.render_workspace_strip(window, cx)),
+                    self.render_status_bar(GuiStatusPlacement::Titlebar, window, cx),
+                    None,
                 ),
             },
         };
@@ -207,6 +240,7 @@ impl Render for AppShell {
             sidebar,
             titlebar,
             self.workspace.clone(),
+            bottom,
             overlays,
         )
         .on_drag_move::<SidebarResizeDrag>(cx.listener(Self::on_sidebar_resize_drag_move))

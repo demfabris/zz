@@ -319,7 +319,7 @@ impl<S: ChooserSpec> Render for Chooser<S> {
         let close = Button::new(S::CLOSE_ID)
             .xsmall()
             .ghost()
-            .icon(IconName::Close)
+            .icon(IconName::Xmark)
             .tooltip("Close")
             .on_click(move |_, _, cx| {
                 S::send(close_mux.read(cx), S::close());

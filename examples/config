@@ -29,6 +29,10 @@
 # Panes are flush and square until pane-gaps turns the card treatment on.
 pane-gaps = false
 
+# Retained strength of inactive pane content and chrome (0..=1). Set 1 to disable
+# dimming.
+pane-inactive-opacity = 0.7
+
 # Pane geometry renders app-side on every platform, in logical pixels, and
 # applies only while pane-gaps is on: pane-corner-radius (0..=32) rounds all
 # four corners of each pane, pane-margin (0..=32) is the single gap between

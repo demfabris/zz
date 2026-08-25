@@ -29,7 +29,7 @@ pub(super) fn render(showcase: &mut Showcase, cx: &mut Context<Showcase>) -> Any
                         "destructive · clear data",
                         Button::new("fb-clear-data")
                             .danger()
-                            .icon(IconName::Delete)
+                            .icon(IconName::Xmark)
                             .label("Clear site data…")
                             .on_click(|_, window, cx| {
                                 window.open_alert_dialog(cx, |alert, _, cx| {

@@ -402,6 +402,7 @@ pub(crate) struct BrowserView {
     address_editing: bool,
     omnibox: OmniboxState,
     focus_handle: FocusHandle,
+    chrome_opacity: f32,
     window_corners: WindowCorners,
     content_bounds: Option<Bounds<Pixels>>,
     page_buttons_down: u8,
@@ -731,6 +732,7 @@ impl BrowserView {
             address_editing: false,
             omnibox: OmniboxState::default(),
             focus_handle,
+            chrome_opacity: 1.0,
             window_corners: WindowCorners::NONE,
             content_bounds: None,
             page_buttons_down: 0,
@@ -823,6 +825,14 @@ impl BrowserView {
     pub(crate) fn set_window_corners(&mut self, corners: WindowCorners, cx: &mut Context<Self>) {
         if self.window_corners != corners {
             self.window_corners = corners;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn set_chrome_dimmed(&mut self, dimmed: bool, opacity: f32, cx: &mut Context<Self>) {
+        let opacity = if dimmed { opacity.clamp(0.0, 1.0) } else { 1.0 };
+        if self.chrome_opacity.to_bits() != opacity.to_bits() {
+            self.chrome_opacity = opacity;
             cx.notify();
         }
     }
@@ -3563,7 +3573,21 @@ impl Render for BrowserView {
                                     .w_full()
                                     .flex_none(),
                             ),
-                        ),
+                        )
+                        .when(self.chrome_opacity < 1.0, |chrome| {
+                            chrome.child(round_div_radii(
+                                div().absolute().inset_0().bg(cx
+                                    .theme()
+                                    .background
+                                    .opaque()
+                                    .opacity(1.0 - self.chrome_opacity)),
+                                Corners {
+                                    bottom_left: px(0.0),
+                                    bottom_right: px(0.0),
+                                    ..content_radii
+                                },
+                            ))
+                        }),
                 )
                 .child(content)
                 .children(omnibox_results)

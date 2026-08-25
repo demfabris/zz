@@ -70,9 +70,9 @@ impl PaneChoice {
     const fn icon(self) -> IconName {
         match self {
             Self::Terminal => IconName::SquareTerminal,
-            Self::Browser => IconName::Globe,
+            Self::Browser => IconName::BrandChrome,
             Self::Editor => IconName::File,
-            Self::Agent => IconName::Bot,
+            Self::Agent => IconName::RobotFace,
         }
     }
 
@@ -352,6 +352,12 @@ mod tests {
             picker_action(&key("escape"), &CHOICES),
             Some(PickerAction::Close)
         );
+    }
+
+    #[test]
+    fn pane_choices_use_pane_specific_icons() {
+        assert_eq!(PaneChoice::Browser.icon(), IconName::BrandChrome);
+        assert_eq!(PaneChoice::Agent.icon(), IconName::RobotFace);
     }
 
     #[test]

@@ -25,7 +25,7 @@ pub use widget::icon::{Icon, IconName};
 
 pub use widget::title_bar::{
     MACOS_TRAFFIC_LIGHT_INSET, MACOS_TRAFFIC_LIGHT_SPAN, TITLE_BAR_HEIGHT, TitleBar,
-    WindowControls, draws_window_controls,
+    WindowControls, draws_window_controls, window_controls_width,
 };
 
 /// The SVG icon assets backing [`IconName`], embedded from `crates/zz-ui/assets`.

@@ -15,7 +15,7 @@ mod view;
 #[cfg(feature = "agent-pane")]
 pub use controller::AgentController;
 #[cfg(feature = "agent-pane")]
-pub(crate) use controller::{AgentAttention, AgentControllerEvent};
+pub(crate) use controller::AgentControllerEvent;
 #[cfg(feature = "agent-pane")]
 pub use preferences::AgentPreferences;
 #[cfg(feature = "agent-pane")]
@@ -24,6 +24,6 @@ pub(crate) use view::AgentView;
 #[cfg(not(feature = "agent-pane"))]
 mod stub;
 #[cfg(not(feature = "agent-pane"))]
-pub(crate) use stub::{AgentAttention, AgentControllerEvent, AgentView};
-#[cfg(not(feature = "agent-pane"))]
 pub use stub::{AgentController, AgentPreferences};
+#[cfg(not(feature = "agent-pane"))]
+pub(crate) use stub::{AgentControllerEvent, AgentView};

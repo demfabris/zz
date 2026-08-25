@@ -20,6 +20,7 @@ mod macos_app;
 mod mux;
 mod pane;
 mod profile;
+mod status_bar;
 mod terminal;
 mod theme;
 /// A desktop menu bar / notification area; the iPad has neither.

@@ -6,10 +6,7 @@ use gpui::{
     App, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Rgba, SharedString,
     StrikethroughStyle, StyledText, UnderlineStyle, Window, px,
 };
-use zz_mux::{
-    TmuxAttributeState, TmuxColour, TmuxStyle, indexed_colour_rgb, parse_styled_segments,
-    parse_tmux_colour,
-};
+use zz_mux::{TmuxAttributeState, TmuxColour, TmuxStyle, indexed_colour_rgb, parse_tmux_colour};
 use zz_terminal::TerminalAppearance;
 use zz_ui::{ActiveTheme as _, Colorize as _, Theme, ThemeColor, ThemeMode};
 
@@ -30,51 +27,14 @@ pub(crate) fn tmux_style_colour(style: &str, key: &str, fallback: Hsla, cx: &App
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TmuxStyledText {
-    pub(crate) text: SharedString,
-    pub(crate) highlights: Vec<(Range<usize>, HighlightStyle)>,
-    background_from_reverse: Vec<bool>,
+    text: SharedString,
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
 }
 
 impl TmuxStyledText {
     pub(crate) fn into_styled_text(self) -> StyledText {
         StyledText::new(self.text).with_highlights(self.highlights)
     }
-
-    pub(crate) fn take_explicit_background_color(&mut self) -> Option<Hsla> {
-        let background = self
-            .highlights
-            .iter()
-            .zip(&self.background_from_reverse)
-            .find_map(|((_, highlight), from_reverse)| {
-                (!from_reverse)
-                    .then_some(highlight.background_color)
-                    .flatten()
-            });
-        for ((_, highlight), from_reverse) in self
-            .highlights
-            .iter_mut()
-            .zip(&self.background_from_reverse)
-        {
-            if !from_reverse {
-                highlight.background_color = None;
-            }
-        }
-        background
-    }
-}
-
-pub(crate) fn tmux_styled_text(
-    value: &str,
-    base_foreground: Hsla,
-    base_background: Hsla,
-    cx: &App,
-) -> TmuxStyledText {
-    tmux_styled_segments_text(
-        &parse_styled_segments(value),
-        base_foreground,
-        base_background,
-        cx,
-    )
 }
 
 pub(crate) fn tmux_styled_segments_text(
@@ -85,21 +45,17 @@ pub(crate) fn tmux_styled_segments_text(
 ) -> TmuxStyledText {
     let mut text = String::new();
     let mut highlights = Vec::new();
-    let mut background_from_reverse = Vec::new();
     for segment in segments {
         let start = text.len();
         text.push_str(&segment.text);
         let highlight = tmux_highlight_style(&segment.style, base_foreground, base_background, cx);
         if highlight != HighlightStyle::default() {
             highlights.push((start..text.len(), highlight));
-            background_from_reverse
-                .push(segment.style.attributes.reverse == TmuxAttributeState::On);
         }
     }
     TmuxStyledText {
         text: text.into(),
         highlights,
-        background_from_reverse,
     }
 }
 
@@ -160,7 +116,7 @@ fn tmux_highlight_style(
     }
 }
 
-pub(crate) fn resolve_tmux_colour(colour: TmuxColour, cx: &App) -> Option<Hsla> {
+fn resolve_tmux_colour(colour: TmuxColour, cx: &App) -> Option<Hsla> {
     match colour {
         TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
             Some(packed_tmux_colour(indexed_colour_rgb(index)))
@@ -661,199 +617,6 @@ fn resolved_chrome_colors(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[gpui::test]
-    fn tmux_runs_map_colours_and_text_attributes(cx: &mut gpui::TestAppContext) {
-        cx.update(zz_ui::init);
-        cx.update(|cx| {
-            let base_foreground = cx.theme().foreground.muted();
-            let base_background = cx.theme().background;
-            let styled = tmux_styled_text(
-                "#[fg=#123456,bg=blue,us=green,bold,italics,underscore,strikethrough,dim]styled",
-                base_foreground,
-                base_background,
-                cx,
-            );
-
-            assert_eq!(styled.text.as_ref(), "styled");
-            assert_eq!(styled.highlights.len(), 1);
-            assert_eq!(styled.highlights[0].0, 0..6);
-            let highlight = styled.highlights[0].1;
-            assert_eq!(highlight.color, Some(packed_tmux_colour(0x12_34_56)));
-            assert_eq!(
-                highlight.background_color,
-                Some(packed_tmux_colour(indexed_colour_rgb(4)))
-            );
-            assert_eq!(highlight.font_weight, Some(FontWeight::BOLD));
-            assert_eq!(highlight.font_style, Some(FontStyle::Italic));
-            assert_eq!(highlight.fade_out, Some(0.5));
-            assert_eq!(
-                highlight.underline.expect("underline").color,
-                Some(packed_tmux_colour(indexed_colour_rgb(2)))
-            );
-            assert!(highlight.strikethrough.is_some());
-        });
-    }
-
-    #[gpui::test]
-    fn tmux_runs_reverse_explicit_and_inherited_colours(cx: &mut gpui::TestAppContext) {
-        cx.update(zz_ui::init);
-        cx.update(|cx| {
-            let base_foreground = cx.theme().foreground.muted();
-            let base_background = cx.theme().background;
-            let explicit = tmux_styled_text(
-                "#[fg=red,bg=blue,reverse]x",
-                base_foreground,
-                base_background,
-                cx,
-            );
-            let explicit = explicit.highlights[0].1;
-            assert_eq!(
-                explicit.color,
-                Some(packed_tmux_colour(indexed_colour_rgb(4)))
-            );
-            assert_eq!(
-                explicit.background_color,
-                Some(packed_tmux_colour(indexed_colour_rgb(1)))
-            );
-
-            let inherited = tmux_styled_text("#[reverse]x", base_foreground, base_background, cx);
-            let inherited = inherited.highlights[0].1;
-            assert_eq!(inherited.color, Some(base_background));
-            assert_eq!(inherited.background_color, Some(base_foreground));
-        });
-    }
-
-    #[gpui::test]
-    fn tmux_reverse_backgrounds_stay_on_runs_instead_of_becoming_pill_tints(
-        cx: &mut gpui::TestAppContext,
-    ) {
-        cx.update(zz_ui::init);
-        cx.update(|cx| {
-            let base_foreground = cx.theme().foreground.muted();
-            let base_background = cx.theme().background.washed(1);
-            for value in ["#[reverse]bell", "#[default reverse]#[push-default]bell"] {
-                let mut styled = tmux_styled_text(value, base_foreground, base_background, cx);
-
-                assert_eq!(styled.take_explicit_background_color(), None);
-                assert_eq!(styled.highlights.len(), 1);
-                assert_eq!(styled.highlights[0].1.color, Some(base_background));
-                assert_eq!(
-                    styled.highlights[0].1.background_color,
-                    Some(base_foreground)
-                );
-            }
-
-            let mut explicit =
-                tmux_styled_text("#[bg=blue]styled", base_foreground, base_background, cx);
-            assert_eq!(
-                explicit.take_explicit_background_color(),
-                Some(packed_tmux_colour(indexed_colour_rgb(4)))
-            );
-            assert_eq!(explicit.highlights[0].1.background_color, None);
-        });
-    }
-
-    #[gpui::test]
-    fn tmux_runs_use_utf8_byte_ranges(cx: &mut gpui::TestAppContext) {
-        cx.update(zz_ui::init);
-        cx.update(|cx| {
-            let styled = tmux_styled_text(
-                "#[fg=red]你",
-                cx.theme().foreground.muted(),
-                cx.theme().background,
-                cx,
-            );
-
-            assert_eq!(styled.text.as_ref(), "你");
-            assert_eq!(styled.highlights.len(), 1);
-            assert_eq!(styled.highlights[0].0, 0..3);
-            assert_eq!(
-                styled.highlights[0].1.color,
-                Some(packed_tmux_colour(indexed_colour_rgb(1)))
-            );
-        });
-    }
-
-    #[gpui::test]
-    fn tmux_runs_reset_to_default_and_map_theme_colours(cx: &mut gpui::TestAppContext) {
-        cx.update(zz_ui::init);
-        cx.update(|cx| {
-            let base_foreground = cx.theme().foreground.muted();
-            let base_background = cx.theme().background;
-            let styled = tmux_styled_text(
-                "plain#[fg=themegreen,bg=themeyellow,bold]styled#[default] reset",
-                base_foreground,
-                base_background,
-                cx,
-            );
-
-            assert_eq!(styled.text.as_ref(), "plainstyled reset");
-            assert_eq!(styled.highlights.len(), 1);
-            assert_eq!(styled.highlights[0].0, 5..11);
-            assert_eq!(styled.highlights[0].1.color, Some(cx.theme().success));
-            assert_eq!(
-                styled.highlights[0].1.background_color,
-                Some(cx.theme().warning)
-            );
-            assert_eq!(styled.highlights[0].1.font_weight, Some(FontWeight::BOLD));
-        });
-    }
-
-    #[gpui::test]
-    fn tmux_runs_default_returns_to_the_pushed_style(cx: &mut gpui::TestAppContext) {
-        cx.update(zz_ui::init);
-        cx.update(|cx| {
-            let styled = tmux_styled_text(
-                "#[fg=themegreen,bold]#[push-default]base#[fg=red]override#[default]base",
-                cx.theme().foreground.muted(),
-                cx.theme().background,
-                cx,
-            );
-
-            assert_eq!(styled.text.as_ref(), "baseoverridebase");
-            assert_eq!(styled.highlights.len(), 3);
-            assert_eq!(styled.highlights[0].0, 0..4);
-            assert_eq!(styled.highlights[0].1.color, Some(cx.theme().success));
-            assert_eq!(styled.highlights[1].0, 4..12);
-            assert_eq!(
-                styled.highlights[1].1.color,
-                Some(packed_tmux_colour(indexed_colour_rgb(1)))
-            );
-            assert_eq!(styled.highlights[2].0, 12..16);
-            assert_eq!(styled.highlights[2].1.color, Some(cx.theme().success));
-            assert!(
-                styled
-                    .highlights
-                    .iter()
-                    .all(|(_, highlight)| highlight.font_weight == Some(FontWeight::BOLD))
-            );
-        });
-    }
-
-    #[gpui::test]
-    fn tmux_runs_leave_unstyled_text_and_spaces_untouched(cx: &mut gpui::TestAppContext) {
-        cx.update(zz_ui::init);
-        cx.update(|cx| {
-            let styled = tmux_styled_text(
-                "  unchanged  ",
-                cx.theme().foreground.muted(),
-                cx.theme().background,
-                cx,
-            );
-            assert_eq!(styled.text.as_ref(), "  unchanged  ");
-            assert!(styled.highlights.is_empty());
-
-            let inherited = tmux_styled_text(
-                "#[fg=default,bg=terminal]inherited",
-                cx.theme().foreground.muted(),
-                cx.theme().background,
-                cx,
-            );
-            assert_eq!(inherited.text.as_ref(), "inherited");
-            assert!(inherited.highlights.is_empty());
-        });
-    }
 
     #[test]
     fn each_root_reads_back_exactly_what_it_wrote() {

@@ -32,7 +32,7 @@ use zz_terminal::{
 use zz_ui::{
     ActiveTheme as _, Colorize as _,
     pane::{
-        INACTIVE_PANE_CONTENT_OPACITY, PaneOverlayCorner, pane_overlay_stack, terminal_link_popup,
+        PaneOverlayCorner, pane_overlay_stack, terminal_link_popup,
         terminal_mode_indicator as terminal_mode_tag, terminal_search_prompt,
         terminal_status_popup,
     },
@@ -481,7 +481,7 @@ pub(crate) struct TerminalView {
     pane: PaneId,
     command_output: bool,
     popup: bool,
-    text_dimmed: bool,
+    text_opacity: f32,
     window_corners: WindowCorners,
     mux: Entity<MuxClient>,
     render_appearance: TerminalRenderAppearance,
@@ -911,7 +911,7 @@ impl TerminalView {
             pane,
             command_output,
             popup,
-            text_dimmed: false,
+            text_opacity: 1.0,
             window_corners: WindowCorners::NONE,
             mux,
             render_appearance: TerminalRenderAppearance::new(appearance),
@@ -1147,9 +1147,10 @@ impl TerminalView {
         }
     }
 
-    pub(crate) fn set_text_dimmed(&mut self, dimmed: bool, cx: &mut Context<Self>) {
-        if self.text_dimmed != dimmed {
-            self.text_dimmed = dimmed;
+    pub(crate) fn set_text_dimmed(&mut self, dimmed: bool, opacity: f32, cx: &mut Context<Self>) {
+        let opacity = if dimmed { opacity.clamp(0.0, 1.0) } else { 1.0 };
+        if self.text_opacity.to_bits() != opacity.to_bits() {
+            self.text_opacity = opacity;
             cx.notify();
         }
     }
@@ -2387,11 +2388,7 @@ impl Render for TerminalView {
                     Rc::clone(&self.row_cache),
                     Arc::clone(&appearance),
                     appearance_hash,
-                    if self.text_dimmed {
-                        INACTIVE_PANE_CONTENT_OPACITY
-                    } else {
-                        1.0
-                    },
+                    self.text_opacity,
                     self.cursor_blink_visible,
                     search_query.is_none().then_some(marked_text).flatten(),
                 )),

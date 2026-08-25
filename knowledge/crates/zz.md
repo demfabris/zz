@@ -71,7 +71,9 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
 `ZZ_SOCKET` supplies the implicit zz endpoint. `TMUX` remains compatibility metadata and never
 selects transport. A tmux-compatible CLI command with `TMUX` but no `ZZ_SOCKET` or explicit socket
 selector exits before it can send a zz handshake to a real tmux server. The installed launchers
-turn bare `zz` into `attach`, which keeps `alias tmux=zz` aligned with tmux's terminal behavior.
+turn bare `zz` into `new-session -A`: an empty daemon creates and attaches session `0`, while a live
+daemon attaches its current session. Explicit `attach` keeps tmux's `no sessions` failure on an
+empty daemon.
 
 Windows has a fifth entrypoint: `RunWinMain`, an `extern "C"` export called by the bundled CEF
 sandbox bootstrap executable (`zz.exe` in a shipped bundle is *not* this crate's binary; it is
@@ -88,9 +90,10 @@ askpass . and only refuses to open the GUI, pointing at the bundle instead.
 # Application configuration (`config/mod.rs`)
 
 On GUI startup, the app loads the first bounded [`zz/config`](/configuration/app-config.md) file from
-the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-two
-client-local knobs: fifteen switches (including `auto-restart-stale-daemon`), six lengths, four
-enumerated selectors, the browser element-selector hotkey, and six `chrome-*` palette overrides.
+the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-three
+client-local knobs: fifteen switches (including `auto-restart-stale-daemon`), six lengths, one pane
+opacity factor, four enumerated selectors, the browser element-selector hotkey, and six `chrome-*`
+palette overrides.
 `AppConfig` stays `Copy`;
 the string-valued browser shortcut is published through a separate `BrowserConfig` global. One
 app-owned Agent key remains . an optional absolute `agent-working-directory` . because the three
@@ -109,7 +112,7 @@ Browser, Terminal, Hosts, System, About:
 |---------|----------|
 | Interface | Theme (`theme-mode`, transient UI zoom, and macOS app-icon pickers), Chroma Colors (presets and `chrome-*` colors), Tweaks (`animations`, `widget-corner-radius`, window blur, and Linux `use-system-titlebar`) |
 | Editor | Editor-pane typography and display controls, when compiled in |
-| Panes | Layout (`pane-gaps`, `pane-margin`, `pane-corner-radius`), Frame (`pane-border-width`); gapped panes carry subtle inset surface rings |
+| Panes | Layout (`pane-gaps`), Focus (`pane-inactive-opacity`), Frame (`pane-margin`, `pane-corner-radius`, `pane-border-width`); gapped panes carry subtle inset surface rings |
 | Multiplexer | Full-file `zz/mux.conf` editor without line numbers, 12px text, Save, and tmux import |
 | Browser | Browser-local shortcuts, beginning with the element-selector hotkey |
 | Terminal | Structured terminal appearance controls with effective values, provenance, palette swatches, and Reset |
@@ -118,8 +121,8 @@ Browser, Terminal, Hosts, System, About:
 | About | Version, build identity, and project links |
 
 A **Devices** pairing page sat in this list until 2026-08-01 and was deleted with QUIC pairing.
-Fleet hosts are plain `host-<name>` config lines, added from Settings › Hosts, the sidebar host
-menu's **Add host** dialog, or `zz fleet add`, and removed by **Close host** or `zz fleet remove`.
+Fleet hosts are plain `host-<name>` config lines, added from Settings › Hosts, the sidebar's final
+**Add host** row, or `zz fleet add`, and removed by **Close host** or `zz fleet remove`.
 
 The ordinary controls, including Terminal, retain the typed comment-preserving writer.
 Multiplexer's code editor saves its bounded file atomically; a clean editor reloads on navigation,
@@ -307,10 +310,12 @@ its half of each adjacent segment with a washed foreground accent, including the
 nested T-junctions. Gapped layouts use the configured border width around each pane, replacing the
 active pane's neutral border color with the same wash. Their half-pixel surface ring matches the
 Settings stack and paints before the pane background without a directional tail.
-`PaneChrome::dimmed` still fades inactive panes behind a scrim
-(`INACTIVE_PANE_FADE` = 0.3 toward the opaque window background).
-The scrim sits above pane content and below overlays, so `SYNC`, the waiting placeholder, and the
-`display-panes` card keep full contrast. Divider drags preview the ratio locally and commit
+`pane-inactive-opacity` controls the retained strength of inactive content from `0` to `1`, with
+`1` disabling dimming. Native picker, editor, Agent, and waiting surfaces use the inverse as a
+theme-background scrim. Terminal panes apply the factor to glyphs and decorations only. Browser
+panes apply it to the toolbar only, leaving terminal backgrounds and Chromium page pixels unchanged.
+Surface scrims sit above pane content and below overlays, so `SYNC`, the waiting placeholder, and
+the `display-panes` card keep full contrast. Divider drags preview the ratio locally and commit
 `InputMessage::ResizeSplit` only on mouse-up.
 Zoomed panes short-circuit straight to `render_layout(&LayoutNode::Pane(zoomed))`, skipping the rest
 of the tree. `AppView` owns the current `CommandPaletteView` and renders it as an absolute overlay;
@@ -523,28 +528,41 @@ imports reload the page.
   each window's `LayoutNode`) from `MuxSnapshot`, renders it as a full-height indented
   `uniform_list` tree whose top strip **is** the window's title bar (traffic lights, drag region,
   double-click), and issues `CommandInvocation`s (`new-session`, `split-picker`,
-  `kill-session`/`kill-window`/`kill-pane`) from hover-revealed row actions. Row labels
+  `kill-session`/`kill-window`/`kill-pane`) from hover-revealed row actions. A host reveals one
+  new-session plus button, the final muted row opens Add host, a session keeps new-window and delete
+  buttons, and a window folds split-right, split-bottom, and delete into one overflow menu. Row labels
   ellipsis-truncate (`min_w_0` + `overflow_hidden` + `text_ellipsis`) inside a **reserved action
   gutter**: the trailing action strip is `flex_none` and merely `invisible()` until hover, so it
   always occupies its `WORKSPACE_TREE_ACTION_INSET` width and rows never reflow when actions appear.
   Both selection signals are the same fill at two strengths, applied in that order: the **keyboard
   cursor** takes a washed `background.raised(2)`, the **mux-active** row the solid one with
   medium weight. A row that is both reads active. The
-  toggle flips `ChromeMode` between the full-height sidebar and a titlebar-height strip, so one of
-  the two always owns the window's left edge and, on macOS, the traffic lights that sit on it. Both
-  chromes start their control cluster at `WORKSPACE_STRIP_TRAFFIC_LIGHT_INSET`, which clears those
-  lights and is derived rather than chosen: `2 * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN`
-  = 88px, so the gap between the cluster and the first control equals the gap between the window
+  toggle flips `ChromeMode` between the full-height sidebar and the native status bar in the
+  titlebar. The chrome starts its first control at `WORKSPACE_CONTROL_TRAFFIC_LIGHT_INSET`, which
+  clears the macOS traffic lights and is derived rather than chosen:
+  `2 * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN`
+  = 81px, so the gap between the cluster and the first control equals the gap between the window
   edge and the cluster. Both numbers are measured, not guessed: on macOS 27 each window button is a
   14x14 frame with origins 23 apart, so three of them span 60. The lights' y falls out of the same
   arithmetic — `(TITLE_BAR_HEIGHT - 14) / 2` — because the platform layer centres them in a
   container of `glyph + 2y`; move the strip height without moving y and the lights stop sharing its
-  centre line.
-  Nothing else claims that strip. Below the tree,
-  `workspace_sidebar_status` renders the daemon-expanded [tmux status line](/tmux/status-line.md):
-  `status-left` and `status-right` stacked as two ellipsized lines, empty halves dropped so `status
-  off` costs no height, and the whole section hidden while collapsed. `MuxClient::status_revision`
-  drives the repaint, because the status moves on `status-interval` rather than with the snapshot. A
+  centre line. The 35px strip and 10.5px traffic-light inset match the compact Cursor reference;
+  settings and the sidebar toggle keep Small 14px icons with a 0.5px optical drop inside 24px
+  controls, the same `Button::compact_icon` geometry used by sidebar row actions and the Agent and
+  browser panes. The toggle changes chrome mode and opens no menu.
+  `status_bar.rs` renders the daemon-expanded [tmux status line](/tmux/status-line.md) once around
+  the whole app shell: full-width at the bottom in sidebar mode, or full-width at the top in
+  titlebar mode. It strips tmux styles and Powerline separators from `status-left`/`status-right`,
+  promotes known semantic glyphs to native icons, and renders the remaining values as borderless
+  UI-font chunks rather than drawing `status-format[]` terminal cells. Window controls use snapshot
+  index/name/focus/zoom/bell state, select by stable id, expose rename/close context actions, keep
+  the active window in the five-control viewport, and put the whole list in an overflow menu. Only
+  the active window gets a theme-derived filled surface; tmux colors, attributes, and formatted
+  window labels have zero GUI authority. Settings and the sidebar toggle remain paired in the top chrome in
+  either mode; in titlebar mode that cluster and the platform window controls compete with the
+  rail. The bottom bar contains only tmux status and disappears with `status off`.
+  `MuxClient::status_revision`, snapshot
+  generation, and attachment drive repaint. A
   `FocusSidebar` control event expands a collapsed sidebar, selects/reveals the active pane, and transfers
   focus; arrows plus `hjkl` and `g/G` navigate the visibly selected row, while Enter or `q`/Escape
   returns focus to the active pane. Plain `r` opens the existing native rename prompt for a selected
@@ -657,8 +675,8 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | `crates/zz/src/browser/recent_pages.rs` | App-owned browser history global . records live visits, merges Chrome imports by newest URL visit, persists `<data dir>/zz/browser/recent-pages`, feeds the browser empty state |
 | `crates/zz/src/browser/element.rs` | `BrowserElement` . custom `Element` painting the CEF BGRA `RenderImage` |
 | `crates/zz/src/browser/controller.rs` | `BrowserController` . owns `BrowserRuntime`, per-pane `BrowserSession`s, latest-frame mailbox, CEF pump scheduling, shutdown state machine |
-| `crates/zz/src/workspace/sidebar.rs` | `WorkspaceSidebar` . one merged tree over every fleet host, each expanding into its own session/window/pane hierarchy; the collapsed rail, CRUD commands (local host only), and the per-host ellipsis menu (remote: Close host, New session; local: New session, Add host) |
-| `crates/zz/src/workspace/add_host.rs` | The **Add host** dialog, opened from the local host row's menu: one `[user@]host[:port]` field, named after its host component, validated through `config::validate_fleet_host`, written and republished by `config::add_fleet_host` |
+| `crates/zz/src/workspace/sidebar.rs` | `WorkspaceSidebar` . one merged tree over every fleet host, each expanding into its own session/window/pane hierarchy; direct sidebar/titlebar modes, host and session creation, target deletion, and the window split/delete overflow menu |
+| `crates/zz/src/workspace/add_host.rs` | The **Add host** dialog, opened from the final muted sidebar row: one `[user@]host[:port]` field, named after its host component, validated through `config::validate_fleet_host`, written and republished by `config::add_fleet_host` |
 | `crates/zz/src/workspace/ssh_prompt.rs` | The dialog ssh's password and host-key questions appear in, opened from `MuxClient`'s `SshPromptRequest` event. Names the ssh destination, quotes ssh's own prompt, and answers a host key with exactly `yes`/`no`; dismissing it parks the host until Reconnect |
 | `crates/zz/src/workspace/tree.rs` | `WorkspaceIndentGuides` . tree row indent-guide painting decoration |
 | `crates/zz/src/chooser/tree.rs` | `ChooseTreeView` . native window/pane chooser overlay |
@@ -671,7 +689,7 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | `crates/zz/src/file_picker.rs` | Feature-gated fuzzy path picker shared by Agent and Editor panes |
 | `crates/zz/src/user_data.rs` | Platform user-data location and user-only file/directory permission policy |
 | `crates/zz/src/bin/zz_helper.rs` | CEF subprocess entrypoint binary |
-| `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; dispatches `app`, maps a bare invocation to `attach`, and execs the sibling bundle executable for tmux commands |
+| `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; dispatches `app`, maps a bare invocation to `new-session -A`, and execs the sibling bundle executable for tmux commands |
 | `crates/zz/src/bin/zz_browser_fixture.rs` | Loopback HTTP fixture server for manual browser smoke tests |
 | `crates/zz/build.rs` | Linux-only: adds `$ORIGIN` rpath so the bundled CEF runtime libraries are found next to the executable |
 | `crates/zz/Cargo.toml` | Declares the `zz`/`zz_helper`/`zz_cli`/`zz_browser_fixture` binaries and the `cef.bundle.helper_name` metadata `zz-xtask` reads |

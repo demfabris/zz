@@ -41,8 +41,6 @@ const TOOL_CONTENT_MAX_HEIGHT: f32 = 360.0;
 const TOOL_CONTENT_MAX_LINES: usize = 2_000;
 const TOOL_CONTENT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_CONTENT_ROW_HEIGHT: f32 = 20.0;
-/// Side of the round jump-to-bottom disc floated over the timeline.
-const JUMP_TO_BOTTOM_SIZE: f32 = 26.0;
 const ACTIVITY_ROW_HEIGHT: f32 = 28.0;
 const ACTIVITY_ROW_FONT_SIZE: f32 = 13.0;
 /// Tall enough to clear the system font's ascent-plus-descent at
@@ -1131,12 +1129,9 @@ impl StickSpring {
 /// layout, or appearing would resize the scroll viewport and move the very
 /// content it is offering to reveal.
 pub fn agent_jump_to_bottom_button(id: impl Into<ElementId>, cx: &App) -> Button {
-    let disc = Button::new(id)
+    let disc = Button::compact_icon(id, IconName::ArrowDown)
         .secondary()
-        .small()
-        .size(px(JUMP_TO_BOTTOM_SIZE))
         .rounded_full()
-        .icon(IconName::ArrowDown)
         .tooltip("Jump to latest");
     if cx.theme().shadow {
         disc.shadow(control_shadow(cx))
@@ -1701,17 +1696,18 @@ fn render_entry(
                             div()
                                 .debug_selector(|| "agent-assistant-copy".to_owned())
                                 .child(
-                                    Button::new(("agent-copy-assistant", id))
-                                        .ghost()
-                                        .xsmall()
-                                        .compact()
-                                        .icon(IconName::Copy)
-                                        .tooltip("Copy message")
-                                        .on_click(move |_, _, cx| {
+                                    Button::compact_icon(
+                                        ("agent-copy-assistant", id),
+                                        IconName::Copy,
+                                    )
+                                    .tooltip("Copy message")
+                                    .on_click(
+                                        move |_, _, cx| {
                                             cx.write_to_clipboard(ClipboardItem::new_string(
                                                 copy.full_text(),
                                             ));
-                                        }),
+                                        },
+                                    ),
                                 ),
                         ),
                     )
@@ -2444,11 +2440,7 @@ fn agent_code_block_chrome(
         )
         .child(
             div().debug_selector(|| "agent-code-copy".to_owned()).child(
-                Button::new(("agent-copy-code", source_offset))
-                    .ghost()
-                    .xsmall()
-                    .compact()
-                    .icon(IconName::Copy)
+                Button::compact_icon(("agent-copy-code", source_offset), IconName::Copy)
                     .tooltip("Copy code")
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
@@ -2721,29 +2713,27 @@ impl MarkdownPlugin for MermaidPlugin {
                     h_flex()
                         .gap_1()
                         .child(
-                            Button::new(("agent-mermaid-copy", source_offset))
-                                .ghost()
-                                .xsmall()
-                                .compact()
-                                .icon(IconName::Copy)
-                                .tooltip("Copy source")
-                                .on_click(move |_, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(
-                                        mermaid_source.clone(),
-                                    ));
-                                }),
+                            Button::compact_icon(
+                                ("agent-mermaid-copy", source_offset),
+                                IconName::Copy,
+                            )
+                            .tooltip("Copy source")
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    mermaid_source.clone(),
+                                ));
+                            }),
                         )
                         .when_some(preview_image, |this, image| {
                             this.child(
-                                Button::new(("agent-mermaid-preview", source_offset))
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
-                                    .icon(IconName::WindowMaximize)
-                                    .tooltip("Open full diagram")
-                                    .on_click(move |_, window, cx| {
-                                        open_render_image_preview(Arc::clone(&image), window, cx);
-                                    }),
+                                Button::compact_icon(
+                                    ("agent-mermaid-preview", source_offset),
+                                    IconName::WindowMaximize,
+                                )
+                                .tooltip("Open full diagram")
+                                .on_click(move |_, window, cx| {
+                                    open_render_image_preview(Arc::clone(&image), window, cx);
+                                }),
                             )
                         }),
                 ),
@@ -3261,10 +3251,6 @@ fn css_color(color: Hsla) -> String {
 
 /// Height of the agent pane's chrome bar, matching the browser toolbar.
 pub const AGENT_HEADER_HEIGHT: f32 = 40.0;
-/// Height of a control that sits evenly inset in a chrome bar, leaving
-/// [`CHROME_GAP`] above and below it.
-pub const AGENT_CHROME_CONTROL_HEIGHT: f32 = AGENT_HEADER_HEIGHT - 2.0 * CHROME_GAP;
-
 /// The agent pane's chrome bar: `leading` and `trailing` pinned to each end.
 /// The bar owns only the height, the inset, and the rule beneath it.
 pub fn agent_pane_header(

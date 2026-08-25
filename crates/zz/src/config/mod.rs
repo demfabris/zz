@@ -54,6 +54,9 @@ const DEFAULT_WINDOW_CORNER_RADIUS: f32 = 13.5;
 pub(crate) const WINDOW_FRAME_BORDER_SIZE: Pixels = px(1.0);
 
 const DEFAULT_PANE_GAPS: bool = false;
+const DEFAULT_PANE_INACTIVE_OPACITY: f32 = 0.7;
+const MIN_PANE_INACTIVE_OPACITY: f32 = 0.0;
+const MAX_PANE_INACTIVE_OPACITY: f32 = 1.0;
 const DEFAULT_PANE_CORNER_RADIUS: f32 = DEFAULT_WINDOW_CORNER_RADIUS;
 const DEFAULT_PANE_MARGIN: f32 = 6.0;
 const DEFAULT_PANE_BORDER_WIDTH: f32 = 1.0;
@@ -129,6 +132,7 @@ pub enum ConfigKey {
     ExperimentalAgentPane,
     ExperimentalEditorPane,
     PaneGaps,
+    PaneInactiveOpacity,
     PaneCornerRadius,
     PaneMargin,
     PaneBorderWidth,
@@ -161,6 +165,7 @@ impl ConfigKey {
             Self::ExperimentalAgentPane => "experimental-agent-pane",
             Self::ExperimentalEditorPane => "experimental-editor-pane",
             Self::PaneGaps => "pane-gaps",
+            Self::PaneInactiveOpacity => "pane-inactive-opacity",
             Self::PaneCornerRadius => "pane-corner-radius",
             Self::PaneMargin => "pane-margin",
             Self::PaneBorderWidth => "pane-border-width",
@@ -193,6 +198,7 @@ impl ConfigKey {
             "experimental-agent-pane" => Some(Self::ExperimentalAgentPane),
             "experimental-editor-pane" => Some(Self::ExperimentalEditorPane),
             "pane-gaps" => Some(Self::PaneGaps),
+            "pane-inactive-opacity" => Some(Self::PaneInactiveOpacity),
             "pane-corner-radius" => Some(Self::PaneCornerRadius),
             "pane-margin" => Some(Self::PaneMargin),
             "pane-border-width" => Some(Self::PaneBorderWidth),
@@ -212,10 +218,13 @@ impl ConfigKey {
         }
     }
 
-    /// The inclusive range of logical pixels this key accepts, or `None` for a
-    /// key that is not a geometry value.
-    pub const fn geometry_range(self) -> Option<(f32, f32)> {
+    /// The inclusive range this numeric key accepts, or `None` for a key that
+    /// is not numeric.
+    pub const fn numeric_range(self) -> Option<(f32, f32)> {
         match self {
+            Self::PaneInactiveOpacity => {
+                Some((MIN_PANE_INACTIVE_OPACITY, MAX_PANE_INACTIVE_OPACITY))
+            }
             Self::PaneMargin => Some((0.0, MAX_PANE_MARGIN)),
             Self::PaneCornerRadius => Some((0.0, MAX_PANE_CORNER_RADIUS)),
             Self::PaneBorderWidth => Some((0.0, MAX_PANE_BORDER_WIDTH)),
@@ -301,6 +310,7 @@ pub struct AppConfig {
     pub experimental_agent_pane: ConfigValue<bool>,
     pub experimental_editor_pane: ConfigValue<bool>,
     pub pane_gaps: ConfigValue<bool>,
+    pub pane_inactive_opacity: ConfigValue<f32>,
     pub pane_corner_radius: ConfigValue<f32>,
     pub pane_margin: ConfigValue<f32>,
     pub pane_border_width: ConfigValue<f32>,
@@ -335,6 +345,7 @@ impl Default for AppConfig {
             experimental_agent_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_AGENT_PANE),
             experimental_editor_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_EDITOR_PANE),
             pane_gaps: ConfigValue::from_default(DEFAULT_PANE_GAPS),
+            pane_inactive_opacity: ConfigValue::from_default(DEFAULT_PANE_INACTIVE_OPACITY),
             pane_corner_radius: ConfigValue::from_default(DEFAULT_PANE_CORNER_RADIUS),
             pane_margin: ConfigValue::from_default(DEFAULT_PANE_MARGIN),
             pane_border_width: ConfigValue::from_default(DEFAULT_PANE_BORDER_WIDTH),
@@ -374,6 +385,7 @@ impl AppConfig {
             ConfigKey::EditorVimMode => Some(&mut self.editor_vim_mode),
             ConfigKey::BrowserEgress => Some(&mut self.browser_egress),
             ConfigKey::WindowCornerRadius
+            | ConfigKey::PaneInactiveOpacity
             | ConfigKey::PaneCornerRadius
             | ConfigKey::PaneMargin
             | ConfigKey::PaneBorderWidth
@@ -550,9 +562,10 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
 
     log::info!(
         target: "zz::config",
-        "application configuration path={} pane_gaps={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} agent_working_directory={:?} daemon_override_entries={}",
+        "application configuration path={} pane_gaps={} pane_inactive_opacity={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} agent_working_directory={:?} daemon_override_entries={}",
         path.display(),
         parsed.config.pane_gaps.value,
+        parsed.config.pane_inactive_opacity.value,
         parsed.config.pane_corner_radius.value,
         parsed.config.pane_margin.value,
         parsed.config.pane_border_width.value,
@@ -675,6 +688,10 @@ fn content_corner_radius(window_radius: Pixels) -> Pixels {
 
 pub(crate) fn pane_gaps(cx: &App) -> bool {
     resolved_config(cx).pane_gaps.value
+}
+
+pub(crate) fn pane_inactive_opacity(cx: &App) -> f32 {
+    resolved_config(cx).pane_inactive_opacity.value
 }
 
 pub(crate) fn pane_margin(cx: &App) -> Pixels {
@@ -1367,6 +1384,7 @@ fn parse_config(source: &str) -> ParsedConfig {
 
         let target = match key {
             ConfigKey::WindowCornerRadius => &mut parsed.config.window_corner_radius,
+            ConfigKey::PaneInactiveOpacity => &mut parsed.config.pane_inactive_opacity,
             ConfigKey::PaneCornerRadius => &mut parsed.config.pane_corner_radius,
             ConfigKey::PaneMargin => &mut parsed.config.pane_margin,
             ConfigKey::PaneBorderWidth => &mut parsed.config.pane_border_width,
@@ -1399,9 +1417,9 @@ fn parse_config(source: &str) -> ParsedConfig {
         target.provenance = ConfigProvenance::Override;
 
         let range = key
-            .geometry_range()
-            .expect("every key reaching here is a geometry value");
-        match parse_geometry_value(value, range) {
+            .numeric_range()
+            .expect("every key reaching here is a numeric value");
+        match parse_numeric_value(key, value, range) {
             Ok(value) => target.value = value,
             Err(message) => parsed.diagnostics.push(ConfigDiagnostic {
                 line: line_number,
@@ -1607,17 +1625,20 @@ pub(crate) fn normalize_browser_hotkey(value: &str) -> Result<String, String> {
     Ok(hotkey.to_string())
 }
 
-fn parse_geometry_value(value: &str, (min, max): (f32, f32)) -> Result<f32, String> {
+fn parse_numeric_value(key: ConfigKey, value: &str, (min, max): (f32, f32)) -> Result<f32, String> {
+    let unit = if key == ConfigKey::PaneInactiveOpacity {
+        ""
+    } else {
+        " logical pixels"
+    };
     let value = value
         .parse::<f32>()
-        .map_err(|_| "expected a number of logical pixels".to_owned())?;
+        .map_err(|_| format!("expected a number{unit}"))?;
     if !value.is_finite() {
         return Err("value must be finite".to_owned());
     }
     if !(min..=max).contains(&value) {
-        return Err(format!(
-            "value must be between {min} and {max} logical pixels"
-        ));
+        return Err(format!("value must be between {min} and {max}{unit}"));
     }
     Ok(value)
 }
@@ -2447,6 +2468,7 @@ mod tests {
             "\
              # $XDG_CONFIG_HOME/zz/config\n\
              pane-gaps = true\n\
+             pane-inactive-opacity = 0.85\n\
              pane-corner-radius = 9 # inline comments are allowed\n\
              pane-margin = 6\n\
              pane-border-width = 2.5\n\
@@ -2495,11 +2517,16 @@ mod tests {
             ConfigProvenance::Override
         );
         assert!(parsed.config.pane_gaps.value);
+        assert_f32_eq(parsed.config.pane_inactive_opacity.value, 0.85);
         assert_f32_eq(parsed.config.pane_corner_radius.value, 9.0);
         assert_f32_eq(parsed.config.pane_margin.value, 6.0);
         assert_f32_eq(parsed.config.pane_border_width.value, 2.5);
         assert_eq!(
             parsed.config.pane_gaps.provenance,
+            ConfigProvenance::Override
+        );
+        assert_eq!(
+            parsed.config.pane_inactive_opacity.provenance,
             ConfigProvenance::Override
         );
         assert_eq!(
@@ -3325,11 +3352,13 @@ mod tests {
     }
 
     #[test]
-    fn parser_accepts_a_tmux_spelled_switch_and_validates_geometry() {
-        let parsed = parse_config("pane-gaps = yes\npane-border-width = 9\n");
+    fn parser_accepts_a_tmux_spelled_switch_and_validates_numeric_values() {
+        let parsed =
+            parse_config("pane-gaps = yes\npane-border-width = 9\npane-inactive-opacity = 1.1\n");
 
         assert!(parsed.config.pane_gaps.value);
         assert_f32_eq(parsed.config.pane_border_width.value, 1.0);
+        assert_f32_eq(parsed.config.pane_inactive_opacity.value, 0.7);
         assert_eq!(
             parsed.config.pane_gaps.provenance,
             ConfigProvenance::Override
@@ -3338,8 +3367,13 @@ mod tests {
             parsed.config.pane_border_width.provenance,
             ConfigProvenance::Override
         );
-        assert_eq!(parsed.diagnostics.len(), 1);
+        assert_eq!(
+            parsed.config.pane_inactive_opacity.provenance,
+            ConfigProvenance::Override
+        );
+        assert_eq!(parsed.diagnostics.len(), 2);
         assert!(parsed.diagnostics[0].message.contains("between 0 and 8"));
+        assert!(parsed.diagnostics[1].message.contains("between 0 and 1"));
     }
 
     #[test]
@@ -3419,6 +3453,7 @@ mod tests {
         let path = directory.path().join(CONFIG_FILE_NAME);
         for (key, value) in [
             (ConfigKey::PaneGaps, "true"),
+            (ConfigKey::PaneInactiveOpacity, "0.85"),
             (ConfigKey::PaneBorderWidth, "2.5"),
         ] {
             write_config_edit_at(&path, key.as_str(), Some(value))
@@ -3429,6 +3464,7 @@ mod tests {
         let parsed = parse_config(&source);
         assert!(parsed.diagnostics.is_empty());
         assert!(parsed.config.pane_gaps.value);
+        assert_f32_eq(parsed.config.pane_inactive_opacity.value, 0.85);
         assert_f32_eq(parsed.config.pane_border_width.value, 2.5);
     }
 
@@ -4075,11 +4111,12 @@ mod tests {
     }
 
     #[test]
-    fn config_key_surface_is_twenty_five_named_keys_plus_six_chrome_colors() {
+    fn config_key_surface_is_twenty_seven_named_keys_plus_six_chrome_colors() {
         let named = [
             "use-system-titlebar",
             "window-corner-radius",
             "window-background-blur",
+            "animations",
             "tray",
             "show-fps",
             "quit-daemon-on-exit",
@@ -4087,6 +4124,7 @@ mod tests {
             "experimental-agent-pane",
             "experimental-editor-pane",
             "pane-gaps",
+            "pane-inactive-opacity",
             "pane-corner-radius",
             "pane-margin",
             "pane-border-width",
@@ -4103,7 +4141,7 @@ mod tests {
             "app-icon",
             "chrome-preset",
         ];
-        assert_eq!(named.len(), 25);
+        assert_eq!(named.len(), 27);
         assert_eq!(ChromeColor::ALL.len(), 6);
         for key in named {
             assert!(ConfigKey::from_str(key).is_some(), "{key}");

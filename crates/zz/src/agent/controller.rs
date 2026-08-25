@@ -313,27 +313,6 @@ pub(crate) struct AgentPaneState {
     pub(crate) queued_prompts: usize,
 }
 
-/// The fleet rollup the workspace sidebar renders: how many agents are blocked
-/// on a permission, dead, or mid-turn. Each pane lands in exactly one bucket, so
-/// the counts partition the fleet.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct AgentAttention {
-    pub(crate) waiting: usize,
-    pub(crate) failed: usize,
-    pub(crate) running: usize,
-    /// First pane blocked on a permission, for the rollup to jump to.
-    pub(crate) waiting_pane: Option<PaneId>,
-    /// First pane whose agent failed, for the rollup to jump to.
-    pub(crate) failed_pane: Option<PaneId>,
-}
-
-impl AgentAttention {
-    /// Nothing to say: every agent is idle or absent.
-    pub(crate) fn is_quiet(&self) -> bool {
-        *self == Self::default()
-    }
-}
-
 #[derive(Debug)]
 struct AgentThread {
     provider: AgentProvider,
@@ -1266,23 +1245,6 @@ impl AgentController {
         } else {
             AgentPaneStatus::Idle
         })
-    }
-
-    /// Fold every pane's thread into the sidebar's [`AgentAttention`] rollup.
-    pub(crate) fn attention(&self) -> AgentAttention {
-        let mut attention = AgentAttention::default();
-        for (&pane, thread) in &self.panes {
-            if !thread.pending_permissions.is_empty() {
-                attention.waiting += 1;
-                attention.waiting_pane.get_or_insert(pane);
-            } else if thread.connection == AgentConnectionState::Failed {
-                attention.failed += 1;
-                attention.failed_pane.get_or_insert(pane);
-            } else if thread.connection.has_active_turn() {
-                attention.running += 1;
-            }
-        }
-        attention
     }
 
     pub(crate) fn pane_entries(&self, pane: PaneId) -> Option<(&[AgentThreadEntry], &[u64], u64)> {
@@ -3960,37 +3922,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn attention_buckets_partition_the_fleet() {
-        let mut controller = AgentController::new(AgentConfig::default());
-        assert!(controller.attention().is_quiet());
-
-        let mut running = thread();
-        running.connection = AgentConnectionState::Running;
-        let mut waiting = thread();
-        waiting.connection = AgentConnectionState::Running;
-        waiting.pending_permissions = Arc::from([AgentPermissionRequest {
-            request_id: 1,
-            tool_call_id: "call".to_owned(),
-            title: "Run tests".to_owned(),
-            options: Vec::new(),
-        }]);
-        let mut failed = thread();
-        failed.connection = AgentConnectionState::Failed;
-        for (pane, thread) in [(1, running), (2, waiting), (3, failed), (4, thread())] {
-            controller.panes.insert(PaneId(pane), thread);
-        }
-
-        let attention = controller.attention();
-        assert!(!attention.is_quiet());
-        assert_eq!(
-            (attention.waiting, attention.failed, attention.running),
-            (1, 1, 1)
-        );
-        assert_eq!(attention.waiting_pane, Some(PaneId(2)));
-        assert_eq!(attention.failed_pane, Some(PaneId(3)));
     }
 
     #[test]

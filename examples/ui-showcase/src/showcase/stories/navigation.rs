@@ -1,19 +1,17 @@
-//! The workspace-navigation pieces: host-tree rows, sidebar controls, and the
-//! titlebar strip.
+//! The workspace-navigation pieces: host-tree rows and sidebar controls.
 
 use gpui::{
     AnyElement, App, Context, ParentElement as _, SharedString, Styled as _, div, prelude::*, px,
 };
 use zz_ui::navigation::{
-    WORKSPACE_STRIP_GAP, WORKSPACE_TREE_ACTION_INSET, WORKSPACE_TREE_NODE_ICON_SIZE,
-    sidebar_settings_button, workspace_layout_button, workspace_sidebar_attention,
-    workspace_sidebar_controls, workspace_sidebar_status, workspace_strip_chip_connector,
-    workspace_strip_group_separator, workspace_strip_session_badge, workspace_strip_window_pill,
-    workspace_titlebar_strip, workspace_tree_disclosure, workspace_tree_marker, workspace_tree_row,
+    WORKSPACE_STATUS_CONTENT_HEIGHT, WORKSPACE_TREE_ACTION_INSET, WORKSPACE_TREE_NODE_ICON_SIZE,
+    WorkspaceStatusWindowState, workspace_chrome_controls, workspace_layout_button,
+    workspace_settings_button, workspace_status_item, workspace_status_window,
+    workspace_tree_action_button, workspace_tree_action_row, workspace_tree_disclosure,
+    workspace_tree_marker, workspace_tree_row,
 };
 use zz_ui::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme as _, Icon, IconName, Sizable as _,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     rems_from_px,
     spinner::Spinner,
@@ -52,6 +50,11 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
                             ),
                             cx,
                         ),
+                        cx,
+                    ))
+                    .child(specimen_block(
+                        "add host · final muted row",
+                        tree_row(&Row::add_host("nav-host-add"), cx),
                         cx,
                     ))
                     .child(specimen_block(
@@ -120,31 +123,21 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
         .child(
             gallery(
                 "Sidebar controls",
-                "The settings entry and workspace-layout menu sit at the leading end of the sidebar titlebar. The layout menu toggles the sidebar and splits the focused pane right or down. Without an active pane, it disables both split entries. The titlebar strip that replaces the sidebar keeps the pair on the same axis.",
+                "Settings and the sidebar toggle share one compact cluster at the leading end of both sidebar and titlebar modes.",
                 cx,
             )
             .child(
                 specimens()
                     .child(specimen(
-                        "layout menu · active pane",
-                        layout_menu_button("nav-layout", true),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "layout menu · no active pane",
-                        layout_menu_button("nav-layout-disabled", false),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "settings entry",
-                        sidebar_settings_button("nav-settings"),
+                        "sidebar toggle",
+                        workspace_layout_button("nav-layout"),
                         cx,
                     ))
                     .child(specimen(
                         "control cluster",
-                        workspace_sidebar_controls(
-                            sidebar_settings_button("nav-cluster-settings"),
-                            layout_menu_button("nav-cluster-layout", true),
+                        workspace_chrome_controls(
+                            workspace_settings_button("nav-settings"),
+                            Some(workspace_layout_button("nav-layout-cluster").into_any_element()),
                         ),
                         cx,
                     )),
@@ -152,278 +145,136 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
         )
         .child(
             gallery(
-                "Titlebar strip",
-                "The other chrome: the sidebar column is gone and one titlebar-height strip spans the window, tmux-status-line style. Every session on the attached machine shows as a letter badge, and the attached session's windows follow as index:pane pills (one chain, dash-joined the way a status line writes it). The live chip takes the same fill a sidebar row takes, so the fleet reads the same in either chrome, and the text follows it: attached session and focused window at full strength, the rest dimmed. Window pills all take one width and ellipsize into their tooltip, because a pill is named after its active pane and a chain that hugged those names would reflow whenever a shell retitled itself; each reveals the tree's delete action under the pointer. The leading inset is dead space the macOS traffic lights sit in, and drag surface; the chrome controls follow it, on the axis the sidebar titlebar puts them, closed by a hairline that divides them from the chain. Content clips rather than wrapping (this height is the window's title bar) while the trailing status keeps its seat.",
+                "Native tmux status rail",
+                "tmux still supplies status-left, one formatted label per window, status-right, and their styles. GPUI owns the regions, spacing, active and bell states, clipping, hover, menus, and overflow instead of painting one terminal-cell row.",
                 cx,
             )
             .child(
-                specimens()
-                    .w_full()
-                    .child(specimen_block("strip · at window width", strip_row(cx), cx))
-                    .child(specimen(
-                        "session badge · attached",
-                        workspace_strip_session_badge("nav-strip-badge-on", "Z".into(), "zz", true, true, cx),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "session badge · parked",
-                        workspace_strip_session_badge("nav-strip-badge-off", "R".into(), "research", false, true, cx),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "session badge · disconnected",
-                        workspace_strip_session_badge("nav-strip-badge-down", "B".into(), "builds", false, false, cx),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "window pill · focused",
-                        workspace_strip_window_pill(
-                            "nav-strip-pill-on",
-                            "nav-strip-pill-on".into(),
-                            "0:bash".into(),
-                            true,
-                            true,
-                            strip_window_delete("nav-strip-pill-on-delete", cx),
-                            cx,
-                        ),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "window pill · idle",
-                        workspace_strip_window_pill(
-                            "nav-strip-pill-off",
-                            "nav-strip-pill-off".into(),
-                            "1:claude".into(),
-                            false,
-                            true,
-                            strip_window_delete("nav-strip-pill-off-delete", cx),
-                            cx,
-                        ),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "controls separator",
-                        workspace_strip_group_separator(cx),
-                        cx,
-                    ))
-                    .child(specimen(
-                        "chip connector",
-                        workspace_strip_chip_connector(cx),
-                        cx,
-                    )),
-            ),
-        )
-        .child(
-            gallery(
-                "Status section",
-                "The sidebar's bottom section has two tenants: the agent attention rollup (which agents are blocked on the user, dead, or mid-turn, silent when every count is zero) and the auxiliary half of a tmux status line (the clock, script output) expanded by the daemon from status-left and status-right in .tmux.conf. One line; the tmux left half ellipsizes first so the ends stay legible.",
-                cx,
-            )
-            .child(
-                specimens()
-                    .w_full()
-                    .child(specimen_block(
-                        "agent rollup",
-                        sidebar_status_section(
-                            "nav-status-attn",
-                            Some(attention_rollup("nav-attn", cx)),
-                            "",
-                            "",
-                            cx,
-                        ),
-                        cx,
-                    ))
-                    .child(specimen_block(
-                        "rollup beside a tmux half",
-                        sidebar_status_section(
-                            "nav-status-attn-tmux",
-                            Some(attention_rollup("nav-attn-tmux", cx)),
-                            "",
-                            "09:41 25-Jul-26",
-                            cx,
-                        ),
-                        cx,
-                    ))
-                    .child(specimen_block(
-                        "both tmux halves",
-                        sidebar_status_section(
-                            "nav-status-both",
-                            None,
-                            "batt 82%",
-                            "09:41 25-Jul-26",
-                            cx,
-                        ),
-                        cx,
-                    ))
-                    .child(specimen_block(
-                        "a long left half ellipsizes",
-                        sidebar_status_section(
-                            "nav-status-long",
-                            None,
-                            "#(kubectl config current-context) staging-eu-west-1-primary",
-                            "09:41",
-                            cx,
-                        ),
-                        cx,
-                    )),
+                specimens().w_full().child(specimen_block(
+                    "left · native windows · right",
+                    native_status_rail(cx),
+                    cx,
+                )),
             ),
         )
         .into_any_element()
 }
 
-fn sidebar_status_section(
-    id: &'static str,
-    attention: Option<AnyElement>,
-    left: &'static str,
-    right: &'static str,
-    cx: &App,
-) -> AnyElement {
-    div()
-        .w(px(256.0))
-        .child(workspace_sidebar_status(
-            id,
-            attention,
-            left.into(),
-            right.into(),
-            cx,
-        ))
-        .into_any_element()
-}
-
-fn attention_rollup(prefix: &'static str, cx: &App) -> AnyElement {
+fn native_status_rail(cx: &App) -> AnyElement {
+    let foreground = cx.theme().foreground;
     div()
         .flex()
-        .flex_none()
+        .w_full()
+        .h(zz_ui::TITLE_BAR_HEIGHT)
         .items_center()
-        .gap(px(8.0))
-        .child(workspace_sidebar_attention(
-            (prefix, 0usize),
-            "1 waiting".into(),
-            cx.theme().warning,
-            true,
-            cx,
-        ))
-        .child(workspace_sidebar_attention(
-            (prefix, 1usize),
-            "1 failed".into(),
-            cx.theme().danger,
-            true,
-            cx,
-        ))
-        .child(workspace_sidebar_attention(
-            (prefix, 2usize),
-            "2 running".into(),
-            cx.theme().foreground.muted(),
-            false,
-            cx,
-        ))
-        .into_any_element()
-}
-
-fn strip_window_delete(id: &'static str, cx: &App) -> Button {
-    Button::new(id)
-        .ghost()
-        .with_size(px(18.0))
-        .icon(Icon::new(IconName::Delete).text_color(cx.theme().danger))
-        .tooltip("Delete window")
-}
-
-fn layout_menu_button(id: &'static str, can_split: bool) -> impl IntoElement {
-    workspace_layout_button(id).dropdown_menu(move |menu, _, _| {
-        menu.item(PopupMenuItem::new("Toggle sidebar").icon(IconName::PanelLeft))
-            .item(
-                PopupMenuItem::new("Split right")
-                    .icon(IconName::PanelRight)
-                    .disabled(!can_split),
-            )
-            .item(
-                PopupMenuItem::new("Split bottom")
-                    .icon(IconName::PanelBottom)
-                    .disabled(!can_split),
-            )
-    })
-}
-
-fn strip_row(cx: &App) -> AnyElement {
-    let content = div()
-        .flex()
-        .items_center()
-        .min_w_0()
+        .gap(px(6.0))
+        .px(px(6.0))
         .overflow_hidden()
-        .child(workspace_strip_session_badge(
-            "nav-strip-row-s0",
-            "Z".into(),
-            "zz",
-            true,
-            true,
-            cx,
-        ))
-        .child(workspace_strip_chip_connector(cx))
-        .child(workspace_strip_session_badge(
-            "nav-strip-row-s1",
-            "R".into(),
-            "research",
-            false,
-            true,
-            cx,
-        ))
-        .child(workspace_strip_chip_connector(cx))
-        .child(workspace_strip_window_pill(
-            "nav-strip-row-w0",
-            "nav-strip-row-w0".into(),
-            "0:bash".into(),
-            true,
-            true,
-            strip_window_delete("nav-strip-row-w0-delete", cx),
-            cx,
-        ))
-        .child(workspace_strip_chip_connector(cx))
-        .child(workspace_strip_window_pill(
-            "nav-strip-row-w1",
-            "nav-strip-row-w1".into(),
-            "1:claude".into(),
-            false,
-            true,
-            strip_window_delete("nav-strip-row-w1-delete", cx),
-            cx,
-        ))
-        .child(workspace_strip_chip_connector(cx))
-        .child(workspace_strip_window_pill(
-            "nav-strip-row-w2",
-            "nav-strip-row-w2".into(),
-            "2:https://zed.dev".into(),
-            false,
-            true,
-            strip_window_delete("nav-strip-row-w2-delete", cx),
-            cx,
-        ));
-    let leading = div()
-        .flex()
-        .items_center()
-        .gap(px(WORKSPACE_STRIP_GAP))
-        .child(workspace_sidebar_controls(
-            sidebar_settings_button("nav-strip-row-settings"),
-            layout_menu_button("nav-strip-row-layout", true),
-        ))
-        .child(workspace_strip_group_separator(cx));
-    let trailing = div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(WORKSPACE_STRIP_GAP))
+        .bg(cx.theme().background)
+        .border_1()
+        .border_color(cx.theme().border)
+        .text_color(foreground)
         .child(
             div()
-                .text_xs()
-                .whitespace_nowrap()
-                .text_color(cx.theme().foreground.muted())
-                .child("09:41 25-Jul-26"),
-        );
-    workspace_titlebar_strip("nav-strip-row", leading, content, trailing, cx).into_any_element()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .child(workspace_status_item(
+                    "nav-status-session",
+                    Some(IconName::SquareTerminal),
+                    "0".into(),
+                    cx,
+                ))
+                .child(workspace_status_item(
+                    "nav-status-host",
+                    None,
+                    "macbook".into(),
+                    cx,
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .h(WORKSPACE_STATUS_CONTENT_HEIGHT)
+                .items_center()
+                .gap(px(2.0))
+                .overflow_hidden()
+                .child(workspace_status_window(
+                    "nav-status-window-editor",
+                    "0".into(),
+                    "editor".into(),
+                    "0:editor".into(),
+                    WorkspaceStatusWindowState {
+                        connected: true,
+                        active: true,
+                        ..WorkspaceStatusWindowState::default()
+                    },
+                    cx,
+                ))
+                .child(workspace_status_window(
+                    "nav-status-window-server",
+                    "1".into(),
+                    "server".into(),
+                    "1:server".into(),
+                    WorkspaceStatusWindowState {
+                        connected: true,
+                        bell: true,
+                        ..WorkspaceStatusWindowState::default()
+                    },
+                    cx,
+                ))
+                .child(workspace_status_window(
+                    "nav-status-window-docs",
+                    "2".into(),
+                    "docs".into(),
+                    "2:docs".into(),
+                    WorkspaceStatusWindowState {
+                        connected: true,
+                        zoomed: true,
+                        ..WorkspaceStatusWindowState::default()
+                    },
+                    cx,
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .child(workspace_status_item(
+                    "nav-status-command",
+                    None,
+                    "bash".into(),
+                    cx,
+                ))
+                .child(workspace_status_item(
+                    "nav-status-branch",
+                    Some(IconName::GitBranch),
+                    "main".into(),
+                    cx,
+                ))
+                .child(workspace_status_item(
+                    "nav-status-clock",
+                    Some(IconName::Clock),
+                    "17:49".into(),
+                    cx,
+                ))
+                .child(workspace_status_item(
+                    "nav-status-calendar",
+                    Some(IconName::Calendar),
+                    "23 Aug".into(),
+                    cx,
+                )),
+        )
+        .into_any_element()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RowKind {
     Host,
+    AddHost,
     Session,
     Window,
     Pane,
@@ -462,7 +313,7 @@ impl Row {
             detail: None,
             icon,
             depth: match kind {
-                RowKind::Host => 0,
+                RowKind::Host | RowKind::AddHost => 0,
                 RowKind::Session => 1,
                 RowKind::Window => 2,
                 RowKind::Pane => 3,
@@ -480,6 +331,14 @@ impl Row {
         Self {
             expanded: Some(true),
             ..Self::new(RowKind::Host, id, label, IconName::HardDrive)
+        }
+    }
+
+    fn add_host(id: &'static str) -> Self {
+        Self {
+            connected: false,
+            expanded: None,
+            ..Self::new(RowKind::AddHost, id, "Add host", IconName::Plus)
         }
     }
 
@@ -544,6 +403,10 @@ impl Row {
 }
 
 fn tree_row(row: &Row, cx: &App) -> AnyElement {
+    if row.kind == RowKind::AddHost {
+        return workspace_tree_action_row(row.id, row.depth, row.icon.clone(), row.label, cx)
+            .into_any_element();
+    }
     let row_group = SharedString::from(format!("{}-group", row.id));
     let strong = row.kind == RowKind::Host || row.connected && row.active;
     let color = if strong {
@@ -557,9 +420,14 @@ fn tree_row(row: &Row, cx: &App) -> AnyElement {
             .text_color(color),
     );
     let marker = match row.expanded {
-        Some(expanded) => {
-            workspace_tree_disclosure(marker, expanded, row_group.clone(), cx).into_any_element()
-        }
+        Some(expanded) => workspace_tree_disclosure(
+            format!("{}-disclosure", row.id),
+            marker,
+            expanded,
+            row_group.clone(),
+            cx,
+        )
+        .into_any_element(),
         None => marker.into_any_element(),
     };
 
@@ -642,11 +510,7 @@ fn reachability_mark(row: &Row, cx: &App) -> Option<AnyElement> {
                 .flex()
                 .flex_none()
                 .tooltip(move |window, cx| Tooltip::new(reason).build(window, cx))
-                .child(
-                    Icon::new(IconName::Close)
-                        .xsmall()
-                        .text_color(cx.theme().danger),
-                )
+                .child(Icon::new(IconName::Xmark).xsmall())
                 .into_any_element(),
         ),
     }
@@ -656,45 +520,51 @@ fn row_actions(row: &Row, group: &SharedString, cx: &App) -> AnyElement {
     let mut children = Vec::new();
     match row.kind {
         RowKind::Host => children.push(
-            Button::new(format!("{}-menu", row.id))
-                .ghost()
-                .xsmall()
-                .icon(IconName::Ellipsis)
-                .tooltip("Host actions")
-                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, {
-                    let connected = row.connected;
-                    move |menu, _, _| {
-                        menu.item(PopupMenuItem::new("Close host"))
-                            .item(PopupMenuItem::new("New session").disabled(!connected))
-                            .item(PopupMenuItem::new("Add host"))
-                    }
-                })
-                .into_any_element(),
+            workspace_tree_action_button(
+                format!("{}-new-session", row.id),
+                IconName::Plus,
+                "New session",
+                !row.connected,
+                cx,
+            )
+            .into_any_element(),
         ),
-        RowKind::Session | RowKind::Window => children.push(
-            Button::new(format!("{}-add", row.id))
-                .ghost()
-                .xsmall()
-                .icon(IconName::Plus)
-                .disabled(!row.connected)
-                .tooltip(if row.kind == RowKind::Session {
-                    "New window"
-                } else {
-                    "New pane"
-                })
-                .into_any_element(),
+        RowKind::Session => children.push(
+            workspace_tree_action_button(
+                format!("{}-add", row.id),
+                IconName::Plus,
+                "New window",
+                !row.connected,
+                cx,
+            )
+            .into_any_element(),
         ),
-        RowKind::Pane => {}
+        RowKind::Window => children.push(
+            workspace_tree_action_button(
+                format!("{}-layout", row.id),
+                IconName::LayoutColumns,
+                "Window layout",
+                !row.connected,
+                cx,
+            )
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
+                menu.item(PopupMenuItem::new("Split right").icon(IconName::PanelRight))
+                    .item(PopupMenuItem::new("Split bottom").icon(IconName::PanelBottom))
+            })
+            .into_any_element(),
+        ),
+        RowKind::AddHost | RowKind::Pane => {}
     }
-    if row.kind != RowKind::Host {
+    if matches!(row.kind, RowKind::Session | RowKind::Window | RowKind::Pane) {
         children.push(
-            Button::new(format!("{}-delete", row.id))
-                .ghost()
-                .xsmall()
-                .icon(Icon::new(IconName::Delete).text_color(cx.theme().danger))
-                .tooltip("Delete")
-                .disabled(!row.connected)
-                .into_any_element(),
+            workspace_tree_action_button(
+                format!("{}-delete", row.id),
+                IconName::Xmark,
+                "Delete",
+                !row.connected,
+                cx,
+            )
+            .into_any_element(),
         );
     }
     div()
@@ -704,6 +574,10 @@ fn row_actions(row: &Row, group: &SharedString, cx: &App) -> AnyElement {
         .items_center()
         .justify_center()
         .pr(px(WORKSPACE_TREE_ACTION_INSET))
+        .when(row.kind == RowKind::Host, |this| {
+            this.invisible()
+                .group_hover(group.clone(), gpui::Styled::visible)
+        })
         .when(row.kind != RowKind::Host, |this| {
             this.invisible()
                 .group_hover(group.clone(), gpui::Styled::visible)

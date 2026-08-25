@@ -11,10 +11,13 @@ use gpui::{
 
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable, Icon, IconName, Selectable, Sizable, Size,
-    StyledExt as _, control_shadow, h_flex, tooltip::Tooltip,
+    StyledExt as _, control_shadow, h_flex, rems_from_px, tooltip::Tooltip,
 };
 
 use super::button_icon::ButtonIcon;
+
+pub const COMPACT_ICON_BUTTON_SIZE: f32 = 24.0;
+const COMPACT_ICON_DROP: Pixels = px(0.5);
 
 /// Corner radius of a [`Button`]: the theme radius, or an explicit override.
 #[derive(Default, Clone, Copy)]
@@ -203,6 +206,15 @@ impl Button {
             tab_index: 0,
             tab_stop: true,
         }
+    }
+
+    pub fn compact_icon(id: impl Into<ElementId>, icon: impl Into<Icon>) -> Self {
+        Self::new(id)
+            .ghost()
+            .small()
+            .compact()
+            .size(rems_from_px(COMPACT_ICON_BUTTON_SIZE))
+            .icon(icon.into().relative().top(COMPACT_ICON_DROP))
     }
 
     pub fn outline(mut self) -> Self {

@@ -5,12 +5,7 @@ use gpui::{
     relative,
 };
 
-/// How far an inactive pane fades toward the window background.
-pub const INACTIVE_PANE_FADE: f32 = 0.3;
-
-/// Opacity multiplier for inactive terminal glyphs, which dim themselves
-/// instead of taking the scrim.
-pub const INACTIVE_PANE_CONTENT_OPACITY: f32 = 0.9;
+const PANE_DRAG_SOURCE_FADE: f32 = 0.3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaneChrome {
@@ -19,7 +14,7 @@ pub struct PaneChrome {
     pub border_color: Hsla,
     pub gap_background: Hsla,
     pub shadow: bool,
-    pub dimmed: bool,
+    pub inactive_opacity: f32,
 }
 
 impl PaneChrome {
@@ -37,14 +32,13 @@ impl PaneChrome {
             border_color,
             gap_background,
             shadow,
-            dimmed: false,
+            inactive_opacity: 1.0,
         }
     }
 
-    /// Marks this pane as *not* the active one, fading it behind a scrim.
     #[must_use]
-    pub const fn dimmed(mut self, dimmed: bool) -> Self {
-        self.dimmed = dimmed;
+    pub fn dimmed(mut self, dimmed: bool, opacity: f32) -> Self {
+        self.inactive_opacity = if dimmed { opacity.clamp(0.0, 1.0) } else { 1.0 };
         self
     }
 }
@@ -79,8 +73,12 @@ pub fn pane_surface(
                 .border(chrome.border_width)
                 .border_color(chrome.border_color)
                 .child(content)
-                .when(chrome.dimmed, |surface| {
-                    surface.child(pane_inactive_scrim(chrome.radii, cx))
+                .when(chrome.inactive_opacity < 1.0, |surface| {
+                    surface.child(pane_inactive_scrim(
+                        chrome.radii,
+                        chrome.inactive_opacity,
+                        cx,
+                    ))
                 })
                 .children(overlays),
         )
@@ -137,7 +135,7 @@ fn pane_corner_notches(chrome: PaneChrome) -> Option<gpui::Div> {
     )
 }
 
-fn pane_inactive_scrim(radii: Corners<Pixels>, cx: &App) -> gpui::Div {
+fn pane_inactive_scrim(radii: Corners<Pixels>, opacity: f32, cx: &App) -> gpui::Div {
     div()
         .absolute()
         .inset_0()
@@ -145,7 +143,7 @@ fn pane_inactive_scrim(radii: Corners<Pixels>, cx: &App) -> gpui::Div {
         .rounded_tr(radii.top_right)
         .rounded_bl(radii.bottom_left)
         .rounded_br(radii.bottom_right)
-        .bg(cx.theme().background.opaque().opacity(INACTIVE_PANE_FADE))
+        .bg(cx.theme().background.opaque().opacity(1.0 - opacity))
 }
 
 fn floating_surface_shadow(cx: &App) -> Vec<BoxShadow> {
@@ -282,7 +280,10 @@ pub fn pane_drag_overlay(
     let (tint, cursor) = match state {
         PaneDragOverlayState::Armed => (cx.theme().border.opacity(0.08), CursorStyle::OpenHand),
         PaneDragOverlayState::Source => (
-            cx.theme().background.opaque().opacity(INACTIVE_PANE_FADE),
+            cx.theme()
+                .background
+                .opaque()
+                .opacity(PANE_DRAG_SOURCE_FADE),
             CursorStyle::ClosedHand,
         ),
     };
@@ -756,6 +757,21 @@ pub fn terminal_link_popup(uri: impl IntoElement, cx: &App) -> Tag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inactive_opacity_one_disables_surface_dimming() {
+        let chrome = PaneChrome::new(
+            Corners::default(),
+            px(0.0),
+            gpui::transparent_black(),
+            gpui::transparent_black(),
+            false,
+        );
+
+        assert_eq!(chrome.dimmed(true, 1.0).inactive_opacity, 1.0);
+        assert_eq!(chrome.dimmed(false, 0.0).inactive_opacity, 1.0);
+        assert_eq!(chrome.dimmed(true, 0.7).inactive_opacity, 0.7);
+    }
 
     #[gpui::test]
     fn pane_surface_shadow_stays_inside_the_pane_curve(cx: &mut gpui::TestAppContext) {

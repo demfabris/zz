@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::{
     ActiveTheme as _, Colorize as _, Disableable as _, Icon, IconName, Selectable as _,
     Sizable as _, StyledExt as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     input::{Input, InputContentType, InputState},
     menu::{PopupMenu, PopupMenuItem},
     tag::Tag,
@@ -343,10 +343,7 @@ fn browser_tab_close_button(id: u64, on_close: &BrowserTabAction) -> impl IntoEl
         .invisible()
         .group_hover(browser_tab_group(id), gpui::Styled::visible)
         .child(
-            Button::new(("browser-tab-close", id))
-                .ghost()
-                .with_size(px(18.0))
-                .icon(IconName::Close)
+            Button::compact_icon(("browser-tab-close", id), IconName::Xmark)
                 .debug_selector(move || format!("browser-tab-close-{id}"))
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
@@ -365,10 +362,7 @@ pub fn browser_toolbar_button(
     disabled: bool,
     selected: bool,
 ) -> Button {
-    Button::new(id)
-        .ghost()
-        .xsmall()
-        .icon(icon)
+    Button::compact_icon(id, icon)
         .when(!disabled, |this| {
             this.text_color(cx.theme().foreground.muted())
         })
@@ -868,7 +862,7 @@ pub fn browser_action_menu(
     )
     .item(
         PopupMenuItem::new("Clear site data…")
-            .icon(IconName::Delete)
+            .icon(IconName::Xmark)
             .disabled(!state.can_clear_site_data)
             .on_click(move |_, window, cx| clear_site_data(window, cx)),
     )

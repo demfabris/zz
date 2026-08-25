@@ -48,12 +48,11 @@ derivations alongside the `Input`/`InputState`, `ListItem`, `Kbd`, and `Tag` wid
    solid `foreground` outline (`crates/zz-ui/src/widget/list/mod.rs`). That outlined look belongs to
    lists only: `select` builds its own rows rather than reusing `ListItem`, because reusing it is
    what made dropdown rows read as outlined boxes.
-6. Use two strengths of one signal instead of two competing signals. The sidebar's keyboard cursor
-   and its mux-active row are the same `background.raised(2)` fill at two alphas (washed for the
-   cursor, solid for the row the mux is focused on, in
-   `crates/zz-ui/src/navigation.rs::workspace_tree_row`), so a row that is both reads as active.
-   Earlier revisions drew the cursor as an outline; an outline inside a panel reads as a widget
-   border, not a cursor.
+6. Use one translucent signal instead of competing fills. Sidebar pointer hover, keyboard selection,
+   mux focus, and clickable native status windows use `workspace_row_highlight`, a
+   `background.washed(2)` tint that preserves the desktop blur. Tree fills keep a 1px vertical inset,
+   so adjacent rounded rows never merge into one slab. The final Add host action is the exception:
+   its row stays unpainted and only its label moves from muted to foreground on hover.
 
 # Control density
 
@@ -123,6 +122,10 @@ detach action, not to color anything). `apply_zz_overrides` layers these values 
   match the terminal typeface;
 - `theme.radius` from `widget-corner-radius`, so one radius reaches every widget and survives a
   light/dark switch.
+
+Icon-only chrome controls use `Button::compact_icon`: a 24px hover surface around a Small 14px
+glyph with a 0.5px downward optical adjustment. The titlebar, sidebar row actions, browser pane,
+and Agent pane share this constructor, which fixes padding and icon scale in one place.
 
 A radius is a *request*, not the final corner. GPUI caps one at half the shorter side . the point a
 rounded rectangle stops existing . so one global setting applied to components of different sizes

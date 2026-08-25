@@ -10786,6 +10786,8 @@ dependencies = [
  "chrono",
  "glob",
  "regex",
+ "serde",
+ "serde_json",
  "unicode-width",
  "zz-protocol",
  "zz-terminal",

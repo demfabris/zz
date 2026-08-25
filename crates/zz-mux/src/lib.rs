@@ -3,6 +3,8 @@
 //! Pure state, commands, layouts, key tables, and tmux-compatible parsing.
 
 mod command;
+#[cfg(test)]
+mod compat_manifest_tests;
 mod formats;
 mod honest_knobs;
 mod layout;

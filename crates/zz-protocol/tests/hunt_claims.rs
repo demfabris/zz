@@ -13,8 +13,44 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_seventy_one() {
-    assert_eq!(PROTOCOL_VERSION, 71);
+fn protocol_version_on_this_commit_is_seventy_two() {
+    assert_eq!(PROTOCOL_VERSION, 72);
+}
+
+#[test]
+fn chooser_states_append_the_v72_filter_fallback_flag() {
+    let tree = zz_protocol::ChooseTreeState {
+        items: Vec::new(),
+        search: None,
+        selected: 2,
+        kind: zz_protocol::ChooseTreeKind::Panes,
+        filter_no_matches: true,
+    };
+    assert_eq!(
+        postcard::to_stdvec(&tree).expect("encode tree chooser state"),
+        [0, 0, 2, 1, 1]
+    );
+    assert_eq!(
+        postcard::from_bytes::<zz_protocol::ChooseTreeState>(&[0, 0, 2, 1, 1])
+            .expect("decode tree chooser state"),
+        tree
+    );
+
+    let buffer = zz_protocol::ChooseBufferState {
+        items: Vec::new(),
+        search: None,
+        selected: 3,
+        filter_no_matches: true,
+    };
+    assert_eq!(
+        postcard::to_stdvec(&buffer).expect("encode buffer chooser state"),
+        [0, 0, 3, 1]
+    );
+    assert_eq!(
+        postcard::from_bytes::<zz_protocol::ChooseBufferState>(&[0, 0, 3, 1])
+            .expect("decode buffer chooser state"),
+        buffer
+    );
 }
 
 #[test]
@@ -142,13 +178,14 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
         capabilities: Vec::new(),
         color_scheme: Some(TerminalColorScheme::Dark),
         origin: None,
+        working_directory: None,
     }))
     .expect("encode hello");
     assert_eq!(
         frame,
         [
-            0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x47, 0x00, 0x00, 0x47, 0x00, 0x00, 0x00, 0x00,
-            0x01, 0x01, 0x00,
+            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x00,
+            0x01, 0x01, 0x00, 0x00,
         ]
     );
 }

@@ -7,7 +7,7 @@ use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{CommandSpec, MAX_STATUS_TEXT_BYTES, PaneId, SessionId, WindowId};
 pub use zz_protocol::{TmuxColour, parse_tmux_colour};
 
-use crate::{MuxEngine, PaneKind, layout::CellLayout};
+use crate::{MuxEngine, PaneKind, WindowSize, layout::CellLayout};
 
 const FORMAT_LOOP_LIMIT: usize = 100;
 const FORMAT_MAX_WIDTH: isize = 10_000;
@@ -31,6 +31,7 @@ pub(crate) enum FormatType {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StatusContext {
     pub active_window_index: Option<u32>,
+    pub config_files: String,
     pub history_limit: Option<usize>,
     pub host: String,
     pub host_short: String,
@@ -47,6 +48,8 @@ pub struct StatusContext {
     pub pane_dead: Option<bool>,
     pub pane_dead_signal: String,
     pub pane_dead_status: Option<u32>,
+    pub pane_dead_time: Option<i64>,
+    pub pane_input_off: Option<bool>,
     pub pane_path: String,
     pub pane_flags: String,
     pub pane_height: Option<u16>,
@@ -102,6 +105,8 @@ pub struct StatusContext {
     pub window_layout: String,
     pub window_linked_sessions: usize,
     pub window_linked_sessions_list: String,
+    pub window_manual_height: Option<u16>,
+    pub window_manual_width: Option<u16>,
     pub window_name: String,
     pub window_panes: usize,
     pub window_silence_alert: bool,
@@ -173,6 +178,7 @@ enum FormatBacking {
     Zero,
     One,
     ActiveWindowIndex,
+    ConfigFiles,
     HistoryLimit,
     Host,
     HostShort,
@@ -189,6 +195,8 @@ enum FormatBacking {
     PaneDead,
     PaneDeadSignal,
     PaneDeadStatus,
+    PaneDeadTime,
+    PaneInputOff,
     PanePath,
     PaneFlags,
     PaneFormat,
@@ -248,6 +256,8 @@ enum FormatBacking {
     WindowLinked,
     WindowLinkedSessions,
     WindowLinkedSessionsList,
+    WindowManualHeight,
+    WindowManualWidth,
     WindowName,
     WindowPanes,
     WindowRawFlags,
@@ -325,7 +335,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("client_utf8", Client, Empty),
     variable!("client_width", Client, Empty),
     variable!("client_written", Client, Empty),
-    variable!("config_files", Server, Empty),
+    variable!("config_files", Server, ConfigFiles),
     variable!("cursor_blinking", Terminal, Zero),
     variable!("cursor_character", Terminal, Empty),
     variable!("cursor_colour", Terminal, Empty),
@@ -372,7 +382,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_dead", Pane, PaneDead),
     variable!("pane_dead_signal", Pane, PaneDeadSignal),
     variable!("pane_dead_status", Pane, PaneDeadStatus),
-    variable!("pane_dead_time", Pane, Time, Empty),
+    variable!("pane_dead_time", Pane, Time, PaneDeadTime),
     variable!("pane_fg", Pane, Empty),
     variable!("pane_flags", Pane, PaneFlags),
     variable!("pane_floating_flag", Pane, Zero),
@@ -381,7 +391,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_id", Pane, PaneId),
     variable!("pane_in_mode", Pane, Zero),
     variable!("pane_index", Pane, PaneIndex),
-    variable!("pane_input_off", Pane, Zero),
+    variable!("pane_input_off", Pane, PaneInputOff),
     variable!("pane_key_mode", Pane, Empty),
     variable!("pane_last", Pane, PaneLast),
     variable!("pane_left", Pane, PaneLeft),
@@ -416,7 +426,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("server_sessions", Server, ServerSessions),
     variable!("session_active", Session, Empty),
     variable!("session_activity", Session, Time, Empty),
-    variable!("session_activity_flag", Session, Zero),
+    variable!("session_activity_flag", Session, WindowActivityFlag),
     variable!("session_alert", Session, SessionAlert),
     variable!("session_alerts", Session, SessionAlerts),
     variable!("session_attached", Session, SessionAttached),
@@ -437,7 +447,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("session_marked", Session, Zero),
     variable!("session_name", Session, SessionName),
     variable!("session_path", Session, Empty),
-    variable!("session_silence_flag", Session, Zero),
+    variable!("session_silence_flag", Session, WindowSilenceFlag),
     variable!("session_stack", Session, SessionStack),
     variable!("session_windows", Session, SessionWindows),
     variable!("sixel_support", Server, Zero),
@@ -482,8 +492,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
         Window,
         WindowLinkedSessionsList
     ),
-    variable!("window_manual_height", Window, Empty),
-    variable!("window_manual_width", Window, Empty),
+    variable!("window_manual_height", Window, WindowManualHeight),
+    variable!("window_manual_width", Window, WindowManualWidth),
     variable!("window_marked_flag", Window, Zero),
     variable!("window_name", Window, WindowName),
     variable!("window_offset_x", Window, Empty),
@@ -545,6 +555,7 @@ impl StatusContext {
             FormatBacking::Zero => Cow::Borrowed("0"),
             FormatBacking::One => Cow::Borrowed("1"),
             FormatBacking::ActiveWindowIndex => optional_display(self.active_window_index),
+            FormatBacking::ConfigFiles => Cow::Borrowed(self.config_files.as_str()),
             FormatBacking::HistoryLimit => optional_display(self.history_limit),
             FormatBacking::Host => Cow::Borrowed(self.host.as_str()),
             FormatBacking::HostShort => Cow::Borrowed(self.host_short.as_str()),
@@ -565,6 +576,8 @@ impl StatusContext {
                 ""
             }),
             FormatBacking::PaneDeadStatus => optional_display(self.pane_dead_status),
+            FormatBacking::PaneDeadTime => optional_display(self.pane_dead_time),
+            FormatBacking::PaneInputOff => optional_bool(self.pane_input_off),
             FormatBacking::PanePath => Cow::Borrowed(self.pane_path.as_str()),
             FormatBacking::PaneFlags => Cow::Borrowed(self.pane_flags.as_str()),
             FormatBacking::PaneFormat => {
@@ -653,6 +666,8 @@ impl StatusContext {
             FormatBacking::WindowLinkedSessionsList => {
                 Cow::Borrowed(self.window_linked_sessions_list.as_str())
             }
+            FormatBacking::WindowManualHeight => optional_display(self.window_manual_height),
+            FormatBacking::WindowManualWidth => optional_display(self.window_manual_width),
             FormatBacking::WindowName => Cow::Borrowed(self.window_name.as_str()),
             FormatBacking::WindowPanes => Cow::Owned(self.window_panes.to_string()),
             FormatBacking::WindowRawFlags => Cow::Owned(self.window_flags(false)),
@@ -909,6 +924,10 @@ impl MuxEngine {
         let (width, height) = window.layout.extent();
         context.window_width = Some(width);
         context.window_height = Some(height);
+        if self.window_size(window.id) == WindowSize::Manual {
+            context.window_manual_width = Some(width);
+            context.window_manual_height = Some(height);
+        }
         context.window_layout = window.layout.dump();
         context.window_active = Some(session.active_window == window.id);
         context.window_zoomed = window.zoomed_pane.is_some();
@@ -940,6 +959,10 @@ impl MuxEngine {
         context.pane_active = Some(window.active_pane == pane.id);
         context.pane_dead = Some(pane.dead);
         context.pane_dead_status = pane.dead_status;
+        context.pane_dead_time = pane
+            .dead_time
+            .and_then(|dead_time| i64::try_from(dead_time).ok());
+        context.pane_input_off = Some(pane.input_off);
         context.pane_id = pane.id.to_string();
         context.pane_index = self.pane_index(window.id, pane.id).unwrap_or_default();
         context.pane_last = Some(window.last_pane() == Some(pane.id));
@@ -1092,6 +1115,25 @@ fn format_variable(name: &str) -> Option<&'static FormatVariableSpec> {
         .binary_search_by_key(&name, |variable| variable.name)
         .ok()
         .map(|index| &FORMAT_VARIABLES[index])
+}
+
+#[cfg(test)]
+pub(crate) fn format_variable_names() -> impl Iterator<Item = &'static str> {
+    FORMAT_VARIABLES.iter().map(|variable| variable.name)
+}
+
+#[cfg(test)]
+pub(crate) fn constant_format_variable_names() -> impl Iterator<Item = &'static str> {
+    FORMAT_VARIABLES.iter().filter_map(|variable| {
+        matches!(
+            variable.backing,
+            FormatBacking::Empty
+                | FormatBacking::Zero
+                | FormatBacking::One
+                | FormatBacking::WindowLinked
+        )
+        .then_some(variable.name)
+    })
 }
 
 fn optional_display<T: ToString>(value: Option<T>) -> Cow<'static, str> {
@@ -3235,6 +3277,7 @@ mod tests {
     fn context() -> StatusContext {
         StatusContext {
             active_window_index: Some(1),
+            config_files: "/tmp/first.conf,/tmp/second.conf".to_owned(),
             history_limit: Some(2_000),
             host: "tower.local".to_owned(),
             host_short: "tower".to_owned(),
@@ -3342,6 +3385,14 @@ mod tests {
             }
         }
         assert!(context.variable("not_a_tmux_variable").is_none());
+        assert_eq!(
+            context.variable("config_files").as_deref(),
+            Some("/tmp/first.conf,/tmp/second.conf")
+        );
+        assert_eq!(
+            StatusContext::default().variable("config_files").as_deref(),
+            Some("")
+        );
     }
 
     #[test]
@@ -3701,7 +3752,17 @@ mod tests {
         assert_eq!(expand("#{t/f/%Y:start_time}"), "2026");
         assert!(!expand("#{t:start_time}").is_empty());
         assert_eq!(expand("#{t:session_created}"), "");
+        assert_eq!(expand("#{pane_dead_time}"), "");
         let mut context = context();
+        context.pane_dead_time = Some(946_728_000);
+        assert_eq!(
+            expand_format_values(
+                "#{pane_dead_time}|#{t/f/%Y:pane_dead_time}",
+                &context,
+                &mut Stub,
+            ),
+            "946728000|2000"
+        );
         context.pane_title = "#{session_name}".to_owned();
         assert_eq!(
             expand_status("#{E:pane_title}", &context, &mut Stub),

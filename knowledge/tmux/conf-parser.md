@@ -9,11 +9,18 @@ timestamp: 2026-08-19T00:00:00Z
 
 # Overview
 
-`parser.rs` implements `parse_config(source, input) -> ParsedConfig`, the lexer that the daemon uses
-to read the zz-owned `~/.config/zz/mux.conf` on startup (the daemon does not read `~/.tmux.conf`;
-the client's import flow copies a user's tmux config there verbatim; see
-[Application configuration](/configuration/app-config.md)), to handle `source-file`, and to parse
-each `command-prompt` submission. It is a single character-by-character state machine (modeled on tmux's `cmd-parse.y` /
+`parser.rs` implements `parse_config(source, input) -> ParsedConfig`, the lexer used for startup
+config, `source-file`, and each `command-prompt` submission. By default the daemon reads the first
+existing zz-owned platform candidate for `zz/mux.conf`: XDG config, the home config directory,
+macOS Application Support, or Windows AppData in platform order. One or more top-level startup `-f`
+files replace that default for the initial load. `#{config_files}` retains that ordered startup
+selection until `reload-config` returns to the first existing platform candidate; reload then
+replaces the fact with that selected path, or empties it when no candidate exists. Later
+`source-file` calls do not append to the fact. The daemon does not read `~/.tmux.conf`; the client's
+import flow copies a user's tmux config to the first existing or first constructible candidate. See
+[Application configuration](/configuration/app-config.md).
+
+The lexer is a single character-by-character state machine (modeled on tmux's `cmd-parse.y` /
 `arguments.c`) that splits input into words, groups words into commands, and records a
 [`SourceSpan`](/crates/zz-protocol.md) (`source`, `line`, `column`) for each command so diagnostics and
 `list-keys` output can point back at the origin. It produces `CommandInvocation`s only. It does
@@ -49,6 +56,59 @@ interactive `source-file` replay, the daemon reapplies its stored mux overrides 
 and the last successful writer is what `ServerHello` and `MuxOptionsChanged` report. Thus a
 `zz/mux.conf` assignment such as `set -g prefix C-b` cannot revert a stored `prefix = C-a` when the
 configuration is reloaded.
+
+`source-file -F` expands every positional path in the command's current pane context before the
+daemon resolves relative paths and globs. Paths remain in declared order and matches within each
+path remain in glob order. On Unix, matching uses `glob(3)` with flags zero, like tmux: backslash
+quotes the next character, a wildcard does not include a leading dot, repeated stars are ordinary
+wildcards rather than recursive traversal, and an unmatched bracket can be a literal. A pattern
+that finds nothing follows the ordinary missing-file path, including malformed forms that libc
+treats as no match. A `-q` miss is silent without stopping later paths. Nested loud no-match and
+glob errors retain the post-`-F` declared argument; a nested `-q` no-match stays silent. Command and
+Interactive clients receive those diagnostics directly. For the current pinned English families,
+zz Control groups all misses from one nested source command into a synthesized standalone plain
+`%error` after the successful outer frame. That is not tmux's complete replay model: tmux gives every
+sourced command its own guard, ends a nested partial match with `%end`, and orders a containing
+command's missing arguments before deeper recursion. `control-mode.sourced-command-frames` owns the
+missing guards; `source-file.nested-control-queue` owns nested termination and ordering. Typed
+Control classification also remains open for localized or platform-specific
+errors. Counting the initial `source-file` as invocation 1, both sides run 50 concurrent
+source invocations and refuse invocation 51 with `too many nested files` before any of its
+paths are matched or loaded: Command stderr at rc 1, the same lowercase text on the Control
+error channel while the outer typed line continues, and the capitalized `Too many nested
+files` on an attached status line. `-q` does not suppress it, one diagnostic covers a refused
+command rather than each of its paths, and the containing file keeps running its later
+physical lines. Exact Control frame placement is not part of that: the pin prints the refusal
+inside the rejected nested command's own flags-1 `%begin`/`%error` frame, while zz synthesizes
+a standalone `%error`, which `control-mode.sourced-command-frames` and
+`source-file.nested-control-queue` own. A same-line `;` sibling inside the containing config
+file is a separate boundary: the pin removes the rest of that sourced line and zz still runs
+it, tracked under `config.same-line-error-group`. The typed outer line's own same-line sibling
+runs on both sides, because the outer `source-file` does not itself return an error. A malformed
+invocation at the refused depth is diagnosed as malformed rather than as depth on both sides,
+because the pin rejects it while parsing the containing file and never consults its depth guard, and
+zz runs its depth guard after the command's own flag and positional validation for the same reason.
+Precedence, the stdout stream, and the rc-1 exit agree there; the malformed text itself still
+differs and is tracked under `mux.error-shapes`, and the pin's abandonment of the rest of the
+containing file after it is tracked under `config.parser-edge-cases`. Startup configuration now uses
+one cumulative 50-command source budget across every top-level config. Top-level roots do not consume
+slots, quiet misses do, and one command with many paths consumes one slot. Invocation 51 and later
+retain `<file>:<line>: too many nested files` in the startup report while later ordinary commands
+continue. Runtime sequential sources stay unbounded. zz still discards that startup report before a
+client can see it, which `config.startup-diagnostic-delivery` owns. A replayed command that fails for
+an ordinary runtime reason is a separate hole. tmux reports every such failure through `cmdq_error`,
+so the bare message
+reaches the invoking client's error channel and that client exits 1 while the file's later physical
+lines still run. zz logs the daemon-side error and continues, so a sourced `kill-session -t nosuch`
+or `set-option -t nosuch status on` is silent on Command, Control, and attached channels at rc 0,
+and the failures zz classifies as invalid commands arrive as `path:line:`-prefixed stdout parse
+diagnostics instead. `config.replayed-command-errors` owns both halves.
+Parse-only `-n`, explicit target `-t`, and verbose `-v` remain rejected rather than
+being accepted without their tmux behavior. `source-file` does not expand tildes again during path
+resolution. Leading tildes that the config lexer expands already arrive as absolute paths; a quoted
+literal tilde or a tilde passed through direct argv remains relative and follows the command's
+normal base selection. One parser edge remains tracked separately: tmux expands a tilde immediately
+after a closing quote, while zz leaves it literal.
 
 # Syntax and tokenization rules
 

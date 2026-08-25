@@ -1223,6 +1223,74 @@ mod tests {
     }
 
     #[test]
+    fn window_status_separator_uses_each_item_scope_and_skips_the_trailing_item() {
+        let mut engine = MuxEngine::default();
+        let mut context = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-session", "-s", "work", "-n", "main"],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["new-window", "-d", "-n", "logs"],
+        );
+        let session = context.session.expect("session id");
+        for args in [
+            &["set-option", "-g", "status-left", ""] as &[&str],
+            &["set-option", "-g", "status-right", ""],
+            &[
+                "set-option",
+                "-g",
+                "status-format[0]",
+                "#{W:#{T:window-status-format}#{?loop_last_flag,,#{E:window-status-separator}},#{T:window-status-current-format}#{?loop_last_flag,,#{E:window-status-separator}}}",
+            ],
+            &[
+                "set-window-option",
+                "-g",
+                "window-status-format",
+                "N#{window_index}:#{window_name}",
+            ],
+            &[
+                "set-window-option",
+                "-g",
+                "window-status-current-format",
+                "C#{window_index}:#{window_name}",
+            ],
+            &[
+                "set-window-option",
+                "-g",
+                "window-status-separator",
+                "#{?#{==:#{window_index},0},#[fg=red]G#{window_index}:#{window_name},#[fg=blue]BAD}",
+            ],
+        ] {
+            execute(&mut engine, &mut context, args);
+        }
+
+        let global =
+            StatusRenderer::default().render_initial(&engine_request(1, &engine, Some(session)));
+        assert_eq!(global.left, "");
+        assert_eq!(global.right, "");
+        assert_eq!(global.rows, ["C0:main#[fg=red]G0:mainN1:logs"]);
+
+        execute(
+            &mut engine,
+            &mut context,
+            &[
+                "set-window-option",
+                "-t",
+                "work:0",
+                "window-status-separator",
+                "#{?#{==:#{window_index},0},#[bold]L#{window_index}:#{window_name},#[reverse]BAD}",
+            ],
+        );
+        let local =
+            StatusRenderer::default().render_initial(&engine_request(2, &engine, Some(session)));
+        assert_eq!(local.rows, ["C0:main#[bold]L0:mainN1:logs"]);
+    }
+
+    #[test]
     fn sparse_session_status_formats_keep_blank_rows_without_compaction() {
         let mut engine = MuxEngine::default();
         let mut context = zz_mux::ExecutionContext::default();

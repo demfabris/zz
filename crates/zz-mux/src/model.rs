@@ -213,6 +213,8 @@ pub struct Pane {
     pub bell: bool,
     pub dead: bool,
     pub dead_status: Option<u32>,
+    pub dead_time: Option<u64>,
+    pub(crate) input_off: bool,
     pub(crate) empty: bool,
     input_options: InputOptions,
 }
@@ -389,6 +391,8 @@ impl MuxState {
             bell: false,
             dead: false,
             dead_status: None,
+            dead_time: None,
+            input_off: false,
             empty: false,
             input_options: InputOptions::default(),
         };
@@ -506,6 +510,8 @@ impl MuxState {
             bell: false,
             dead: false,
             dead_status: None,
+            dead_time: None,
+            input_off: false,
             empty: false,
             input_options: InputOptions::default(),
         };
@@ -1015,6 +1021,8 @@ impl MuxState {
                 bell: false,
                 dead: false,
                 dead_status: None,
+                dead_time: None,
+                input_off: false,
                 empty: false,
                 input_options: InputOptions::default(),
             },
@@ -1310,6 +1318,25 @@ impl MuxState {
             .map_err(|error| pane_layout_error(error, pane))?;
         window.zoomed_pane = None;
         self.bump_generation();
+        Ok(())
+    }
+
+    pub(crate) fn resize_window(
+        &mut self,
+        window: WindowId,
+        columns: u16,
+        rows: u16,
+    ) -> Result<(), ServerError> {
+        let window = self
+            .windows
+            .get_mut(&window)
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        let before = window.layout.extent();
+        window.layout.resize(columns, rows);
+        window.last_extent_probe = None;
+        if window.layout.extent() != before {
+            self.bump_generation();
+        }
         Ok(())
     }
 
@@ -2604,11 +2631,12 @@ impl MuxState {
         let pane = self
             .pane_mut(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        if !pane.dead && pane.dead_status.is_none() && !pane.empty {
+        if !pane.dead && pane.dead_status.is_none() && pane.dead_time.is_none() && !pane.empty {
             return Ok(false);
         }
         pane.dead = false;
         pane.dead_status = None;
+        pane.dead_time = None;
         pane.empty = false;
         self.bump_generation();
         Ok(true)
@@ -2618,11 +2646,12 @@ impl MuxState {
         let pane = self
             .pane_mut(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        if !pane.dead && pane.dead_status.is_none() && pane.empty {
+        if !pane.dead && pane.dead_status.is_none() && pane.dead_time.is_none() && pane.empty {
             return Ok(false);
         }
         pane.dead = false;
         pane.dead_status = None;
+        pane.dead_time = None;
         pane.empty = true;
         self.bump_generation();
         Ok(true)
@@ -3221,6 +3250,28 @@ impl MuxState {
                 .ok_or_else(|| ServerError::InvalidCommand("no last pane".to_owned()));
         }
         Err(ServerError::InvalidCommand("no last pane".to_owned()))
+    }
+
+    pub(crate) fn pane_input_off(&self, pane: PaneId) -> Result<bool, ServerError> {
+        self.pane(pane)
+            .map(|target| target.input_off)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))
+    }
+
+    pub(crate) fn set_pane_input_off(
+        &mut self,
+        pane: PaneId,
+        input_off: bool,
+    ) -> Result<bool, ServerError> {
+        let target = self
+            .pane_mut(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        if target.input_off == input_off {
+            return Ok(false);
+        }
+        target.input_off = input_off;
+        self.bump_generation();
+        Ok(true)
     }
 
     #[must_use]

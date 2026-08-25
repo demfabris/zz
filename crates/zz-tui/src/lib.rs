@@ -434,7 +434,7 @@ fn initial_connection(
 }
 
 fn resolve_attach_target(client: &InteractiveClient, target: Option<&str>) -> Result<(), Error> {
-    let arguments = target.map_or_else(Vec::new, |target| vec!["-t".to_owned(), target.to_owned()]);
+    let arguments = attach_preflight_arguments(target);
     let request_id = client
         .execute(CommandInvocation::new("has-session", arguments))
         .map_err(|error| Error::message(error.to_string()))?;
@@ -459,19 +459,21 @@ fn resolve_attach_target(client: &InteractiveClient, target: Option<&str>) -> Re
             }
             ProtocolMessage::CommandResponse(CommandResponse::Error {
                 request_id: response_id,
-                error: ServerError::SessionNotFound(_),
-                ..
-            }) if response_id == request_id && target.is_none() => {
-                return Err(Error::message("no sessions"));
-            }
-            ProtocolMessage::CommandResponse(CommandResponse::Error {
-                request_id: response_id,
                 error,
                 ..
-            }) if response_id == request_id => return Err(Error::message(error.to_string())),
+            }) if response_id == request_id => {
+                if target.is_none() && matches!(error, ServerError::SessionNotFound(_)) {
+                    return Err(Error::message("no sessions"));
+                }
+                return Err(Error::message(error.to_string()));
+            }
             _ => {}
         }
     }
+}
+
+fn attach_preflight_arguments(target: Option<&str>) -> Vec<String> {
+    target.map_or_else(Vec::new, |target| vec!["-t".to_owned(), target.to_owned()])
 }
 
 fn spawn_and_connect_daemon(
@@ -582,6 +584,15 @@ mod tests {
                 "attach".to_owned(),
             ])
             .is_err()
+        );
+    }
+
+    #[test]
+    fn targetless_attach_preflights_the_current_session() {
+        assert_eq!(attach_preflight_arguments(None), Vec::<String>::new());
+        assert_eq!(
+            attach_preflight_arguments(Some("work")),
+            vec!["-t".to_owned(), "work".to_owned()]
         );
     }
 }

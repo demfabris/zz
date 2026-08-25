@@ -89,7 +89,7 @@ const CONTROL_CELL_WIDTH_PX: u32 = 8;
 const CONTROL_CELL_HEIGHT_PX: u32 = 18;
 const CONTROL_SIZE_MINIMUM: u16 = 1;
 const CONTROL_SIZE_MAXIMUM: u16 = 10_000;
-const MAX_CONFIG_DEPTH: usize = 16;
+const MAX_SOURCE_INVOCATIONS: usize = 50;
 const MAX_RELIABLE_MESSAGES: usize = 256;
 const MAX_KITTY_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
 const MAX_PENDING_TERMINALS: usize = 128;
@@ -304,7 +304,7 @@ fn terminal_environment_for_session(
     session: SessionId,
 ) -> Result<Vec<(String, Option<String>)>, ServerError> {
     let mut environment = engine.environment_for_session(session)?;
-    environment.retain(|(name, _)| name != "TERM");
+    environment.retain(|(name, _)| !name.is_empty() && name != "TERM");
     Ok(environment)
 }
 
@@ -376,7 +376,6 @@ fn next_timed_message_id(inner: &mut ServerState) -> u64 {
 #[derive(Clone, Copy)]
 struct WindowAlert {
     session: SessionId,
-    window: WindowId,
     pane: PaneId,
     window_index: u32,
     label: &'static str,
@@ -392,7 +391,6 @@ fn window_alert_notifications(
 ) -> (Option<PendingHookEvent>, Vec<(ClientId, Vec<EventPayload>)>) {
     let WindowAlert {
         session,
-        window,
         pane,
         window_index,
         label,
@@ -401,30 +399,29 @@ fn window_alert_notifications(
         visual,
         session_current,
     } = alert;
-    let hook = action.applies(session_current).then(|| {
+    let applies = action.applies(session_current);
+    let hook = applies.then(|| {
         let snapshot = MuxHookSnapshot::capture(&inner.engine);
         PendingHookEvent::pane(hook_name, pane, &snapshot.panes[&pane], &snapshot)
     });
     let duration_ms = inner.engine.display_time_for_session(session);
-    let mut notifications = inner
-        .attached
-        .get(&session)
-        .into_iter()
-        .flatten()
-        .filter(|client| {
-            inner.client_kinds.get(*client) != Some(&ClientKind::Control)
-                && inner.subscribers.contains_key(*client)
-        })
-        .filter_map(|client| {
-            let session_state = &inner.engine.state.sessions[&session];
-            let current = client_focused_window(inner, *client, session_state) == window;
-            action.applies(current).then(|| {
+    let mut notifications = if applies {
+        inner
+            .attached
+            .get(&session)
+            .into_iter()
+            .flatten()
+            .filter(|client| {
+                inner.client_kinds.get(*client) != Some(&ClientKind::Control)
+                    && inner.subscribers.contains_key(*client)
+            })
+            .map(|client| {
                 let mut events = Vec::with_capacity(2);
                 if visual.rings() {
                     events.push(EventPayload::Bell { pane });
                 }
                 if visual.shows_message() {
-                    let text = if current {
+                    let text = if session_current {
                         format!("{label} in current window")
                     } else {
                         format!("{label} in window {window_index}")
@@ -439,8 +436,10 @@ fn window_alert_notifications(
                 }
                 (*client, events)
             })
-        })
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     for (_, events) in &mut notifications {
         for event in events {
             if let EventPayload::TimedClientMessage { message_id, .. } = event {
@@ -592,10 +591,11 @@ struct ResolvedTerminalWorkerOptions {
 fn terminal_worker_options(
     engine: &MuxEngine,
     base_appearance: &Arc<TerminalAppearance>,
+    config_files: &str,
     pane: PaneId,
 ) -> Result<ResolvedTerminalWorkerOptions, ServerError> {
     let options = engine.terminal_worker_options_for_pane(pane)?;
-    let window_colours = window_style_colours(engine, &options, pane);
+    let window_colours = window_style_colours(engine, config_files, &options, pane);
     Ok(ResolvedTerminalWorkerOptions {
         appearance: pane_terminal_appearance(
             base_appearance,
@@ -610,6 +610,7 @@ fn terminal_worker_options(
 
 fn window_style_colours(
     engine: &MuxEngine,
+    config_files: &str,
     options: &zz_mux::TerminalWorkerOptions,
     pane: PaneId,
 ) -> (Option<TmuxColour>, Option<TmuxColour>) {
@@ -622,7 +623,8 @@ fn window_style_colours(
         .map(|window| window.session);
     let resolve = |value: &Option<String>| {
         value.as_deref().and_then(|value| {
-            let expanded = expanded_style_value(engine, value, session, window, Some(pane));
+            let expanded =
+                expanded_style_value(engine, config_files, value, session, window, Some(pane));
             zz_protocol::parse_style(&expanded)
         })
     };
@@ -724,8 +726,21 @@ impl StatusHooks for InertFormatHooks {
     }
 }
 
+fn server_format_context(
+    engine: &MuxEngine,
+    config_files: &str,
+    session: Option<SessionId>,
+    window: Option<WindowId>,
+    pane: Option<PaneId>,
+) -> zz_mux::StatusContext {
+    let mut context = engine.format_status_context(session, window, pane);
+    config_files.clone_into(&mut context.config_files);
+    context
+}
+
 fn expanded_style_value(
     engine: &MuxEngine,
+    config_files: &str,
     value: &str,
     session: Option<SessionId>,
     window: Option<WindowId>,
@@ -734,7 +749,7 @@ fn expanded_style_value(
     if !value.contains("#{") {
         return value.to_owned();
     }
-    let context = engine.format_status_context(session, window, pane);
+    let context = server_format_context(engine, config_files, session, window, pane);
     let mut hooks = InertFormatHooks;
     expand_format_values(value, &context, &mut hooks)
 }
@@ -747,7 +762,8 @@ fn published_appearance(inner: &ServerState) -> Arc<TerminalAppearance> {
     let base = Arc::clone(&inner.appearance);
     let mut appearance = (*base).clone();
     let resolve = |value: &str| {
-        let expanded = expanded_style_value(&inner.engine, value, None, None, None);
+        let expanded =
+            expanded_style_value(&inner.engine, &inner.config_files, value, None, None, None);
         zz_protocol::parse_style(&expanded).map(|style| {
             (
                 style.fg.and_then(|fg| appearance_tmux_colour(&base, fg)),
@@ -781,19 +797,25 @@ fn terminal_appearance_updates(
 ) -> Vec<(Arc<TerminalSession>, Arc<TerminalAppearance>)> {
     let mut updates = Vec::with_capacity(inner.terminals.len() + inner.command_outputs.len());
     for (pane, terminal) in &inner.terminals {
-        let appearance = terminal_worker_options(&inner.engine, &inner.appearance, *pane)
-            .map_or_else(
-                |_| Arc::clone(&inner.appearance),
-                |options| options.appearance,
-            );
+        let appearance =
+            terminal_worker_options(&inner.engine, &inner.appearance, &inner.config_files, *pane)
+                .map_or_else(
+                    |_| Arc::clone(&inner.appearance),
+                    |options| options.appearance,
+                );
         updates.push((Arc::clone(terminal), appearance));
     }
     for output in inner.command_outputs.values() {
-        let appearance = terminal_worker_options(&inner.engine, &inner.appearance, output.pane)
-            .map_or_else(
-                |_| Arc::clone(&inner.appearance),
-                |options| options.appearance,
-            );
+        let appearance = terminal_worker_options(
+            &inner.engine,
+            &inner.appearance,
+            &inner.config_files,
+            output.pane,
+        )
+        .map_or_else(
+            |_| Arc::clone(&inner.appearance),
+            |options| options.appearance,
+        );
         updates.push((Arc::clone(&output.terminal), appearance));
     }
     updates
@@ -862,6 +884,25 @@ fn partition_config_overrides(
         }
     }
     (appearance_entries, mux_entries)
+}
+
+fn startup_mux_config_files(
+    load_user_config: bool,
+    explicit: Option<&[PathBuf]>,
+    default: impl FnOnce() -> Option<PathBuf>,
+) -> Vec<PathBuf> {
+    if !load_user_config {
+        return Vec::new();
+    }
+    explicit.map_or_else(|| default().into_iter().collect(), <[PathBuf]>::to_vec)
+}
+
+fn format_config_files(files: &[PathBuf]) -> String {
+    files
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[derive(Clone, Debug)]
@@ -2075,6 +2116,7 @@ enum DaemonCommandDispatch {
     Buffer,
     ListClients,
     ShowMessages,
+    PromptHistory,
     RefreshClient,
     WaitFor,
     PipePane,
@@ -2115,6 +2157,10 @@ const DAEMON_COMMAND_DISPATCHES: &[(&str, DaemonCommandDispatch)] = &[
     ("lsc", DaemonCommandDispatch::ListClients),
     ("show-messages", DaemonCommandDispatch::ShowMessages),
     ("showmsgs", DaemonCommandDispatch::ShowMessages),
+    ("clear-prompt-history", DaemonCommandDispatch::PromptHistory),
+    ("clearphist", DaemonCommandDispatch::PromptHistory),
+    ("show-prompt-history", DaemonCommandDispatch::PromptHistory),
+    ("showphist", DaemonCommandDispatch::PromptHistory),
     ("refresh-client", DaemonCommandDispatch::RefreshClient),
     ("refresh", DaemonCommandDispatch::RefreshClient),
     ("wait-for", DaemonCommandDispatch::WaitFor),
@@ -2146,7 +2192,9 @@ fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
 
 struct Shared {
     inner: Mutex<ServerState>,
+    default_attach_effects: Mutex<()>,
     pipe_effects: Mutex<()>,
+    prompt_history_effects: Mutex<()>,
     /// Built on the first agent pane rather than at startup: a daemon that
     /// never opens one never touches the journal directory.
     #[cfg(feature = "agent")]
@@ -2975,7 +3023,9 @@ impl Shared {
             crossbeam_channel::unbounded();
         Self {
             inner: Mutex::new(state),
+            default_attach_effects: Mutex::new(()),
             pipe_effects: Mutex::new(()),
+            prompt_history_effects: Mutex::new(()),
             #[cfg(feature = "agent")]
             agent: Mutex::new(None),
             #[cfg(feature = "agent")]
@@ -3042,14 +3092,19 @@ impl Shared {
         self.start_silence_deadline_dispatcher()?;
         self.start_client_message_deadline_dispatcher()?;
         let mut context = ExecutionContext::default();
-        if load_user_config {
-            if let Some(configs) = mux_config_files {
-                for config in configs {
-                    self.load_config_file(config, &mut context, 0)?;
-                }
-            } else if let Some(config) = default_mux_config().filter(|path| path.is_file()) {
-                self.load_config_file(&config, &mut context, 0)?;
-            }
+        let config_files =
+            startup_mux_config_files(load_user_config, mux_config_files, default_mux_config);
+        self.inner.lock().config_files = format_config_files(&config_files);
+        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
+        for config in &config_files {
+            self.load_config_file_with_report_for_terminal(
+                config,
+                &mut context,
+                0,
+                &mut ConfigLoadReport::default(),
+                ClientTerminal::NoClient,
+                &mut source_invocations,
+            )?;
         }
         self.apply_stored_mux_config_overrides("startup-mux-replay");
         let history_settings = {
@@ -3472,7 +3527,9 @@ impl Shared {
                     let mut current = BTreeMap::new();
                     for target in control_subscription_targets(&inner, session, subscription.scope)
                     {
-                        let context = inner.engine.format_status_context(
+                        let context = server_format_context(
+                            &inner.engine,
+                            &inner.config_files,
                             Some(target.session),
                             target.window,
                             target.pane,
@@ -3804,6 +3861,7 @@ impl Shared {
             inner.client_terminals.remove(&client);
             inner.client_ttys.remove(&client);
             inner.client_sizes.remove(&client);
+            inner.client_working_directories.remove(&client);
             inner.published_mux_options.remove(&client);
             inner.client_origins.remove(&client);
             inner.client_activity.remove(&client);
@@ -3906,9 +3964,8 @@ impl Shared {
         request_id: u64,
         command: &CommandInvocation,
     ) -> CommandResponse {
-        if self.inner.lock().read_only_clients.contains(&client)
-            && !command_is_read_only_safe(command)
-        {
+        let (command, blocked) = self.prepare_command_request(client, command);
+        if blocked {
             return CommandResponse::Error {
                 request_id,
                 error: ServerError::InvalidCommand("client is read-only".to_owned()),
@@ -3922,7 +3979,7 @@ impl Shared {
                 .get(&client)
                 .cloned()
                 .unwrap_or_else(|| format!("device-{}", client.0));
-            let command = command_log_line(command);
+            let command = command_log_line(&command);
             push_server_message(&mut inner, format!("{client_name} command: {command}"));
             if kind == ClientKind::Command {
                 inner
@@ -3931,7 +3988,13 @@ impl Shared {
             }
             client_name
         };
-        let response = match self.execute(client, kind, context, command) {
+        let response = match self.execute_with_mux_source_routed(
+            client,
+            kind,
+            context,
+            &command,
+            MuxOptionSource::RuntimeCommand,
+        ) {
             Ok(execution) => CommandResponse::Success {
                 request_id,
                 output: execution.output,
@@ -3994,6 +4057,21 @@ impl Shared {
         response
     }
 
+    fn prepare_command_request(
+        &self,
+        client: ClientId,
+        command: &CommandInvocation,
+    ) -> (CommandInvocation, bool) {
+        let inner = self.inner.lock();
+        let command = inner
+            .engine
+            .expand_command_alias(command)
+            .unwrap_or_else(|| command.clone());
+        let blocked =
+            inner.read_only_clients.contains(&client) && !command_is_read_only_safe(&command);
+        (command, blocked)
+    }
+
     fn execute(
         self: &Arc<Self>,
         client: ClientId,
@@ -4018,12 +4096,29 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
+        let routed = self
+            .inner
+            .lock()
+            .engine
+            .expand_command_alias(command)
+            .unwrap_or_else(|| command.clone());
+        self.execute_with_mux_source_routed(client, kind, context, &routed, mux_source)
+    }
+
+    fn execute_with_mux_source_routed(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+    ) -> Result<Execution, DaemonError> {
         let client_terminal = if context.has_no_client() {
             ClientTerminal::NoClient
         } else {
             client_terminal(&self.inner.lock(), client, kind)
         };
-        self.execute_with_mux_source_for_terminal(
+        self.execute_with_mux_source_routed_for_terminal(
             client,
             kind,
             context,
@@ -4034,6 +4129,31 @@ impl Shared {
     }
 
     fn execute_with_mux_source_for_terminal(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+        client_terminal: ClientTerminal,
+    ) -> Result<Execution, DaemonError> {
+        let routed = self
+            .inner
+            .lock()
+            .engine
+            .expand_command_alias(command)
+            .unwrap_or_else(|| command.clone());
+        self.execute_with_mux_source_routed_for_terminal(
+            client,
+            kind,
+            context,
+            &routed,
+            mux_source,
+            client_terminal,
+        )
+    }
+
+    fn execute_with_mux_source_routed_for_terminal(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
@@ -4107,11 +4227,9 @@ impl Shared {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
-        client_terminal: ClientTerminal,
+        invoking_client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
-        let expanded = self.inner.lock().engine.expand_command_alias(command);
-        let routed = expanded.as_ref().unwrap_or(command);
-        let canonical = canonical_command(&routed.name);
+        let canonical = canonical_command(&command.name);
         let unattached_watch = {
             let inner = self.inner.lock();
             inner
@@ -4125,52 +4243,55 @@ impl Shared {
                 match daemon_command_dispatch(canonical)
                     .expect("daemon command catalog and dispatch must agree")
                 {
-                    DaemonCommandDispatch::CapturePane => self.capture_pane(context, &routed.args),
+                    DaemonCommandDispatch::CapturePane => self.capture_pane(context, &command.args),
                     DaemonCommandDispatch::RunShell => {
-                        self.run_shell(client, kind, context, &routed.args)
+                        self.run_shell(client, kind, context, &command.args)
                     }
                     DaemonCommandDispatch::IfShell => {
-                        self.if_shell(client, kind, context, &routed.args)
+                        self.if_shell(client, kind, context, &command.args)
                     }
-                    DaemonCommandDispatch::AgentSend => self.agent_send(context, &routed.args),
+                    DaemonCommandDispatch::AgentSend => self.agent_send(context, &command.args),
                     DaemonCommandDispatch::SendLastOutput => {
-                        self.send_last_output(context, &routed.args)
+                        self.send_last_output(context, &command.args)
                     }
                     DaemonCommandDispatch::CaptureBrowser => {
-                        self.capture_browser(context, &routed.args)
+                        self.capture_browser(context, &command.args)
                     }
                     DaemonCommandDispatch::DebugMarker => {
-                        Ok(debug_marker(client, context, &routed.args))
+                        Ok(debug_marker(client, context, &command.args))
                     }
                     DaemonCommandDispatch::Tools => Ok(workspace_tools_catalog()),
                     DaemonCommandDispatch::Buffer => {
-                        self.buffer_command(context, canonical, &routed.args)
+                        self.buffer_command(context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::ListClients => {
-                        self.list_clients(context, canonical, &routed.args)
+                        self.list_clients(context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::ShowMessages => {
-                        self.show_messages(canonical, &routed.args)
+                        self.show_messages(canonical, &command.args)
+                    }
+                    DaemonCommandDispatch::PromptHistory => {
+                        self.prompt_history_command(canonical, &command.args)
                     }
                     DaemonCommandDispatch::RefreshClient => {
-                        self.refresh_client(client, kind, canonical, &routed.args)
+                        self.refresh_client(client, kind, canonical, &command.args)
                     }
-                    DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &routed.args),
-                    DaemonCommandDispatch::PipePane => self.pipe_pane(context, &routed.args),
+                    DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &command.args),
+                    DaemonCommandDispatch::PipePane => self.pipe_pane(context, &command.args),
                     DaemonCommandDispatch::DisplayPopup => {
-                        self.display_popup(client, kind, context, &routed.args)
+                        self.display_popup(client, kind, context, &command.args)
                     }
                     DaemonCommandDispatch::DisplayMenu => {
-                        self.display_menu(client, kind, context, &routed.args)
+                        self.display_menu(client, kind, context, &command.args)
                     }
                     DaemonCommandDispatch::ConfirmBefore => {
-                        self.confirm_before(client, kind, context, &routed.args)
+                        self.confirm_before(client, kind, context, &command.args)
                     }
                     DaemonCommandDispatch::Lock => {
-                        self.lock_command(client, context, canonical, &routed.args)
+                        self.lock_command(client, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::SwitchClient => {
-                        self.switch_client(client, kind, context, &routed.args)
+                        self.switch_client(client, kind, context, &command.args)
                     }
                 }
             });
@@ -4182,14 +4303,52 @@ impl Shared {
             return result;
         }
         let generation = self.inner.lock().engine.state.generation();
-        let result = self.execute_with_mux_source_inner(
-            client,
-            kind,
-            context,
-            command,
-            mux_source,
-            client_terminal,
-        );
+        let display_panes_target = if canonical == "display-panes" {
+            let parsed = parse_buffer_command_args(
+                "display-panes",
+                &command.args,
+                &['d', 't'],
+                &['b', 'N'],
+            )?;
+            parsed.value('t').map(|target| {
+                let inner = self.inner.lock();
+                resolve_display_panes_client(&inner, target).map(|target| {
+                    let kind = inner
+                        .client_kinds
+                        .get(&target)
+                        .copied()
+                        .unwrap_or(ClientKind::Command);
+                    let terminal = client_terminal(&inner, target, kind);
+                    let mut context = context.clone();
+                    retarget_context_to_attachment(&inner, target, &mut context);
+                    (target, kind, terminal, context)
+                })
+            })
+        } else {
+            None
+        }
+        .transpose()?;
+        let result = if let Some((target, target_kind, target_terminal, mut target_context)) =
+            display_panes_target
+        {
+            self.execute_with_mux_source_inner(
+                target,
+                target_kind,
+                &mut target_context,
+                command,
+                mux_source,
+                target_terminal,
+            )
+        } else {
+            self.execute_with_mux_source_inner(
+                client,
+                kind,
+                context,
+                command,
+                mux_source,
+                invoking_client_terminal,
+            )
+        };
         let publish_snapshot = {
             let inner = self.inner.lock();
             let current = inner.engine.state.generation();
@@ -4353,7 +4512,7 @@ impl Shared {
         mux_source: MuxOptionSource,
         client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
-        let format_variables = context.format_variables.clone();
+        let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
         let command_name = canonical_command(&command.name);
         let mut terminals_to_watch = Vec::new();
@@ -4398,15 +4557,10 @@ impl Shared {
         let mut pending_hook_events = Vec::new();
         let (mut execution, mux_options_event) = {
             let mut inner = self.inner.lock();
+            format_variables.insert("config_files".to_owned(), inner.config_files.clone());
             let hook_snapshot_before =
                 event_hooks_enabled.then(|| MuxHookSnapshot::capture(&inner.engine));
-            let copy_modes_before = event_hooks_enabled.then(|| {
-                inner
-                    .copy_sessions
-                    .values()
-                    .map(|session| session.pane)
-                    .collect::<BTreeSet<_>>()
-            });
+            let copy_modes_before = event_hooks_enabled.then(|| active_copy_mode_panes(&inner));
             let active_windows_before = inner
                 .engine
                 .state
@@ -4450,15 +4604,23 @@ impl Shared {
             )
             .with_status_options(&status_options);
             inner.engine.set_format_now(unix_timestamp());
-            if command_name == "attach-session"
-                && let Some(refusal) = nested_attach_refusal(&inner, client)
-            {
+            let mut prospective_context = context.clone();
+            set_context_client_terminal(&mut prospective_context, client_terminal);
+            let command_will_attach = command_name == "attach-session"
+                || (command_name == "new-session"
+                    && inner
+                        .engine
+                        .new_session_will_attach(&prospective_context, &command.args)?);
+            if command_will_attach && let Some(refusal) = nested_attach_refusal(&inner, client) {
                 return Err(refusal.into());
             }
             context.set_client_size(inner.client_sizes.get(&client).copied());
+            context.set_client_working_directory(
+                inner.client_working_directories.get(&client).cloned(),
+            );
             let previous_client_terminal = context_client_terminal(context);
             set_context_client_terminal(context, client_terminal);
-            let execution = inner.engine.execute_with_shell_validator(
+            let execution = inner.engine.execute_without_alias_expansion(
                 context,
                 command,
                 &mut hooks,
@@ -4558,6 +4720,7 @@ impl Shared {
                         inherit_cwd_from,
                         cwd,
                         command,
+                        ..
                     }
                     | MuxEffect::PaneMaterialized {
                         pane,
@@ -4566,6 +4729,13 @@ impl Shared {
                         cwd,
                         command,
                     } => {
+                        let (pane_environment, empty) = match effect {
+                            MuxEffect::PaneCreated {
+                                environment, empty, ..
+                            } => (environment.as_slice(), *empty),
+                            MuxEffect::PaneMaterialized { .. } => (&[][..], false),
+                            _ => unreachable!(),
+                        };
                         let history_limit = inner.engine.history_limit_for_pane(*pane)?;
                         let word_separators =
                             WordSeparators::new(inner.engine.word_separators_for_pane(*pane)?);
@@ -4584,8 +4754,12 @@ impl Shared {
                             .as_deref()
                             .map(|path| path.to_string_lossy().into_owned())
                             .unwrap_or_default();
-                        let terminal_options =
-                            terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
+                        let terminal_options = terminal_worker_options(
+                            &inner.engine,
+                            &inner.appearance,
+                            &inner.config_files,
+                            *pane,
+                        )?;
                         let appearance = Arc::clone(&terminal_options.appearance);
                         let pane_session = inner
                             .engine
@@ -4593,7 +4767,9 @@ impl Shared {
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
                             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                        let command = if let Some(command) =
+                        let command = if empty {
+                            command.clone()
+                        } else if let Some(command) =
                             command.clone().filter(|command| !command.is_empty())
                         {
                             Some(command)
@@ -4607,6 +4783,15 @@ impl Shared {
                         let shell = Some(terminal_shell_for_session(&inner.engine, pane_session)?);
                         let mut env =
                             terminal_environment_for_session(&inner.engine, pane_session)?;
+                        env.push((
+                            "TMUX".to_owned(),
+                            Some(tmux_environment(&self.socket_path, Some(pane_session))),
+                        ));
+                        env.extend(
+                            pane_environment
+                                .iter()
+                                .map(|(name, value)| (name.clone(), Some(value.clone()))),
+                        );
                         env.extend([
                             ("ZZ_PANE".to_owned(), Some(pane.to_string())),
                             (
@@ -4614,10 +4799,6 @@ impl Shared {
                                 Some(self.socket_path.display().to_string()),
                             ),
                             ("ZZ_SESSION".to_owned(), Some(pane_session.to_string())),
-                            (
-                                "TMUX".to_owned(),
-                                Some(tmux_environment(&self.socket_path, Some(pane_session))),
-                            ),
                             ("TMUX_PANE".to_owned(), Some(pane.to_string())),
                         ]);
                         if let Some(path) = &working_directory {
@@ -4634,14 +4815,18 @@ impl Shared {
                             non_login_shell: false,
                             env,
                         };
-                        let session = Arc::new(TerminalSession::spawn(
-                            history_limit,
-                            appearance,
-                            spawn.clone(),
-                        ));
-                        let current_path = terminal_working_directory(&session)
-                            .map(|path| path.to_string_lossy().into_owned())
-                            .unwrap_or_default();
+                        let session = Arc::new(if empty {
+                            TerminalSession::spawn_empty_with_appearance(history_limit, appearance)
+                        } else {
+                            TerminalSession::spawn(history_limit, appearance, spawn.clone())
+                        });
+                        let current_path = if empty {
+                            start_path.clone()
+                        } else {
+                            terminal_working_directory(&session)
+                                .map(|path| path.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        };
                         deferred_terminal_commands.push(
                             DeferredTerminalCommand::SetWordSeparators {
                                 terminal: Arc::clone(&session),
@@ -4728,8 +4913,12 @@ impl Shared {
                             .as_deref()
                             .map(|path| path.to_string_lossy().into_owned())
                             .unwrap_or_default();
-                        let terminal_options =
-                            terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
+                        let terminal_options = terminal_worker_options(
+                            &inner.engine,
+                            &inner.appearance,
+                            &inner.config_files,
+                            *pane,
+                        )?;
                         let appearance = Arc::clone(&terminal_options.appearance);
                         let pane_session = inner
                             .engine
@@ -4942,8 +5131,12 @@ impl Shared {
                     }
                     MuxEffect::PaneRelocated { pane, from, to } => {
                         if let Some(terminal) = inner.terminals.get(pane).cloned() {
-                            let terminal_options =
-                                terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
+                            let terminal_options = terminal_worker_options(
+                                &inner.engine,
+                                &inner.appearance,
+                                &inner.config_files,
+                                *pane,
+                            )?;
                             deferred_terminal_commands.push(
                                 DeferredTerminalCommand::SetWordSeparators {
                                     terminal: Arc::clone(&terminal),
@@ -4981,8 +5174,12 @@ impl Shared {
                             .values()
                             .filter(|output| output.pane == *pane)
                         {
-                            let terminal_options =
-                                terminal_worker_options(&inner.engine, &inner.appearance, *pane)?;
+                            let terminal_options = terminal_worker_options(
+                                &inner.engine,
+                                &inner.appearance,
+                                &inner.config_files,
+                                *pane,
+                            )?;
                             deferred_terminal_commands.push(
                                 DeferredTerminalCommand::SetWrapSearch {
                                     terminal: Arc::clone(&output.terminal),
@@ -5071,7 +5268,7 @@ impl Shared {
                             if terminal_view_action_enters_copy_mode(action) {
                                 enter_copy_session(&mut inner, target, *pane)?;
                             } else if terminal_view_action_exits_copy_mode(action) {
-                                exit_copy_session(&mut inner, target);
+                                begin_exit_copy_session(&mut inner, target);
                             } else if terminal_view_action_arms_scroll_exit(action)
                                 && let Some(session) = inner.copy_sessions.get_mut(&target)
                                 && session.pane == *pane
@@ -5263,7 +5460,11 @@ impl Shared {
                         inner.choose_buffers.insert(client, chooser);
                         direct_events.push(EventPayload::ChooseBuffer { state: Some(state) });
                     }
-                    MuxEffect::DisplayPanes { pane, duration_ms } => {
+                    MuxEffect::DisplayPanes {
+                        pane,
+                        duration_ms,
+                        selectable,
+                    } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
                         {
@@ -5275,6 +5476,7 @@ impl Shared {
                         let display_panes_facts = format_hook_facts(&inner);
                         let (source_session, source_window, state) = build_display_panes_state(
                             &inner.engine,
+                            &inner.config_files,
                             &display_panes_facts,
                             *pane,
                             *duration_ms,
@@ -5307,6 +5509,7 @@ impl Shared {
                                 source_pane: *pane,
                                 source_session,
                                 source_window,
+                                selectable: *selectable,
                                 state: state.clone(),
                                 deadline,
                                 cancel: deadline.map(|_| self.display_panes_deadline_tx.clone()),
@@ -5346,6 +5549,35 @@ impl Shared {
                             );
                             client_message_retires.extend(previous);
                             client_message_schedule = schedule;
+                        }
+                    }
+                    MuxEffect::PrintOrMessage {
+                        pane,
+                        text,
+                        duration_ms,
+                        freeze,
+                    } => {
+                        if kind == ClientKind::Interactive {
+                            push_server_message(&mut inner, text.clone());
+                            let message_id = next_timed_message_id(&mut inner);
+                            direct_events.push(EventPayload::TimedClientMessage {
+                                pane: *pane,
+                                kind: ClientMessageKind::Info,
+                                text: text.clone(),
+                                duration_ms: *duration_ms,
+                                message_id,
+                            });
+                            let (previous, schedule) = arm_client_message(
+                                &mut inner,
+                                client,
+                                message_id,
+                                *duration_ms,
+                                *freeze,
+                            );
+                            client_message_retires.extend(previous);
+                            client_message_schedule = schedule;
+                        } else {
+                            append_inserted_output(&mut execution.output, text);
                         }
                     }
                     MuxEffect::BufferLimitChanged(limit) => {
@@ -5400,6 +5632,7 @@ impl Shared {
                             let terminal_options = terminal_worker_options(
                                 &inner.engine,
                                 &inner.appearance,
+                                &inner.config_files,
                                 *candidate,
                             )?;
                             deferred_terminal_commands.push(
@@ -5432,6 +5665,7 @@ impl Shared {
                             let terminal_options = terminal_worker_options(
                                 &inner.engine,
                                 &inner.appearance,
+                                &inner.config_files,
                                 output.pane,
                             )?;
                             deferred_terminal_commands.push(
@@ -5606,11 +5840,7 @@ impl Shared {
                     }
                 }
                 if let Some(copy_modes_before) = copy_modes_before.as_ref() {
-                    let copy_modes_after = inner
-                        .copy_sessions
-                        .values()
-                        .map(|session| session.pane)
-                        .collect::<BTreeSet<_>>();
+                    let copy_modes_after = active_copy_mode_panes(&inner);
                     pending_hook_events.extend(pane_mode_hook_events(
                         before,
                         &after,
@@ -5805,7 +6035,17 @@ impl Shared {
         } else if !status_refresh_sessions.is_empty() {
             self.refresh_status_for_sessions(false, Some(&status_refresh_sessions));
         }
+        let source_working_directory = (!source_files.is_empty()).then(|| {
+            context
+                .client_working_directory()
+                .map(Path::to_owned)
+                .or_else(home_directory)
+                .unwrap_or_else(|| PathBuf::from("/"))
+        });
         let mut source_file_error = None;
+        let mut control_source_errors = Vec::new();
+        let mut control_source_matched = false;
+        let mut source_invocations = SourceInvocationAccounting::default();
         for (path, quiet) in source_files {
             if path == "-" {
                 self.publish_to_client(
@@ -5816,39 +6056,36 @@ impl Shared {
                         text: STANDARD_INPUT_SOURCE_WARNING.to_owned(),
                     },
                 );
-                self.record_command_stderr(client, STANDARD_INPUT_SOURCE_WARNING);
-                self.record_command_failure(client);
-                continue;
-            }
-            let path = expand_path(&path);
-            let matches = source_glob_matches(&path);
-            for error in &matches.errors {
-                let text = source_glob_error_warning(&path, error);
-                self.publish_to_client(
-                    client,
-                    EventPayload::ClientMessage {
-                        pane: context.pane,
-                        kind: ClientMessageKind::Warning,
-                        text: text.clone(),
-                    },
-                );
-                self.record_command_stderr(client, &text);
-                self.record_command_failure(client);
-            }
-            if matches.paths.is_empty() && matches.errors.is_empty() {
-                if !quiet {
-                    self.publish_to_client(
-                        client,
-                        EventPayload::ClientMessage {
-                            pane: context.pane,
-                            kind: ClientMessageKind::Warning,
-                            text: no_such_file_warning(&path),
-                        },
-                    );
-                    self.record_command_stderr(client, &missing_source_error(&path));
+                if kind == ClientKind::Command {
+                    self.record_command_stderr(client, STANDARD_INPUT_SOURCE_WARNING);
                     self.record_command_failure(client);
                 }
                 continue;
+            }
+            let declared_path = PathBuf::from(&path);
+            let pattern = resolve_source_path(&path, source_working_directory.as_deref());
+            let matches = source_glob_matches(&pattern);
+            for error in &matches.errors {
+                let text = source_glob_error_warning(&declared_path, error);
+                if kind == ClientKind::Control {
+                    control_source_errors.push(text);
+                } else {
+                    self.route_source_error(client, kind, context.pane, &text);
+                }
+            }
+            if matches.paths.is_empty() && matches.errors.is_empty() {
+                if !quiet {
+                    let error = missing_source_error(&declared_path);
+                    if kind == ClientKind::Control {
+                        control_source_errors.push(error);
+                    } else {
+                        self.route_source_error(client, kind, context.pane, &error);
+                    }
+                }
+                continue;
+            }
+            if kind == ClientKind::Control && !matches.paths.is_empty() {
+                control_source_matched = true;
             }
             for path in matches.paths {
                 if is_default_mux_config(&path) {
@@ -5861,6 +6098,7 @@ impl Shared {
                         0,
                         &mut report,
                         client_terminal,
+                        &mut source_invocations,
                     ) {
                         if source_file_error.is_none() {
                             source_file_error = Some(error);
@@ -5868,11 +6106,16 @@ impl Shared {
                         continue;
                     }
                     self.apply_stored_mux_config_overrides("source-file-replay");
-                    for diagnostic in report.diagnostics() {
-                        self.record_command_stdout(client, diagnostic);
-                        self.record_command_failure(client);
+                    if kind == ClientKind::Command {
+                        for diagnostic in report.diagnostics() {
+                            self.record_command_stdout(client, diagnostic);
+                            self.record_command_failure(client);
+                        }
                     }
-                    if let Some(skipped) = report.skipped_summary() {
+                    self.route_config_source_errors(client, kind, context.pane, &report);
+                    if kind == ClientKind::Command
+                        && let Some(skipped) = report.skipped_summary()
+                    {
                         self.record_command_stderr(client, &skipped);
                     }
                     if let Some(summary) = report.message() {
@@ -5886,6 +6129,19 @@ impl Shared {
                         );
                     }
                 }
+            }
+        }
+        if !control_source_errors.is_empty() {
+            let mut inner = self.inner.lock();
+            let streams = inner.command_streams.entry(client).or_default();
+            if control_source_matched {
+                for error in control_source_errors {
+                    streams.stdout.push_str(&error);
+                    streams.stdout.push('\n');
+                }
+                streams.exit_code = 1;
+            } else {
+                streams.control_error = control_source_errors.join("\n");
             }
         }
         if reload_config
@@ -5910,16 +6166,60 @@ impl Shared {
     }
 
     fn publish_key_tables_if_changed(&self) {
-        let tables = {
+        let (tables, tables_changed, disarmed) = {
             let mut inner = self.inner.lock();
-            let tables = inner.engine.keys.snapshot();
-            if tables == inner.key_tables {
-                return;
+            let existing = inner
+                .engine
+                .keys
+                .table_names()
+                .map(str::to_owned)
+                .collect::<BTreeSet<_>>();
+            let reset_clients = inner
+                .key_engines
+                .iter()
+                .filter_map(|(client, engine)| {
+                    engine
+                        .active_table()
+                        .is_some_and(|table| !existing.contains(table))
+                        .then_some(*client)
+                })
+                .collect::<Vec<_>>();
+            for client in &reset_clients {
+                inner
+                    .key_engines
+                    .get_mut(client)
+                    .expect("reset client has a key engine")
+                    .switch_table(None);
             }
-            inner.key_tables.clone_from(&tables);
-            tables
+            let mut defaults = inner
+                .attached
+                .iter()
+                .filter(|(_, clients)| !clients.is_empty())
+                .map(|(session, _)| inner.engine.key_table_for_session(*session))
+                .collect::<BTreeSet<_>>();
+            if !reset_clients.is_empty() && defaults.is_empty() {
+                defaults.insert("root".to_owned());
+            }
+            for table in defaults {
+                inner.engine.keys.ensure_table(&table);
+            }
+            let disarmed = reset_clients
+                .into_iter()
+                .filter(|client| inner.prefix_armed.remove(client))
+                .collect::<Vec<_>>();
+            let tables = inner.engine.keys.snapshot();
+            let tables_changed = tables != inner.key_tables;
+            if tables_changed {
+                inner.key_tables.clone_from(&tables);
+            }
+            (tables, tables_changed, disarmed)
         };
-        self.publish(EventPayload::KeyTablesChanged { tables });
+        for client in disarmed {
+            self.publish_to_client(client, EventPayload::PrefixArmed { armed: false });
+        }
+        if tables_changed {
+            self.publish(EventPayload::KeyTablesChanged { tables });
+        }
     }
 
     fn capture_pane(
@@ -5927,21 +6227,53 @@ impl Shared {
         context: &ExecutionContext,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_capture_pane_args(args)?;
-        let (pane, terminal) = {
-            let inner = self.inner.lock();
+        let mut parsed = parse_capture_pane_args(args)?;
+        let (pane, terminal, mut start, mut end) = {
+            let mut inner = self.inner.lock();
             let pane = inner.engine.resolve_pane(
                 parsed.target.as_deref(),
                 context.window,
                 context.pane,
             )?;
+            inner.engine.set_format_now(unix_timestamp());
+            let target = ExecutionContext::for_pane(&inner.engine.state, pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+            let facts = format_hook_facts(&inner);
+            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                &facts,
+                context.format_variables(),
+            );
+            let start = resolve_capture_boundary(
+                &inner.engine,
+                parsed.start.as_deref(),
+                true,
+                &target,
+                context.session,
+                &mut hooks,
+            );
+            let end = resolve_capture_boundary(
+                &inner.engine,
+                parsed.end.as_deref(),
+                false,
+                &target,
+                context.session,
+                &mut hooks,
+            );
             let terminal = inner
                 .terminals
                 .get(&pane)
                 .cloned()
                 .ok_or(ServerError::PaneExited(pane))?;
-            (pane, terminal)
+            (pane, terminal, start, end)
         };
+        if matches!(
+            (start, end),
+            (CaptureBoundary::Relative(start), CaptureBoundary::Relative(end)) if start > end
+        ) {
+            std::mem::swap(&mut start, &mut end);
+        }
+        parsed.options.start = start;
+        parsed.options.end = end;
         let capture = match terminal.capture(parsed.options) {
             Err(TerminalCaptureError::ActorStopped) => {
                 let retained = {
@@ -5960,9 +6292,13 @@ impl Shared {
             }
             result => result,
         };
+        let mut unavailable_alternate = false;
         let output = match capture {
             Ok(output) => output,
-            Err(TerminalCaptureError::AlternateUnavailable) if parsed.quiet => String::new(),
+            Err(TerminalCaptureError::AlternateUnavailable) if parsed.quiet => {
+                unavailable_alternate = true;
+                String::new()
+            }
             Err(TerminalCaptureError::ActorStopped) => {
                 return Err(ServerError::PaneExited(pane).into());
             }
@@ -5976,26 +6312,31 @@ impl Shared {
             }
             Err(error) => return Err(ServerError::InvalidCommand(error.to_string()).into()),
         };
-        if let Some(buffer_name) = parsed.buffer_name.as_deref() {
-            let events = {
-                let mut inner = self.inner.lock();
-                insert_paste_buffer(
-                    &mut inner,
-                    Some(buffer_name),
-                    "buffer",
-                    output.into_bytes(),
-                    true,
-                )?
-            };
-            if !context.no_hooks {
-                self.run_event_hooks(events);
-            }
-            return Ok(Execution::default());
+        if parsed.print {
+            return Ok(Execution {
+                output,
+                effects: Vec::new(),
+            });
         }
-        Ok(Execution {
-            output,
-            effects: Vec::new(),
-        })
+        let mut data = output.into_bytes();
+        if !unavailable_alternate {
+            data.push(b'\n');
+        }
+        let events = {
+            let mut inner = self.inner.lock();
+            insert_paste_buffer(
+                &mut inner,
+                parsed.buffer_name.as_deref(),
+                "buffer",
+                data,
+                true,
+            )?
+        };
+        if !context.no_hooks {
+            self.run_event_hooks(events);
+        }
+        self.refresh_choose_buffers();
+        Ok(Execution::default())
     }
 
     fn wait_for(
@@ -6750,7 +7091,9 @@ impl Shared {
                 command_context.retarget_to_pane(&inner.engine.state, pane);
             }
             inner.engine.set_format_now(unix_timestamp());
-            let format_context = inner.engine.format_status_context(
+            let format_context = server_format_context(
+                &inner.engine,
+                &inner.config_files,
                 command_context.session,
                 command_context.window,
                 command_context.pane,
@@ -6970,7 +7313,9 @@ impl Shared {
                 command_context.retarget_to_pane(&inner.engine.state, pane);
             }
             inner.engine.set_format_now(unix_timestamp());
-            let format_context = inner.engine.format_status_context(
+            let format_context = server_format_context(
+                &inner.engine,
+                &inner.config_files,
                 command_context.session,
                 command_context.window,
                 command_context.pane,
@@ -7601,10 +7946,13 @@ impl Shared {
                 .get(&session_id)
                 .ok_or_else(|| ServerError::MissingTarget(session_id.to_string()))?;
             let focused = client_focused_window(&inner, client, session);
-            let format_context =
-                inner
-                    .engine
-                    .format_status_context(Some(session_id), Some(focused), None);
+            let format_context = server_format_context(
+                &inner.engine,
+                &inner.config_files,
+                Some(session_id),
+                Some(focused),
+                None,
+            );
             let mut client_facts = client_format_facts(&inner, client, session_id);
             client_facts.line = line;
             let facts = FormatHookFacts {
@@ -7877,7 +8225,7 @@ impl Shared {
         require_no_positionals(name, &parsed)?;
         let mut inner = self.inner.lock();
         inner.engine.set_format_now(unix_timestamp());
-        let context = inner.engine.format_status_context(None, None, None);
+        let context = server_format_context(&inner.engine, &inner.config_files, None, None, None);
         let output = inner
             .message_log
             .iter()
@@ -7896,6 +8244,49 @@ impl Shared {
             })
             .collect::<Vec<_>>()
             .join("\n");
+        Ok(Execution {
+            output,
+            effects: Vec::new(),
+        })
+    }
+
+    fn prompt_history_command(
+        &self,
+        name: &str,
+        args: &[String],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(name, args, &['T'], &[])?;
+        require_no_positionals(name, &parsed)?;
+        let prompt_type = parsed
+            .value('T')
+            .map(|value| match value {
+                "command" => Ok(CommandPromptType::Command),
+                "search" => Ok(CommandPromptType::Search),
+                _ => Err(ServerError::InvalidCommand(format!(
+                    "invalid type: {value}"
+                ))),
+            })
+            .transpose()?;
+
+        if name == "clear-prompt-history" {
+            self.clear_prompt_history(prompt_type);
+            return Ok(Execution::default());
+        }
+
+        let inner = self.inner.lock();
+        let mut output = String::new();
+        match prompt_type {
+            Some(CommandPromptType::Command) => {
+                append_prompt_history_output(&mut output, "command", &inner.command_history);
+            }
+            Some(CommandPromptType::Search) => {
+                append_prompt_history_output(&mut output, "search", &inner.search_history);
+            }
+            None => {
+                append_prompt_history_output(&mut output, "command", &inner.command_history);
+                append_prompt_history_output(&mut output, "search", &inner.search_history);
+            }
+        }
         Ok(Execution {
             output,
             effects: Vec::new(),
@@ -8805,7 +9196,18 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         match name {
             "set-buffer" | "setb" => {
-                let parsed = parse_buffer_command_args(name, args, &['b'], &['a'])?;
+                let parsed = parse_buffer_command_args(name, args, &['b', 'n', 't'], &['a'])?;
+                if let Some(new_name) = parsed.value('n') {
+                    let events = {
+                        let mut inner = self.inner.lock();
+                        rename_paste_buffer(&mut inner, parsed.value('b'), new_name)?
+                    };
+                    if !context.no_hooks {
+                        self.run_event_hooks(events);
+                    }
+                    self.refresh_choose_buffers();
+                    return Ok(Execution::default());
+                }
                 let [data] = parsed.positional.as_slice() else {
                     return Err(ServerError::InvalidCommand(
                         "set-buffer requires exactly one data argument".to_owned(),
@@ -8877,7 +9279,8 @@ impl Shared {
                 let sort = TmuxSort::parse(parsed.value('O'), parsed.has('r'), None)?;
                 let mut inner = self.inner.lock();
                 inner.engine.set_format_now(unix_timestamp());
-                let format_context = inner.engine.format_status_context(None, None, None);
+                let format_context =
+                    server_format_context(&inner.engine, &inner.config_files, None, None, None);
                 let mut buffers = inner.paste_buffers.clone();
                 sort.apply(&mut buffers, |left, right| {
                     let ordering = match sort.order() {
@@ -8919,7 +9322,7 @@ impl Shared {
                 })
             }
             "load-buffer" | "loadb" => {
-                let parsed = parse_buffer_command_args(name, args, &['b'], &[])?;
+                let parsed = parse_buffer_command_args(name, args, &['b', 't'], &[])?;
                 let path = require_one_positional(name, &parsed)?;
                 if path == "-" {
                     return Err(ServerError::UnsupportedCommand(
@@ -9151,11 +9554,7 @@ impl Shared {
         let hook_state_before = event_hooks_enabled.then(|| {
             (
                 MuxHookSnapshot::capture(&inner.engine),
-                inner
-                    .copy_sessions
-                    .values()
-                    .map(|session| session.pane)
-                    .collect::<BTreeSet<_>>(),
+                active_copy_mode_panes(&inner),
             )
         });
         let previous_session = client_attached_session(&inner, client);
@@ -9224,6 +9623,17 @@ impl Shared {
             .get(&session)
             .map(|state| state.active_window)
         {
+            let panes = inner.engine.state.windows[&active_window]
+                .panes
+                .keys()
+                .copied()
+                .collect::<Vec<_>>();
+            for pane in panes {
+                inner.engine.state.set_pane_bell(pane, false);
+                if let Some(terminal) = inner.terminals.get(&pane) {
+                    terminal.clear_bell();
+                }
+            }
             inner
                 .engine
                 .state
@@ -9257,11 +9667,7 @@ impl Shared {
                 &hook_snapshot_after,
                 "",
             ));
-            let copy_modes_after = inner
-                .copy_sessions
-                .values()
-                .map(|session| session.pane)
-                .collect::<BTreeSet<_>>();
+            let copy_modes_after = active_copy_mode_panes(&inner);
             hook_events.extend(pane_mode_hook_events(
                 hook_snapshot_before,
                 &hook_snapshot_after,
@@ -9325,26 +9731,64 @@ impl Shared {
         context: &mut ExecutionContext,
         target: &str,
     ) -> Result<(SessionId, MuxSnapshot), ServerError> {
-        if matches!(kind, ClientKind::Interactive | ClientKind::Control)
-            && target.is_empty()
-            && self.inner.lock().engine.state.sessions.is_empty()
-        {
-            let execution = self
-                .execute(
+        self.attach_target_with_materialization_observer(
+            client,
+            kind,
+            context,
+            target,
+            || {},
+            || {},
+        )
+    }
+
+    fn attach_target_with_materialization_observer<BeforeLock, BeforeCreate>(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        target: &str,
+        before_lock: BeforeLock,
+        before_create: BeforeCreate,
+    ) -> Result<(SessionId, MuxSnapshot), ServerError>
+    where
+        BeforeLock: FnOnce(),
+        BeforeCreate: FnOnce(),
+    {
+        if matches!(kind, ClientKind::Interactive | ClientKind::Control) && target.is_empty() {
+            before_lock();
+            let _default_attach = self.default_attach_effects.lock();
+            if self.inner.lock().engine.state.sessions.is_empty() {
+                before_create();
+                let execution = match self.execute(
                     client,
                     ClientKind::Command,
                     context,
                     &CommandInvocation::new("new-session", ["-A", "-d"]),
-                )
-                .map_err(daemon_server_error)?;
-            if !execution.output.is_empty() {
-                self.open_command_output(
-                    client,
-                    context.pane,
-                    "new-session".to_owned(),
-                    &execution.output,
-                )
-                .map_err(daemon_server_error)?;
+                ) {
+                    Ok(execution) => execution,
+                    Err(error) => {
+                        let error = daemon_server_error(error);
+                        let materialized_elsewhere =
+                            matches!(
+                                &error,
+                                ServerError::InvalidCommand(message)
+                                    if message == "open terminal failed: not a terminal"
+                            ) && !self.inner.lock().engine.state.sessions.is_empty();
+                        if !materialized_elsewhere {
+                            return Err(error);
+                        }
+                        Execution::default()
+                    }
+                };
+                if !execution.output.is_empty() {
+                    self.open_command_output(
+                        client,
+                        context.pane,
+                        "new-session".to_owned(),
+                        &execution.output,
+                    )
+                    .map_err(daemon_server_error)?;
+                }
             }
         }
         let session = {
@@ -9497,11 +9941,7 @@ impl Shared {
         let hook_state_before = event_hooks_enabled.then(|| {
             (
                 MuxHookSnapshot::capture(&inner.engine),
-                inner
-                    .copy_sessions
-                    .values()
-                    .map(|session| session.pane)
-                    .collect::<BTreeSet<_>>(),
+                active_copy_mode_panes(&inner),
             )
         });
         let client_name = inner.client_names.get(&client).cloned();
@@ -9569,11 +10009,7 @@ impl Shared {
                 &hook_snapshot_after,
                 "",
             ));
-            let copy_modes_after = inner
-                .copy_sessions
-                .values()
-                .map(|session| session.pane)
-                .collect::<BTreeSet<_>>();
+            let copy_modes_after = active_copy_mode_panes(&inner);
             events.extend(pane_mode_hook_events(
                 hook_snapshot_before,
                 &hook_snapshot_after,
@@ -9669,13 +10105,7 @@ impl Shared {
             ) || copy_mode_change))
             .then(|| {
                 let inner = self.inner.lock();
-                let copy_modes = copy_mode_change.then(|| {
-                    inner
-                        .copy_sessions
-                        .values()
-                        .map(|session| session.pane)
-                        .collect::<BTreeSet<_>>()
-                });
+                let copy_modes = copy_mode_change.then(|| active_copy_mode_panes(&inner));
                 (MuxHookSnapshot::capture(&inner.engine), copy_modes)
             });
         let result = (|| -> Result<(), DaemonError> {
@@ -9760,6 +10190,7 @@ impl Shared {
                     pane,
                     action: zz_terminal::TerminalViewAction::Paste(text),
                 } => {
+                    self.dismiss_client_message(client);
                     let modal_active = {
                         let inner = self.inner.lock();
                         inner.choose_trees.contains_key(&client)
@@ -9894,13 +10325,9 @@ impl Shared {
         {
             let (after, copy_modes_after) = {
                 let inner = self.inner.lock();
-                let copy_modes = copy_modes_before.as_ref().map(|_| {
-                    inner
-                        .copy_sessions
-                        .values()
-                        .map(|session| session.pane)
-                        .collect::<BTreeSet<_>>()
-                });
+                let copy_modes = copy_modes_before
+                    .as_ref()
+                    .map(|_| active_copy_mode_panes(&inner));
                 (MuxHookSnapshot::capture(&inner.engine), copy_modes)
             };
             let mut events = mux_hook_events(before, &after, "");
@@ -10270,6 +10697,10 @@ impl Shared {
     ) -> Result<(), DaemonError> {
         let filtered_text = self.filter_suppressed_text(client, text);
         let text = filtered_text.as_ref();
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.dismiss_client_message(client);
         {
             let inner = self.inner.lock();
             if inner.choose_trees.contains_key(&client)
@@ -10279,7 +10710,7 @@ impl Shared {
                 return Ok(());
             }
         }
-        if text.is_empty() || self.input_command_prompt_text(client, kind, context, text) {
+        if self.input_command_prompt_text(client, kind, context, text) {
             return Ok(());
         }
         let command_output_active = self.inner.lock().command_outputs.contains_key(&client);
@@ -10798,24 +11229,30 @@ impl Shared {
                     .insert("Escape".to_owned());
             }
             DisplayPanesAction::Select(pane) => {
-                if overlay
-                    .state
-                    .indicators
-                    .iter()
-                    .any(|indicator| indicator.pane == pane)
+                if overlay.selectable
+                    && overlay
+                        .state
+                        .indicators
+                        .iter()
+                        .any(|indicator| indicator.pane == pane)
                 {
                     self.select_display_pane(client, kind, context, pane)?;
                 }
             }
             DisplayPanesAction::Key(input) => {
-                let selected = display_panes_selection_key(&input).and_then(|key| {
-                    overlay
-                        .state
-                        .indicators
-                        .iter()
-                        .find(|indicator| indicator.select_key == key)
-                        .map(|indicator| indicator.pane)
-                });
+                let selected = overlay
+                    .selectable
+                    .then(|| {
+                        display_panes_selection_key(&input).and_then(|key| {
+                            overlay
+                                .state
+                                .indicators
+                                .iter()
+                                .find(|indicator| indicator.select_key == key)
+                                .map(|indicator| indicator.pane)
+                        })
+                    })
+                    .flatten();
                 if let Some(pane) = selected {
                     self.inner
                         .lock()
@@ -11006,36 +11443,48 @@ impl Shared {
         commands: &[CommandInvocation],
         repeat_binding: bool,
     ) -> Result<(), DaemonError> {
-        let blocked = {
-            let mut inner = self.inner.lock();
-            (inner.read_only_clients.contains(&client)
-                && !commands.iter().all(command_is_read_only_safe))
-            .then(|| {
-                let duration_ms = client_attached_session(&inner, client).map_or(750, |session| {
-                    inner.engine.display_time_for_session(session)
-                });
-                (duration_ms, next_timed_message_id(&mut inner))
-            })
-        };
-        if let Some((duration_ms, message_id)) = blocked {
-            self.publish_to_client(
-                client,
-                EventPayload::TimedClientMessage {
-                    pane: Some(pane),
-                    kind: ClientMessageKind::Error,
-                    text: "client is read-only".to_owned(),
-                    duration_ms,
-                    message_id,
-                },
-            );
-            return Ok(());
-        }
         let mut output = String::new();
         let mut output_truncated = false;
-        for command in commands {
+        for original in commands {
+            let (command, blocked) = {
+                let mut inner = self.inner.lock();
+                let command = inner
+                    .engine
+                    .expand_command_alias(original)
+                    .unwrap_or_else(|| original.clone());
+                let blocked = (inner.read_only_clients.contains(&client)
+                    && !command_is_read_only_safe(&command))
+                .then(|| {
+                    let duration_ms = client_attached_session(&inner, client)
+                        .map_or(750, |session| {
+                            inner.engine.display_time_for_session(session)
+                        });
+                    (duration_ms, next_timed_message_id(&mut inner))
+                });
+                (command, blocked)
+            };
+            if let Some((duration_ms, message_id)) = blocked {
+                self.publish_to_client(
+                    client,
+                    EventPayload::TimedClientMessage {
+                        pane: Some(pane),
+                        kind: ClientMessageKind::Error,
+                        text: "client is read-only".to_owned(),
+                        duration_ms,
+                        message_id,
+                    },
+                );
+                return Ok(());
+            }
             let previous_repeat_binding = context.repeat_binding();
             context.set_repeat_binding(repeat_binding);
-            let execution = self.execute(client, kind, context, command);
+            let execution = self.execute_with_mux_source_routed(
+                client,
+                kind,
+                context,
+                &command,
+                MuxOptionSource::RuntimeCommand,
+            );
             context.set_repeat_binding(previous_repeat_binding);
             let execution = match execution {
                 Ok(execution) => execution,
@@ -11413,19 +11862,76 @@ impl Shared {
     }
 
     fn record_prompt_history(&self, prompt_type: CommandPromptType, input: &str) {
+        self.record_prompt_history_with_persist_observer(prompt_type, input, || {}, || {});
+    }
+
+    fn record_prompt_history_with_persist_observer<BeforeLock, AfterLock>(
+        &self,
+        prompt_type: CommandPromptType,
+        input: &str,
+        before_lock: BeforeLock,
+        after_lock: AfterLock,
+    ) where
+        BeforeLock: FnOnce(),
+        AfterLock: FnOnce(),
+    {
         if input.is_empty() {
             return;
         }
-        let save = {
+        let changed = {
             let mut inner = self.inner.lock();
             let limit = inner.engine.prompt_history_limit();
             let history = match prompt_type {
                 CommandPromptType::Command => &mut inner.command_history,
                 CommandPromptType::Search => &mut inner.search_history,
             };
-            if !add_command_prompt_history(history, input, limit) {
-                return;
+            add_command_prompt_history(history, input, limit)
+        };
+        if changed {
+            self.persist_prompt_history_with_observer(before_lock, after_lock);
+        }
+    }
+
+    fn clear_prompt_history(&self, prompt_type: Option<CommandPromptType>) {
+        self.clear_prompt_history_with_persist_observer(prompt_type, || {}, || {});
+    }
+
+    fn clear_prompt_history_with_persist_observer<BeforeLock, AfterLock>(
+        &self,
+        prompt_type: Option<CommandPromptType>,
+        before_lock: BeforeLock,
+        after_lock: AfterLock,
+    ) where
+        BeforeLock: FnOnce(),
+        AfterLock: FnOnce(),
+    {
+        {
+            let mut inner = self.inner.lock();
+            match prompt_type {
+                Some(CommandPromptType::Command) => inner.command_history.clear(),
+                Some(CommandPromptType::Search) => inner.search_history.clear(),
+                None => {
+                    inner.command_history.clear();
+                    inner.search_history.clear();
+                }
             }
+        }
+        self.persist_prompt_history_with_observer(before_lock, after_lock);
+    }
+
+    fn persist_prompt_history_with_observer<BeforeLock, AfterLock>(
+        &self,
+        before_lock: BeforeLock,
+        after_lock: AfterLock,
+    ) where
+        BeforeLock: FnOnce(),
+        AfterLock: FnOnce(),
+    {
+        before_lock();
+        let _prompt_history = self.prompt_history_effects.lock();
+        after_lock();
+        let save = {
+            let inner = self.inner.lock();
             prompt_history_path(inner.engine.history_file()).map(|path| {
                 (
                     path,
@@ -12374,7 +12880,12 @@ impl Shared {
             (
                 pane,
                 WordSeparators::new(inner.engine.word_separators_for_pane(pane)?),
-                terminal_worker_options(&inner.engine, &inner.appearance, pane)?,
+                terminal_worker_options(
+                    &inner.engine,
+                    &inner.appearance,
+                    &inner.config_files,
+                    pane,
+                )?,
             )
         };
         let terminal = Arc::new(TerminalSession::spawn_output_view_with_appearance(
@@ -13085,6 +13596,7 @@ impl Shared {
             let Some(context) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
                 return;
             };
+            inner.engine.set_format_now(unix_timestamp());
             let before = MuxHookSnapshot::capture(&inner.engine);
             let retained = inner
                 .engine
@@ -13504,6 +14016,7 @@ impl Shared {
                 let active_window = client_focused_window_for_attachment(&inner, client);
                 let rebuilt = build_display_panes_state(
                     &inner.engine,
+                    &inner.config_files,
                     facts.as_ref().expect("facts exist while clients do"),
                     overlay.source_pane,
                     overlay.state.duration_ms,
@@ -13646,8 +14159,6 @@ impl Shared {
         }
     }
 
-    /// Append one line to the running Command request's stdout. Interactive and
-    /// Control clients hold no slot, so this is a no-op for them.
     fn record_command_stdout(&self, client: ClientId, line: &str) {
         if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
             streams.stdout.push_str(line);
@@ -13668,6 +14179,66 @@ impl Shared {
     fn record_command_failure(&self, client: ClientId) {
         if let Some(streams) = self.inner.lock().command_streams.get_mut(&client) {
             streams.exit_code = 1;
+        }
+    }
+
+    fn route_source_error(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        pane: Option<PaneId>,
+        error: &str,
+    ) {
+        match kind {
+            ClientKind::Interactive => {
+                let mut text = error.to_owned();
+                uppercase_first(&mut text);
+                self.publish_to_client(
+                    client,
+                    EventPayload::ClientMessage {
+                        pane,
+                        kind: ClientMessageKind::Warning,
+                        text,
+                    },
+                );
+            }
+            ClientKind::Command => {
+                self.record_command_stderr(client, error);
+                self.record_command_failure(client);
+            }
+            ClientKind::Control => {
+                let mut inner = self.inner.lock();
+                let streams = inner.command_streams.entry(client).or_default();
+                if !streams.control_error.is_empty() {
+                    streams.control_error.push('\n');
+                }
+                streams.control_error.push_str(error);
+            }
+        }
+    }
+
+    fn route_config_source_errors(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        pane: Option<PaneId>,
+        report: &ConfigLoadReport,
+    ) {
+        if kind == ClientKind::Control {
+            for errors in report.source_error_groups() {
+                self.publish_to_client(
+                    client,
+                    EventPayload::ClientMessage {
+                        pane,
+                        kind: ClientMessageKind::Warning,
+                        text: errors.join("\n"),
+                    },
+                );
+            }
+        } else {
+            for error in report.source_errors() {
+                self.route_source_error(client, kind, pane, error);
+            }
         }
     }
 
@@ -13991,7 +14562,6 @@ impl Shared {
                     &mut inner,
                     WindowAlert {
                         session,
-                        window,
                         pane,
                         window_index,
                         label: "Bell",
@@ -14057,7 +14627,6 @@ impl Shared {
                 &mut inner,
                 WindowAlert {
                     session,
-                    window,
                     pane,
                     window_index,
                     label: "Activity",
@@ -14212,7 +14781,6 @@ impl Shared {
                     &mut inner,
                     WindowAlert {
                         session,
-                        window: scheduled.window,
                         pane,
                         window_index,
                         label: "Silence",
@@ -14697,7 +15265,9 @@ impl Shared {
         context: &mut ExecutionContext,
         mux_config: Option<&Path>,
     ) -> Result<(), DaemonError> {
-        let (color_scheme, appearance_config_overrides, config_client_terminal) = {
+        self.inner.lock().config_files =
+            mux_config.map_or_else(String::new, |path| path.to_string_lossy().into_owned());
+        let (kind, color_scheme, appearance_config_overrides, config_client_terminal) = {
             let inner = self.inner.lock();
             let kind = inner
                 .client_kinds
@@ -14705,6 +15275,7 @@ impl Shared {
                 .copied()
                 .unwrap_or(ClientKind::Command);
             (
+                kind,
                 inner
                     .client_color_schemes
                     .get(&client)
@@ -14718,6 +15289,7 @@ impl Shared {
         log_appearance_load("reload", &load);
         self.inner.lock().engine.keys = KeyTables::default();
         let mut report = ConfigLoadReport::default();
+        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
         if let Some(config) = mux_config {
             self.load_config_file_with_report_for_terminal(
                 config,
@@ -14725,6 +15297,7 @@ impl Shared {
                 0,
                 &mut report,
                 config_client_terminal,
+                &mut source_invocations,
             )?;
         }
         self.apply_stored_mux_config_overrides("reload-mux-replay");
@@ -14750,6 +15323,7 @@ impl Shared {
             appearance: Box::new((*published).clone()),
             provenance,
         });
+        self.route_config_source_errors(client, kind, context.pane, &report);
         let (kind, text) = match report.summary() {
             Some(summary) => (
                 ClientMessageKind::Warning,
@@ -14772,18 +15346,21 @@ impl Shared {
         Ok(())
     }
 
+    #[cfg(test)]
     fn load_config_file(
         self: &Arc<Self>,
         path: &Path,
         context: &mut ExecutionContext,
         depth: usize,
     ) -> Result<(), DaemonError> {
+        let mut source_invocations = SourceInvocationAccounting::default();
         self.load_config_file_with_report_for_terminal(
             path,
             context,
             depth,
             &mut ConfigLoadReport::default(),
             ClientTerminal::NoClient,
+            &mut source_invocations,
         )
     }
 
@@ -14795,12 +15372,14 @@ impl Shared {
         depth: usize,
         report: &mut ConfigLoadReport,
     ) -> Result<(), DaemonError> {
+        let mut source_invocations = SourceInvocationAccounting::default();
         self.load_config_file_with_report_for_terminal(
             path,
             context,
             depth,
             report,
             ClientTerminal::NoClient,
+            &mut source_invocations,
         )
     }
 
@@ -14811,14 +15390,8 @@ impl Shared {
         depth: usize,
         report: &mut ConfigLoadReport,
         client_terminal: ClientTerminal,
+        source_invocations: &mut SourceInvocationAccounting,
     ) -> Result<(), DaemonError> {
-        if depth >= MAX_CONFIG_DEPTH {
-            log::warn!(
-                "ignoring config source past depth {MAX_CONFIG_DEPTH}: {}",
-                path.display()
-            );
-            return Ok(());
-        }
         let input = match fs::read_to_string(path) {
             Ok(input) => input,
             Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -14833,6 +15406,7 @@ impl Shared {
                 .engine
                 .parse_config(path.display().to_string(), &input)
         };
+        let mut failed_group = None;
         for diagnostic in parsed.diagnostics {
             log::warn!(
                 "{}:{}:{}: {}",
@@ -14851,6 +15425,16 @@ impl Shared {
             );
         }
         for command in parsed.commands {
+            let group = command
+                .source
+                .as_ref()
+                .map(|source| (source.source.clone(), source.line));
+            if group
+                .as_ref()
+                .is_some_and(|group| failed_group.as_ref() == Some(group))
+            {
+                continue;
+            }
             if command.name == "reload-config" {
                 log::warn!(
                     "{}: ignoring reload-config while loading configuration",
@@ -14878,6 +15462,7 @@ impl Shared {
                             path.display()
                         );
                         report.note_skip(&command);
+                        failed_group = group;
                         continue;
                     }
                     Err(ServerError::InvalidCommand(message)) => {
@@ -14886,34 +15471,60 @@ impl Shared {
                             path.display()
                         );
                         report.note_invalid_command(&command, &message);
+                        failed_group = group;
                         continue;
                     }
                     Err(error) => {
                         log::warn!("{}: ignoring tmux command error: {error}", path.display());
+                        failed_group = group;
                         continue;
                     }
                 };
+                let startup = source_invocations.is_startup();
+                if source_invocations.refuses(depth) {
+                    let error = if startup {
+                        config_command_error(&command, NESTED_SOURCE_LIMIT_ERROR)
+                    } else {
+                        NESTED_SOURCE_LIMIT_ERROR.to_owned()
+                    };
+                    log::warn!("{error}");
+                    report.note_source_error(&mut None, &error);
+                    failed_group = group;
+                    continue;
+                }
                 if source_effects.is_empty() {
                     log::warn!("{}: ignoring source-file without a path", path.display());
                 }
                 let mut source_error = None;
+                let mut source_error_group = None;
+                let mut source_has_file = false;
+                let mut source_command_error = false;
                 for (source, quiet) in source_effects {
                     if source == "-" {
+                        source_has_file = true;
                         log::warn!("{STANDARD_INPUT_SOURCE_WARNING}");
                         report.note_invalid_command(&command, STANDARD_INPUT_SOURCE_WARNING);
                         continue;
                     }
-                    let source = expand_relative(path, &source);
-                    let matches = source_glob_matches(&source);
+                    let declared_path = PathBuf::from(&source);
+                    let pattern = expand_relative(path, &source);
+                    let matches = source_glob_matches(&pattern);
                     for error in &matches.errors {
-                        log::warn!("{}", source_glob_error_warning(&source, error));
+                        let warning = source_glob_error_warning(&declared_path, error);
+                        log::warn!("{warning}");
+                        report.note_source_error(&mut source_error_group, &warning);
+                        source_command_error = true;
                     }
                     if matches.paths.is_empty() && matches.errors.is_empty() {
                         if !quiet {
-                            log::warn!("{}", no_such_file_warning(&source));
+                            let error = missing_source_error(&declared_path);
+                            log::warn!("{error}");
+                            report.note_source_error(&mut source_error_group, &error);
+                            source_command_error = true;
                         }
                         continue;
                     }
+                    source_has_file = true;
                     for source in matches.paths {
                         if let Err(error) = self.load_config_file_with_report_for_terminal(
                             &source,
@@ -14921,6 +15532,7 @@ impl Shared {
                             depth + 1,
                             report,
                             client_terminal,
+                            source_invocations,
                         ) && source_error.is_none()
                         {
                             source_error = Some(error);
@@ -14929,6 +15541,9 @@ impl Shared {
                 }
                 if let Some(error) = source_error {
                     return Err(error);
+                }
+                if source_command_error && !source_has_file {
+                    failed_group = group;
                 }
                 continue;
             }
@@ -14950,6 +15565,7 @@ impl Shared {
                         path.display()
                     );
                     report.note_skip(&command);
+                    failed_group = group;
                 }
                 Err(DaemonError::Server(ServerError::InvalidCommand(message))) => {
                     log::warn!(
@@ -14957,9 +15573,11 @@ impl Shared {
                         path.display()
                     );
                     report.note_invalid_command(&command, &message);
+                    failed_group = group;
                 }
                 Err(DaemonError::Server(error)) => {
                     log::warn!("{}: ignoring tmux command error: {error}", path.display());
+                    failed_group = group;
                 }
                 Err(error) => return Err(error),
             }
@@ -15570,12 +16188,47 @@ fn session_agent_panes(inner: &ServerState, session: SessionId) -> Vec<PaneId> {
 }
 
 #[derive(Default)]
+enum SourceInvocationAccounting {
+    #[default]
+    Runtime,
+    Startup {
+        used: usize,
+    },
+}
+
+impl SourceInvocationAccounting {
+    fn is_startup(&self) -> bool {
+        matches!(self, Self::Startup { .. })
+    }
+
+    fn refuses(&mut self, depth: usize) -> bool {
+        match self {
+            Self::Runtime => depth + 2 > MAX_SOURCE_INVOCATIONS,
+            Self::Startup { used } if *used >= MAX_SOURCE_INVOCATIONS => true,
+            Self::Startup { used } => {
+                *used += 1;
+                false
+            }
+        }
+    }
+}
+
+fn config_command_error(command: &CommandInvocation, message: &str) -> String {
+    command.source.as_ref().map_or_else(
+        || message.to_owned(),
+        |source| format!("{}:{}: {message}", source.source, source.line),
+    )
+}
+
+#[derive(Default)]
 struct ConfigLoadReport {
     skipped_count: usize,
     skipped: Vec<String>,
     invalid_count: usize,
     invalid: Vec<String>,
     diagnostics: Vec<String>,
+    source_errors: Vec<String>,
+    source_error_groups: Vec<Vec<String>>,
 }
 
 impl ConfigLoadReport {
@@ -15611,6 +16264,27 @@ impl ConfigLoadReport {
     /// summary channels de-duplicate and cap; the CLI stream does neither.
     fn diagnostics(&self) -> &[String] {
         &self.diagnostics
+    }
+
+    fn note_source_error(&mut self, group: &mut Option<usize>, error: &str) {
+        self.source_errors.push(error.to_owned());
+        let index = if let Some(index) = *group {
+            index
+        } else {
+            let index = self.source_error_groups.len();
+            self.source_error_groups.push(Vec::new());
+            *group = Some(index);
+            index
+        };
+        self.source_error_groups[index].push(error.to_owned());
+    }
+
+    fn source_errors(&self) -> &[String] {
+        &self.source_errors
+    }
+
+    fn source_error_groups(&self) -> &[Vec<String>] {
+        &self.source_error_groups
     }
 
     fn message(&self) -> Option<String> {
@@ -15669,20 +16343,20 @@ impl ConfigLoadReport {
     }
 }
 
-/// The response streams a Command client accumulates while one request runs.
-/// It models the pin's per-client `stdout`/`stderr` files and `c->retval`: a
-/// slot exists only for the duration of a Command client's request, so every
-/// other client kind — and every daemon-internal execution — records nothing.
 #[derive(Default)]
 struct CommandStreams {
     stdout: String,
     stderr: String,
+    control_error: String,
     exit_code: u8,
 }
 
 impl CommandStreams {
     fn is_empty(&self) -> bool {
-        self.stdout.is_empty() && self.stderr.is_empty() && self.exit_code == 0
+        self.stdout.is_empty()
+            && self.stderr.is_empty()
+            && self.control_error.is_empty()
+            && self.exit_code == 0
     }
 }
 
@@ -15730,6 +16404,7 @@ struct ServerState {
     appearance_provenance: AppearanceProvenance,
     appearance_config_overrides: Vec<ConfigOverrideEntry>,
     mux_config_overrides: Vec<ConfigOverrideEntry>,
+    config_files: String,
     mux_options: MuxOptions,
     mux_option_underlay: MuxOptions,
     published_mux_options: BTreeMap<ClientId, MuxOptions>,
@@ -15742,6 +16417,7 @@ struct ServerState {
     client_terminals: BTreeSet<ClientId>,
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
+    client_working_directories: BTreeMap<ClientId, PathBuf>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
     read_only_clients: BTreeSet<ClientId>,
@@ -15903,6 +16579,7 @@ struct CopySession {
     pane: PaneId,
     observed: bool,
     scroll_exit: bool,
+    exiting: bool,
 }
 
 struct DiagnosticSample {
@@ -15982,6 +16659,7 @@ struct DisplayPanesSession {
     source_pane: PaneId,
     source_session: SessionId,
     source_window: WindowId,
+    selectable: bool,
     state: DisplayPanesState,
     deadline: Option<Instant>,
     cancel: Option<crossbeam_channel::Sender<DisplayPanesDeadlineCommand>>,
@@ -16006,6 +16684,7 @@ fn take_display_panes(inner: &mut ServerState, client: ClientId) -> Option<Displ
 
 fn build_display_panes_state(
     engine: &MuxEngine,
+    config_files: &str,
     facts: &FormatHookFacts,
     source_pane: PaneId,
     duration_ms: u32,
@@ -16040,8 +16719,13 @@ fn build_display_panes_state(
             let label = if format.is_empty() {
                 String::new()
             } else {
-                let context =
-                    engine.format_status_context(Some(window.session), Some(window_id), Some(pane));
+                let context = server_format_context(
+                    engine,
+                    config_files,
+                    Some(window.session),
+                    Some(window_id),
+                    Some(pane),
+                );
                 let mut hooks = DaemonFormatHooks::command(facts);
                 truncate_pane_indicator_label(expand_format_values(&format, &context, &mut hooks))
             };
@@ -16168,6 +16852,7 @@ impl ChooseBufferSession {
                 items: Vec::new(),
                 search: None,
                 selected: 0,
+                filter_no_matches: false,
             },
         };
         chooser.rebuild(engine, buffers, attached_session, facts);
@@ -16221,7 +16906,8 @@ impl ChooseBufferSession {
                 .collect::<Vec<_>>()
         };
         let mut visible = filtered(self.filter.is_some());
-        if visible.is_empty() && self.filter.is_some() {
+        let filter_no_matches = visible.is_empty() && self.filter.is_some();
+        if filter_no_matches {
             visible = filtered(false);
         }
         let mut items = Vec::with_capacity(visible.len().min(MAX_CHOOSE_BUFFER_ITEMS));
@@ -16274,6 +16960,7 @@ impl ChooseBufferSession {
             items,
             search: self.search.clone(),
             selected: u32::try_from(selected).unwrap_or(u32::MAX),
+            filter_no_matches,
         };
     }
 
@@ -16562,6 +17249,7 @@ impl ChooseTreeSession {
                 search: None,
                 selected: 0,
                 kind,
+                filter_no_matches: false,
             },
         };
         chooser.rebuild(engine, attached_session, facts);
@@ -16751,7 +17439,8 @@ impl ChooseTreeSession {
     ) {
         let state = &engine.state;
         let mut branches = self.branches(engine, attached_session, facts, self.filter.is_some());
-        if branches.is_empty() && self.filter.is_some() {
+        let filter_no_matches = branches.is_empty() && self.filter.is_some();
+        if filter_no_matches {
             branches = self.branches(engine, attached_session, facts, false);
         }
         let mut items = Vec::new();
@@ -16881,6 +17570,7 @@ impl ChooseTreeSession {
             search: self.search.clone(),
             selected: u32::try_from(selected).unwrap_or(u32::MAX),
             kind: self.kind,
+            filter_no_matches,
         };
     }
 
@@ -17589,6 +18279,14 @@ fn command_prompt_history_snapshot(history: &[String]) -> Vec<String> {
     snapshot
 }
 
+fn append_prompt_history_output(output: &mut String, prompt_type: &str, history: &[String]) {
+    let _ = writeln!(output, "History for {prompt_type}:\n");
+    for (index, entry) in history.iter().enumerate() {
+        let _ = writeln!(output, "{}: {entry}", index + 1);
+    }
+    output.push('\n');
+}
+
 /// `prompt_hlist[PROMPT_NTYPES]`: command and search prompts keep separate
 /// rings, and `-T` alone decides which one a prompt reads and writes.
 fn prompt_history(inner: &ServerState, prompt_type: CommandPromptType) -> &[String] {
@@ -17788,6 +18486,7 @@ fn enter_copy_session(
             pane,
             observed: false,
             scroll_exit: false,
+            exiting: false,
         },
     );
     Ok(())
@@ -17809,6 +18508,26 @@ fn exit_copy_session(inner: &mut ServerState, client: ClientId) {
         .switch_table(None);
 }
 
+fn begin_exit_copy_session(inner: &mut ServerState, client: ClientId) {
+    if let Some(session) = inner.copy_sessions.get_mut(&client) {
+        session.exiting = true;
+    }
+    inner
+        .key_engines
+        .entry(client)
+        .or_default()
+        .switch_table(None);
+}
+
+fn active_copy_mode_panes(inner: &ServerState) -> BTreeSet<PaneId> {
+    inner
+        .copy_sessions
+        .values()
+        .filter(|session| !session.exiting)
+        .map(|session| session.pane)
+        .collect()
+}
+
 fn sync_copy_session_for_view_action(
     inner: &mut ServerState,
     client: ClientId,
@@ -17818,7 +18537,7 @@ fn sync_copy_session_for_view_action(
     if terminal_view_action_enters_copy_mode(action) {
         enter_copy_session(inner, client, pane)?;
     } else if terminal_view_action_exits_copy_mode(action) {
-        exit_copy_session(inner, client);
+        begin_exit_copy_session(inner, client);
     } else if terminal_view_action_arms_scroll_exit(action)
         && let Some(session) = inner.copy_sessions.get_mut(&client)
         && session.pane == pane
@@ -17853,6 +18572,7 @@ fn retarget_copy_mode_tables(inner: &mut ServerState, changed_window: Option<Win
     let retargeted = inner
         .copy_sessions
         .iter()
+        .filter(|(_, session)| !session.exiting)
         .filter_map(|(client, session)| {
             let window = inner.engine.state.window_for_pane(session.pane)?;
             changed_window
@@ -17897,12 +18617,15 @@ fn reconcile_copy_session(
 ) -> (Option<Arc<TerminalSession>>, bool) {
     match (mode, inner.copy_sessions.get_mut(&client)) {
         (TerminalMode::Copy { .. }, Some(session)) if session.pane == pane => {
-            session.observed = true;
+            if !session.exiting {
+                session.observed = true;
+            }
             (None, false)
         }
         (TerminalMode::Copy { .. }, _) => (inner.terminals.get(&pane).cloned(), false),
         (TerminalMode::Live, Some(session))
-            if session.pane == pane && (session.observed || session.scroll_exit) =>
+            if session.pane == pane
+                && (session.observed || session.scroll_exit || session.exiting) =>
         {
             exit_copy_session(inner, client);
             (None, true)
@@ -17935,6 +18658,12 @@ fn client_size_fact(capabilities: &[String]) -> Option<(u16, u16)> {
         let rows = rows.parse::<u16>().ok().filter(|rows| *rows > 0)?;
         Some((columns, rows))
     })
+}
+
+fn client_working_directory_fact(working_directory: Option<&Path>) -> Option<PathBuf> {
+    working_directory
+        .filter(|working_directory| working_directory.is_absolute())
+        .map(Path::to_owned)
 }
 
 fn effective_mux_options(inner: &ServerState, client: ClientId) -> MuxOptions {
@@ -18076,6 +18805,35 @@ fn resolve_switch_client_target(
     best_attached_session(inner)
         .and_then(|session| best_client_on_session(inner, session))
         .ok_or_else(|| ServerError::InvalidCommand("no current client".to_owned()))
+}
+
+fn resolve_display_panes_client(
+    inner: &ServerState,
+    target: &str,
+) -> Result<ClientId, ServerError> {
+    let target = target.strip_suffix(':').unwrap_or(target);
+    inner
+        .attached
+        .values()
+        .flatten()
+        .copied()
+        .find(|client| {
+            inner
+                .client_names
+                .get(client)
+                .is_some_and(|name| name == target)
+                || format!("device-{}", client.0) == target
+                || inner.client_ttys.get(client).is_some_and(|tty| {
+                    tty == target
+                        || tty
+                            .strip_prefix("/dev/")
+                            .is_some_and(|device| device == target)
+                        || Path::new(tty)
+                            .file_name()
+                            .is_some_and(|name| name == target)
+                })
+        })
+        .ok_or_else(|| ServerError::InvalidCommand(format!("can't find client: {target}")))
 }
 
 fn nested_attach_refusal(inner: &ServerState, client: ClientId) -> Option<ServerError> {
@@ -18228,6 +18986,13 @@ fn status_request(
     if let Some(session) = attached {
         facts.client = Some(client_format_facts(inner, client, session));
     }
+    let mut context = status_context(
+        snapshot,
+        &inner.engine,
+        attached,
+        client_focused_window_for_attachment(inner, client),
+    );
+    context.config_files.clone_from(&inner.config_files);
     StatusRequest {
         client,
         formats: inner.engine.status_formats_for_session(attached),
@@ -18237,12 +19002,7 @@ fn status_request(
         customized: inner.engine.status_customized_for_session(attached),
         title_format: (attached.is_some() && inner.engine.set_titles_for_session(attached))
             .then(|| inner.engine.set_titles_string_for_session(attached)),
-        context: status_context(
-            snapshot,
-            &inner.engine,
-            attached,
-            client_focused_window_for_attachment(inner, client),
-        ),
+        context,
         facts,
     }
 }
@@ -18536,12 +19296,13 @@ fn stamp_snapshot_for_client(
             .collect();
     }
     let facts = format_hook_facts(inner);
-    expand_window_status_labels(&inner.engine, &facts, snapshot);
-    stamp_pane_border_colours(&inner.engine, &facts, snapshot);
+    expand_window_status_labels(&inner.engine, &inner.config_files, &facts, snapshot);
+    stamp_pane_border_colours(&inner.engine, &inner.config_files, &facts, snapshot);
 }
 
 fn stamp_pane_border_colours(
     engine: &MuxEngine,
+    config_files: &str,
     facts: &FormatHookFacts,
     snapshot: &mut MuxSnapshot,
 ) {
@@ -18550,7 +19311,13 @@ fn stamp_pane_border_colours(
     }
     let resolve = |value: Option<String>, session, window, pane| {
         let value = value?;
-        let context = engine.format_status_context(Some(session), Some(window), Some(pane));
+        let context = server_format_context(
+            engine,
+            config_files,
+            Some(session),
+            Some(window),
+            Some(pane),
+        );
         let mut hooks = DaemonFormatHooks::command(facts);
         let expanded = if value.contains("#{") {
             expand_format_values(&value, &context, &mut hooks)
@@ -18573,6 +19340,7 @@ fn stamp_pane_border_colours(
 
 fn expand_window_status_labels(
     engine: &MuxEngine,
+    config_files: &str,
     facts: &FormatHookFacts,
     snapshot: &mut MuxSnapshot,
 ) {
@@ -18584,7 +19352,9 @@ fn expand_window_status_labels(
             } else {
                 &formats.format
             };
-            let context = engine.format_status_context(
+            let context = server_format_context(
+                engine,
+                config_files,
                 Some(session.id),
                 Some(window.id),
                 Some(window.active_pane),
@@ -19571,9 +20341,15 @@ impl DeferredTerminalCommand {
 }
 
 fn resolve_input_sinks(inner: &ServerState, source: PaneId) -> Result<Vec<PaneSink>, ServerError> {
+    if inner.engine.pane_input_off(source)? {
+        return Ok(Vec::new());
+    }
     let targets = inner.engine.synchronized_input_targets(source)?;
     let mut sinks = Vec::with_capacity(targets.len());
     for pane in targets {
+        if inner.engine.pane_input_off(pane)? {
+            continue;
+        }
         if let Some(terminal) = inner.terminals.get(&pane) {
             sinks.push(PaneSink::Terminal(Arc::clone(terminal)));
         } else if matches!(
@@ -19814,7 +20590,15 @@ fn terminal_geometry_for_mode(
             client.0,
         )
     })?;
-    if matches!(mode, WindowSize::Latest | WindowSize::Manual) {
+    if mode == WindowSize::Manual {
+        let (columns, rows) = inner.engine.pane_geometry(pane)?;
+        return Some(TerminalGeometry {
+            columns,
+            rows,
+            ..owner.1
+        });
+    }
+    if mode == WindowSize::Latest {
         return Some(owner.1);
     }
     let first_geometry = candidates.first()?.1;
@@ -19960,13 +20744,6 @@ fn command_is_read_only_safe(command: &CommandInvocation) -> bool {
     READ_ONLY_SAFE_COMMANDS.contains(&canonical_command(&command.name))
 }
 
-/// The pin retires a status message on the key presses that reach
-/// `server_client_handle_key0`, and read-only clients skip that whole block.
-///
-/// Only `Key` counts. zz splits one physical press into `Key` plus an optional
-/// trailing `Text`, and a binding that ran `display-message` suppresses that
-/// text later, in `input_text` — so letting `Text` dismiss would let a bound
-/// key's own trailing character wipe the message it had just raised.
 fn input_dismisses_client_message(input: &InputMessage) -> bool {
     match input {
         InputMessage::Key { input, .. } => input.action != zz_terminal::KeyAction::Release,
@@ -20368,6 +21145,13 @@ fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) ->
             mut stderr,
         } => {
             append_inserted_output(&mut output, &streams.stdout);
+            if !streams.control_error.is_empty() {
+                return CommandResponse::Error {
+                    request_id,
+                    error: ServerError::InvalidCommand(streams.control_error.clone()),
+                    output,
+                };
+            }
             stderr.push_str(&streams.stderr);
             let exit_code = if exit_code == 0 {
                 streams.exit_code
@@ -20387,6 +21171,7 @@ fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) ->
             mut output,
         } => {
             append_inserted_output(&mut output, &streams.stdout);
+            append_inserted_output(&mut output, &streams.control_error);
             CommandResponse::Error {
                 request_id,
                 error,
@@ -20949,6 +21734,61 @@ fn insert_paste_buffer(
     Ok(events)
 }
 
+fn rename_paste_buffer(
+    inner: &mut ServerState,
+    requested_name: Option<&str>,
+    new_name: &str,
+) -> Result<Vec<PendingHookEvent>, ServerError> {
+    let mut source_index = match requested_name {
+        Some(name) => inner
+            .paste_buffers
+            .iter()
+            .position(|buffer| buffer.name == name)
+            .ok_or_else(|| ServerError::InvalidCommand(format!("unknown buffer: {name}")))?,
+        None => inner
+            .paste_buffers
+            .iter()
+            .position(|buffer| buffer.automatic)
+            .ok_or_else(|| ServerError::InvalidCommand("no buffer".to_owned()))?,
+    };
+    if new_name.is_empty() {
+        return Err(ServerError::InvalidCommand("new name is empty".to_owned()));
+    }
+    validate_paste_buffer_name(new_name)?;
+    if inner.paste_buffers[source_index].name == new_name {
+        return Ok(Vec::new());
+    }
+
+    let mut events = Vec::new();
+    if let Some(destination_index) = inner
+        .paste_buffers
+        .iter()
+        .position(|buffer| buffer.name == new_name)
+    {
+        let removed = inner.paste_buffers.remove(destination_index);
+        events.push(PendingHookEvent::paste_buffer(
+            "paste-buffer-deleted",
+            removed.name,
+        ));
+        if destination_index < source_index {
+            source_index -= 1;
+        }
+    }
+
+    let source = &mut inner.paste_buffers[source_index];
+    let old_name = std::mem::replace(&mut source.name, new_name.to_owned());
+    source.automatic = false;
+    events.push(PendingHookEvent::paste_buffer(
+        "paste-buffer-deleted",
+        old_name,
+    ));
+    events.push(PendingHookEvent::paste_buffer(
+        "paste-buffer-changed",
+        new_name.to_owned(),
+    ));
+    Ok(events)
+}
+
 fn read_paste_buffer_file(path: &Path) -> Result<Vec<u8>, ServerError> {
     let file =
         fs::File::open(path).map_err(|error| buffer_file_error("load-buffer", path, &error))?;
@@ -20999,101 +21839,76 @@ fn buffer_file_error(command: &str, path: &Path, error: &std::io::Error) -> Serv
 struct ParsedCapturePane {
     target: Option<String>,
     buffer_name: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
     options: CaptureOptions,
+    print: bool,
     quiet: bool,
 }
 
 fn parse_capture_pane_args(args: &[String]) -> Result<ParsedCapturePane, ServerError> {
-    let mut parsed = ParsedCapturePane {
-        target: None,
-        buffer_name: None,
-        options: CaptureOptions::default(),
-        quiet: false,
+    let args = parse_buffer_command_args(
+        "capture-pane",
+        args,
+        &['b', 'E', 'S', 't'],
+        &['a', 'e', 'J', 'M', 'N', 'p', 'T', 'q'],
+    )?;
+    require_no_positionals("capture-pane", &args)?;
+    let options = CaptureOptions {
+        alternate: args.has('a'),
+        escape_sequences: args.has('e'),
+        join_wrapped: args.has('J'),
+        mode: args.has('M'),
+        preserve_trailing: args.has('J') || args.has('N'),
+        ..CaptureOptions::default()
     };
-    let mut index = 0;
-    while let Some(argument) = args.get(index) {
-        if matches!(argument.as_str(), "-t" | "-S" | "-E" | "-b") {
-            let value = args.get(index + 1).ok_or_else(|| {
-                ServerError::InvalidCommand(format!("{argument} requires a value"))
-            })?;
-            apply_capture_value(&mut parsed, argument, value)?;
-            index += 2;
-            continue;
-        }
-        if let Some((option, value)) = ["-t", "-S", "-E", "-b"].iter().find_map(|option| {
-            argument
-                .strip_prefix(option)
-                .filter(|value| !value.is_empty())
-                .map(|value| (*option, value))
-        }) {
-            apply_capture_value(&mut parsed, option, value)?;
-            index += 1;
-            continue;
-        }
-        if argument == "--" {
-            if index + 1 != args.len() {
-                return Err(ServerError::InvalidCommand(
-                    "capture-pane does not accept positional arguments".to_owned(),
-                ));
-            }
-            break;
-        }
-        if !argument.starts_with('-') || argument == "-" {
-            return Err(ServerError::InvalidCommand(format!(
-                "unexpected capture-pane argument: {argument}"
-            )));
-        }
-        for flag in argument[1..].chars() {
-            match flag {
-                'a' => parsed.options.alternate = true,
-                'e' => parsed.options.escape_sequences = true,
-                'J' => {
-                    parsed.options.join_wrapped = true;
-                    parsed.options.preserve_trailing = true;
-                }
-                'M' => parsed.options.mode = true,
-                'N' => parsed.options.preserve_trailing = true,
-                'p' | 'T' => {}
-                'q' => parsed.quiet = true,
-                unsupported => {
-                    return Err(ServerError::UnsupportedCommand(format!(
-                        "capture-pane -{unsupported}"
-                    )));
-                }
-            }
-        }
-        index += 1;
-    }
+    let parsed = ParsedCapturePane {
+        target: args.value('t').map(str::to_owned),
+        buffer_name: args.value('b').map(str::to_owned),
+        start: args.value('S').map(str::to_owned),
+        end: args.value('E').map(str::to_owned),
+        options,
+        print: args.has('p'),
+        quiet: args.has('q'),
+    };
     Ok(parsed)
 }
 
-fn apply_capture_value(
-    parsed: &mut ParsedCapturePane,
-    option: &str,
-    value: &str,
-) -> Result<(), ServerError> {
-    match option {
-        "-t" => parsed.target = Some(value.to_owned()),
-        "-S" => parsed.options.start = parse_capture_boundary(value, true)?,
-        "-E" => parsed.options.end = parse_capture_boundary(value, false)?,
-        "-b" => parsed.buffer_name = Some(value.to_owned()),
-        _ => unreachable!("capture value option is validated by the caller"),
-    }
-    Ok(())
-}
-
-fn parse_capture_boundary(value: &str, start: bool) -> Result<CaptureBoundary, ServerError> {
+fn resolve_capture_boundary(
+    engine: &MuxEngine,
+    value: Option<&str>,
+    start: bool,
+    target: &ExecutionContext,
+    active_session: Option<SessionId>,
+    hooks: &mut impl StatusHooks,
+) -> CaptureBoundary {
+    let Some(value) = value else {
+        return default_capture_boundary(start);
+    };
     if value == "-" {
-        return Ok(if start {
+        return if start {
             CaptureBoundary::HistoryStart
         } else {
             CaptureBoundary::VisibleEnd
-        });
+        };
     }
-    value
+    let expanded = engine.expand_pane_format(value, target, active_session, hooks);
+    expanded
         .parse::<i64>()
-        .map(CaptureBoundary::Relative)
-        .map_err(|_| ServerError::InvalidCommand(format!("invalid capture-pane line: {value}")))
+        .ok()
+        .filter(|line| *line >= i64::from(i32::MIN) && *line <= i64::from(i16::MAX))
+        .map_or_else(
+            || default_capture_boundary(start),
+            CaptureBoundary::Relative,
+        )
+}
+
+fn default_capture_boundary(start: bool) -> CaptureBoundary {
+    if start {
+        CaptureBoundary::Relative(0)
+    } else {
+        CaptureBoundary::VisibleEnd
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -21588,8 +22403,9 @@ fn expand_popup_value(
     value: &str,
 ) -> String {
     let facts = format_hook_facts(inner);
-    let mut hooks =
-        DaemonFormatHooks::command_with_optional_variables(&facts, target.format_variables());
+    let mut variables = target.format_variables.clone();
+    variables.insert("config_files".to_owned(), inner.config_files.clone());
+    let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables);
     inner
         .engine
         .expand_pane_format_time(value, target, active_session, &mut hooks)
@@ -21964,6 +22780,13 @@ fn handle_connection<S: TransportStream>(
         }
         if let Some(size) = client_size_fact(&hello.capabilities) {
             inner.client_sizes.insert(client, size);
+        }
+        if let Some(working_directory) =
+            client_working_directory_fact(hello.working_directory.as_deref())
+        {
+            inner
+                .client_working_directories
+                .insert(client, working_directory);
         }
     }
     let mut registration = ClientRegistrationGuard::new(shared, client);
@@ -22443,6 +23266,37 @@ fn expand_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+#[cfg(unix)]
+fn source_working_directory_glob_prefix(path: &Path) -> PathBuf {
+    use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+
+    let bytes = path.as_os_str().as_bytes();
+    let mut quoted = Vec::with_capacity(bytes.len().saturating_mul(2));
+    for &byte in bytes {
+        if byte.is_ascii() && !byte.is_ascii_alphanumeric() && byte != b'/' {
+            quoted.push(b'\\');
+        }
+        quoted.push(byte);
+    }
+    PathBuf::from(std::ffi::OsString::from_vec(quoted))
+}
+
+#[cfg(not(unix))]
+fn source_working_directory_glob_prefix(path: &Path) -> PathBuf {
+    PathBuf::from(glob::Pattern::escape(path.to_string_lossy().as_ref()))
+}
+
+fn resolve_source_path(path: &str, working_directory: Option<&Path>) -> PathBuf {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        path
+    } else {
+        working_directory.map_or(path.clone(), |working_directory| {
+            source_working_directory_glob_prefix(working_directory).join(path)
+        })
+    }
+}
+
 fn prompt_history_path(path: &str) -> Option<PathBuf> {
     if path.is_empty() {
         None
@@ -22505,24 +23359,61 @@ struct SourceGlobMatches {
     errors: Vec<String>,
 }
 
-/// Control mode reconstructs `%config-error` by sniffing these three strings
-/// (`is_config_message` in `crates/zz/src/control_mode.rs`), so they are pinned
-/// by `config_diagnostics_pin_the_control_mode_sniffer_wording`. The CLI stream
-/// carries the pin's own `strerror(ENOENT)` shape instead.
 const STANDARD_INPUT_SOURCE_WARNING: &str = "source-file from standard input is not supported";
-
-fn no_such_file_warning(path: &Path) -> String {
-    format!("no such file: {}", path.display())
-}
+const NESTED_SOURCE_LIMIT_ERROR: &str = "too many nested files";
 
 fn source_glob_error_warning(path: &Path, error: &str) -> String {
-    format!("source-file glob error for {}: {error}", path.display())
+    format!("{error}: {}", path.display())
 }
 
 fn missing_source_error(path: &Path) -> String {
     format!("No such file or directory: {}", path.display())
 }
 
+#[cfg(unix)]
+#[allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
+fn source_glob_matches(path: &Path) -> SourceGlobMatches {
+    use std::{
+        ffi::{CStr, CString},
+        mem::MaybeUninit,
+        os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    };
+
+    let error_message = |errno| {
+        unsafe { CStr::from_ptr(libc::strerror(errno)) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let Ok(pattern) = CString::new(path.as_os_str().as_bytes()) else {
+        return SourceGlobMatches {
+            paths: Vec::new(),
+            errors: vec![error_message(libc::EINVAL)],
+        };
+    };
+    let mut state = MaybeUninit::<libc::glob_t>::zeroed();
+    let result = unsafe { libc::glob(pattern.as_ptr(), 0, None, state.as_mut_ptr()) };
+    let mut state = unsafe { state.assume_init() };
+    let mut matches = SourceGlobMatches::default();
+    if result == 0 {
+        for index in 0..state.gl_pathc {
+            let path = unsafe { *state.gl_pathv.add(index) };
+            if !path.is_null() {
+                let bytes = unsafe { CStr::from_ptr(path) }.to_bytes().to_vec();
+                matches
+                    .paths
+                    .push(PathBuf::from(std::ffi::OsString::from_vec(bytes)));
+            }
+        }
+    } else if result == libc::GLOB_NOSPACE {
+        matches.errors.push(error_message(libc::ENOMEM));
+    } else if result != libc::GLOB_NOMATCH {
+        matches.errors.push(error_message(libc::EINVAL));
+    }
+    unsafe { libc::globfree(&raw mut state) };
+    matches
+}
+
+#[cfg(not(unix))]
 fn source_glob_matches(path: &Path) -> SourceGlobMatches {
     match glob::glob(path.to_string_lossy().as_ref()) {
         Ok(paths) => {
@@ -22544,20 +23435,18 @@ fn source_glob_matches(path: &Path) -> SourceGlobMatches {
 }
 
 fn expand_relative(source: &Path, nested: &str) -> PathBuf {
-    let nested = expand_path(nested);
+    let nested = PathBuf::from(nested);
     if nested.is_absolute() {
         nested
     } else {
-        source
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
+        source_working_directory_glob_prefix(source.parent().unwrap_or_else(|| Path::new(".")))
             .join(nested)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
     use std::time::Instant;
 
@@ -22592,6 +23481,18 @@ mod tests {
                 .into_iter()
                 .map(|client| (ClientId(client), ClientInstanceId(client))),
         );
+    }
+
+    fn read_global_option(shared: &Arc<Shared>, name: &str) -> String {
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gqv", name]),
+            )
+            .expect("read global option")
+            .output
     }
 
     #[test]
@@ -22893,7 +23794,7 @@ mod tests {
             .unwrap();
 
         let mut snapshot = engine.state.snapshot();
-        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        expand_window_status_labels(&engine, "", &FormatHookFacts::default(), &mut snapshot);
         assert_eq!(
             snapshot.sessions[0].windows[0].status_label,
             "#[underscore]#[push-default]0:main*"
@@ -22926,7 +23827,7 @@ mod tests {
             )
             .unwrap();
         let mut snapshot = engine.state.snapshot();
-        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        expand_window_status_labels(&engine, "", &FormatHookFacts::default(), &mut snapshot);
         assert_eq!(
             snapshot.sessions[0].windows[0].status_label,
             "#[underscore]#[push-default]#[bold]CURRENT:0:main:*"
@@ -22981,7 +23882,7 @@ mod tests {
         assert!(engine.state.set_pane_bell(main_pane, true));
 
         let mut snapshot = engine.state.snapshot();
-        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        expand_window_status_labels(&engine, "", &FormatHookFacts::default(), &mut snapshot);
         let main = &snapshot.sessions[0].windows[0];
         let logs = &snapshot.sessions[0].windows[1];
         assert!(
@@ -23009,7 +23910,7 @@ mod tests {
         assert!(engine.state.set_pane_bell(main_pane, false));
         assert!(engine.state.set_pane_bell(logs_pane, true));
         let mut snapshot = engine.state.snapshot();
-        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        expand_window_status_labels(&engine, "", &FormatHookFacts::default(), &mut snapshot);
         let logs_style =
             &zz_mux::parse_styled_segments(&snapshot.sessions[0].windows[1].status_label)[0].style;
         assert_eq!(logs_style.fg, Some(zz_mux::TmuxColour::Basic(3)));
@@ -23039,7 +23940,7 @@ mod tests {
                 .unwrap();
         }
         let mut snapshot = engine.state.snapshot();
-        expand_window_status_labels(&engine, &FormatHookFacts::default(), &mut snapshot);
+        expand_window_status_labels(&engine, "", &FormatHookFacts::default(), &mut snapshot);
         for window in &snapshot.sessions[0].windows {
             let style = &zz_mux::parse_styled_segments(&window.status_label)[0].style;
             assert_eq!(style.fg, Some(zz_mux::TmuxColour::Basic(1)));
@@ -23054,8 +23955,10 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary config directory");
         let first = directory.path().join("first.conf");
         let second = directory.path().join("second.conf");
+        let sourced = directory.path().join("sourced.conf");
         fs::write(&first, "set -g prefix C-a\n").expect("first config");
         fs::write(&second, "set -g prefix C-x\n").expect("second config");
+        fs::write(&sourced, "set -g prefix C-z\n").expect("sourced config");
         let configs = [first, second];
         let shared = Arc::new(Shared::new(1));
         shared
@@ -23071,6 +23974,417 @@ mod tests {
             .expect("show boot option")
             .output;
         assert_eq!(output, "C-x");
+
+        let expected = format_config_files(&configs);
+        let config_files = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-message", ["-p", "#{config_files}"]),
+            )
+            .expect("show startup config files")
+            .output;
+        assert_eq!(config_files, expected);
+        {
+            let inner = shared.inner.lock();
+            let snapshot = inner.engine.state.snapshot();
+            let request =
+                status_request(&inner, ClientId(7), &snapshot, FormatHookFacts::default());
+            assert_eq!(request.context.config_files, expected);
+        }
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("source-file", [sourced.display().to_string()]),
+            )
+            .expect("source additional config");
+        let config_files = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-message", ["-p", "#{config_files}"]),
+            )
+            .expect("show retained startup config files")
+            .output;
+        assert_eq!(config_files, expected);
+    }
+
+    #[test]
+    fn startup_source_invocations_share_one_budget_across_explicit_configs() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let first = directory.path().join("first.conf");
+        let second = directory.path().join("second.conf");
+        let mut first_body = String::new();
+        let mut second_body = String::new();
+        for index in 1..=60 {
+            let leaf = directory.path().join(format!("leaf{index}.conf"));
+            fs::write(&leaf, format!("set-option -g @startup{index} yes\n")).expect("startup leaf");
+            let line = format!("source-file '{}'\n", leaf.display());
+            if index <= 30 {
+                first_body.push_str(&line);
+            } else {
+                second_body.push_str(&line);
+            }
+        }
+        second_body.push_str("set-option -g @startup-after yes\n");
+        fs::write(&first, first_body).expect("first startup config");
+        fs::write(&second, second_body).expect("second startup config");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(&[first, second]))
+            .expect("initialize startup configs");
+
+        assert_eq!(read_global_option(&shared, "@startup50"), "yes");
+        assert!(read_global_option(&shared, "@startup51").is_empty());
+        assert!(read_global_option(&shared, "@startup60").is_empty());
+        assert_eq!(read_global_option(&shared, "@startup-after"), "yes");
+    }
+
+    #[test]
+    fn startup_source_depth_does_not_count_the_top_level_config() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("root.conf");
+        for level in 1..=51 {
+            let mut body = format!("set-option -g @startup-depth {level}\n");
+            if level < 51 {
+                let _ = writeln!(
+                    body,
+                    "source-file '{}'",
+                    directory
+                        .path()
+                        .join(format!("f{}.conf", level + 1))
+                        .display()
+                );
+            }
+            let _ = writeln!(body, "set-option -g @startup-after{level} yes");
+            fs::write(directory.path().join(format!("f{level}.conf")), body)
+                .expect("startup chain level");
+        }
+        fs::write(
+            &root,
+            format!(
+                "source-file '{}'\n",
+                directory.path().join("f1.conf").display()
+            ),
+        )
+        .expect("startup chain root");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(std::slice::from_ref(&root)))
+            .expect("initialize startup chain");
+
+        assert_eq!(read_global_option(&shared, "@startup-depth"), "50");
+        assert_eq!(read_global_option(&shared, "@startup-after50"), "yes");
+        assert!(read_global_option(&shared, "@startup-after51").is_empty());
+    }
+
+    #[test]
+    fn startup_source_refusal_keeps_the_declaring_location() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("root.conf");
+        let present = directory.path().join("present.conf");
+        fs::write(&present, "set-option -g @startup-present yes\n").expect("present source");
+        let mut body = String::new();
+        for index in 1..=50 {
+            let _ = writeln!(body, "source-file -q missing{index}.conf");
+        }
+        let _ = writeln!(body, "source-file '{}'", present.display());
+        body.push_str("set-option -g @startup-continued yes\n");
+        fs::write(&root, body).expect("startup config");
+
+        let shared = Arc::new(Shared::new(1));
+        let mut report = ConfigLoadReport::default();
+        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
+        shared
+            .load_config_file_with_report_for_terminal(
+                &root,
+                &mut ExecutionContext::default(),
+                0,
+                &mut report,
+                ClientTerminal::NoClient,
+                &mut source_invocations,
+            )
+            .expect("load startup config");
+
+        assert_eq!(
+            report.source_errors(),
+            [format!(
+                "{}:51: {NESTED_SOURCE_LIMIT_ERROR}",
+                root.display()
+            )]
+        );
+        assert!(read_global_option(&shared, "@startup-present").is_empty());
+        assert_eq!(read_global_option(&shared, "@startup-continued"), "yes");
+    }
+
+    #[test]
+    fn config_replay_drops_failed_same_line_groups() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("root.conf");
+        let leaf = directory.path().join("leaf.conf");
+        let nested_failure = directory.path().join("nested-failure.conf");
+        let nested_parser_failure = directory.path().join("nested-parser-failure.conf");
+        let mixed_match = directory.path().join("mixed-match.conf");
+        let source_identity = directory.path().join("source-identity.conf");
+        fs::write(&leaf, "set-option -g @depth-leaf yes\n").expect("depth leaf");
+        fs::write(
+            &nested_failure,
+            "kill-session -t =missing ; set-option -g @nested-same yes\n\
+             set-option -g @nested-next yes\n",
+        )
+        .expect("nested failure config");
+        fs::write(&nested_parser_failure, "set 'oops\n").expect("nested parser failure config");
+        fs::write(&mixed_match, "set-option -g @mixed-loaded yes\n")
+            .expect("mixed source match");
+        fs::write(
+            &source_identity,
+            "set-option -g @source-identity yes\n",
+        )
+        .expect("source identity config");
+
+        for level in (1..=49).rev() {
+            let body = if level == 49 {
+                format!(
+                    "source-file '{}' ; set-option -g @depth-same yes\n\
+                     set-option -g @depth-next yes\n",
+                    leaf.display()
+                )
+            } else {
+                format!(
+                    "source-file '{}'\n",
+                    directory.path().join(format!("f{}.conf", level + 1)).display()
+                )
+            };
+            fs::write(directory.path().join(format!("f{level}.conf")), body)
+                .expect("depth config");
+        }
+
+        fs::write(
+            &root,
+            format!(
+                "source-file '{}'\n\
+                 source-file missing-loud.conf ; set-option -g @loud-same yes\n\
+                 set-option -g @loud-next yes\n\
+                 source-file -q missing-quiet.conf ; set-option -g @quiet-same yes\n\
+                 set-option -g @quiet-next yes\n\
+                 kill-session -t =missing ; set-option -g @runtime-same yes\n\
+                 set-option -g @runtime-next yes\n\
+                 source-file '{}' ; set-option -g @nested-parent-same yes\n\
+                 set-option -g @nested-parent-next yes\n\
+                 source-file '{}' ; set-option -g @parser-parent-same yes\n\
+                 set-option -g @parser-parent-next yes\n\
+                 source-file missing-mixed.conf '{}' ; set-option -g @mixed-same yes\n\
+                 set-option -g @mixed-next yes\n\
+                 source-file - ; set-option -g @stdin-same yes\n\
+                 set-option -g @stdin-next yes\n\
+                 run-shell 'exit 1' ; set-option -g @async-same yes\n\
+                 set-option -g @async-next yes\n\
+                 source-file '{}'\n",
+                directory.path().join("f1.conf").display(),
+                nested_failure.display(),
+                nested_parser_failure.display(),
+                mixed_match.display(),
+                source_identity.display(),
+            ),
+        )
+        .expect("root config");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .load_config_file(&root, &mut ExecutionContext::default(), 0)
+            .expect("replay config");
+
+        for marker in [
+            "@depth-leaf",
+            "@depth-same",
+            "@loud-same",
+            "@runtime-same",
+            "@nested-same",
+        ] {
+            assert!(read_global_option(&shared, marker).is_empty(), "{marker}");
+        }
+        for marker in [
+            "@depth-next",
+            "@loud-next",
+            "@quiet-same",
+            "@quiet-next",
+            "@runtime-next",
+            "@nested-next",
+            "@nested-parent-same",
+            "@nested-parent-next",
+            "@parser-parent-same",
+            "@parser-parent-next",
+            "@mixed-loaded",
+            "@mixed-same",
+            "@mixed-next",
+            "@stdin-same",
+            "@stdin-next",
+            "@async-same",
+            "@async-next",
+            "@source-identity",
+        ] {
+            assert_eq!(read_global_option(&shared, marker), "yes", "{marker}");
+        }
+    }
+
+    #[test]
+    fn one_startup_source_command_can_load_more_than_fifty_paths() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("root.conf");
+        let mut body = String::from("source-file");
+        for index in 1..=60 {
+            let leaf = directory.path().join(format!("leaf{index}.conf"));
+            fs::write(&leaf, format!("set-option -g @startup-many {index}\n"))
+                .expect("startup leaf");
+            let _ = write!(body, " '{}'", leaf.display());
+        }
+        body.push('\n');
+        fs::write(&root, body).expect("startup config");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(std::slice::from_ref(&root)))
+            .expect("initialize startup config");
+
+        assert_eq!(read_global_option(&shared, "@startup-many"), "60");
+    }
+
+    #[test]
+    fn reload_config_replays_the_root_under_one_startup_budget() {
+        fn write_leaves(directory: &Path, generation: &str) {
+            for index in 1..=52 {
+                fs::write(
+                    directory.join(format!("leaf{index}.conf")),
+                    format!("set-option -g @reload-source {generation}{index}\n"),
+                )
+                .expect("reload source leaf");
+            }
+        }
+
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("root.conf");
+        let mut body = String::new();
+        for index in 1..=52 {
+            let _ = writeln!(
+                body,
+                "source-file '{}'",
+                directory.path().join(format!("leaf{index}.conf")).display()
+            );
+        }
+        body.push_str("set-option -g @reload-after yes\n");
+        fs::write(&root, body).expect("reload config");
+        write_leaves(directory.path(), "startup");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(std::slice::from_ref(&root)))
+            .expect("initialize startup config");
+        assert_eq!(read_global_option(&shared, "@reload-source"), "startup50");
+
+        write_leaves(directory.path(), "reload");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::default();
+        shared
+            .reload_user_config_with_mux_file(client, &mut context, Some(&root))
+            .expect("reload user configuration");
+
+        assert_eq!(read_global_option(&shared, "@reload-source"), "reload50");
+        assert_eq!(read_global_option(&shared, "@reload-after"), "yes");
+        let warnings = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for line in [51, 52] {
+            let expected = format!("{}:{line}: {NESTED_SOURCE_LIMIT_ERROR}", root.display());
+            assert!(
+                warnings.contains(&expected),
+                "missing {expected} in {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn config_files_is_empty_when_loading_is_disabled_and_retains_the_default_selection() {
+        let default = PathBuf::from("/tmp/default.conf");
+        assert_eq!(
+            startup_mux_config_files(true, None, || Some(default.clone())),
+            [default]
+        );
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize without config");
+        let config_files = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-message", ["-p", "#{config_files}"]),
+            )
+            .expect("show empty startup config files")
+            .output;
+        assert!(config_files.is_empty());
+    }
+
+    #[test]
+    fn reload_config_files_tracks_the_selected_file_or_empty_selection() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let startup = directory.path().join("startup.conf");
+        let reloaded = directory.path().join("reloaded.conf");
+        fs::write(&startup, "set -g prefix C-a\n").expect("startup config");
+        fs::write(&reloaded, "set -g prefix C-x\n").expect("reload config");
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(std::slice::from_ref(&startup)))
+            .expect("initialize startup config");
+        let mut context = ExecutionContext::default();
+
+        shared
+            .reload_user_config_with_mux_file(ClientId(7), &mut context, Some(&reloaded))
+            .expect("reload selected config");
+        let selected = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "#{config_files}"]),
+            )
+            .expect("show reloaded config file")
+            .output;
+        assert_eq!(selected, reloaded.to_string_lossy());
+
+        shared
+            .reload_user_config_with_mux_file(ClientId(7), &mut context, None)
+            .expect("reload without a selected config");
+        let selected = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "#{config_files}"]),
+            )
+            .expect("show empty reload selection")
+            .output;
+        assert!(selected.is_empty());
     }
 
     #[cfg(unix)]
@@ -23487,6 +24801,7 @@ mod tests {
             capabilities: Vec::new(),
             color_scheme: None,
             origin: None,
+            working_directory: None,
         }))
         .unwrap();
         hello[6..8].copy_from_slice(&stale.to_le_bytes());
@@ -23529,6 +24844,7 @@ mod tests {
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                working_directory: None,
             }),
         )
         .unwrap();
@@ -23579,6 +24895,7 @@ mod tests {
                     capabilities: Vec::new(),
                     color_scheme: None,
                     origin: None,
+                    working_directory: None,
                 }),
             )
             .expect("hello");
@@ -23913,12 +25230,9 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let inner = shared.inner.lock();
-            if inner
-                .engine
-                .state
-                .pane(pane)
-                .is_some_and(|pane| pane.dead && pane.dead_status == Some(7))
-            {
+            if inner.engine.state.pane(pane).is_some_and(|pane| {
+                pane.dead && pane.dead_status == Some(7) && pane.dead_time.is_some()
+            }) {
                 assert!(inner.terminals.contains_key(&pane));
                 break;
             }
@@ -23941,13 +25255,28 @@ mod tests {
                         "-p",
                         "-t",
                         &pane.to_string(),
-                        "#{pane_id}:#{pane_dead}:#{pane_dead_status}",
+                        "#{pane_id}:#{pane_dead}:#{pane_dead_status}:#{?pane_dead_time,set,}",
                     ],
                 ),
             )
             .expect("read dead facts")
             .output;
-        assert_eq!(output, format!("{pane}:1:7"));
+        assert_eq!(output, format!("{pane}:1:7:set"));
+        let dead_time = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "-t", &pane.to_string(), "#{pane_dead_time}"],
+                ),
+            )
+            .expect("read dead time")
+            .output
+            .parse::<u64>()
+            .expect("dead time epoch");
+        assert!(dead_time > 0);
 
         let mailbox = OutboundMailbox::new();
         let (late_client, _) =
@@ -24006,6 +25335,7 @@ mod tests {
             let replacement = Arc::clone(&inner.terminals[&pane]);
             assert!(!Arc::ptr_eq(&previous, &replacement));
             assert!(!inner.engine.state.pane(pane).unwrap().dead);
+            assert_eq!(inner.engine.state.pane(pane).unwrap().dead_time, None);
             assert_eq!(inner.engine.state.windows[&window].layout.project(), layout);
             assert_eq!(replacement.process_id(), None);
             assert_eq!(replacement.foreground_process_id(), None);
@@ -24322,8 +25652,13 @@ mod tests {
         let order = inner.engine.state.windows[&window].pane_order().to_vec();
         let (active, inactive) = (order[0], order[1]);
 
-        let untouched = terminal_worker_options(&inner.engine, &inner.appearance, active)
-            .expect("worker options");
+        let untouched = terminal_worker_options(
+            &inner.engine,
+            &inner.appearance,
+            &inner.config_files,
+            active,
+        )
+        .expect("worker options");
         assert!(Arc::ptr_eq(&untouched.appearance, &inner.appearance));
 
         inner
@@ -24344,8 +25679,13 @@ mod tests {
             )
             .expect("set window-active-style");
 
-        let active_options = terminal_worker_options(&inner.engine, &inner.appearance, active)
-            .expect("worker options");
+        let active_options = terminal_worker_options(
+            &inner.engine,
+            &inner.appearance,
+            &inner.config_files,
+            active,
+        )
+        .expect("worker options");
         assert_eq!(
             active_options.appearance.background,
             Color::rgb(0x20, 0x20, 0x20)
@@ -24354,8 +25694,13 @@ mod tests {
             active_options.appearance.foreground,
             Color::rgb(0xf0, 0xf0, 0xf0)
         );
-        let inactive_options = terminal_worker_options(&inner.engine, &inner.appearance, inactive)
-            .expect("worker options");
+        let inactive_options = terminal_worker_options(
+            &inner.engine,
+            &inner.appearance,
+            &inner.config_files,
+            inactive,
+        )
+        .expect("worker options");
         assert_eq!(
             inactive_options.appearance.background,
             Color::rgb(0x10, 0x10, 0x10)
@@ -24382,18 +25727,72 @@ mod tests {
                 &CommandInvocation::new("set-option", ["-gu", "window-active-style"]),
             )
             .expect("unset window-active-style");
-        let conditional_active = terminal_worker_options(&inner.engine, &inner.appearance, active)
-            .expect("worker options");
+        let conditional_active = terminal_worker_options(
+            &inner.engine,
+            &inner.appearance,
+            &inner.config_files,
+            active,
+        )
+        .expect("worker options");
         assert_eq!(
             conditional_active.appearance.background,
             Color::rgb(0x30, 0x30, 0x30)
         );
-        let conditional_inactive =
-            terminal_worker_options(&inner.engine, &inner.appearance, inactive)
-                .expect("worker options");
+        let conditional_inactive = terminal_worker_options(
+            &inner.engine,
+            &inner.appearance,
+            &inner.config_files,
+            inactive,
+        )
+        .expect("worker options");
         assert_eq!(
             conditional_inactive.appearance.background,
             Color::rgb(0x40, 0x40, 0x40)
+        );
+    }
+
+    #[test]
+    fn renderer_style_conditionals_see_loaded_config_files() {
+        let shared = Shared::new(1);
+        let mut context = ExecutionContext::default();
+        let mut inner = shared.inner.lock();
+        inner.config_files = "/tmp/loaded.conf".to_owned();
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "style-config"]),
+            )
+            .expect("create session");
+        let pane = context.pane.expect("pane id");
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-g", "window-style", "bg=#{?config_files,#123456,#654321}"],
+                ),
+            )
+            .expect("set conditional window style");
+        inner
+            .engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-g", "mode-style", "bg=#{?config_files,#112233,#332211}"],
+                ),
+            )
+            .expect("set conditional mode style");
+
+        let terminal =
+            terminal_worker_options(&inner.engine, &inner.appearance, &inner.config_files, pane)
+                .expect("worker options");
+        assert_eq!(terminal.appearance.background, Color::rgb(0x12, 0x34, 0x56));
+        assert_eq!(
+            published_appearance(&inner).selection_background,
+            AppearanceColor::rgba(0x11, 0x22, 0x33, 255)
         );
     }
 
@@ -24507,7 +25906,7 @@ mod tests {
         let facts = FormatHookFacts::default();
 
         let mut snapshot = engine.state.snapshot();
-        stamp_pane_border_colours(&engine, &facts, &mut snapshot);
+        stamp_pane_border_colours(&engine, "", &facts, &mut snapshot);
         for session in &snapshot.sessions {
             for window in &session.windows {
                 for pane in window.panes.values() {
@@ -24540,7 +25939,7 @@ mod tests {
             .expect("set active border style");
 
         let mut snapshot = engine.state.snapshot();
-        stamp_pane_border_colours(&engine, &facts, &mut snapshot);
+        stamp_pane_border_colours(&engine, "", &facts, &mut snapshot);
         let panes = &snapshot.sessions[0].windows[0].panes;
         assert_eq!(panes[&active].border_colour, Some(TmuxColour::Indexed(100)));
         assert_eq!(panes[&active].active_border_colour, None);
@@ -24575,6 +25974,7 @@ mod tests {
 
         let (_, _, state) = build_display_panes_state(
             &engine,
+            "",
             &facts,
             engine.state.windows[&window].active_pane,
             1_000,
@@ -24608,6 +26008,7 @@ mod tests {
             .expect("set format");
         let (_, _, state) = build_display_panes_state(
             &engine,
+            "",
             &facts,
             engine.state.windows[&window].active_pane,
             1_000,
@@ -24627,6 +26028,7 @@ mod tests {
             .expect("set oversized format");
         let (_, _, state) = build_display_panes_state(
             &engine,
+            "",
             &facts,
             engine.state.windows[&window].active_pane,
             1_000,
@@ -24810,7 +26212,14 @@ mod tests {
                     ProtocolMessage::Event(Event {
                         payload: EventPayload::HookEvent { name, .. },
                         ..
-                    }) => Some(name.as_str()),
+                    }) if matches!(
+                        name.as_str(),
+                        "window-linked"
+                            | "session-created"
+                            | "client-session-changed"
+                            | "client-attached"
+                    ) =>
+                        Some(name.as_str()),
                     _ => None,
                 })
                 .collect::<Vec<_>>(),
@@ -24820,6 +26229,28 @@ mod tests {
                 "client-session-changed",
                 "client-attached",
             ]
+        );
+        let hook_names = messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, .. },
+                    ..
+                }) => Some(name.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            hook_names.iter().all(|name| matches!(
+                *name,
+                "window-linked"
+                    | "session-created"
+                    | "client-session-changed"
+                    | "client-attached"
+                    | "window-renamed"
+                    | "pane-title-changed"
+            )),
+            "unexpected control hook sequence: {hook_names:?}"
         );
         shared.send_resync(client, &mailbox);
         shared.send_full(client, pane, &mailbox);
@@ -26378,6 +27809,129 @@ mod tests {
         assert!(shared.inner.lock().command_outputs.is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn source_file_globs_follow_the_posix_dialect_losslessly() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        assert_eq!(
+            source_working_directory_glob_prefix(Path::new("/tmp/client [literal]*?\\ cwd"))
+                .as_os_str()
+                .as_bytes(),
+            b"/tmp/client\\ \\[literal\\]\\*\\?\\\\\\ cwd"
+        );
+        assert_eq!(
+            resolve_source_path("~/literal.conf", Some(Path::new("/tmp/client cwd"))),
+            PathBuf::from("/tmp/client\\ cwd/~/literal.conf")
+        );
+        assert_eq!(
+            expand_relative(Path::new("/tmp/nested source/entry.conf"), "~/literal.conf"),
+            PathBuf::from("/tmp/nested\\ source/~/literal.conf")
+        );
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let escaped = directory.path().join("escaped [literal]*?\\ cwd");
+        fs::create_dir(&escaped).expect("escaped-character directory");
+        let literal_star = escaped.join("literal*.conf");
+        fs::write(&literal_star, "").expect("literal-star file");
+        fs::write(escaped.join("literalX.conf"), "").expect("wildcard peer");
+        let matches = source_glob_matches(&resolve_source_path("literal\\*.conf", Some(&escaped)));
+        assert_eq!(matches.paths, [literal_star]);
+        assert!(matches.errors.is_empty());
+
+        let nested_literal_parent = directory.path().join("nested[1]");
+        let nested_pattern_peer = directory.path().join("nested1");
+        fs::create_dir(&nested_literal_parent).expect("literal nested-source parent");
+        fs::create_dir(&nested_pattern_peer).expect("pattern nested-source peer");
+        let nested_entry = nested_literal_parent.join("entry.conf");
+        fs::write(&nested_entry, "").expect("nested-source entry");
+        let nested_literal_leaf = nested_literal_parent.join("leaf.conf");
+        fs::write(&nested_literal_leaf, "").expect("literal nested-source leaf");
+        fs::write(nested_pattern_peer.join("leaf.conf"), "")
+            .expect("misleading nested-source peer");
+        let matches = source_glob_matches(&expand_relative(&nested_entry, "leaf.conf"));
+        assert_eq!(matches.paths, [nested_literal_leaf]);
+        assert!(matches.errors.is_empty());
+
+        let hidden = directory.path().join("hidden");
+        fs::create_dir(&hidden).expect("hidden-file directory");
+        let visible = hidden.join("visible.conf");
+        fs::write(&visible, "").expect("visible file");
+        fs::write(hidden.join(".hidden.conf"), "").expect("hidden file");
+        let matches = source_glob_matches(&resolve_source_path("*.conf", Some(&hidden)));
+        assert_eq!(matches.paths, [visible]);
+        assert!(matches.errors.is_empty());
+
+        let double_star = directory.path().join("double-star");
+        let one = double_star.join("one");
+        let deep = one.join("deep");
+        fs::create_dir_all(&deep).expect("double-star directories");
+        fs::write(double_star.join("root.conf"), "").expect("root file");
+        let one_file = one.join("one.conf");
+        fs::write(&one_file, "").expect("one-component file");
+        fs::write(deep.join("deep.conf"), "").expect("deep file");
+        let matches = source_glob_matches(&resolve_source_path("**/*.conf", Some(&double_star)));
+        assert_eq!(matches.paths, [one_file]);
+        assert!(matches.errors.is_empty());
+
+        let triple_star = directory.path().join("triple-star");
+        fs::create_dir(&triple_star).expect("triple-star directory");
+        let alpha = triple_star.join("alpha.conf");
+        fs::write(&alpha, "").expect("triple-star match");
+        fs::write(triple_star.join("alpha.txt"), "").expect("triple-star miss");
+        let matches = source_glob_matches(&resolve_source_path("***.conf", Some(&triple_star)));
+        assert_eq!(matches.paths, [alpha]);
+        assert!(matches.errors.is_empty());
+
+        let prefix_siblings = directory.path().join("prefix-siblings");
+        let mut expected = Vec::new();
+        for name in ["zz-client-ffi", "zz-client", "zz"] {
+            let child = prefix_siblings.join(name);
+            fs::create_dir_all(&child).expect("prefix-sibling directory");
+            let path = child.join("match.conf");
+            fs::write(&path, "").expect("prefix-sibling match");
+            expected.push(path);
+        }
+        let SourceGlobMatches { mut paths, errors } =
+            source_glob_matches(&prefix_siblings.join("zz*/match.conf"));
+        paths.sort();
+        expected.sort();
+        assert_eq!(paths, expected);
+        assert!(errors.is_empty());
+
+        let bracket = directory.path().join("bracket");
+        fs::create_dir(&bracket).expect("bracket directory");
+        let literal_bracket = bracket.join("literal[.conf");
+        fs::write(&literal_bracket, "").expect("literal-bracket file");
+        let matches = source_glob_matches(&resolve_source_path("literal[.conf", Some(&bracket)));
+        assert_eq!(matches.paths, [literal_bracket]);
+        assert!(matches.errors.is_empty());
+        let matches = source_glob_matches(&resolve_source_path("missing[.conf", Some(&bracket)));
+        assert!(matches.paths.is_empty());
+        assert!(matches.errors.is_empty());
+
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::ffi::OsStringExt as _;
+
+            let non_utf8_name = std::ffi::OsString::from_vec(b"non-utf8-\xff.conf".to_vec());
+            let non_utf8 = directory.path().join(&non_utf8_name);
+            fs::write(&non_utf8, "").expect("non-UTF-8 file");
+            let matches = source_glob_matches(&directory.path().join("non-utf8-?.conf"));
+            assert_eq!(matches.paths, [non_utf8]);
+            assert!(matches.errors.is_empty());
+        }
+
+        let nul = std::ffi::OsStr::from_bytes(b"/tmp/source\0glob");
+        let matches = source_glob_matches(Path::new(nul));
+        assert!(matches.paths.is_empty());
+        assert_eq!(matches.errors.len(), 1);
+        assert_eq!(
+            source_glob_error_warning(Path::new("declared.conf"), &matches.errors[0]),
+            format!("{}: declared.conf", matches.errors[0])
+        );
+    }
+
     #[test]
     fn source_file_globs_nested_sources_and_refuses_standard_input() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -26434,10 +27988,34 @@ mod tests {
                 &CommandInvocation::new("source-file", [entry.display().to_string()]),
             )
             .expect("nested source glob");
+        let formatted = directory.path().join("formatted");
+        fs::create_dir_all(&formatted).expect("formatted source directory");
+        fs::write(
+            formatted.join("source-glob-0-0-10.conf"),
+            "bind-key F9 new-window\n",
+        )
+        .expect("first formatted source");
+        fs::write(
+            formatted.join("source-glob-0-0-20.conf"),
+            "bind-key F10 new-window\n",
+        )
+        .expect("second formatted source");
+        let formatted_pattern = formatted
+            .join("#{session_name}-#{window_index}-#{pane_index}-*.conf")
+            .display()
+            .to_string();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("source-file", ["-F", &formatted_pattern]),
+            )
+            .expect("format-expanded source glob");
         {
             let inner = shared.inner.lock();
             assert_eq!(inner.engine.keys.prefix(), "C-z");
-            for key in ["F2", "F3", "F4", "F5"] {
+            for key in ["F2", "F3", "F4", "F5", "F9", "F10"] {
                 assert!(inner.engine.keys.get("prefix", key).is_some(), "{key}");
             }
         }
@@ -26507,7 +28085,7 @@ mod tests {
                     ["-q", &malformed, &after_error.display().to_string()],
                 ),
             )
-            .expect("glob error continues to later sources");
+            .expect("glob no-match continues to later sources");
         assert!(
             shared
                 .inner
@@ -26517,17 +28095,17 @@ mod tests {
                 .get("prefix", "F6")
                 .is_some()
         );
-        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+        let missing_warning = format!("No such file or directory: {missing}");
+        assert!(!take_reliable_messages(&mailbox).iter().any(|message| {
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ClientMessage {
                         kind: ClientMessageKind::Warning,
-                        text,
                         ..
                     },
                     ..
-                }) if text.contains("source-file glob error")
+                })
             )
         }));
 
@@ -26549,7 +28127,7 @@ mod tests {
                         ..
                     },
                     ..
-                }) if text.contains("no such file") && text.contains("missing-*.conf")
+                }) if text == &missing_warning
             )
         }));
 
@@ -26583,6 +28161,9 @@ mod tests {
         fs::write(&bad, "wibble\nwibble\n").expect("invalid source fixture");
         let bad = bad.display().to_string();
         let missing = directory.path().join("missing.conf").display().to_string();
+        let good = directory.path().join("good.conf");
+        fs::write(&good, "").expect("valid source fixture");
+        let good = good.display().to_string();
         let unsupported = directory.path().join("unsupported.conf");
         fs::write(&unsupported, "source-file -v nested.conf\n").expect("unsupported source");
         let unsupported = unsupported.display().to_string();
@@ -26666,6 +28247,39 @@ mod tests {
             }
         );
 
+        let control = ClientId(u64::from(u16::MAX) - 1);
+        let control_loud = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut context,
+            5,
+            &CommandInvocation::new("source-file", [&missing]),
+        );
+        assert_eq!(
+            control_loud,
+            CommandResponse::Error {
+                request_id: 5,
+                error: ServerError::InvalidCommand(format!("No such file or directory: {missing}")),
+                output: String::new(),
+            }
+        );
+        let control_partial = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut context,
+            6,
+            &CommandInvocation::new("source-file", [&good, &missing]),
+        );
+        assert_eq!(
+            control_partial,
+            CommandResponse::Success {
+                request_id: 6,
+                output: format!("No such file or directory: {missing}\n"),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+
         assert!(shared.inner.lock().command_streams.is_empty());
 
         take_reliable_messages(&mailbox);
@@ -26674,13 +28288,13 @@ mod tests {
             interactive,
             ClientKind::Interactive,
             &mut interactive_context,
-            5,
+            7,
             &CommandInvocation::new("source-file", [&bad, &missing]),
         );
         assert_eq!(
             attended,
             CommandResponse::Success {
-                request_id: 5,
+                request_id: 7,
                 output: String::new(),
                 exit_code: 0,
                 stderr: String::new(),
@@ -26708,18 +28322,751 @@ mod tests {
                     "2 invalid lines: {bad}:1: unknown command: wibble, \
                      {bad}:2: unknown command: wibble"
                 ),
-                format!("no such file: {missing}"),
+                format!("No such file or directory: {missing}"),
             ]
         );
     }
 
-    /// `is_config_message` in `crates/zz/src/control_mode.rs` reconstructs
-    /// control mode's `%config-error` by sniffing this wording. Rewording any
-    /// producer without teaching that sniffer silently kills the channel, so
-    /// both sides of the contract are pinned: this test locks what the daemon
-    /// emits, `config_messages_include_the_source_line_shape` locks what the
-    /// sniffer accepts. A typed wire marker would retire both, but it needs a
-    /// protocol bump.
+    #[test]
+    fn nested_source_misses_use_effective_declared_paths_across_client_channels() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let parent = directory
+            .path()
+            .join("entry parent [literal]*? with spaces");
+        fs::create_dir(&parent).expect("nested source parent");
+        let loud_entry = parent.join("loud.conf");
+        let quiet_entry = parent.join("quiet.conf");
+        let invalid_entry = parent.join("invalid-entry.conf");
+        let invalid_leaf = parent.join("invalid-leaf.conf");
+        fs::write(
+            &loud_entry,
+            "source-file -F '#{session_name}-missing[1].conf'\n",
+        )
+        .expect("loud nested source fixture");
+        fs::write(
+            &quiet_entry,
+            "source-file -Fq '#{session_name}-quiet-missing[1].conf'\n",
+        )
+        .expect("quiet nested source fixture");
+        fs::write(&invalid_entry, "source-file invalid-leaf.conf\n")
+            .expect("invalid nested source entry");
+        fs::write(&invalid_leaf, "wibble\n").expect("invalid nested source leaf");
+        let loud_entry_pattern = source_working_directory_glob_prefix(&parent)
+            .join("loud.conf")
+            .display()
+            .to_string();
+        let quiet_entry_pattern = source_working_directory_glob_prefix(&parent)
+            .join("quiet.conf")
+            .display()
+            .to_string();
+        let invalid_entry_pattern = source_working_directory_glob_prefix(&parent)
+            .join("invalid-entry.conf")
+            .display()
+            .to_string();
+
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "nested-diagnostic"]),
+            )
+            .expect("nested diagnostic session");
+        let expected = "No such file or directory: nested-diagnostic-missing[1].conf";
+
+        let loud = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("source-file", [&loud_entry_pattern]),
+        );
+        assert_eq!(
+            loud,
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{expected}\n"),
+            }
+        );
+
+        let quiet = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("source-file", [&quiet_entry_pattern]),
+        );
+        assert_eq!(
+            quiet,
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        let mut interactive_context = ExecutionContext::default();
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                &CommandInvocation::new("attach-session", ["-t", "nested-diagnostic"]),
+            )
+            .expect("attach interactive source diagnostic client");
+        take_reliable_messages(&interactive_mailbox);
+        let response = shared.execute_command_request(
+            interactive,
+            ClientKind::Interactive,
+            &mut interactive_context,
+            3,
+            &CommandInvocation::new("source-file", [&loud_entry_pattern]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 3,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert!(
+            take_reliable_messages(&interactive_mailbox)
+                .iter()
+                .any(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ClientMessage {
+                                kind: ClientMessageKind::Warning,
+                                text,
+                                ..
+                            },
+                            ..
+                        }) if text == expected
+                    )
+                })
+        );
+        let response = shared.execute_command_request(
+            interactive,
+            ClientKind::Interactive,
+            &mut interactive_context,
+            4,
+            &CommandInvocation::new("source-file", [&quiet_entry_pattern]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 4,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert!(
+            !take_reliable_messages(&interactive_mailbox)
+                .iter()
+                .any(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ClientMessage {
+                                kind: ClientMessageKind::Warning,
+                                ..
+                            },
+                            ..
+                        })
+                    )
+                })
+        );
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let mut control_context = ExecutionContext::default();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-t", "nested-diagnostic"]),
+            )
+            .expect("attach control source diagnostic client");
+        take_reliable_messages(&control_mailbox);
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            5,
+            &CommandInvocation::new("source-file", [&loud_entry_pattern]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 5,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&control_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings, [expected]);
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            6,
+            &CommandInvocation::new("source-file", [&quiet_entry_pattern]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 6,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert!(
+            !take_reliable_messages(&control_mailbox)
+                .iter()
+                .any(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ClientMessage {
+                                kind: ClientMessageKind::Warning,
+                                ..
+                            },
+                            ..
+                        })
+                    )
+                })
+        );
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            7,
+            &CommandInvocation::new("source-file", [&invalid_entry_pattern]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 7,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let invalid = format!("{}:1: unknown command: wibble", invalid_leaf.display());
+        let warnings = take_reliable_messages(&control_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings, [invalid]);
+    }
+
+    #[test]
+    fn nested_source_errors_group_control_frames_by_source_command() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let grouped = directory.path().join("grouped.conf");
+        let separate = directory.path().join("separate.conf");
+        fs::write(&grouped, "source-file missing-a.conf missing-b.conf\n")
+            .expect("grouped nested source fixture");
+        fs::write(
+            &separate,
+            "source-file missing-c.conf\nsource-file missing-d.conf\n",
+        )
+        .expect("separate nested source fixture");
+        let missing_a = "No such file or directory: missing-a.conf";
+        let missing_b = "No such file or directory: missing-b.conf";
+        let missing_c = "No such file or directory: missing-c.conf";
+        let missing_d = "No such file or directory: missing-d.conf";
+
+        let shared = Arc::new(Shared::new(66));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut command_context = ExecutionContext::default();
+        let response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut command_context,
+            1,
+            &CommandInvocation::new("source-file", [grouped.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{missing_a}\n{missing_b}\n"),
+            }
+        );
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        take_reliable_messages(&control_mailbox);
+        let mut control_context = ExecutionContext::default();
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            2,
+            &CommandInvocation::new("source-file", [grouped.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&control_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings, [format!("{missing_a}\n{missing_b}")]);
+
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            3,
+            &CommandInvocation::new("source-file", [separate.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 3,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&control_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings, [missing_c, missing_d]);
+
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        take_reliable_messages(&interactive_mailbox);
+        let response = shared.execute_command_request(
+            interactive,
+            ClientKind::Interactive,
+            &mut ExecutionContext::default(),
+            4,
+            &CommandInvocation::new("source-file", [grouped.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 4,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&interactive_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings, [missing_a, missing_b]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_source_glob_errors_are_loud_with_quiet_and_use_the_declared_path() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let entry = directory.path().join("entry.conf");
+        let declared = "invalid\0pattern.conf";
+        fs::write(&entry, format!("source-file -q '{declared}'\n"))
+            .expect("nested glob error fixture");
+        let glob_error = source_glob_matches(Path::new(declared))
+            .errors
+            .into_iter()
+            .next()
+            .expect("NUL glob error");
+        let expected = source_glob_error_warning(Path::new(declared), &glob_error);
+
+        let shared = Arc::new(Shared::new(65));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        let response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("source-file", [entry.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{expected}\n"),
+            }
+        );
+
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Control,
+            &mut context,
+            2,
+            &CommandInvocation::new("source-file", [entry.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings, [expected]);
+    }
+
+    #[test]
+    fn runtime_source_invocations_release_between_sequential_commands() {
+        fn fan_out(directory: &Path, name: &str, leaves: usize) -> PathBuf {
+            let entry = directory.join(format!("{name}.conf"));
+            let mut body = String::new();
+            for index in 1..=leaves {
+                let leaf = directory.join(format!("{name}-leaf{index}.conf"));
+                fs::write(&leaf, format!("set-option -g @{name} {index}\n"))
+                    .expect("runtime source leaf");
+                let _ = writeln!(body, "source-file '{}'", leaf.display());
+            }
+            fs::write(&entry, body).expect("runtime source entry");
+            entry
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(67));
+        let client = ClientId(u64::MAX);
+        let mut context = ExecutionContext::default();
+
+        let breadth = fan_out(directory.path(), "runtime-breadth", 60);
+        let response = shared.execute_command_request(
+            client,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("source-file", [breadth.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@runtime-breadth"), "60");
+
+        let half = MAX_SOURCE_INVOCATIONS - 10;
+        for (request_id, name) in [(2, "runtime-first"), (3, "runtime-second")] {
+            let entry = fan_out(directory.path(), name, half);
+            let response = shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                request_id,
+                &CommandInvocation::new("source-file", [entry.display().to_string()]),
+            );
+            assert_eq!(
+                response,
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                read_global_option(&shared, &format!("@{name}")),
+                half.to_string()
+            );
+        }
+    }
+
+    #[test]
+    fn nested_source_invocations_stop_at_the_pinned_depth_limit_on_every_channel() {
+        fn chain(directory: &Path, invocations: usize) -> PathBuf {
+            for level in 1..=invocations {
+                let nested = if level < invocations {
+                    format!("source-file f{}.conf\n", level + 1)
+                } else {
+                    "source-file leaf-a.conf leaf-b.conf\nsource-file -q leaf-a.conf\n".to_owned()
+                };
+                let body = format!(
+                    "set-option -g @depth {level}\n{nested}set-option -g @after{level} yes\n"
+                );
+                fs::write(directory.join(format!("f{level}.conf")), body).expect("chain level");
+            }
+            fs::write(directory.join("leaf-a.conf"), "set-option -g @leaf yes\n")
+                .expect("chain leaf");
+            fs::write(directory.join("leaf-b.conf"), "set-option -g @leaf yes\n")
+                .expect("chain leaf");
+            directory.join("f1.conf")
+        }
+
+        fn read_global(shared: &Arc<Shared>, name: &str) -> String {
+            shared
+                .execute(
+                    ClientId(u64::from(u16::MAX)),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-options", ["-gv", name]),
+                )
+                .expect("read global option")
+                .output
+        }
+
+        fn source_warnings(mailbox: &OutboundMailbox) -> Vec<String> {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ClientMessage {
+                                kind: ClientMessageKind::Warning,
+                                text,
+                                ..
+                            },
+                        ..
+                    }) => Some(text),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let shared = Arc::new(Shared::new(67));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+
+        let allowed_directory = tempfile::tempdir().expect("temporary directory");
+        let allowed = chain(allowed_directory.path(), MAX_SOURCE_INVOCATIONS - 1);
+        let response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            1,
+            &CommandInvocation::new("source-file", [allowed.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            read_global(&shared, "@depth"),
+            (MAX_SOURCE_INVOCATIONS - 1).to_string()
+        );
+        assert_eq!(read_global(&shared, "@leaf"), "yes");
+
+        let refused_directory = tempfile::tempdir().expect("temporary directory");
+        let refused = chain(refused_directory.path(), MAX_SOURCE_INVOCATIONS);
+        let response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            2,
+            &CommandInvocation::new("source-file", [refused.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{NESTED_SOURCE_LIMIT_ERROR}\n{NESTED_SOURCE_LIMIT_ERROR}\n"),
+            }
+        );
+        assert_eq!(
+            read_global(&shared, "@depth"),
+            MAX_SOURCE_INVOCATIONS.to_string()
+        );
+        assert_eq!(
+            read_global(&shared, &format!("@after{MAX_SOURCE_INVOCATIONS}")),
+            "yes"
+        );
+
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        take_reliable_messages(&interactive_mailbox);
+        let response = shared.execute_command_request(
+            interactive,
+            ClientKind::Interactive,
+            &mut ExecutionContext::default(),
+            3,
+            &CommandInvocation::new("source-file", [refused.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 3,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            source_warnings(&interactive_mailbox),
+            ["Too many nested files", "Too many nested files"]
+        );
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        take_reliable_messages(&control_mailbox);
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut ExecutionContext::default(),
+            4,
+            &CommandInvocation::new("source-file", [refused.display().to_string()]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 4,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            source_warnings(&control_mailbox),
+            [NESTED_SOURCE_LIMIT_ERROR, NESTED_SOURCE_LIMIT_ERROR]
+        );
+    }
+
     #[test]
     fn config_diagnostics_pin_the_control_mode_sniffer_wording() {
         let mut report = ConfigLoadReport::default();
@@ -26758,12 +29105,8 @@ mod tests {
         );
 
         assert_eq!(
-            no_such_file_warning(Path::new("/tmp/mux.conf")),
-            "no such file: /tmp/mux.conf"
-        );
-        assert_eq!(
             source_glob_error_warning(Path::new("/tmp/["), "Pattern syntax error"),
-            "source-file glob error for /tmp/[: Pattern syntax error"
+            "Pattern syntax error: /tmp/["
         );
         assert_eq!(
             STANDARD_INPUT_SOURCE_WARNING,
@@ -27394,15 +29737,246 @@ mod tests {
 
     #[test]
     fn capture_pane_parser_supports_history_mode_and_wrapped_output() {
-        let args = ["-pJ", "-M", "-S", "-", "-E4", "-t%7", "-bcaptured"].map(str::to_owned);
+        let args = ["-pJS", "-", "-ME4", "-t%7", "-bcaptured"].map(str::to_owned);
         let parsed = parse_capture_pane_args(&args).expect("capture args");
         assert_eq!(parsed.target.as_deref(), Some("%7"));
         assert_eq!(parsed.buffer_name.as_deref(), Some("captured"));
-        assert_eq!(parsed.options.start, CaptureBoundary::HistoryStart);
-        assert_eq!(parsed.options.end, CaptureBoundary::Relative(4));
+        assert_eq!(parsed.start.as_deref(), Some("-"));
+        assert_eq!(parsed.end.as_deref(), Some("4"));
         assert!(parsed.options.mode);
         assert!(parsed.options.join_wrapped);
         assert!(parsed.options.preserve_trailing);
+        assert!(parsed.print);
+
+        let compact = ["-pS0", "-pE5", "-pb", "named"].map(str::to_owned);
+        let parsed = parse_capture_pane_args(&compact).expect("compact capture args");
+        assert_eq!(parsed.start.as_deref(), Some("0"));
+        assert_eq!(parsed.end.as_deref(), Some("5"));
+        assert_eq!(parsed.buffer_name.as_deref(), Some("named"));
+        assert!(parsed.print);
+
+        let value_wins = parse_capture_pane_args(&["-pSx".to_owned()])
+            .expect("a value option consumes the cluster remainder");
+        assert_eq!(value_wins.start.as_deref(), Some("x"));
+
+        let error = parse_capture_pane_args(&["-pS".to_owned()])
+            .expect_err("a clustered value option still requires a value");
+        assert!(matches!(
+            error,
+            ServerError::InvalidCommand(message)
+                if message == "capture-pane -S requires a value"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_pane_routes_stdout_buffers_and_reversed_ranges_like_tmux() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-s",
+                        "capture",
+                        "printf 'zz-terminal-ready\\r\\nalpha\\r\\nbeta\\r\\ngamma\\r\\n'; exec /bin/cat",
+                    ],
+                ),
+            )
+            .expect("seed capture terminal");
+        let pane = context.pane.expect("capture pane");
+        let target = pane.to_string();
+        let expected = "zz-terminal-ready\nalpha\nbeta\ngamma";
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let forward = loop {
+            let output = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "capture-pane",
+                        ["-p", "-S", "0", "-E", "3", "-t", &target],
+                    ),
+                )
+                .expect("capture forward range")
+                .output;
+            if output == expected {
+                break output;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "capture rows did not converge: {output:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(forward, expected);
+
+        let reversed = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "capture-pane",
+                    ["-p", "-S", "3", "-E", "0", "-t", &target],
+                ),
+            )
+            .expect("capture reversed range");
+        assert_eq!(reversed.output, expected);
+        let middle = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "capture-pane",
+                    ["-p", "-S", "1", "-E", "2", "-t", &target],
+                ),
+            )
+            .expect("capture middle range");
+        assert_eq!(middle.output, "alpha\nbeta");
+
+        let compact = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("capture-pane", ["-pS0", "-pE3", "-t", &target]),
+            )
+            .expect("capture compact range");
+        assert_eq!(compact.output, expected);
+
+        let fallback = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("capture-pane", ["-pSbogus", "-Ebogus", "-t", &target]),
+            )
+            .expect("capture invalid range defaults");
+        assert_eq!(fallback.output, expected);
+
+        let expanded = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "capture-pane",
+                    [
+                        "-pS#{?pane_active,1,bogus}",
+                        "-E#{?pane_active,2,bogus}",
+                        "-t",
+                        &target,
+                    ],
+                ),
+            )
+            .expect("capture format-expanded range");
+        assert_eq!(expanded.output, "alpha\nbeta");
+
+        let bare = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("capture-pane", ["-S", "0", "-E", "3", "-t", &target]),
+            )
+            .expect("capture automatic buffer");
+        assert!(bare.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-buffer", [] as [&str; 0]),
+                )
+                .expect("show automatic capture")
+                .output,
+            format!("{expected}\n")
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "pinned", "sentinel"]),
+            )
+            .expect("seed named buffer");
+        let automatic_before = shared
+            .inner
+            .lock()
+            .paste_buffers
+            .iter()
+            .filter(|buffer| buffer.automatic)
+            .count();
+        let printed = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "capture-pane",
+                    ["-p", "-b", "pinned", "-S", "0", "-E", "3", "-t", &target],
+                ),
+            )
+            .expect("print capture with ignored buffer name");
+        assert_eq!(printed.output, expected);
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .paste_buffers
+                .iter()
+                .filter(|buffer| buffer.automatic)
+                .count(),
+            automatic_before
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-buffer", ["-b", "pinned"]),
+                )
+                .expect("show untouched named buffer")
+                .output,
+            "sentinel"
+        );
+
+        let named = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "capture-pane",
+                    ["-b", "captured", "-S", "0", "-E", "3", "-t", &target],
+                ),
+            )
+            .expect("capture named buffer");
+        assert!(named.output.is_empty());
+        assert_eq!(
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-buffer", ["-b", "captured"]),
+                )
+                .expect("show named capture")
+                .output,
+            format!("{expected}\n")
+        );
     }
 
     #[test]
@@ -27453,6 +30027,164 @@ mod tests {
         );
         assert!(
             take_reliable_messages(&observing_mailbox)
+                .iter()
+                .all(|message| !matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::TimedClientMessage { .. },
+                        ..
+                    })
+                ))
+        );
+    }
+
+    #[test]
+    fn list_keys_single_routes_to_frozen_status_or_stdout_by_client_kind() {
+        let shared = Arc::new(Shared::new(1));
+        let interactive_mailbox = OutboundMailbox::new();
+        let control_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "list-keys-single"]),
+            )
+            .expect("create list-keys session");
+        let session = context.session.expect("session");
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive");
+        shared.attach(control, session).expect("attach control");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["display-time", "1234"]),
+            )
+            .expect("set display time");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "zzlk", "a", "display-message", "unused"],
+                ),
+            )
+            .expect("bind list key");
+        take_reliable_messages(&interactive_mailbox);
+        take_reliable_messages(&control_mailbox);
+        let command = CommandInvocation::new(
+            "list-keys",
+            [
+                "-1",
+                "-T",
+                "zzlk",
+                "-F",
+                "#{key_table}|#{key_string}|#{key_repeat}",
+            ],
+        );
+
+        let interactive_execution = shared
+            .execute(interactive, ClientKind::Interactive, &mut context, &command)
+            .expect("interactive list keys");
+        assert!(interactive_execution.output.is_empty());
+        assert!(
+            take_reliable_messages(&interactive_mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::TimedClientMessage {
+                            pane: Some(_),
+                            text,
+                            duration_ms: 1234,
+                            ..
+                        },
+                        ..
+                    }) if text == "zzlk|a|0"
+                ))
+        );
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.client_messages[&interactive].freeze);
+            assert!(!inner.command_outputs.contains_key(&interactive));
+        }
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-n", "C-g", "list-keys", "-1", "-T", "zzlk", "-F", "BOUND"],
+                ),
+            )
+            .expect("bind interactive list keys");
+        take_reliable_messages(&interactive_mailbox);
+        let pane = context.pane.expect("pane");
+        shared
+            .input(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: test_key(
+                        KeyCode::Character('g'),
+                        Modifiers::new(false, true, false, false),
+                        None,
+                    ),
+                    text_follows: false,
+                },
+            )
+            .expect("run bound list keys");
+        assert!(
+            take_reliable_messages(&interactive_mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::TimedClientMessage { text, .. },
+                        ..
+                    }) if text == "BOUND"
+                ))
+        );
+
+        let command_execution = shared
+            .execute(
+                ClientId(u64::MAX - 1),
+                ClientKind::Command,
+                &mut context,
+                &command,
+            )
+            .expect("command list keys");
+        assert_eq!(command_execution.output, "zzlk|a|0");
+
+        let control_execution = shared
+            .execute(control, ClientKind::Control, &mut context, &command)
+            .expect("control list keys");
+        assert_eq!(control_execution.output, "zzlk|a|0");
+        assert!(!shared.inner.lock().client_messages.contains_key(&control));
+        assert!(
+            take_reliable_messages(&control_mailbox)
                 .iter()
                 .all(|message| !matches!(
                     message,
@@ -27774,6 +30506,303 @@ mod tests {
             )
             .expect("deliver the trailing text");
         assert_eq!(armed_client_message(&shared, client), armed);
+    }
+
+    #[test]
+    fn surviving_text_and_explicit_paste_dismiss_messages_but_read_only_input_does_not() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "message-input", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["about:blank"]),
+            )
+            .expect("browser sink");
+        let browser = context.pane.expect("browser pane");
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "text"]),
+            )
+            .expect("text message");
+        let text_message = armed_client_message(&shared, client);
+        take_reliable_messages(&mailbox);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane,
+                    text: "ordinary".to_owned(),
+                },
+            )
+            .expect("ordinary text");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            [text_message.token]
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "paste"]),
+            )
+            .expect("paste message");
+        let paste_message = armed_client_message(&shared, client);
+        take_reliable_messages(&mailbox);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane: browser,
+                    action: zz_terminal::TerminalViewAction::Paste("pasted".to_owned()),
+                },
+            )
+            .expect("explicit paste");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        let paste_messages = take_reliable_messages(&mailbox);
+        assert_eq!(cleared_message_ids(&paste_messages), [paste_message.token]);
+        assert!(paste_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand {
+                    pane,
+                    command: BrowserCommand::SendKeys(keys),
+                },
+                ..
+            }) if *pane == browser
+                && keys == &[zz_protocol::KeyToken::Literal("pasted".to_owned())]
+        )));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "read-only"]),
+            )
+            .expect("read-only message");
+        let read_only_message = armed_client_message(&shared, client);
+        shared.inner.lock().read_only_clients.insert(client);
+        take_reliable_messages(&mailbox);
+        for input in [
+            InputMessage::Key {
+                pane,
+                input: chooser_key_press("q"),
+                text_follows: false,
+            },
+            InputMessage::Text {
+                pane,
+                text: "blocked".to_owned(),
+            },
+            InputMessage::TerminalView {
+                pane: browser,
+                action: zz_terminal::TerminalViewAction::Paste("blocked".to_owned()),
+            },
+        ] {
+            shared
+                .input(client, ClientKind::Interactive, &mut context, input)
+                .expect("read-only input");
+            assert_eq!(armed_client_message(&shared, client), read_only_message);
+        }
+        let read_only_messages = take_reliable_messages(&mailbox);
+        assert!(cleared_message_ids(&read_only_messages).is_empty());
+        assert!(!read_only_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand { pane, .. },
+                ..
+            }) if *pane == browser
+        )));
+    }
+
+    #[test]
+    fn modal_consumed_text_and_paste_still_dismiss_writable_messages() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "modal-message-input", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["about:blank"]),
+            )
+            .expect("browser sink");
+        let browser = context.pane.expect("browser pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "covered", "buffer"]),
+            )
+            .expect("chooser buffer");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "chooser"]),
+            )
+            .expect("chooser message");
+        let chooser_message = armed_client_message(&shared, client);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("choose-buffer", std::iter::empty::<&str>()),
+            )
+            .expect("open chooser");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert_eq!(inner.client_messages[&client], chooser_message);
+        }
+        take_reliable_messages(&mailbox);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Text {
+                    pane: browser,
+                    text: "covered text".to_owned(),
+                },
+            )
+            .expect("chooser-consumed text");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.choose_buffers.contains_key(&client));
+            assert!(!inner.client_messages.contains_key(&client));
+        }
+        let text_messages = take_reliable_messages(&mailbox);
+        assert_eq!(cleared_message_ids(&text_messages), [chooser_message.token]);
+        assert!(!text_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand { pane, .. },
+                ..
+            }) if *pane == browser
+        )));
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ChooseBuffer {
+                    action: ChooseBufferAction::Close,
+                },
+            )
+            .expect("close chooser");
+        take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "display-panes"]),
+            )
+            .expect("display-panes message");
+        let paste_message = armed_client_message(&shared, client);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "1000"]),
+            )
+            .expect("open display panes");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.display_panes.contains_key(&client));
+            assert_eq!(inner.client_messages[&client], paste_message);
+        }
+        take_reliable_messages(&mailbox);
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::TerminalView {
+                    pane: browser,
+                    action: zz_terminal::TerminalViewAction::Paste("covered paste".to_owned()),
+                },
+            )
+            .expect("display-panes-consumed paste");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.display_panes.contains_key(&client));
+            assert!(!inner.client_messages.contains_key(&client));
+        }
+        let paste_messages = take_reliable_messages(&mailbox);
+        assert_eq!(cleared_message_ids(&paste_messages), [paste_message.token]);
+        assert!(!paste_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand { pane, .. },
+                ..
+            }) if *pane == browser
+        )));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "read-only"]),
+            )
+            .expect("read-only modal message");
+        let read_only_message = armed_client_message(&shared, client);
+        shared.inner.lock().read_only_clients.insert(client);
+        take_reliable_messages(&mailbox);
+        for input in [
+            InputMessage::Text {
+                pane: browser,
+                text: "blocked text".to_owned(),
+            },
+            InputMessage::TerminalView {
+                pane: browser,
+                action: zz_terminal::TerminalViewAction::Paste("blocked paste".to_owned()),
+            },
+        ] {
+            shared
+                .input(client, ClientKind::Interactive, &mut context, input)
+                .expect("read-only modal input");
+            assert_eq!(armed_client_message(&shared, client), read_only_message);
+        }
+        let read_only_messages = take_reliable_messages(&mailbox);
+        assert!(cleared_message_ids(&read_only_messages).is_empty());
+        assert!(!read_only_messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand { pane, .. },
+                ..
+            }) if *pane == browser
+        )));
     }
 
     /// No deadline may outlive its client: detaching drops the record so the
@@ -28650,6 +31679,45 @@ mod tests {
         assert_eq!(client_size_fact(&["client-size-v1:0x40".to_owned()]), None);
         assert_eq!(client_size_fact(&["client-size-v1:120".to_owned()]), None);
         assert_eq!(client_size_fact(&["client-terminal-v1".to_owned()]), None);
+        assert_eq!(
+            client_working_directory_fact(Some(Path::new("/tmp/client cwd"))),
+            Some(PathBuf::from("/tmp/client cwd"))
+        );
+        assert_eq!(
+            client_working_directory_fact(Some(Path::new("relative/client-cwd"))),
+            None
+        );
+        assert_eq!(client_working_directory_fact(None), None);
+        #[cfg(unix)]
+        assert_eq!(
+            resolve_source_path("configs/*.conf", Some(Path::new("/tmp/client cwd"))),
+            PathBuf::from("/tmp/client\\ cwd/configs/*.conf")
+        );
+        #[cfg(not(unix))]
+        assert_eq!(
+            resolve_source_path("configs/*.conf", Some(Path::new("/tmp/client cwd"))),
+            PathBuf::from("/tmp/client cwd/configs/*.conf")
+        );
+        assert_eq!(
+            resolve_source_path("/tmp/absolute.conf", Some(Path::new("/ignored"))),
+            PathBuf::from("/tmp/absolute.conf")
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            resolve_source_path(
+                "configs/*.conf",
+                Some(Path::new("/tmp/client [literal]*? cwd"))
+            ),
+            PathBuf::from("/tmp/client\\ \\[literal\\]\\*\\?\\ cwd/configs/*.conf")
+        );
+        #[cfg(not(unix))]
+        assert_eq!(
+            resolve_source_path(
+                "configs/*.conf",
+                Some(Path::new("/tmp/client [literal]*? cwd"))
+            ),
+            PathBuf::from("/tmp/client [[]literal[]][*][?] cwd/configs/*.conf")
+        );
 
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
@@ -28861,6 +31929,14 @@ mod tests {
         assert_eq!(zz_mux::CommandSpec::DAEMON_COMMAND_NAMES.len(), names.len());
         assert_eq!(DAEMON_COMMAND_DISPATCHES.len(), dispatches.len());
         assert_eq!(names, dispatches);
+        for name in dispatches {
+            let canonical = canonical_command(name);
+            assert_eq!(
+                zz_protocol::catalog_command_spec(name).map(|spec| spec.name),
+                Some(canonical),
+                "daemon dispatch {name} has no shared spec"
+            );
+        }
         for name in ["new-session", "capture-pane-extra"] {
             assert!(daemon_command_dispatch(name).is_none());
         }
@@ -31279,6 +34355,81 @@ mod tests {
     }
 
     #[test]
+    fn set_buffer_rename_replaces_destinations_ignores_data_and_uses_the_top_automatic() {
+        let shared = Arc::new(Shared::new(1));
+        let context = ExecutionContext::default();
+        for arguments in [
+            vec!["-b", "source", "alpha"],
+            vec!["-b", "destination", "beta"],
+            vec!["top automatic"],
+        ] {
+            shared
+                .buffer_command(
+                    &context,
+                    "set-buffer",
+                    &arguments.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                )
+                .expect("seed buffer");
+        }
+
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &[
+                    "-b",
+                    "source",
+                    "-n",
+                    "destination",
+                    "ignored replacement data",
+                ]
+                .map(str::to_owned),
+            )
+            .expect("rename over destination");
+        {
+            let inner = shared.inner.lock();
+            assert!(resolve_buffer(&inner, Some("source")).is_err());
+            let renamed = resolve_buffer(&inner, Some("destination")).expect("renamed buffer");
+            assert_eq!(renamed.data.as_ref(), b"alpha");
+            assert_eq!(inner.paste_buffers.len(), 2);
+        }
+
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-an", "named-top", "ignored"].map(str::to_owned),
+            )
+            .expect("rename top automatic");
+        {
+            let inner = shared.inner.lock();
+            let renamed = resolve_buffer(&inner, Some("named-top")).expect("named top buffer");
+            assert_eq!(renamed.data.as_ref(), b"top automatic");
+            assert!(!renamed.automatic);
+            assert!(!inner.paste_buffers.iter().any(|buffer| buffer.automatic));
+        }
+
+        assert!(matches!(
+            shared.buffer_command(
+                &context,
+                "set-buffer",
+                &["-n", "nowhere", "ignored"].map(str::to_owned),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "no buffer"
+        ));
+        assert!(matches!(
+            shared.buffer_command(
+                &context,
+                "set-buffer",
+                &["-b", "missing", "-n", "", "ignored"].map(str::to_owned),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "unknown buffer: missing"
+        ));
+    }
+
+    #[test]
     fn buffer_formats_read_named_rows_and_the_top_automatic_buffer() {
         let shared = Arc::new(Shared::new(1));
         let mut context = {
@@ -31467,11 +34618,11 @@ mod tests {
                 &mut context,
                 &CommandInvocation::new(
                     "capture-pane",
-                    ["-p", "-b", "detached-capture", "-t", &pane.to_string()],
+                    ["-b", "detached-capture", "-t", &pane.to_string()],
                 ),
             )
             .expect("capture detached terminal into a named buffer");
-        assert!(buffered.output.is_empty(), "-b wins over -p");
+        assert!(buffered.output.is_empty());
         let shown = shared
             .execute(
                 ClientId(7),
@@ -31584,6 +34735,323 @@ mod tests {
         let environment = &inner.terminal_spawns[&pane].env;
         assert!(environment.contains(&("TMUX".to_owned(), Some(expected_tmux))));
         assert!(environment.contains(&("TMUX_PANE".to_owned(), Some(pane.to_string()))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_session_creation_environment_reaches_the_first_terminal() {
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .inner
+            .lock()
+            .engine
+            .seed_global_environment([("DISPLAY", "client")]);
+        let mut context = ExecutionContext::default();
+        let spawned_value = |pane: PaneId, name: &str| {
+            shared.inner.lock().terminal_spawns[&pane]
+                .env
+                .iter()
+                .rev()
+                .find_map(|(candidate, value)| (candidate == name).then(|| value.clone()))
+                .flatten()
+        };
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-s",
+                        "creation-environment",
+                        "-e",
+                        "DISPLAY=first",
+                        "-e",
+                        "MALFORMED",
+                        "-e",
+                        "=ignored",
+                        "-e",
+                        "DISPLAY=last",
+                        "--",
+                        "sleep",
+                        "30",
+                    ],
+                ),
+            )
+            .expect("session environment");
+        let pane = context.pane.expect("first pane");
+        assert_eq!(spawned_value(pane, "DISPLAY").as_deref(), Some("last"));
+        assert!(
+            !shared.inner.lock().terminal_spawns[&pane]
+                .env
+                .iter()
+                .any(|(name, _)| name.is_empty())
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "show-environment",
+                        ["-t", "creation-environment", "DISPLAY"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "DISPLAY=last"
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "show-environment",
+                        ["-t", "creation-environment", ""],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "=ignored"
+        );
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-E", "-s", "creation-unseeded", "--", "sleep", "30"],
+                ),
+            )
+            .expect("unseeded session");
+        let pane = context.pane.expect("unseeded first pane");
+        assert_eq!(spawned_value(pane, "DISPLAY").as_deref(), Some("client"));
+        assert!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-environment", ["-t", "creation-unseeded"],),
+                )
+                .unwrap()
+                .output
+                .is_empty()
+        );
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-E",
+                        "-s",
+                        "creation-explicit",
+                        "-e",
+                        "DISPLAY=explicit",
+                        "--",
+                        "sleep",
+                        "30",
+                    ],
+                ),
+            )
+            .expect("explicit unseeded session");
+        let pane = context.pane.expect("explicit first pane");
+        assert_eq!(spawned_value(pane, "DISPLAY").as_deref(), Some("explicit"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_and_split_window_apply_local_environment_and_spawn_empty_panes() {
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "pane-spawn-options", "--", "sleep", "30"],
+                ),
+            )
+            .expect("session");
+        let source = context.pane.expect("source pane");
+
+        let window = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-window",
+                    [
+                        "-d",
+                        "-t",
+                        "pane-spawn-options",
+                        "-e",
+                        "PANE_ONLY=first",
+                        "-e",
+                        "MALFORMED",
+                        "-e",
+                        "=ignored",
+                        "-e",
+                        "PANE_ONLY=last",
+                        "-e",
+                        "TMUX=overlay",
+                        "-e",
+                        "TMUX_PANE=bogus",
+                        "-e",
+                        "PWD=/bogus",
+                        "--",
+                        "sleep",
+                        "30",
+                    ],
+                ),
+            )
+            .expect("environment window");
+        let window_pane = window
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("window pane");
+        {
+            let inner = shared.inner.lock();
+            let spawn = &inner.terminal_spawns[&window_pane];
+            let expected_pane = window_pane.to_string();
+            let value = |name: &str| {
+                spawn
+                    .env
+                    .iter()
+                    .rev()
+                    .find_map(|(candidate, value)| (candidate == name).then_some(value.as_deref()))
+                    .flatten()
+            };
+            assert_eq!(value("PANE_ONLY"), Some("last"));
+            assert_eq!(value("TMUX"), Some("overlay"));
+            assert_eq!(value("TMUX_PANE"), Some(expected_pane.as_str()));
+            assert_eq!(
+                value("PWD"),
+                spawn.working_directory.as_deref().and_then(Path::to_str)
+            );
+            assert!(!spawn.env.iter().any(|(name, _)| name.is_empty()));
+            assert!(!spawn.env.iter().any(|(name, _)| name == "MALFORMED"));
+        }
+
+        let split = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "split-window",
+                    [
+                        "-d",
+                        "-t",
+                        &source.to_string(),
+                        "-e",
+                        "SPLIT_ONLY=first",
+                        "-e",
+                        "SPLIT_ONLY=last",
+                        "--",
+                        "sleep",
+                        "30",
+                    ],
+                ),
+            )
+            .expect("environment split");
+        let split_pane = split
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("split pane");
+        {
+            let inner = shared.inner.lock();
+            let environment = &inner.terminal_spawns[&split_pane].env;
+            assert_eq!(
+                environment.iter().rev().find_map(|(name, value)| {
+                    (name == "SPLIT_ONLY").then_some(value.as_deref())
+                }),
+                Some(Some("last"))
+            );
+        }
+        assert!(matches!(
+            shared.execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "show-environment",
+                    ["-t", "pane-spawn-options", "PANE_ONLY"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "unknown variable: PANE_ONLY"
+        ));
+
+        let source_target = source.to_string();
+        for (name, arguments, keeps_empty_argument) in [
+            (
+                "new-window",
+                vec!["-d", "-t", "pane-spawn-options", "-E"],
+                false,
+            ),
+            (
+                "new-window",
+                vec!["-d", "-t", "pane-spawn-options", "-E", ""],
+                true,
+            ),
+            (
+                "split-window",
+                vec!["-d", "-t", source_target.as_str(), "-E"],
+                false,
+            ),
+        ] {
+            let execution = shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(name, arguments),
+                )
+                .expect("empty pane");
+            let pane = execution
+                .effects
+                .iter()
+                .find_map(|effect| match effect {
+                    MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                    _ => None,
+                })
+                .expect("empty pane id");
+            let inner = shared.inner.lock();
+            assert_eq!(inner.terminals[&pane].process_id(), None);
+            assert!(!inner.engine.state.pane(pane).unwrap().dead);
+            assert_eq!(
+                inner.terminal_spawns[&pane]
+                    .command
+                    .as_deref()
+                    .is_some_and(|command| command == [""]),
+                keeps_empty_argument
+            );
+        }
     }
 
     fn paste_upload_fixture(
@@ -31910,7 +35378,9 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let empty = directory.path().join("empty");
         let oversized = directory.path().join("oversized");
+        let targeted = directory.path().join("targeted");
         fs::write(&empty, []).expect("empty fixture");
+        fs::write(&targeted, b"loaded through inert target").expect("targeted fixture");
         fs::File::create(&oversized)
             .expect("oversized fixture")
             .set_len(u64::try_from(MAX_PASTE_BUFFER_BYTES).unwrap() + 1)
@@ -31941,8 +35411,49 @@ mod tests {
         ));
         assert!(shared.inner.lock().paste_buffers.is_empty());
 
+        shared
+            .buffer_command(
+                &context,
+                "set-buffer",
+                &["-t", "missing", "set through inert target"].map(str::to_owned),
+            )
+            .expect("set-buffer target is inert without clipboard output");
+        shared
+            .buffer_command(
+                &context,
+                "load-buffer",
+                &[
+                    "-b".to_owned(),
+                    "targeted".to_owned(),
+                    "-t".to_owned(),
+                    "missing".to_owned(),
+                    targeted.to_string_lossy().into_owned(),
+                ],
+            )
+            .expect("load-buffer target is inert without clipboard output");
+        let inner = shared.inner.lock();
+        assert_eq!(inner.paste_buffers.len(), 2);
+        assert_eq!(
+            inner.paste_buffers[0].data.as_ref(),
+            b"loaded through inert target"
+        );
+        assert_eq!(
+            inner.paste_buffers[1].data.as_ref(),
+            b"set through inert target"
+        );
+        drop(inner);
+
         for (command, arguments, unsupported) in [
-            ("load-buffer", vec!["-w", "fixture"], "load-buffer -w"),
+            (
+                "load-buffer",
+                vec!["-t", "missing", "-w", "fixture"],
+                "load-buffer -w",
+            ),
+            (
+                "set-buffer",
+                vec!["-t", "missing", "-w", "fixture"],
+                "set-buffer -w",
+            ),
             ("save-buffer", vec!["-"], "save-buffer to standard output"),
             ("paste-buffer", vec!["-x"], "paste-buffer -x"),
         ] {
@@ -33809,6 +37320,86 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[cfg(unix)]
+    #[test]
+    fn exiting_copy_session_stays_claimed_until_live_mode_is_published() {
+        let (shared, client, _context, pane, _terminal, _mailbox) =
+            copy_mode_fixture("copy-exit-order", ":");
+        let mut inner = shared.inner.lock();
+        enter_copy_session(&mut inner, client, pane).expect("claim copy mode");
+        begin_exit_copy_session(&mut inner, client);
+
+        assert!(inner.copy_sessions[&client].exiting);
+        assert!(active_copy_mode_panes(&inner).is_empty());
+        assert_eq!(
+            inner
+                .key_engines
+                .get(&client)
+                .and_then(KeyEngine::active_table),
+            None
+        );
+
+        let (unclaimed, changed) = reconcile_copy_session(
+            &mut inner,
+            pane,
+            client,
+            TerminalMode::Copy {
+                position: 0,
+                total: 0,
+                hide_position: false,
+            },
+        );
+        assert!(unclaimed.is_none());
+        assert!(!changed);
+        assert!(inner.copy_sessions[&client].exiting);
+        assert!(!inner.copy_sessions[&client].observed);
+
+        let (unclaimed, changed) =
+            reconcile_copy_session(&mut inner, pane, client, TerminalMode::Live);
+        assert!(unclaimed.is_none());
+        assert!(changed);
+        assert!(!inner.copy_sessions.contains_key(&client));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unclaimed_copy_mode_self_heal_does_not_displace_an_existing_claim() {
+        let (shared, client, mut context, claimed_pane, _terminal, _mailbox) =
+            copy_mode_fixture("copy-self-heal", ":");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-h"]),
+            )
+            .expect("split pane");
+        let unclaimed_pane = context.pane.expect("unclaimed pane");
+
+        let mut inner = shared.inner.lock();
+        enter_copy_session(&mut inner, client, claimed_pane).expect("claim first pane");
+        let expected = Arc::clone(&inner.terminals[&unclaimed_pane]);
+        let (unclaimed, changed) = reconcile_copy_session(
+            &mut inner,
+            unclaimed_pane,
+            client,
+            TerminalMode::Copy {
+                position: 0,
+                total: 0,
+                hide_position: false,
+            },
+        );
+
+        assert!(
+            unclaimed
+                .as_ref()
+                .is_some_and(|terminal| Arc::ptr_eq(terminal, &expected))
+        );
+        assert!(!changed);
+        assert_eq!(inner.copy_sessions[&client].pane, claimed_pane);
+        assert!(!inner.copy_sessions[&client].exiting);
+    }
+
+    #[cfg(unix)]
     fn test_drag(column: u16, phase: TerminalMousePhase) -> TerminalMouseInput {
         TerminalMouseInput::new(
             phase,
@@ -34759,6 +38350,235 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn prompt_history_commands_match_the_pin_and_persist_clears() {
+        let shared = Arc::new(Shared::new(1));
+        let directory = tempfile::tempdir().expect("prompt history directory");
+        let path = directory.path().join("history");
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "history-file", path.to_str().unwrap()],
+                ),
+            )
+            .expect("set history file");
+        {
+            let mut inner = shared.inner.lock();
+            inner.command_history = vec!["first".to_owned(), "second".to_owned()];
+            inner.search_history = vec!["needle".to_owned()];
+        }
+
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-prompt-history", [] as [&str; 0]),
+                )
+                .expect("show both histories")
+                .output,
+            "History for command:\n\n1: first\n2: second\n\nHistory for search:\n\n1: needle\n\n"
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("showphist", ["-T", "search"]),
+                )
+                .expect("show search history")
+                .output,
+            "History for search:\n\n1: needle\n\n"
+        );
+
+        let invalid = shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-prompt-history", ["-T", "target"]),
+            )
+            .expect_err("invalid prompt type accepted");
+        assert!(matches!(
+            invalid,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "invalid type: target"
+        ));
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("clearphist", ["-T", "command"]),
+            )
+            .expect("clear command history");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.command_history.is_empty());
+            assert_eq!(inner.search_history, ["needle"]);
+        }
+        assert_eq!(
+            fs::read_to_string(&path).expect("read selectively cleared history"),
+            "search:needle\n"
+        );
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("showphist", ["-Tcommand"]),
+                )
+                .expect("show empty command history")
+                .output,
+            "History for command:\n\n\n"
+        );
+
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("clear-prompt-history", [] as [&str; 0]),
+            )
+            .expect("clear all history");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.command_history.is_empty());
+            assert!(inner.search_history.is_empty());
+        }
+        assert_eq!(fs::read_to_string(&path).expect("read cleared history"), "");
+    }
+
+    #[test]
+    fn prompt_history_persistence_serializes_record_and_clear_interleavings() {
+        let shared = Arc::new(Shared::new(1));
+        let directory = tempfile::tempdir().expect("prompt history directory");
+        let path = directory.path().join("history");
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(7),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "history-file", path.to_str().unwrap()],
+                ),
+            )
+            .expect("set history file");
+
+        {
+            let mut inner = shared.inner.lock();
+            inner.command_history = vec!["old".to_owned()];
+            inner.search_history = vec!["needle".to_owned()];
+        }
+        let (record_locked_tx, record_locked_rx) = crossbeam_channel::bounded(1);
+        let (resume_record_tx, resume_record_rx) = crossbeam_channel::bounded(1);
+        let record_shared = Arc::clone(&shared);
+        let record = thread::spawn(move || {
+            record_shared.record_prompt_history_with_persist_observer(
+                CommandPromptType::Command,
+                "new",
+                || {},
+                || {
+                    record_locked_tx.send(()).expect("report record save lock");
+                    resume_record_rx.recv().expect("resume record save");
+                },
+            );
+        });
+        record_locked_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("record acquired save lock");
+
+        let (clear_waiting_tx, clear_waiting_rx) = crossbeam_channel::bounded(1);
+        let clear_shared = Arc::clone(&shared);
+        let clear = thread::spawn(move || {
+            clear_shared.clear_prompt_history_with_persist_observer(
+                Some(CommandPromptType::Command),
+                || clear_waiting_tx.send(()).expect("report selective clear"),
+                || {},
+            );
+        });
+        clear_waiting_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("selective clear reached save lock");
+        {
+            let inner = shared.inner.lock();
+            assert!(inner.command_history.is_empty());
+            assert_eq!(inner.search_history, ["needle"]);
+        }
+        resume_record_tx.send(()).expect("resume record save");
+        record.join().expect("record history worker");
+        clear.join().expect("selective clear worker");
+        assert_eq!(
+            fs::read_to_string(&path).expect("read selective-clear race result"),
+            "search:needle\n"
+        );
+
+        {
+            let mut inner = shared.inner.lock();
+            inner.command_history = vec!["old".to_owned()];
+            inner.search_history = vec!["needle".to_owned()];
+        }
+        let (clear_locked_tx, clear_locked_rx) = crossbeam_channel::bounded(1);
+        let (resume_clear_tx, resume_clear_rx) = crossbeam_channel::bounded(1);
+        let clear_shared = Arc::clone(&shared);
+        let clear = thread::spawn(move || {
+            clear_shared.clear_prompt_history_with_persist_observer(
+                None,
+                || {},
+                || {
+                    clear_locked_tx
+                        .send(())
+                        .expect("report clear-all save lock");
+                    resume_clear_rx.recv().expect("resume clear-all save");
+                },
+            );
+        });
+        clear_locked_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("clear all acquired save lock");
+
+        let (record_waiting_tx, record_waiting_rx) = crossbeam_channel::bounded(1);
+        let record_shared = Arc::clone(&shared);
+        let record = thread::spawn(move || {
+            record_shared.record_prompt_history_with_persist_observer(
+                CommandPromptType::Command,
+                "new",
+                || {
+                    record_waiting_tx
+                        .send(())
+                        .expect("report record after clear-all");
+                },
+                || {},
+            );
+        });
+        record_waiting_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("record reached save lock after clear all");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.command_history, ["new"]);
+            assert!(inner.search_history.is_empty());
+        }
+        resume_clear_tx.send(()).expect("resume clear-all save");
+        clear.join().expect("clear-all worker");
+        record.join().expect("record history worker");
+        assert_eq!(
+            fs::read_to_string(&path).expect("read clear-all race result"),
+            "command:new\n"
+        );
+    }
+
+    #[test]
     fn command_prompt_editor_preserves_unicode_boundaries_and_history_drafts() {
         let mut prompt = CommandPrompt::new(
             ":".to_owned(),
@@ -35380,7 +39200,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let (z, z_window, z_pane) = engine.state.create_session("z").expect("z session");
         let (a, _, _) = engine.state.create_session("a").expect("a session");
         let facts = FormatHookFacts::default();
-        let session_items = |filter: Option<&str>, reversed: bool| {
+        let session_state = |filter: Option<&str>, reversed: bool| {
             ChooseTreeSession::new(
                 ChooseTreeKind::Windows,
                 true,
@@ -35394,28 +39214,47 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("session chooser")
             .rendered
-            .items
-            .into_iter()
-            .map(|item| item.target)
-            .collect::<Vec<_>>()
         };
+        let unfiltered = session_state(None, false);
+        assert!(!unfiltered.filter_no_matches);
         assert_eq!(
-            session_items(None, false),
+            unfiltered
+                .items
+                .into_iter()
+                .map(|item| item.target)
+                .collect::<Vec<_>>(),
             [ChooseTreeTarget::Session(z), ChooseTreeTarget::Session(a)]
         );
+        let reversed = session_state(None, true);
+        assert!(!reversed.filter_no_matches);
         assert_eq!(
-            session_items(None, true),
+            reversed
+                .items
+                .into_iter()
+                .map(|item| item.target)
+                .collect::<Vec<_>>(),
             [ChooseTreeTarget::Session(a), ChooseTreeTarget::Session(z)]
         );
+        let matched = session_state(Some("#{==:#{session_name},a}"), false);
+        assert!(!matched.filter_no_matches);
         assert_eq!(
-            session_items(Some("#{==:#{session_name},a}"), false),
+            matched
+                .items
+                .into_iter()
+                .map(|item| item.target)
+                .collect::<Vec<_>>(),
             [ChooseTreeTarget::Session(a)]
         );
+        let fallback = session_state(Some("#{==:#{session_name},missing}"), false);
+        assert!(fallback.filter_no_matches);
         assert_eq!(
-            session_items(Some("#{==:#{session_name},missing}"), false),
+            fallback
+                .items
+                .into_iter()
+                .map(|item| item.target)
+                .collect::<Vec<_>>(),
             [ChooseTreeTarget::Session(z), ChooseTreeTarget::Session(a)]
         );
-
         let mut collapsed_sessions = ChooseTreeSession::new(
             ChooseTreeKind::Windows,
             true,
@@ -35482,8 +39321,44 @@ bind - split-window -v -c "#{pane_current_path}"
             default_tree.selected,
             Some(ChooseTreeTarget::Window(z_window))
         );
+        assert!(!default_tree.rendered.filter_no_matches);
 
-        let buffers = vec![
+        let mut rebuilt_tree = ChooseTreeSession::new(
+            ChooseTreeKind::Windows,
+            true,
+            z_pane,
+            &engine,
+            Some(z),
+            &facts,
+            Some("#{==:#{session_name},missing}".to_owned()),
+            TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
+            None,
+        )
+        .expect("fallback tree chooser");
+        assert!(rebuilt_tree.rendered.filter_no_matches);
+        let (missing, _, _) = engine
+            .state
+            .create_session("missing")
+            .expect("matching session");
+        rebuilt_tree.rebuild(&engine, Some(z), &facts);
+        assert!(!rebuilt_tree.rendered.filter_no_matches);
+        assert_eq!(
+            rebuilt_tree
+                .rendered
+                .items
+                .iter()
+                .map(|item| item.target)
+                .collect::<Vec<_>>(),
+            [ChooseTreeTarget::Session(missing)]
+        );
+        engine
+            .state
+            .kill_session(missing)
+            .expect("remove matching session");
+        rebuilt_tree.rebuild(&engine, Some(z), &facts);
+        assert!(rebuilt_tree.rendered.filter_no_matches);
+
+        let mut buffers = vec![
             PasteBuffer {
                 name: "newest".to_owned(),
                 data: Arc::from(b"new".as_slice()),
@@ -35512,14 +39387,15 @@ bind - split-window -v -c "#{pane_current_path}"
         .expect("valid source")
         .expect("filtered chooser");
         assert_eq!(filtered.names, ["older"]);
+        assert!(!filtered.rendered.filter_no_matches);
 
-        let fallback = ChooseBufferSession::new(
+        let mut fallback = ChooseBufferSession::new(
             z_pane,
             &engine,
             &buffers,
             Some(z),
             &facts,
-            Some("0".to_owned()),
+            Some("#{==:#{buffer_name},missing}".to_owned()),
             TmuxSort::parse(None, true, Some(TmuxSortOrder::Creation)).unwrap(),
             None,
         )
@@ -35528,6 +39404,20 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(fallback.names, ["older", "newest"]);
         assert_eq!(fallback.rendered.selected, 0);
         assert_eq!(fallback.selected.as_deref(), Some("older"));
+        assert!(fallback.rendered.filter_no_matches);
+        buffers.push(PasteBuffer {
+            name: "missing".to_owned(),
+            data: Arc::from(b"match".as_slice()),
+            created: UNIX_EPOCH + Duration::from_secs(30),
+            automatic: false,
+            utf8: true,
+        });
+        fallback.rebuild(&engine, &buffers, Some(z), &facts);
+        assert_eq!(fallback.names, ["missing"]);
+        assert!(!fallback.rendered.filter_no_matches);
+        buffers.pop();
+        fallback.rebuild(&engine, &buffers, Some(z), &facts);
+        assert!(fallback.rendered.filter_no_matches);
     }
 
     #[test]
@@ -35836,7 +39726,7 @@ bind - split-window -v -c "#{pane_current_path}"
         engine.state.select_pane(active).expect("select last pane");
 
         let (_, actual_window, overlay) =
-            build_display_panes_state(&engine, &FormatHookFacts::default(), active, 1_000)
+            build_display_panes_state(&engine, "", &FormatHookFacts::default(), active, 1_000)
                 .expect("pane indicators");
         assert_eq!(actual_window, window);
         assert_eq!(overlay.indicators.len(), 37);
@@ -35854,7 +39744,7 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("one-based pane indicators");
         let (_, _, overlay) =
-            build_display_panes_state(&engine, &FormatHookFacts::default(), active, 1_000)
+            build_display_panes_state(&engine, "", &FormatHookFacts::default(), active, 1_000)
                 .expect("one-based indicators");
         assert_eq!(overlay.indicators[0].index, 1);
         assert_eq!(overlay.indicators[0].select_key, b'1');
@@ -37322,6 +41212,51 @@ bind - split-window -v -c "#{pane_current_path}"
             );
         }
 
+        let manual_effect = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut first_context,
+                &CommandInvocation::new(
+                    "resize-window",
+                    ["-t", &first_window.to_string(), "-x", "140", "-y", "42"],
+                ),
+            )
+            .expect("select manual window size");
+        assert_eq!(
+            manual_effect.effects,
+            vec![
+                MuxEffect::WindowSizeChanged {
+                    window: Some(first_window)
+                },
+                MuxEffect::SnapshotChanged,
+            ]
+        );
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((140, 42))
+        );
+        resize(first_client, &mut first_context, first_pane, 200, 30);
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((140, 42))
+        );
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut first_context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-u", "-t", &first_window.to_string(), "window-size"],
+                ),
+            )
+            .expect("restore inherited window size");
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(first_pane),
+            Some((200, 30))
+        );
+
         let window_size_effect = shared
             .execute(
                 ClientId(u64::MAX),
@@ -38347,6 +42282,185 @@ bind - split-window -v -c "#{pane_current_path}"
             })
         });
         assert!(closed.is_some());
+    }
+
+    #[test]
+    fn display_panes_targets_client_window_and_no_select_keys_fall_through() {
+        let (shared, invoking, _, mut invoking_context) = popup_test_workspace("invoking");
+        let session = invoking_context.session.expect("session");
+        shared
+            .execute(
+                invoking,
+                ClientKind::Interactive,
+                &mut invoking_context,
+                &CommandInvocation::new("new-window", ["-d", "-n", "target-window"]),
+            )
+            .expect("target window");
+        let (target_window, target_terminal) = {
+            let inner = shared.inner.lock();
+            let window = inner.engine.state.sessions[&session]
+                .windows
+                .iter()
+                .copied()
+                .find(|window| inner.engine.state.windows[window].name == "target-window")
+                .expect("named target window");
+            (window, inner.engine.state.windows[&window].active_pane)
+        };
+        let mut target_context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, target_terminal)
+                .expect("target context");
+        shared
+            .execute(
+                invoking,
+                ClientKind::Interactive,
+                &mut target_context,
+                &CommandInvocation::new("split-browser", ["https://example.com"]),
+            )
+            .expect("target browser");
+        let target_browser = target_context.pane.expect("target browser");
+        let target_mailbox = OutboundMailbox::new();
+        let (target_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("target-client".to_owned()),
+            None,
+            Arc::clone(&target_mailbox),
+        );
+        shared
+            .attach(target_client, session)
+            .expect("attach target client");
+        {
+            let mut inner = shared.inner.lock();
+            inner.focused_windows.insert(target_client, target_window);
+            inner
+                .client_ttys
+                .insert(target_client, "/dev/ttys004".to_owned());
+        }
+        take_reliable_messages(&target_mailbox);
+
+        let device_target = format!("device-{}", target_client.0);
+        for target in [
+            "target-client",
+            "target-client:",
+            device_target.as_str(),
+            "/dev/ttys004",
+            "ttys004",
+            "ttys004:",
+        ] {
+            shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut invoking_context,
+                    &CommandInvocation::new("display-panes", ["-t", target, "-d", "0"]),
+                )
+                .expect("target pane overlay");
+            let mut inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&invoking));
+            let overlay = inner
+                .display_panes
+                .get(&target_client)
+                .expect("target client overlay");
+            assert_eq!(overlay.source_window, target_window);
+            assert_eq!(overlay.source_pane, target_browser);
+            take_display_panes(&mut inner, target_client);
+        }
+
+        shared
+            .inner
+            .lock()
+            .client_ttys
+            .insert(target_client, "/dev/pts/3".to_owned());
+        for target in ["/dev/pts/3", "/dev/pts/3:", "pts/3", "pts/3:", "3"] {
+            shared
+                .execute(
+                    invoking,
+                    ClientKind::Interactive,
+                    &mut invoking_context,
+                    &CommandInvocation::new("display-panes", ["-t", target, "-d", "0"]),
+                )
+                .expect("Linux tty target pane overlay");
+            let mut inner = shared.inner.lock();
+            assert!(!inner.display_panes.contains_key(&invoking));
+            let overlay = inner
+                .display_panes
+                .get(&target_client)
+                .expect("Linux tty target client overlay");
+            assert_eq!(overlay.source_window, target_window);
+            assert_eq!(overlay.source_pane, target_browser);
+            take_display_panes(&mut inner, target_client);
+        }
+
+        let error = shared
+            .execute(
+                invoking,
+                ClientKind::Interactive,
+                &mut invoking_context,
+                &CommandInvocation::new("display-panes", ["-t", "missing", "-d", "not-a-delay"]),
+            )
+            .expect_err("missing client precedes delay parsing");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "can't find client: missing"
+        ));
+
+        let error = shared
+            .execute(
+                invoking,
+                ClientKind::Interactive,
+                &mut invoking_context,
+                &CommandInvocation::new("display-panes", ["-t", "pts/3", "-d", "not-a-delay"]),
+            )
+            .expect_err("valid Linux tty target reaches delay parsing");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "display-panes duration must be an unsigned millisecond value: not-a-delay"
+        ));
+
+        shared
+            .execute(
+                invoking,
+                ClientKind::Interactive,
+                &mut invoking_context,
+                &CommandInvocation::new("display-panes", ["-N", "-t", "pts/3", "-d", "0"]),
+            )
+            .expect("non-selectable target overlay");
+        assert!(!shared.inner.lock().display_panes[&target_client].selectable);
+        take_reliable_messages(&target_mailbox);
+        let key = test_key(KeyCode::Character('0'), Modifiers::default(), Some("0"));
+        shared
+            .input(
+                target_client,
+                ClientKind::Interactive,
+                &mut target_context,
+                InputMessage::DisplayPanes {
+                    action: DisplayPanesAction::Key(key.clone()),
+                },
+            )
+            .expect("dismiss and forward first key");
+        let messages = take_reliable_messages(&target_mailbox);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::DisplayPanes { state: None },
+                ..
+            })
+        )));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::BrowserCommand {
+                    pane,
+                    command: BrowserCommand::Key(input),
+                },
+                ..
+            }) if *pane == target_browser && input == &key
+        )));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&target_window].active_pane,
+            target_browser
+        );
     }
 
     #[test]
@@ -39688,6 +43802,188 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn read_only_command_requests_authorize_the_expanded_alias_once() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("viewer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("attach-session", ["-r", "-t", "A"]),
+            )
+            .expect("read-only attach");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[40]", "a=kill-session -t B"],
+                ),
+            )
+            .expect("unsafe alias");
+
+        let blocked = shared.execute_command_request(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            9,
+            &CommandInvocation::new("a", [] as [&str; 0]),
+        );
+        assert!(matches!(
+            blocked,
+            CommandResponse::Error {
+                error: ServerError::InvalidCommand(message),
+                ..
+            } if message == "client is read-only"
+        ));
+        assert!(shared.inner.lock().engine.state.sessions.contains_key(&b));
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(a)
+        );
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[40]",
+                        "a=list-clients -F '#{client_name}'",
+                    ],
+                ),
+            )
+            .expect("safe alias");
+        let allowed = shared.execute_command_request(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            10,
+            &CommandInvocation::new("a", [] as [&str; 0]),
+        );
+        assert!(matches!(
+            allowed,
+            CommandResponse::Success { output, .. } if output == "viewer"
+        ));
+    }
+
+    #[test]
+    fn read_only_key_bindings_authorize_the_expanded_alias_once() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, pane) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("viewer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("attach-session", ["-r", "-t", "A"]),
+            )
+            .expect("read-only attach");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[40]", "a=kill-session -t B"],
+                ),
+            )
+            .expect("unsafe alias");
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[CommandInvocation::new("a", [] as [&str; 0])],
+                false,
+            )
+            .expect("blocked binding");
+        assert!(shared.inner.lock().engine.state.sessions.contains_key(&b));
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(a)
+        );
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[40]", "a=detach-client"],
+                ),
+            )
+            .expect("safe alias");
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[CommandInvocation::new("a", [] as [&str; 0])],
+                false,
+            )
+            .expect("allowed binding");
+        assert_eq!(client_attached_session(&shared.inner.lock(), client), None);
+    }
+
+    #[test]
+    fn key_binding_commands_observe_alias_changes_from_earlier_commands() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, pane) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("writer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, a).expect("attach");
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                pane,
+                &[
+                    CommandInvocation::new(
+                        "set-option",
+                        ["-s", "command-alias[40]", "dynamic=kill-session -t B"],
+                    ),
+                    CommandInvocation::new("dynamic", [] as [&str; 0]),
+                ],
+                false,
+            )
+            .expect("binding chain");
+        assert!(!shared.inner.lock().engine.state.sessions.contains_key(&b));
+    }
+
+    #[test]
     fn terminal_mouse_is_rejected_only_for_sized_clients_when_mouse_is_off() {
         let shared = Arc::new(Shared::new(1));
         let (a, _, pane) = switch_test_session(&shared, "A");
@@ -39842,6 +44138,70 @@ bind - split-window -v -c "#{pane_current_path}"
             message,
             "sessions should be nested with care, unset $TMUX to force"
         );
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-s", "outer"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-s", "inner"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .values()
+                .all(|session| session.name != "inner")
+        );
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "outer"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "sessions should be nested with care, unset $TMUX to force"
+        ));
+        shared
+            .execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "fresh"]),
+            )
+            .expect("detached creation from a nested tty is allowed");
+        {
+            let inner = shared.inner.lock();
+            let fresh = inner
+                .engine
+                .state
+                .sessions
+                .iter()
+                .find_map(|(id, session)| (session.name == "fresh").then_some(*id))
+                .expect("fresh detached session");
+            assert!(
+                inner
+                    .attached
+                    .get(&fresh)
+                    .is_none_or(|clients| !clients.contains(&nested))
+            );
+        }
         assert!(matches!(
             shared.attach_target(nested, ClientKind::Interactive, &mut nested_context, "outer"),
             Err(ServerError::InvalidCommand(message))
@@ -40357,6 +44717,171 @@ bind - split-window -v -c "#{pane_current_path}"
             ["B", "A", "1", "attached,read-only", "prefix",]
         );
         assert!(fields[5].parse::<u64>().is_ok_and(|time| time > 0));
+    }
+
+    #[test]
+    fn removing_an_active_key_table_resets_clients_to_their_session_default() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, _) = switch_test_session(&shared, "work");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach desktop");
+        let mut context = ExecutionContext::default();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-T", "copy-mode"]),
+            )
+            .expect("select copy-mode table");
+        assert_eq!(
+            shared.inner.lock().key_engines[&client].active_table(),
+            Some("copy-mode")
+        );
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("unbind-key", ["-a", "-T", "copy-mode"]),
+            )
+            .expect("remove copy-mode table");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.key_engines[&client].active_table(), None);
+            assert!(
+                inner
+                    .engine
+                    .keys
+                    .table_names()
+                    .all(|table| table != "copy-mode")
+            );
+        }
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("list-clients", ["-F", "#{client_key_table}"],),
+                )
+                .expect("list reset client table")
+                .output,
+            "root"
+        );
+
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "custom", "F1", "display-message", "custom"],
+                ),
+            )
+            .expect("create custom table");
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-t", "work", "key-table", "custom"]),
+            )
+            .expect("set session default table");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-T", "custom"]),
+            )
+            .expect("select custom table");
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("unbind-key", ["-a", "-T", "custom"]),
+            )
+            .expect("remove custom default table");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.key_engines[&client].active_table(), None);
+            assert!(
+                inner
+                    .engine
+                    .keys
+                    .table_names()
+                    .any(|table| table == "custom")
+            );
+            assert!(inner.engine.keys.list(Some("custom")).next().is_none());
+        }
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(99),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("list-clients", ["-F", "#{client_key_table}"],),
+                )
+                .expect("list custom reset client table")
+                .output,
+            "custom"
+        );
+
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-t", "work", "key-table", "prefix"]),
+            )
+            .expect("set prefix as the session default");
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("unbind-key", ["-a", "-T", "prefix"]),
+            )
+            .expect("replace the default prefix table with an empty table");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-T", "prefix"]),
+            )
+            .expect("select the empty prefix table");
+        assert!(shared.inner.lock().prefix_armed.contains(&client));
+        shared
+            .execute(
+                ClientId(99),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("unbind-key", ["-a", "-T", "prefix"]),
+            )
+            .expect("remove and recreate the empty default table");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.key_engines[&client].active_table(), None);
+            assert!(!inner.prefix_armed.contains(&client));
+            assert!(
+                inner
+                    .engine
+                    .keys
+                    .table_names()
+                    .any(|table| table == "prefix")
+            );
+            assert!(inner.engine.keys.list(Some("prefix")).next().is_none());
+        }
     }
 
     #[test]
@@ -40975,6 +45500,32 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("alias routed to the daemon-owned command");
         assert!(listed.output.contains("gui"), "{:?}", listed.output);
+        for (index, value) in [("21", "first=second"), ("22", "second=list-clients")] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("alias write");
+        }
+        let error = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("first", [] as [&str; 0]),
+            )
+            .expect_err("daemon expands one alias layer");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "unknown command: second"
+        ));
     }
 
     #[test]
@@ -43066,6 +47617,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
         let (_, _, display) = build_display_panes_state(
             &shared.inner.lock().engine,
+            "",
             &FormatHookFacts::default(),
             browser,
             1_000,
@@ -44502,6 +49054,140 @@ bind - split-window -v -c "#{pane_current_path}"
         );
     }
 
+    #[test]
+    fn pane_input_off_gates_direct_synchronized_send_and_paste_input() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "input-off"]),
+            )
+            .expect("new session");
+        let session = context.session.expect("session");
+        let terminal = context.pane.expect("terminal");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-browser", ["-h", "https://example.com"]),
+            )
+            .expect("browser pane");
+        let browser = context.pane.expect("browser");
+        shared.attach(client, session).expect("attach session");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-w", "synchronize-panes", "on"]),
+            )
+            .expect("enable synchronized input");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("select-pane", ["-t", &terminal.to_string()]),
+            )
+            .expect("select terminal");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("last-pane", ["-d"]),
+            )
+            .expect("disable browser input");
+
+        {
+            let inner = shared.inner.lock();
+            assert!(resolve_input_sinks(&inner, browser).unwrap().is_empty());
+            let sinks = resolve_input_sinks(&inner, terminal).unwrap();
+            assert_eq!(sinks.len(), 1);
+            assert!(matches!(sinks[0], PaneSink::Terminal(_)));
+        }
+
+        take_reliable_messages(&mailbox);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("send-keys", ["-t", &browser.to_string(), "blocked"]),
+            )
+            .expect("send keys to disabled browser");
+        assert!(
+            !take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::BrowserCommand { .. },
+                        ..
+                    })
+                ))
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["blocked paste"]),
+            )
+            .expect("set buffer");
+        take_reliable_messages(&mailbox);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("paste-buffer", ["-t", &browser.to_string()]),
+            )
+            .expect("paste to disabled browser");
+        assert!(
+            !take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::BrowserCommand { .. },
+                        ..
+                    })
+                ))
+        );
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::BrowserSurfaceText {
+                    pane: browser,
+                    text: "blocked direct input".to_owned(),
+                },
+            )
+            .expect("direct input to disabled browser");
+        assert!(
+            !take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::BrowserCommand { .. },
+                        ..
+                    })
+                ))
+        );
+    }
+
     fn belled_session(
         shared: &Arc<Shared>,
         mailbox: &Arc<OutboundMailbox>,
@@ -44677,7 +49363,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn bell_action_and_visual_bell_fan_out_per_interactive_client() {
+    fn bell_action_and_visual_bell_fan_out_from_the_session_active_window() {
         let shared = Arc::new(Shared::new(1));
         let first_mailbox = OutboundMailbox::new();
         let (first_client, mut context, _first, second) = belled_session(&shared, &first_mailbox);
@@ -44741,8 +49427,11 @@ bind - split-window -v -c "#{pane_current_path}"
             vec![(Some(second), format!("Bell in window {second_index}"), 750,)]
         );
         let second_messages = take_reliable_messages(&second_mailbox);
-        assert!(bell_events(&second_messages).is_empty());
-        assert!(bell_messages(&second_messages).is_empty());
+        assert_eq!(bell_events(&second_messages), vec![second]);
+        assert_eq!(
+            bell_messages(&second_messages),
+            vec![(Some(second), format!("Bell in window {second_index}"), 750,)]
+        );
         let control_messages = take_reliable_messages(&control_mailbox);
         assert!(bell_events(&control_messages).is_empty());
         assert!(bell_messages(&control_messages).is_empty());
@@ -44766,10 +49455,23 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(bell_messages(&first_messages).is_empty());
         let second_messages = take_reliable_messages(&second_mailbox);
         assert!(bell_events(&second_messages).is_empty());
-        assert_eq!(
-            bell_messages(&second_messages),
-            vec![(Some(second), "Bell in current window".to_owned(), 750)]
-        );
+        assert!(bell_messages(&second_messages).is_empty());
+        let control_messages = take_reliable_messages(&control_mailbox);
+        assert!(bell_events(&control_messages).is_empty());
+        assert!(bell_messages(&control_messages).is_empty());
+
+        let first_pane = context.pane.expect("active pane");
+        shared.raise_pane_bell(first_pane);
+        for messages in [
+            take_reliable_messages(&first_mailbox),
+            take_reliable_messages(&second_mailbox),
+        ] {
+            assert!(bell_events(&messages).is_empty());
+            assert_eq!(
+                bell_messages(&messages),
+                vec![(Some(first_pane), "Bell in current window".to_owned(), 750)]
+            );
+        }
         let control_messages = take_reliable_messages(&control_mailbox);
         assert!(bell_events(&control_messages).is_empty());
         assert!(bell_messages(&control_messages).is_empty());
@@ -44929,12 +49631,57 @@ bind - split-window -v -c "#{pane_current_path}"
                 )
                 .expect("configure silence alerts");
         }
-        let deadline = {
+        let original_deadlines = {
             let inner = shared.inner.lock();
             assert_eq!(inner.silence_deadlines.len(), 2);
-            inner.silence_deadlines[&second_window]
+            inner.silence_deadlines.clone()
         };
         take_reliable_messages(&mailbox);
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-g", "monitor-silence", "1"]),
+            )
+            .expect("repeat monitor-silence");
+        let replacement_deadlines = shared.inner.lock().silence_deadlines.clone();
+        assert_eq!(
+            replacement_deadlines.keys().collect::<BTreeSet<_>>(),
+            original_deadlines.keys().collect::<BTreeSet<_>>()
+        );
+        for (window, original) in &original_deadlines {
+            assert_ne!(replacement_deadlines[window].token, original.token);
+        }
+        let original_deadline = original_deadlines[&second_window];
+        let deadline = replacement_deadlines[&second_window];
+        shared.expire_window_silence(original_deadline, original_deadline.deadline);
+        assert!(!window_silence_flag(&shared, second_window));
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-window-option", ["-u", "-t", ":1", "monitor-silence"]),
+            )
+            .expect("unset missing local monitor-silence");
+        assert!(shared.inner.lock().silence_deadlines == replacement_deadlines);
+        assert!(
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-window-option",
+                        ["-g", "-o", "monitor-silence", "1"],
+                    ),
+                )
+                .is_err()
+        );
+        assert!(shared.inner.lock().silence_deadlines == replacement_deadlines);
 
         let stale = SilenceDeadline {
             token: deadline.token.wrapping_add(1),
@@ -45050,6 +49797,74 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("select the belled window");
         assert!(!pane_bell(&take_reliable_messages(&mailbox), second));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attaching_clears_every_current_window_alert_and_the_terminal_bell_latch() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, context, first, second) = belled_session(&shared, &mailbox);
+        let session = context.session.expect("session");
+        let (first_window, window, terminal) = {
+            let inner = shared.inner.lock();
+            let first_window = inner
+                .engine
+                .state
+                .window_for_pane(first)
+                .expect("first window");
+            let window = inner.engine.state.window_for_pane(second).expect("window");
+            (first_window, window, Arc::clone(&inner.terminals[&second]))
+        };
+
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, second, &terminal, true);
+        {
+            let mut inner = shared.inner.lock();
+            inner.engine.state.set_pane_bell(first, true);
+            inner
+                .engine
+                .state
+                .set_window_activity_flag(first_window, true);
+            inner
+                .engine
+                .state
+                .set_window_silence_flag(first_window, true);
+            inner
+                .engine
+                .state
+                .sessions
+                .get_mut(&session)
+                .unwrap()
+                .active_window = window;
+            inner.engine.state.set_window_activity_flag(window, true);
+            inner.engine.state.set_window_silence_flag(window, true);
+        }
+
+        let snapshot = shared.attach(client, session).expect("reattach session");
+        let snapshot_window = snapshot.sessions[0]
+            .windows
+            .iter()
+            .find(|candidate| candidate.id == window)
+            .expect("snapshot window");
+        assert!(!snapshot_window.panes[&second].bell);
+        let snapshot_first_window = snapshot.sessions[0]
+            .windows
+            .iter()
+            .find(|candidate| candidate.id == first_window)
+            .expect("inactive snapshot window");
+        assert!(snapshot_first_window.panes[&first].bell);
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.engine.state.pane(second).expect("pane").bell);
+            assert!(!inner.engine.state.windows[&window].activity_flag);
+            assert!(!inner.engine.state.windows[&window].silence_flag);
+            assert!(inner.engine.state.pane(first).expect("inactive pane").bell);
+            assert!(inner.engine.state.windows[&first_window].activity_flag);
+            assert!(inner.engine.state.windows[&first_window].silence_flag);
+        }
+
+        take_reliable_messages(&mailbox);
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, second, &terminal, false);
     }
 
     #[cfg(unix)]
@@ -45355,28 +50170,65 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn concurrent_default_interactive_attaches_share_session_zero() {
+    fn concurrent_default_interactive_attaches_atomically_share_session_zero() {
         let shared = Arc::new(Shared::new(1));
         shared.initialize(false).expect("initialize daemon state");
         let (first, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
         let (second, _) =
             shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
-        let barrier = Arc::new(std::sync::Barrier::new(3));
-        let handles = [first, second].map(|client| {
-            let shared = Arc::clone(&shared);
-            let barrier = Arc::clone(&barrier);
-            thread::spawn(move || {
-                let mut context = ExecutionContext::default();
-                barrier.wait();
-                let attached = shared
-                    .attach_target(client, ClientKind::Interactive, &mut context, "")
-                    .expect("attach to the shared lazy session");
-                (attached.0, context)
-            })
+        let (first_materializing_tx, first_materializing_rx) = crossbeam_channel::bounded(1);
+        let (resume_first_tx, resume_first_rx) = crossbeam_channel::bounded(1);
+        let first_shared = Arc::clone(&shared);
+        let first_handle = thread::spawn(move || {
+            let mut context = ExecutionContext::default();
+            let attached = first_shared
+                .attach_target_with_materialization_observer(
+                    first,
+                    ClientKind::Interactive,
+                    &mut context,
+                    "",
+                    || {},
+                    || {
+                        first_materializing_tx
+                            .send(())
+                            .expect("report first materialization");
+                        resume_first_rx
+                            .recv()
+                            .expect("resume first materialization");
+                    },
+                )
+                .expect("first attach to the shared lazy session");
+            (attached.0, context)
         });
-        barrier.wait();
-        for handle in handles {
+        first_materializing_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first attach holds materialization lock");
+
+        let (second_waiting_tx, second_waiting_rx) = crossbeam_channel::bounded(1);
+        let second_shared = Arc::clone(&shared);
+        let second_handle = thread::spawn(move || {
+            let mut context = ExecutionContext::default();
+            let attached = second_shared
+                .attach_target_with_materialization_observer(
+                    second,
+                    ClientKind::Interactive,
+                    &mut context,
+                    "",
+                    || second_waiting_tx.send(()).expect("report second attach"),
+                    || panic!("second attach attempted a duplicate materialization"),
+                )
+                .expect("second attach to the shared lazy session");
+            (attached.0, context)
+        });
+        second_waiting_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("second attach reached materialization lock");
+        resume_first_tx
+            .send(())
+            .expect("resume first materialization");
+
+        for handle in [first_handle, second_handle] {
             let (session, context) = handle.join().expect("attach thread");
             assert_eq!(session, SessionId(0));
             assert_eq!(context.session, Some(SessionId(0)));
@@ -45389,6 +50241,54 @@ bind - split-window -v -c "#{pane_current_path}"
             inner.attached.get(&SessionId(0)),
             Some(&BTreeSet::from([first, second]))
         );
+    }
+
+    #[test]
+    fn default_attach_survives_command_materializing_after_the_empty_check() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        let racing_shared = Arc::clone(&shared);
+        let mut context = ExecutionContext::default();
+        let (session, snapshot) = shared
+            .attach_target_with_materialization_observer(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                "",
+                || {},
+                move || {
+                    racing_shared
+                        .execute(
+                            command,
+                            ClientKind::Command,
+                            &mut ExecutionContext::default(),
+                            &CommandInvocation::new("new-session", ["-d", "-s", "raced"]),
+                        )
+                        .expect("command client wins the materialization race");
+                },
+            )
+            .expect("attach to the command-created session");
+
+        assert_eq!(session, SessionId(0));
+        assert_eq!(context.session, Some(SessionId(0)));
+        assert_eq!(snapshot.sessions[0].name, "raced");
+        let direct_error = shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "raced"]),
+            )
+            .expect_err("ordinary command clients still require a terminal to attach");
+        assert!(matches!(
+            direct_error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "open terminal failed: not a terminal"
+        ));
     }
 
     #[test]
@@ -45419,6 +50319,25 @@ bind - split-window -v -c "#{pane_current_path}"
                     &CommandInvocation::new("new-session", ["-d", "-s", name]),
                 )
                 .expect("seed session");
+            shared
+                .execute(
+                    alpha_client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-t", name, "status-interval", "0"]),
+                )
+                .expect("disable periodic status refreshes");
+            shared
+                .execute(
+                    alpha_client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-window-option",
+                        ["-t", &format!("{name}:0"), "automatic-rename", "off"],
+                    ),
+                )
+                .expect("disable asynchronous window renames");
         }
         let mut alpha_context = ExecutionContext::default();
         shared
@@ -45438,8 +50357,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 "beta",
             )
             .expect("attach beta");
-        take_reliable_messages(&alpha_mailbox);
-        take_reliable_messages(&beta_mailbox);
+        drain_reliable_messages_until_quiet(&[&alpha_mailbox, &beta_mailbox]);
+        let sequence_boundary = Shared::next_sequence();
 
         shared
             .execute(
@@ -45457,25 +50376,27 @@ bind - split-window -v -c "#{pane_current_path}"
             .into_iter()
             .find_map(|message| match message {
                 ProtocolMessage::Event(Event {
+                    sequence,
                     payload: EventPayload::StatusChanged { status },
-                    ..
-                }) => Some(status),
+                }) if sequence > sequence_boundary && status.rows == ["ALPHA-ROW"] => Some(status),
                 _ => None,
             })
             .expect("alpha client receives the scoped refresh");
         assert_eq!(alpha_status.rows, ["ALPHA-ROW"]);
         assert!(alpha_status.customized);
+        let beta_statuses = take_reliable_messages(&beta_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    sequence,
+                    payload: EventPayload::StatusChanged { status },
+                }) if sequence > sequence_boundary => Some((sequence, status)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert!(
-            take_reliable_messages(&beta_mailbox)
-                .into_iter()
-                .all(|message| !matches!(
-                    message,
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::StatusChanged { .. },
-                        ..
-                    })
-                )),
-            "the write refreshes only alpha's attached clients"
+            beta_statuses.is_empty(),
+            "the scoped write emitted beta status events: {beta_statuses:?}"
         );
     }
 
@@ -45729,7 +50650,10 @@ bind - split-window -v -c "#{pane_current_path}"
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let captured = commands
-                .execute(CommandInvocation::new("capture-pane", ["-t", &pane_target]))
+                .execute(CommandInvocation::new(
+                    "capture-pane",
+                    ["-p", "-t", &pane_target],
+                ))
                 .unwrap();
             if captured.contains("E2E_DAEMON_OK") {
                 break;
@@ -45949,6 +50873,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                working_directory: None,
             }),
         )
         .expect("send hello");
@@ -46029,6 +50954,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                working_directory: None,
             }),
         )
         .expect("send control hello");
@@ -46126,6 +51052,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                working_directory: None,
             }),
         )
         .expect("send client hello");
@@ -46704,6 +51631,27 @@ bind - split-window -v -c "#{pane_current_path}"
             .into_iter()
             .map(|frame| decode_protocol_frame(&frame).expect("decode reliable message"))
             .collect()
+    }
+
+    fn drain_reliable_messages_until_quiet(mailboxes: &[&OutboundMailbox]) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let quiet_period = Duration::from_millis(100);
+        let mut quiet_since = Instant::now();
+        loop {
+            let drained = mailboxes
+                .iter()
+                .map(|mailbox| take_reliable_messages(mailbox).len())
+                .sum::<usize>();
+            if drained == 0 {
+                if quiet_since.elapsed() >= quiet_period {
+                    return;
+                }
+            } else {
+                quiet_since = Instant::now();
+            }
+            assert!(Instant::now() < deadline, "mailboxes did not become quiet");
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn latest_reliable_snapshot(messages: &[ProtocolMessage]) -> &MuxSnapshot {

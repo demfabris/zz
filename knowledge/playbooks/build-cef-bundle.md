@@ -35,9 +35,9 @@ symlinks doing it, so a symlink straight to `Contents/MacOS/zz` starts zz with n
 no bundle identifier, no icon, and none of the usage descriptions the browser pane's camera and
 microphone prompts require. Rust's `current_exe` has the same shape of problem on macOS, which
 would additionally send the CEF framework lookup beside the symlink. Linux ships the same launcher
-as `/usr/lib/zz/cli`. On both platforms bare `zz` enters terminal attach, `zz app` opens the GUI,
-and tmux-shaped commands exec the neighbouring `zz`. The Linux launcher exists for that command
-split; `/proc/self/exe` already handles symlink resolution there.
+as `/usr/lib/zz/cli`. On both platforms bare `zz` runs `new-session -A` through the raw-terminal
+client, `zz app` opens the GUI, and tmux-shaped commands exec the neighbouring `zz`. The Linux
+launcher exists for that command split; `/proc/self/exe` already handles symlink resolution there.
 
 # Examples
 
@@ -244,7 +244,7 @@ What `bundle-cef` does, in order:
 | `third_party/cef/ARTIFACTS.md` | Reviewable mirror of the archive name + SHA-1 fetched from CEF's index per Rust target |
 | `third_party/cef/LICENSE.txt` | Installed into every bundle as `CEF_LICENSE.txt` |
 | `Cargo.toml` | `cef = "=151.2.0"` workspace pin that `download-cef` resolves |
-| `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; maps bare launch to attach and reserves `zz app` for the GUI |
+| `crates/zz/src/bin/zz_cli.rs` | The macOS and Linux `PATH` launcher; maps bare launch to `new-session -A` and reserves `zz app` for the GUI |
 | `.github/workflows/ci.yml` | Exercises `bundle-cef` on `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `.github/workflows/release.yml` | Tag-driven macOS, Linux, and Windows publication; prerelease channel gating |
 | `release.toml` + `scripts/release.sh` | Dry-run-first workspace SemVer bump, one release commit, annotated tag, and push |

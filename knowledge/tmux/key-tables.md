@@ -42,7 +42,7 @@ app and the TUI, which contain no chooser key maps at all.
 | --- | --- | --- |
 | `Binding` | `{ commands: Vec<CommandInvocation>, repeat: bool, note: Option<String> }` | What a key runs; `repeat` keeps the prefix table active (tmux `-r`); `note` is a `-N` description. |
 | `KeyTables` | `{ prefix: String, prefix2: Option<String>, tables: BTreeMap<String, BTreeMap<String, Binding>> }` | Named tables; default `prefix` is `"C-b"`, `prefix2` defaults unset. |
-| `KeyEngine` | `{ table, pending, repeat_count, repeat_deadline }` | Per-client mode: `None` = root, `Some("prefix")` after prefix, `pending` = awaiting a jump target key, `repeat_count` = buffered vi digits, and `repeat_deadline` bounds a repeatable binding sequence. |
+| `KeyEngine` | `{ table, pending, repeat_count, repeat_deadline, prefix_deadline, last_repeat_key }` | Per-client mode: `None` = the effective root table, `Some("prefix")` after prefix, `pending` = awaiting a jump target key, `repeat_count` = buffered vi digits, and the deadline/key fields implement prefix and repeat timing. |
 | `KeyDecision` | `Pass` \| `Prefix` \| `Ignore` \| `Commands(Vec<CommandInvocation>)` | Result of one keypress. |
 
 # Root vs prefix tables and default prefix
@@ -53,13 +53,17 @@ prefix2 <key>` stores the scalar and syncs `KeyTables::set_prefix2` (default `No
 literal `None` value also reads as unset). Resolution in `KeyEngine::handle`:
 
 - In root mode (`table == None`), a key equal to either prefix (`KeyTables::is_prefix`) returns
-  `Prefix` and switches to the `prefix` table. Otherwise the `root` table is consulted; an unbound root key returns `Pass`
-  (goes to the routed pane sinks).
+  `Prefix` and switches to the `prefix` table. Otherwise the attached session's effective
+  `key-table` is consulted (`root` by default); an unbound effective-root key returns `Pass` and
+  goes to the routed pane sinks.
 - In the `prefix` table, a bound key runs its commands; a **non-repeat** binding then drops back to
-  root, while a **repeat** (`-r`) binding stays in `prefix` so e.g. `C-b M-Left M-Left` keeps
-  resizing. The attached session's effective `repeat-time` sets and refreshes its millisecond
-  deadline. The next key after expiry resolves from root, and zero disables the repeat window. An
-  unbound prefix key is **discarded** (`Ignore`) and exits prefix mode, matching tmux:
+  the effective root, while a **repeat** (`-r`) binding stays in `prefix` so e.g.
+  `C-b M-Left M-Left` keeps resizing. `prefix-timeout` bounds the first prefix lookup.
+  `initial-repeat-time` bounds the first or newly changed repeat key, and `repeat-time` bounds
+  same-key continuation. The next key after expiry resolves from the effective root. Zero
+  `prefix-timeout` disables prefix expiry, zero `repeat-time` disables repeat mode, and zero
+  `initial-repeat-time` falls back to `repeat-time`. An unbound prefix key is **discarded**
+  (`Ignore`) and exits prefix mode, matching tmux:
   a mistyped sequence never types into the pane.
 - Persistent tables (`copy-mode`, `copy-mode-vi`, or any table set via `switch_table`) consume unbound
   keys as `Ignore` instead of exiting, matching tmux copy-mode behavior. `Any` is honored as a
@@ -83,13 +87,26 @@ Every key is normalized before lookup, bind, unbind, and prefix comparison:
 | otherwise | trimmed as-is (e.g. `C-b`, `M-Right`, `F2`, `PPage`) |
 
 `bind`/`unbind`/`get` all canonicalize their key, so `Ctrl-a` and `C-a` are the same binding.
+That long `Ctrl-`/`Alt-` spelling is a zz overacceptance, not tmux syntax: the pin accepts the
+case-insensitive short forms such as `c-a`/`m-a` and rejects the long aliases. Strict parser parity
+remains tracked under `keys.strict-validation`.
 
 # bind / unbind semantics
 
 `bind-key` inserts into a table (`prefix` by default; `-n` → `root`; `-T <table>` → named), carrying
 `-r` (repeat) and `-N` (note). `unbind-key` removes a key from a table (`prefix` default, `-n`/`-T`
-selectors); `unbind-key -a` is explicitly unsupported. `list-keys` renders every binding as
-`bind-key -T <table> <key> <commands>`. See [the command layer](/tmux/commands.md) for flag parsing.
+selectors); `-a` removes the selected table and `-q` suppresses handler errors while preserving
+parser and arity errors. Removing a table resets every client using it to its session's configured
+default table. If that default is the removed table, the daemon recreates it empty. Bare
+`list-keys` renders every binding as
+`bind-key -T <table> <key> <commands>`. Its `-N` view selects `prefix` then `root`, filters on
+stored notes unless `-a` is present, and accepts `-P` as the displayed prefix string. See
+[the command layer](/tmux/commands.md) for flag parsing.
+
+Key-table storage folds `Space` and `C-Space` to literal-space bases. `list-keys` maps those bases
+back to `Space` and `C-Space`, computes widths from the displayed spelling, and matches a positional
+key by tmux base, type, and modifier identity. Stored spelling and key flags do not affect that
+filter.
 
 The daemon preserves and executes these stored commands exactly — there is no key-time rewriting.
 A binding of `split-window` (or `splitw`), whether imported from a tmux config or typed at
@@ -102,8 +119,8 @@ Prefix table (partial, the canonical zz set):
 
 | Key | Command | Key | Command |
 | --- | --- | --- | --- |
-| `c` | `new-window` | `%` | `split-window -h` |
-| `"` | `split-window -v` | `!` | `break-pane` |
+| `c` | `new-window` | `%` | `split-picker -h` |
+| `"` | `split-picker -v` | `!` | `break-pane` |
 | `x` | `kill-pane` | `&` | `kill-window` |
 | `<prefix>` | `send-prefix` | | |
 | `n` / `p` | next / previous window | `o` | `select-pane -t:.+` |
@@ -117,6 +134,37 @@ Prefix table (partial, the canonical zz set):
 | `{` / `}` | `swap-pane -U` / `-D` | `:` | `command-prompt` |
 | `$` | `command-prompt -I #S 'rename-session -- %%'` | `,` | `command-prompt -I #W 'rename-window -- %%'` |
 | `Up/Down/Left/Right` | `select-pane -U/-D/-L/-R` (repeat) | `M-Arrow` / `C-Arrow` | `resize-pane` by 5 / by 1 (repeat) |
+
+## Default-prefix compatibility boundary
+
+The default zz prefix table is intentionally not a copy of the pin. zz has 60 default prefix
+bindings, the pin has 92, and 59 keys overlap. zz adds `e -> send-last-output`. It omits these 33
+stock keys:
+
+`#`, `'`, `(`, `)`, `*`, `-`, `.`, `/`, `<`, `>`, `@`, `BTab`, `C`, `C-z`, `D`, `DC`, `L`,
+`M`, `M-n`, `M-p`, `PPage`, `S-Down`, `S-Left`, `S-Right`, `S-Up`, `Tab`, `d`, `f`, `g`, `i`,
+`m`, `t`, and `~`.
+
+Several shared keys also name different commands:
+
+| Keys | Pinned tmux | zz default |
+| --- | --- | --- |
+| `%` | `split-window -h` | `split-picker -h` |
+| `"` | `split-window` (vertical by default) | `split-picker -v` |
+| `&`, `x` | `confirm-before` around kill | immediate kill |
+| `]` | `paste-buffer -p` | `paste-buffer` |
+| `?` | `list-keys -N` | `list-keys` |
+| `r` | `refresh-client` | `reload-config` |
+| `s`, `w` | `choose-tree` | `focus-sidebar` |
+| `M-Up`, `M-Left`, `C-Up`, `C-Left` | floating-aware `if-shell` resize | direct tiled-pane `resize-pane` |
+
+The numeric `0` through `9` bindings select the same windows on both sides, but their stored command
+text differs: zz uses `select-window -t :N`, while the pin uses `select-window -t :=N`.
+
+This is a product choice, not permission to reinterpret tmux syntax. A user's imported binding that
+names `split-window`, `choose-tree`, or `refresh-client` keeps the tmux command. The practical alias
+target promises command/config semantics and documents the default-key delta; it does not erase the
+picker and sidebar behavior that make the native GUI useful.
 
 The prefix key itself is bound to **`send-prefix`** in the prefix table, matching tmux's stock
 `bind C-b send-prefix`, so `<prefix> <prefix>` delivers one literal prefix keystroke to the pane.
@@ -137,7 +185,12 @@ control/named-key aliases; search keys `/`,`?` (vi) and `C-s`,`C-r` (emacs) bind
 `copy-mode-search-prompt`. Stock vi Escape is `clear-selection`; `q` and `C-c` cancel. The two
 keyboard exceptions are `P` (tmux's position-label toggle, redundant with zz's native indicator) and
 `r` (tmux live-refresh toggle, incompatible with the frozen revision). Pointer pseudo-bindings stay
-in the direct mouse route instead of this keyboard table. See [copy mode](/tmux/copy-mode.md).
+in the direct mouse route instead of this keyboard table. Every stock binding in these two persistent
+tables carries `repeat = false`, matching tmux's `list-keys` metadata. Copy-mode movement, jump
+capture, and numeric repetition do not read that binding field; `copy-mode-repeat`, `repeat_count`,
+and the copy action's runtime repeat policy own them. Prefix-table and user-created `bind-key -r`
+bindings still carry and use their repeat bit. The remaining shared copy-table differences are the 25
+command shapes listed in the live gap report, not repeat metadata. See [copy mode](/tmux/copy-mode.md).
 
 # Shifted key spellings
 

@@ -219,6 +219,7 @@ impl Peer {
             capabilities: Vec::new(),
             color_scheme: None,
             origin: None,
+            working_directory: None,
         }));
         assert!(
             matches!(peer.recv(), ProtocolMessage::ServerHello(_)),

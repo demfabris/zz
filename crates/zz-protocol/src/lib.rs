@@ -11,7 +11,8 @@ mod terminal_codec;
 
 pub use catalog::{
     COMMAND_SPECS, CommandOptionSpec, CommandResolution, CommandSpec, CommandValueKind,
-    DAEMON_COMMAND_SPECS, canonical_command, command_spec, resolve_command,
+    DAEMON_COMMAND_SPECS, NATIVE_COMMAND_NAMES, canonical_command, catalog_command_spec,
+    command_spec, command_specs, resolve_command,
 };
 pub use framing::{MAX_ENCODED_FRAME_BYTES, MAX_FRAME_BYTES, ProtocolError};
 pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};
@@ -37,14 +38,15 @@ pub use message::{
     MAX_AGENT_SEND_BYTES, MAX_AGENT_SESSION_DIRECTORIES, MAX_AGENT_SESSION_ID_BYTES,
     MAX_AGENT_STATE_BLOB_BYTES, MAX_AGENT_TOOL_CONTENT_ITEMS, MAX_AGENT_UPDATES_BYTES,
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_COMMAND_PROMPT_BYTES, MAX_GUI_TEXT_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
-    MAX_PASTE_UPLOAD_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, MAX_PASTE_UPLOAD_EXTENSION_BYTES,
-    MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey,
-    MuxOptionSource, MuxOptionValue, MuxOptions, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneIndicator, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines,
-    PopupState, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello, SourceSpan,
-    StatusLine, StatusPosition, TerminalUiCommand, agent_update_batch_bytes,
-    paste_upload_extension_is_valid, split_command_words,
+    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_COMMAND_PROMPT_BYTES, MAX_GUI_TEXT_BYTES,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_PASTE_UPLOAD_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES,
+    MAX_PASTE_UPLOAD_EXTENSION_BYTES, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MenuAction, MenuItem,
+    MenuState, MuxOptionKey, MuxOptionSource, MuxOptionValue, MuxOptions,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneIndicator, PasteUploadPurpose,
+    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, ProtocolMessage,
+    SPLIT_RATIO_BASIS, ServerError, ServerHello, SourceSpan, StatusLine, StatusPosition,
+    TerminalUiCommand, agent_update_batch_bytes, paste_upload_extension_is_valid,
+    split_command_words,
 };
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,

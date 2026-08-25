@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: tmux drop-in plan
-description: "The alias-tmux=zz plan: 100% of tmux's command grammar, options, formats, and geometry on tmux names, zz power moved to superset verbs, exec commands behind an import-time consent gate — nine phases ending at the TTY attach contract, one permanent skip (linked windows), one explicit non-goal (real-tmux socket interop)."
-status: Original nine phases shipped 2026-08-20; the approved core campaign (A3 → B/C → E → D2/D4/D3/D1) closed 2026-08-22 in eleven reviewed slices; F and G tranches and the parked contracts await their own approvals
+description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
+status: Original nine phases shipped 2026-08-20; the approved core campaign closed 2026-08-22; selected F and G follow-up slices shipped, while client, terminal, stream, and model contracts remain open or parked
 tags:
 - tmux
 - compatibility
@@ -11,15 +11,17 @@ tags:
 - control-mode
 - roadmap
 timestamp: 2026-08-20T00:00:00Z
+last_updated: 2026-08-24
 ---
 
 # Overview
 
-Goal: `alias tmux=zz` works — a tmux user's binary invocations, config, scripts, and muscle
-memory all behave identically, while zz-only power lives in superset verbs that never collide
-with tmux names. This supersedes the never-list of the
-[tmux superset roadmap](/designs/tmux-superset-roadmap.md); the current deltas being closed are
-enumerated in the [divergence matrix](/tmux/divergences.md).
+Original goal: `alias tmux=zz` works for a tmux user's invocations, config, scripts, and common
+key habits, while zz-only power lives in superset verbs that never collide with tmux names. The
+current target is the narrower, testable “compatible enough” workload in the
+[tmux superset roadmap](/designs/tmux-superset-roadmap.md). The live deltas are enumerated in the
+[divergence matrix](/tmux/divergences.md) and the source-anchored
+[2026-08-22 audit](/research/2026-08-22-tmux-cli-compatibility-audit.md).
 
 Revised same day after an adversarial review, every claim of which was verified against the
 tree: the differential harness moved off control mode onto `list-* -F`, the exec/consent story
@@ -69,12 +71,13 @@ The target splits in two:
    session-scoped prefixes stay parked.
 10. Each reviewed wave commits to `main` locally; pushes stay explicit.
 
-# Where this stands (2026-08-20)
+# Where this stands (2026-08-22)
 
-**All nine original phases are shipped, and the human attach half of the target is met:** a human
-typing `tmux new -s foo` lands inside the session. Strict config/script indistinguishability remains
-the end-state rather than a current claim: the live ledger below still has unsupported flags and
-documented semantic divergences.
+**All nine original implementation phases shipped.** A human typing `tmux new -s foo` lands inside
+the session, explicit attach works, and bare packaged `zz` now lazily creates and attaches session
+zero on an empty daemon. Strict
+config/script indistinguishability is not a current claim: the live ledger still has unsupported
+flags and documented semantic divergences.
 
 | Phase | State |
 | --- | --- |
@@ -86,31 +89,44 @@ documented semantic divergences.
 | 5 — the exec family | complete 2026-08-18 |
 | 6 — control mode (`-C`/`-CC`) | complete 2026-08-18 |
 | 7 — the binary surface | complete 2026-08-18 |
-| 8 — the attach contract (all four rows) | **closed 2026-08-20** |
+| 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-Acceptance, measured rather than asserted: the differential corpus runs byte-clean against
-pinned tmux `d77c9dc6` across ~40 scenarios; a real user `tmux.conf` and tmux-sensible
-import with **zero skipped lines**; TPM installs end-to-end under a PATH shim; twelve
-strings from the pin's own regress suite match byte-exact; and the attach contract was
-verified live on a pty (`new -s x \; split-window -h` → alt screen, panes `0` and `1` on
-both binaries).
+The live acceptance inventory contains 77 differential scenarios and 1,263 executable steps against
+pinned tmux `d77c9dc6`, including 17 config/plugin smokes. The complete strict run on 2026-08-24 left
+every ordinary row clean, with each known row at exactly its one documented GEO difference and every
+other channel clean. The canonical combined summary records the attached-client fixture separately
+as `PASS`; an exact scenario-path, step-count, and attached-proof check keeps that report current.
+The combined summary includes the 79-step `status-options` and 34-step `show-options-hooks`
+scenarios, both clean in every channel.
+`compat/attached-client.sh` drives real inner zz/tmux attaches through pinned-tmux PTYs, covering copy
+mode, choosers, prompts, prefix tables, buffers, and nested attach. The Cargo launcher and a verified
+built-bundle smoke both pass the six bare/new/attach × empty/existing cases through a spaced path.
+Gate 0 provides durable evidence for the surfaces it exercises. The live tracker still records CLI
+and TUI gaps, including startup config cause delivery, typed Control diagnostics, and asynchronous
+Control output; native GUI rendering still needs separate visual smoke evidence.
 
-**Options: all 180 of the pin's named options store; 67 behave.** The remaining 113 are
-honest storage — they accept, validate, scope, inherit, and read back exactly like the pin,
-and the [divergence matrix](/tmux/divergences.md) carries both rosters. (The running
-"78/180" tallies in the residue section below counted options given a typed home in the
-honest-knobs structs; a 2026-08-20 consumer trace found twelve of those unread. No table
-marker or drift test separates the two yet.) Nothing silently succeeds doing nothing any
-more.
+**Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
+remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
+daemon-expanded window loop. `BEHAVES` and its drift test make that split explicit. Some
+consumers remain bounded rather than byte-exact, so the roster means “reaches behavior,” not
+“fully compatible.”
 
-**Commands: 80 of the pin's 92 verbs run; 12 are absent** (3 buildable, 4 native-chrome
-superseded, 4 parked by decision or by the missing floating-pane model, `server-access`).
-After Waves 2a and 2b, **30 of the 80 still reject tmux flags** — exactly 129
-catalog-declared `unsupported` pairs, inventoried in the matrix — so "100% of the command
-grammar" holds at the verb level, not yet at the flag level.
+**Commands: 83 of the pin's 92 verbs run; 9 are recognized but unimplemented** (four
+native-chrome superseded, linked windows permanently excluded, and `new-pane`, `switch-mode`, and
+`server-access` parked on separate missing models).
+**Twenty-three of the 83 implemented commands still reject tmux flags:** exactly 85
+catalog-declared pairs, inventoried in the matrix and enforced by
+`the_unsupported_flag_ledger_matches_the_catalog`. Sixty commands have no catalog-declared
+flag gap, but accepted semantic divergences remain outside that count.
 
-**What is genuinely left**, in the order real configs hit it (re-ranked 2026-08-20 on
-corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugins):
+**The current queue** is dependency-ordered in the
+[tmux superset roadmap](/designs/tmux-superset-roadmap.md): mine real config hits for the next
+rank-4/5 slice, then repair script-visible output before
+adding one shared client-context model. Binary streaming and process control require a separate
+design. Floating panes stay parked; linked windows and real socket interop stay permanently
+excluded; ACLs remain parked outside the practical alias gate.
+
+**Historical 2026-08-20 queue**, retained as campaign context rather than current status:
 
 0. ~~**Oh My Tmux into the smoke corpus**~~ — SHIPPED 2026-08-20 (scenario green: 15 steps,
    zero divergences; after Wave 2a, zz's baseline was one skip, `send-prefix -2`, driven
@@ -162,13 +178,13 @@ corpus data: Oh My Tmux, fzf-tmux, tmux-sessionizer, and the seven pinned plugin
    with exit 0 because Command responses have no stderr channel. Keep the whole item parked
    until that response contract is approved rather than splitting one command's diagnostics.
 6. **Optional waves** — the 7c error-wording appendix (25 `needs a value` sites, `unknown
-   flag -X`, the `usage:` fallback), key-string parity (`list-keys` padding, `C-zz` prefix
-   strictness), `resize-window` (also unparks `window-size manual`), the prompt-history
+   flag -X`, the `usage:` fallback), key-string parity (`C-zz` prefix
+   strictness), the prompt-history
    pair, lock-program spawning on the TUI.
 7. **Parked by decision** — `status-keys` vi prompt (half-vi is worse than none), linked
-   windows and session groups (decision 3), the floating-pane family (`new-pane`,
-   `switch-mode`, `move-pane` placement flags), real-tmux socket interop (decision 4), the
-   21 theme-palette options and `tree-mode-*` (no demand).
+   windows and session groups (decision 3), floating-pane state (`new-pane`, `move-pane` placement
+   flags), pane-mode transition (`switch-mode`), real-tmux socket interop (decision 4), the 21
+   theme-palette options and `tree-mode-*` (no demand).
 
 Hardware-pending items that need fabrico rather than code: the wave-B status-bar visual
 smoke, a live `allow-passthrough` image smoke, the DCS-filter bench A/B, and an iTerm2
@@ -183,9 +199,14 @@ committed only after a MERGE-READY follow-up verdict. Measured results: `BEHAVES
 (the recomputed C target, 105 minus parked C5); unsupported command-and-flag pairs 129 →
 113 across 29 commands, now MACHINE-ENFORCED by
 `the_unsupported_flag_ledger_matches_the_catalog` (a literal roster cross-checked against
-the catalog in both directions — it has already caught three moves); differential corpus 48
-→ 56 scenarios, zero SKIPs; protocol v71 shipped as one append-only bundle whose every
-field is now consumed.
+the catalog in both directions — it has already caught three moves); a campaign run reported the
+differential corpus moving 48 → 56 scenarios with zero SKIPs, though at campaign close the
+checked-in summary still contained the older 48-scenario evidence. The 2026-08-22 alias tranche
+subsequently refreshed it to 58 scenarios and 846 steps; the rank-5 output/fact fixtures then raised
+the report to 61 scenarios and 874 steps. The capture and manual-geometry slices then brought the
+inventory to 63 scenarios and 905 steps; the later placement, environment, input, buffer, source,
+zoom, and micro-flag fixtures raised the canonical report to 71 scenarios and 1,032 steps. Protocol
+v71 shipped as one append-only bundle whose every field is now consumed.
 
 The campaign's own discipline held: divergences are ledgered rather than silent, with three
 lapses caught and fixed in-wave. Six times an implementer measured the pinned binary and
@@ -193,14 +214,13 @@ found the brief wrong — mouse defaults ON in next-3.8, `display-panes-format`'
 default, `\;` chain-stop semantics, the freeze not being hermetic, prompt-vs-message freeze
 stickiness, and refusal tests that never existed — and each time the measurement won.
 
-Live residues a heavy tmux user could still meet, all ledgered in
-[the divergence matrix](/tmux/divergences.md): per-window copy-mode styles that store but
-do not recolour, border-style owner granularity on nested layouts, and `source-file`'s
-parse-abort semantics (one typo leaves zz with a fully-applied config and the pin with
-none). Scheduled, not silent: the bell attach-clear convergence, F6's harness fix (which
-also restores differential coverage for copy-mode, choosers, and prompts — none of which
-can ride the corpus today because all three refuse non-interactive clients), and F0's
-dispatcher collapse plus its inherited roster.
+At campaign close, the live residues were per-window copy-mode styles, nested-layout border-style
+ownership, client-relative `source-file` paths, script-visible capture/list behavior, bell
+attach-clear convergence, F6's attached harness, and F0's dispatcher collapse. The current alias
+tranche completed the F6 harness and now covers copy mode, choosers, prompts, buffers, prefix tables,
+and nested attach through real PTYs. The remaining current gaps live in
+[the divergence matrix](/tmux/divergences.md); the largest coherent tranche is attach-side client
+context for cwd, environment reseeding, flags, and eviction.
 
 This campaign closes items 3 through 6 from the live queue, then works through the
 remaining flag ledger. File-and-line anchors in this section refer to commit `57ae502`.
@@ -254,9 +274,8 @@ behavior is settled.
 
 The starting ledger has 129 unsupported command-and-flag pairs. Waves B through D removed
 16, leaving 113 (the pre-wave estimate said 15 and 114; the difference is arithmetic, not a
-missed pair). The revised G plan assigns 85 implementations and names 29 parked pairs,
-including the four client-environment flags and `split-window -I` omitted from the first
-count.
+missed pair). The revised G plan assigns 85 implementations and names 28 parked pairs. It counts
+the shipped `move-pane -l` once, on the implementation side.
 
 ## Wave 0 - CI green
 
@@ -324,7 +343,7 @@ terminal lane retains its explicit byte layout.
 | Mux options | Append `MuxOptionKey::{Mouse, EscapeTime, Prefix2}` with tags 14 through 16. Keep `Prefix` and `Prefix2` global in v71 because the shared `KeyTables` own one prefix pair; tmux-style session-scoped prefixes require a separate core refactor. | B2, B3, C2. `Mouse` publishes the attached session's effective value; `EscapeTime` and `Prefix2` publish the global values. |
 | Status | Append `StatusLine.{title: String, base_style: String, rows: Vec<String>, position: StatusPosition, message_line: u8, customized: bool}`. Keep the existing `left` and `right` first for v70 layout. Move `StatusPosition` into `zz-protocol` and re-export it from `zz-mux`; keep justify inside the expanded row formats. Cap rows at five and every string at 4 KiB. Reject a sixth row before allocation, require `base_style` to parse as a style, and require `message_line == 0` for no rows or less than `rows.len()` otherwise. | B1 and B4, C3. `rows` is the authoritative personalized status block and drives `is_empty`: zero rows means off, blank rows still consume geometry, and sparse `status-format` indices do not compact. `base_style` paints blank rows. `customized` controls zz-native hints even when an explicit value equals the default. Title still publishes while status is off. |
 | Display panes | Append `PaneIndicator.label: String`, bounded to 1 KiB; remove its current `Copy` shape and borrow it in helpers. | C4. The daemon expands `display-panes-format` separately in each pane context and both clients paint the result. |
-| Pane borders | Append `PaneSnapshot.{border_colour, active_border_colour}: Option<TmuxColour>` and give `TmuxColour` validated wire serialization. `None` means theme fallback. | C9. Pane-scoped fields preserve pane to window to global inheritance; one pair on `WindowSnapshot` cannot represent distinct pane overrides. Keep non-color attributes ledgered. |
+| Pane borders | Append `PaneSnapshot.{border_colour, active_border_colour}: Option<TmuxColour>` and give `TmuxColour` validated wire serialization. `None` means client fallback. | C9. Pane-scoped fields preserve pane to window to global inheritance; one pair on `WindowSnapshot` cannot represent distinct pane overrides. The raw TUI consumes the fields. The GPUI client keeps pane chrome under its local theme. Keep non-color attributes ledgered. |
 | Prompt | Keep `CommandPromptKind::{Command, Value}`. Append `prompt_type: CommandPromptType`, `mode: CommandPromptMode`, and `no_freeze: bool`; types are `Command|Search` and `Text|Single|Numeric|Incremental|Key|BackspaceExit`. Do not add a prompt-key action. | D1. `kind` remains presentation state, while `-T` is independent. Resolve mode flags with pinned priority `-1`, `-N`, `-i`, `-k`, `-e`; preserve `-C` independently. Route raw special-mode keys through the existing pane-targeted `InputMessage::Key`. The daemon prompt state machine returns handled or pass so `-N` can submit digits and then feed the first non-digit into normal key processing. |
 | Copy mode | Append `hide_position: bool` after `TerminalMode::Copy.total`; encode Copy as tag plus two `u64`s plus one canonical bool byte. Append `TerminalViewAction::EnterCopyModeWith { scroll_exit, hide_position }` at tag 27 while preserving both old variants. | D2. The action shape lets `-e` and `-H` compose; both clients suppress only the position text. |
 | Choosers | Append bounded `key: String` to `ChooseTreeItem` and `ChooseBufferItem`; cap it at 64 bytes and use empty for no shortcut. | D4. Existing actions already carry `KeyInput`. Default rows use `0..9`, then `M-a..M-z`; invalid keys become empty and duplicate keys select the first row before navigation. `-N` preview state remains internal. |
@@ -380,10 +399,14 @@ read-only), each closed by an independent adversarial review and a MERGE-READY f
 folds in from C3); the flag ledger fell 129 to 128 (`attach-session -r`). One brief error
 was caught against the pin mid-wave: the pinned tmux builds with mouse ON by default
 (`TMUX_MOUSE=1`), and zz already matched. Pane-requested mouse forwards with the option
-off, pin-exact. Ledgered bounds: status-row window-option scoping (fix scheduled into
+off, pin-exact. At the 2026-08-21 Wave B ship point, the ledgered bounds were status-row
+window-option scoping (fix scheduled into
 Wave C via the `Expander::lookup` loop-item seam), the status-block suppression
 threshold, the empty-title expansion edge, read-only decoupled from `ignore-size`, and
-`new-session` inside a pane not yet nested-refusing.
+the then-open nested `new-session` check.
+
+The nested `new-session` bound closed on 2026-08-22: attaching forms now run the same tty refusal
+as `attach-session` before the mux mutates.
 
 At the source anchor, the TUI ignored `CoreEvent::MuxOptionsChanged`, stored no mux option
 state, and printed daemon-authored `#[style]` markers as text. The safe prelude fixed the
@@ -475,8 +498,8 @@ the parked `remain-on-exit-format` — and the flag ledger fell 128 to 127
 proven end-to-end by the restored per-window PTY smoke. Two divergences opened with the
 new surfaces and are ledgered: border-style owner granularity (one colour per divider
 where the pin resolves per cell span) and the one-appearance channel bounding per-window
-copy-mode styles. The attach-clear bell asymmetry from run 2 stays scheduled for the next
-slice that owns bell behavior.
+copy-mode styles. The run-2 attach-clear bell asymmetry and the remaining alert state edges
+closed on 2026-08-24; alert message freeze and lifetime remain separately tracked.
 
 1. Alerts: **shipped 2026-08-21 (run 2).** The bell path generalized into the pin's
    alerts.c model: `monitor-bell` gates `raise_pane_bell`, PTY output (the coalesced
@@ -486,15 +509,20 @@ slice that owns bell behavior.
    on output, selection, expiry, and any `monitor-silence` write via
    `MuxEffect::MonitorSilenceChanged` — the pin's `alerts_reset_all`). Selection clears
    flags then requeues activity like `session_set_current`; the `*-action` and
-   `visual-*` options gate hooks and per-client ring/message delivery through the shared
-   `window_alert_notifications` fanout with the pin's message texts. Formats:
+   `visual-*` options choose one outcome from the session's active window and fan that
+   outcome to eligible clients through `window_alert_notifications`, with the pin's texts. Formats:
    `window_activity_flag`/`window_silence_flag` backed for real, `#`/`!`/`~` in
-   `window_flags` in pin order, `session_alert`/`session_alerts` aggregate all three,
+   `window_flags` in pin order, `session_alert`/`session_alerts` aggregate all three, the
+   misleadingly named `session_activity_flag`/`session_silence_flag` mirror the target window,
    and `window-status-activity-style` layers into the status label where the bell style
    does (bell wins when not `default`). Everything is inert at defaults: no timers, no
-   flag writes, and the bell path unchanged with `monitor-bell on`. Silence TIMING is
-   daemon-test-only; the `alerts` differential scenario covers flags, actions, readback,
-   and format output with timing-free triggers.
+   flag writes, and the bell path unchanged with `monitor-bell on`. The 2026-08-24 follow-up
+   made every successful silence write reset all timers, made attach clear every alert kind and
+   terminal bell latch on the active window, and brought writable text/paste message dismissal
+   into the ordinary status-message path. Alert-produced messages still bypass that daemon-owned
+   lifecycle and leave terminal publication unfrozen, while the pin arms `TTY_FREEZE` through
+   `status_message_set(..., no_freeze = 0)`. Silence timing stays daemon-test-only; the 62-step `alerts` differential covers
+   flags, actions, readback, duplicate writes, and format output with timing-free triggers.
 2. `prefix2` and `send-prefix -2`: **shipped 2026-08-21 (run 2).** `KeyTables` carries an
    optional canonical second prefix (`set_prefix2` never touches bindings — the pin has
    no stock `send-prefix -2` binding), both `KeyEngine` arming sites accept either
@@ -518,18 +546,25 @@ slice that owns bell behavior.
 5. `remain-on-exit-format`: park until the terminal actor has an approved post-worker VT
    injection or frozen-view reconstruction seam. The current retained-pane path marks the
    pane dead after the live PTY/VT actor exits, so the proposed feed path does not exist.
+   The tracker keeps whole-catalog option-name format coverage in a separate mux-owned group;
+   separator and hook-listing evidence does not close that audit.
 6. `command-alias`: **shipped 2026-08-21.** `MuxEngine::expand_command_alias` expands one
    layer through the config tokenizer, appends caller arguments, and never recurses (the
-   pin's `CMD_PARSE_NOALIAS`). It runs at both dispatch chokepoints — the daemon's
-   preemption fork before `DAEMON_COMMAND_NAMES`, so aliases reach daemon-owned commands,
-   and `execute_with_shell_validator` before canonical lookup — plus bind-key, set-hook,
-   and option-command validation. The six stored defaults match the pin; no catalog alias
-   deletion was needed. Ledgered: control mode's client-side parse pre-check rejects
-   user alias names before dispatch (no wire carries server options to that client).
+   pin's `CMD_PARSE_NOALIAS`). Standalone mux execution expands once before canonical lookup.
+   Daemon execution expands once before read-only authorization, then sends the same immutable
+   invocation through logging, native preemption, mux dispatch, and hooks without another alias
+   lookup. Stored bindings prepare and authorize each command immediately before it runs, so an
+   earlier command can change the alias seen by the next command. Bind-key, set-hook, and
+   option-command validation also expand one layer. The six stored defaults match the pin; no
+   catalog alias deletion was needed. Ledgered: exact native attach spellings enter client-owned
+   routing before live server aliases, arbitrary live aliases cannot request stdin capture,
+   Control rejects unknown alias names before dispatch, and a failing alias named `kill-server`
+   enters incompatible-daemon recovery; `aliases.client-preflight` owns all four seams.
 7. `update-environment`: **shipped 2026-08-21.** `seed_session_environment` and
    `global_tmux_option_value` both read the stored array; the frozen constant is gone from
-   `command.rs`. The client-environment flags (`-E`, attach re-seeding, `fnmatch` value
-   patterns) stay ledgered because the wire carries no client environment.
+   `command.rs`. Creation-time `new-session -e/-E` shipped 2026-08-22. Client-sourced values,
+   attach re-seeding, `attach-session -E`, and `fnmatch` value patterns stay ledgered because the
+   wire carries no client environment.
 8. Lifecycle trio: **shipped 2026-08-21.** A dedicated `scalar_option_explicit` accessor
    over the stored-scalar maps gives presence-means-set semantics at each option's pin
    scope; `should_shutdown_if_empty` consults `exit_empty_explicit` /
@@ -553,12 +588,11 @@ slice that owns bell behavior.
      ledgered.
    - `pane-border-style`/`pane-active-border-style` explicit COLOURS resolve per pane
      during personalized snapshot stamping (`stamp_pane_border_colours`, formats expanded
-     in pane context) onto the v71 `PaneSnapshot` fields; `None` = theme fallback, so
-     unset options render exactly today's chrome (decision 6). The TUI colours dividers
-     (style-owner: active-adjacent pane first) and pane headers; the GUI its pane frame
-     border, split hairline, and active-split highlight through
-     `theme::resolve_tmux_colour`. Non-colour attributes stay ledgered; the GUI visual
-     smoke is hardware-pending.
+     in pane context) onto the v71 `PaneSnapshot` fields. The TUI colours dividers
+     (style-owner: active-adjacent pane first) and pane headers, with its normal colours
+     as the fallback when a field is `None`. The GPUI client ignores both fields and
+     derives pane frames, split hairlines, and active-split highlights from `cx.theme()`.
+     Non-colour attributes stay ledgered.
 
 The full B and C target moves `BEHAVES` from 67 to 105: 12 Wave B consumers and 26 Wave C
 consumers. The C tranche, if approved without `remain-on-exit-format`, stops at 104. Wave C
@@ -673,16 +707,15 @@ deltas in tests.
    catch-up frame and re-freezes, a key retires the message and unfreezes, `-d 0` pins
    until a key, `-C` never stops the timer, and `-d` validates with the pin's `strtonum`
    strings (`delay invalid` / `too small` / `too large`) over `0..=4294967295`.
-   Only `InputMessage::Key` dismisses: zz splits one physical press into `Key` plus a
-   trailing `Text` whose suppression happens later in `input_text`, so letting `Text`
-   dismiss would let a key bound to `display-message` wipe the message it had just raised
-   (pinned by `a_bound_key_that_displays_a_message_survives_its_own_trailing_text`).
+   Writable non-release keys, explicit paste actions, and nonempty bulk `Text` remaining after
+   suppression dismiss before prompt, key-table, or pane dispatch. A bound key's fully suppressed
+   trailing text leaves the message it just raised intact, and read-only input does not dismiss.
    Control clients are excluded outright, matching the pin: `cmd_display_message_exec`
    routes `CLIENT_CONTROL` through `server_client_print` and never reaches
    `status_message_set`, so `%message` keeps carrying no duration and gets no clear.
-   Residues, all bounded: zz's alert/read-only message producers keep client-side timing
-   and never freeze (the pin's `alerts.c:318` does call `status_message_set` with
-   `no_freeze` clear), `display-popup` frames are not frozen, and `-N` stays unsupported —
+   Residues, all bounded: zz's alert message producers keep client-side timing
+   and do not arm the daemon freeze (the pin's `alerts.c:318` calls `status_message_set` with
+   `no_freeze` clear, which sets `TTY_FREEZE`), `display-popup` frames are not frozen, and `-N` stays unsupported —
    the pin's `message_ignore_keys` is sticky client state that `delay == 0` skips writing,
    so a `-N -d 5000` leaves a later plain `-d 0` message un-clearable by key, measured on
    the pin. Ledger 122 → 120.
@@ -748,36 +781,92 @@ control-mode `%config-error` is reconstructed by a prose sniffer (`is_config_mes
 must either move to a typed marker or pin the wording with a test.
 
 For an explicit `source-file` issued by a Command client, append invalid-line diagnostics to
-stdout and return exit 1. Interactive and Control clients keep warning events and
-`%config-error`. A glob miss without `-q` uses `No such file or directory: path` on stderr
-and exits 1; a quiet miss produces no output and exits 0. Mixed invalid input and a glob miss
-populate both streams and exit 1. Preserve diagnostic order and duplicates. The zz-only
+stdout and return exit 1. Interactive clients keep warning events, while Control renders parser
+diagnostics as `%config-error`. A glob miss without `-q` uses `No such file or directory: path` on
+stderr and exits 1; a quiet miss produces no output and exits 0. A direct all-miss Control invocation
+puts its diagnostics inside `%error` and stops the rest of that input line. If at least one direct
+path matches, missing-path diagnostics remain inside `%end` and the input line continues. Mixed invalid input and a glob miss
+populate both Command streams and exit 1. Preserve diagnostic order and duplicates. The zz-only
 `skipped N unsupported tmux command(s): name, ...` summary stays on stderr and exits 0 so a
 config with supported tmux behavior continues to load.
 
 Add a stream-aware command result while preserving the current output-only client API.
-Treat completed commands with exit 1 as successful protocol responses; reserve response
-errors for dispatch, transport, and server failures. The CLI prints both streams and follows
-the pin's chain rule above. CLI coverage landed for the glob-resolved matched path plus
+Treat completed Command-client commands with exit 1 as successful protocol responses. Control uses
+a response error for a direct all-miss source invocation so it can preserve tmux's same-line abort;
+generic nonzero successes still continue. The CLI prints both streams and follows the pin's chain
+rule above. CLI
+coverage landed for the glob-resolved matched path plus
 `:1: unknown command: wibble` on stdout with exit 1, the mixed-stream matrix, nested and
-multiple inputs, the default-config path, Control `%config-error`, and the
+multiple inputs, the default-config path, Control `%config-error`, and the nine-step
 `smoke/source-file-diagnostics` scenario, whose fixture drives the plain CLI on both sides
 from a `run-shell` job and diffs stdout, stderr, and exit code byte-for-byte. `source-file -`
 remains in the separate G6 streaming contract; it now refuses on stderr at rc 1.
 
-The prose sniffer is pinned from both sides rather than retired:
-`config_diagnostics_pin_the_control_mode_sniffer_wording` (zz-daemon) locks what the config
-loader emits and `every_daemon_config_diagnostic_reaches_the_config_error_channel`
-(`control_mode.rs`) locks what `is_config_message` accepts. A typed wire marker is still the
-better fix and still needs a protocol bump.
+The three-step `smoke/source-file-control` scenario separately preserves attached Control frame
+boundaries. It covers direct all-miss and partial-match behavior, one nested all-miss group,
+`%config-error`, and generic nonzero continuation. The nested frame agrees only in that covered
+all-miss case. tmux emits a flags-1 guard for every sourced command, while zz synthesizes a plain
+`%error` only for recognized nested diagnostics; partial nested matches, quiet misses, ordinary
+commands, and mixed-depth order remain under `control-mode.sourced-command-frames` and
+`source-file.nested-control-queue`. The asynchronous
+`run-shell` exit text itself is excluded from the slice because zz still emits it inside the completed
+response where tmux prints it unframed after `%end`; `control-mode.async-command-output` tracks that
+gap, and the scenario header names the exclusion. Its third step runs a second control client over
+a 50-level chain so invocation 51 is loud. That step deliberately compares wording count,
+outer-line continuation, reached depth, containing-file continuation, the leaf that never loads,
+and the detached client's status instead of frame boundaries, because a 50-file chain would
+otherwise be dominated by the tracked per-sourced-command guard difference.
 
-Two residues stay open, both ledgered rather than forced: a RELATIVE source path resolves
-against the daemon's cwd and prints unresolved where the pin prefixes the client's cwd, and
-zz emits one diagnostic per invalid line and keeps loading where a single parse error aborts
-the pin's whole file with exactly one cause. The second is `cmd_parse_from_buffer` abort
-semantics, not diagnostic routing; the compat scenario therefore compares absolute paths
-only. The flag ledger is untouched at 127 pairs across 29 commands — diagnostics are
-behavior, not flags — and `catalog.rs` has no diff this wave.
+The prose sniffers are pinned from both sides rather than retired:
+`config_diagnostics_pin_the_control_mode_sniffer_wording` (zz-daemon) locks what the config
+loader emits and `daemon_diagnostics_are_partitioned_between_config_and_source_channels`
+(`control_mode.rs`) keeps parser causes on `%config-error` while source misses become plain error
+frames. That covers the current English oracle, not arbitrary prose: localized Unix source errors,
+non-Unix traversal errors, or future config wording can still be dropped or misframed. The active
+`control-mode.diagnostic-typing` gap requires typed wire identity and a protocol bump.
+
+Protocol v72 later closed the top-level relative-path residue with a bounded local caller cwd,
+glob-escaped cwd prefix, and declared-path diagnostics. The generated tracker keeps the related
+residues separate: attached commands still use the client's process cwd instead of the session cwd;
+nested `source-file` still rebases from the containing file instead of repeating the pin's client
+cwd lookup; event hooks can still lose the current client used for cwd selection; zz still applies
+valid commands after parser diagnostics instead of aborting the whole file at the first cause; and
+non-UTF-8 cwd bytes are omitted rather than preserved. Nested loud no-match and glob errors now use
+the post-`-F` declared argument on the invoking client's diagnostic stream, and nested quiet
+no-match stays silent. For recognized Control warnings, zz keeps all misses from one nested command
+together in argument order and continues the outer same-line chain. This is a synthesized diagnostic
+frame, not tmux's sourced-command guard model. Quiet and ordinary guards remain open in
+`control-mode.sourced-command-frames`; nested partial markers and containing-before-deeper order
+remain open in `source-file.nested-control-queue`. The different nested cwd base remains open.
+The nesting limit is closed for depth wording, count, and continuation. Counting the initial
+`source-file` as invocation 1, both sides run 50 concurrent source invocations and refuse invocation
+51 before any of its paths are matched or loaded: Command stderr at rc 1, the same lowercase text on
+the Control error channel while the outer typed line continues, and the capitalized `Too many nested
+files` on an attached status line. `-q` does not suppress it, a refused command emits one diagnostic
+rather than one per path, and the containing file keeps running its later physical lines. A
+malformed invocation at that depth is diagnosed as malformed rather than as depth on both sides,
+because the pin rejects it while parsing the containing file and never consults its depth guard;
+that precedence, the stdout stream, and the rc-1 exit agree, while the differing malformed text
+belongs to `mux.error-shapes` and the pin's abandonment of the rest of the containing file belongs
+to `config.parser-edge-cases`. Exact Control frame placement is not closed: the pin prints the
+refusal inside the rejected nested command's own flags-1 `%begin`/`%error` frame while zz
+synthesizes a standalone `%error`, which belongs to `control-mode.sourced-command-frames` and
+`source-file.nested-control-queue`. A same-line `;` sibling inside the containing config file also
+still runs in zz where the pin drops the rest of that sourced line, under
+`config.same-line-error-group`. A replayed command that fails for an ordinary runtime reason is
+dropped entirely in zz, leaving the containing `source-file` silent at rc 0 where the pin reports
+the bare message on the invoking client's error channel and exits 1;
+`config.replayed-command-errors` owns that. Startup accounting now matches the pin: one budget spans
+every startup root, top-level roots do not count, and source commands after the first 50 retain their
+declaring file and line. zz still discards those causes before Control or attached clients can read
+them; `config.startup-diagnostic-delivery` owns that. Unix matching uses the
+pin's `glob(3)` contract for backslashes, dotfiles, repeated stars, malformed patterns, and result
+order.
+`source-file` no longer performs a second tilde rewrite after parsing, so parser-expanded tildes
+stay absolute and literal tildes follow the selected relative-path base. SSH
+omission is covered at the endpoint-facts helper but still lacks an end-to-end remote fixture. The
+flag ledger is untouched at 127 pairs across 29 commands — diagnostics are behavior, not flags — and
+`catalog.rs` has no diff this wave.
 
 ## Wave F - shared contracts and optional semantics
 
@@ -803,17 +892,19 @@ behavior, not flags — and `catalog.rs` has no diff this wave.
    too-many argument, alias, and usage fallback shapes. Treat this as a command-semantics
    tranche rather than a text-only cleanup.
 2. Key grammar and tables: add a fallible canonical key parser, reject malformed modifier
-   tails, align bare `list-keys` output, and pin the supported stock copy-table metadata,
+   tails and pin the supported stock copy-table metadata,
    repeat flags, and actions. Preserve zz-native product bindings. Review missing actions
-   before importing more pinned rows. Complete this tranche before G4.
-3. `resize-window` and `window-size manual`: approve geometry policy on its own. Specify
-   absolute and relative precedence, ranges, persistent manual extent across viewer changes,
-   layout effects, PTY resize behavior, and differential fixtures. Stop resolving Manual as
-   Latest only after those invariants have tests.
-4. Prompt history, after A3 and D1: add typed Command and Search storage plus
-   `show-prompt-history` and `clear-prompt-history [-T type]`. Pin ordering, output, errors,
-   and prompt-to-history routing. Clearing rewrites persisted state so old entries do not
-   return after restart. Keep save-on-submit as the documented durability choice.
+   before importing more pinned rows. Bare `list-keys` alignment shipped 2026-08-22; the remaining
+   selectors and stock copy-table repeat metadata shipped 2026-08-24. The live tracker now keeps
+   only 25 shared copy-table command-shape differences in this tranche.
+3. ~~`resize-window` and `window-size manual`~~: **SHIPPED 2026-08-22.** The practical absolute
+   and relative forms own the durable layout extent, manual sizing outranks client measurements,
+   PTYs follow the manual pane allocations, and a 16-step strict-geometry fixture covers output,
+   formats, option transitions, bounds, and target/error precedence. Client-derived `-A`/`-a`
+   remain loud.
+4. ~~Prompt history, after A3 and D1~~: **SHIPPED 2026-08-22.**
+   `show-prompt-history` and `clear-prompt-history [-T type]` now expose the existing typed rings
+   with pin ordering, output, errors, selective clearing, and serialized persistence.
 5. Lock and client process control: defer for a separate protocol and execution-policy
    approval together with `detach-client -E`. Settle target fanout, stale unlock rejection,
    reconnect cleanup, input gating, shell/cwd/environment, process failure, raw-mode restore,
@@ -844,25 +935,37 @@ unsupported-pair roster.
 
 Tranches:
 
-- G1 environment: carry repeated creation-command `-e KEY=VAL` through the internal spawn
-  effects for new session, window, and pane paths, with pinned validation and precedence
-  against session and global environment. Park all four `-E` pairs for `attach-session`,
-  `new-session`, `new-window`, and `split-window` until the client environment has an
-  approved wire contract.
-- G2 pane input and marking: `select-pane -d -e -m -M -g -P`, `last-pane -d -e`, the marked
-  pane target and format facts, and per-pane style storage. Gate every daemon input route,
-  keep one global marked pane, and clear it on pane relocation or death. Implement after C9.
-- G3a placement: `break-pane -a -b`, `new-window -b`, `join-pane -l`, and
-  `split-window -Z`.
+- G1 environment: `new-window` and `split-window` now carry repeated `-e KEY=VAL` overlays
+  through `PaneCreated`, after the session environment and before forced pane identifiers.
+  Malformed entries are ignored, later entries win, and the overlay is never stored on the
+  session. Their `-E` forms create live empty panes without a child process. Creation-time
+  `new-session -e` now persists last-wins overlays on the new session and reaches its first pane;
+  creation-time `-E` suppresses the normal `update-environment` seed but retains explicit `-e`.
+  `new-session -A` against an existing session ignores `-e`, matching the pin. The remaining G1
+  work is client-sourced creation and attach-time reseeding: zz has no client environment to copy,
+  accepted `new-session -E` has no existing-session reseed to suppress, and `attach-session -E`
+  stays rejected until that wire contract exists.
+- G2 pane input and marking: `last-pane -d/-e` shipped 2026-08-22 with input gating at the daemon's
+  shared sink resolver. The remaining work is `select-pane -d -e -m -M -g -P`, the marked pane
+  target and format facts, and per-pane style storage. Gate every daemon input route, keep one global
+  marked pane, and clear it on pane relocation or death. Implement after C9.
+- G3a placement: `new-window -b`, `join-pane -l`, `break-pane -a -b`, and `split-window -Z`
+  shipped 2026-08-22. Join length accepts cells or percent, expands destination-pane formats,
+  and uses the whole-window basis under `-f`. Break placement shuffles occupied window indexes,
+  lets `-b` win over `-a`, and falls back from an unused indexed target to the current window.
+  Successful `split-window -Z` zooms the post-spawn active pane; a plain split clears zoom even
+  under `-d`.
 - G3b spawn metadata and styles: `split-window -k -m -R -s -S -T`. Keep the C5-dependent
   subset parked until its terminal seam has approval; implement the independent subset only
   after C9 defines per-pane metadata.
 - G3c wait lifecycle: implement `split-window -W` with command-queue ownership,
   cancellation, client disconnect, and daemon lifecycle tests.
-- G4 keys: `list-keys -1 -a -N -O -P -r` and `unbind-key -a -q`. `Binding` already carries
-  `note: Option<String>` and its wire snapshot preserves it, so `list-keys -N` has backing
-  state. Implement after F2 and pin filtering, sort order, prefix formatting, widths,
-  missing targets, notes, and repeat metadata.
+- G4 keys: `unbind-key -a -q` and `list-keys -a -N -P` shipped 2026-08-22. The note listing
+  reads `Binding::note`, limits its default view to `prefix` then `root`, computes facts after
+  filtering, and treats `-P` as a literal label. **Complete 2026-08-24:** `list-keys -1 -O -r`
+  and the positional key filter now share the pin's grammar, precedence, sorting, post-truncation
+  facts, and attached-client presentation. Stock copy tables expose no false repeat bits. The pin's
+  non-total comparator is retained as one bounded accepted divergence rather than copied into Rust.
 - G5a chooser residue: `choose-buffer -F -k -y` and `choose-tree -F -h -k -y`.
 - G5b output, format, and filter behavior: the relevant `display-message`, `display-panes`,
   `show-messages`, `source-file`, `capture-pane`, and `command-prompt` pairs.
@@ -874,6 +977,13 @@ Tranches:
 - G5e terminal engine and history: the remaining capture, copy-mode, clear-history,
   send-keys, and resize-pane pairs. Review pending-output, escape, hyperlink,
   alternate-history, reset, and target semantics before accepting each flag.
+- The first script-visible capture slice shipped 2026-08-22 without changing the unsupported-pair
+  roster: `capture-pane -p` now owns stdout, no-`-p` capture owns named or automatic buffer bytes
+  with the pin's final newline. The slice's 2026-08-23 extension brings its fixture to 23 clean
+  steps and covers clustered value flags, inclusive/reversed `-S`/`-E` ranges, target-scoped format
+  expansion, and invalid/out-of-range fallback. G5b/G5e still own `-C`/`-F`/`-H`/`-L`/`-P`/`-R`,
+  inert `-T`, saved-alternate/raw transport, and the trailing-blank-row difference at fallback
+  visible end.
 - G5f mouse-driven behavior: `resize-pane -M` consumes an originating drag event and keeps
   its own input and geometry tranche.
 - G6 binary stdin and stdout streaming: `split-window -I`, `load-buffer -`, `save-buffer -`,
@@ -881,20 +991,21 @@ Tranches:
   are accepted positional grammar with missing behavior. Park the tranche until a dedicated
   protocol defines bounded binary chunks, EOF, backpressure, cancellation, disconnect,
   size limits, and binary stdout.
-- Keep 24 pairs parked: `move-pane` x10, `break-pane -W -x -y -X -Y`, `new-session -t`,
+- Keep 23 pairs parked: `move-pane` x9, `break-pane -W -x -y -X -Y`, `new-session -t`,
   `kill-session -g`, `choose-tree -G`, `command-prompt -P`, `copy-mode -S`,
   `send-keys -M`, `display-message -I`, and `show-messages -T -t`.
 
-The ledger now holds 113 unsupported flag pairs across 29 commands. Wave D is complete:
+The Wave D ledger held 113 unsupported flag pairs across 29 commands. The first 2026-08-22 alias
+slice implemented three pairs, and the filtered kill-command slice implemented three more, leaving
+107 across 26. Wave D is complete:
 `attach-session -r` left with Wave B's read-only slice, `send-prefix -2` with Wave C run 2,
 `copy-mode -H` plus `-K`/`-N` on both choosers with Wave D run 1, `display-message -C -d`
 with run 3, and `command-prompt -1 -C -e -i -k -N -T` with the final run —
 the plan's "leaving 114" was arithmetic drift, not a missed pair: 129 - 1 - 1 - 5 - 2 - 7
-is 113. The original G list omitted seven
-chooser pairs and four parked `-E` pairs; the unsupported-pair roster replaces prose
-arithmetic as the completion proof. With the seven chooser pairs assigned to G5a and the
-current `-E`, streaming, and explicit parked sets unchanged, the planned result is 85
-implemented and 29 parked.
+is 113. The original G list omitted seven chooser pairs, and later slices changed its environment
+and spawn assignments. The unsupported-pair roster replaces prose arithmetic as the completion
+proof. With the seven chooser pairs assigned to G5a and shipped `move-pane -l` counted only as an
+implementation, the plan assigns 85 implementations and 28 parked pairs.
 
 ## Order and wave gates
 
@@ -903,7 +1014,7 @@ The completed safe prelude is `0 -> A1 -> A2 -> B1-existing-wire`. After core ap
 new response streams without interactive state, and shipped 2026-08-22, as did D2 and D4. D3
 establishes the freeze lifecycle before D1 reuses it for prompts.
 
-Continue with `F0 -> F1 -> F2 -> F3 -> F4 -> G1 -> G2 -> G3a -> independent G3b -> G3c ->
+Continue with `F0 -> F1 -> F2 -> F3 -> F4 -> G1 remainder -> G2 -> G3a -> independent G3b -> G3c ->
 G4 -> G5a..G5f`. C5 and its G3b dependents wait for a terminal injection design. F5 plus
 `detach-client -E` needs a later process-control bump, and G6 needs a binary-stream bump.
 Each contract gets its own approval and review.
@@ -954,7 +1065,7 @@ geometry fixtures matched their documented divergences, and all eight plugin smo
 | F5 TUI lock | Park. It adds new lock execution behavior and optional wire messages. |
 | TUI status extras | Keep `PREFIX` and `COPY`; hide the detach hint after explicit status customization. |
 | Unsupported config summary | Park until Command responses gain an approved stderr channel; keep stderr plus exit 0 and invalid lines at exit 1 in the eventual contract. |
-| Client environment and stdin wire | Park G1 `-E` and all G6 streaming until fabrico approves the contracts. |
+| Client environment and stdin wire | Park `attach-session -E`, the attach-side reseeding half of `new-session -E`, and all G6 streaming until fabrico approves the contracts. Pane-local spawn `-e`/`-E` and creation-time `new-session -e`/`-E` need no new wire and have shipped. |
 | Protocol v71 | Recommend the audited single bundle in A3, with per-client option publication, personalized status metadata, per-pane typed border colors, and Command-response stderr. Keep it parked until fabrico approves it. |
 | Prefix scope | Keep both prefixes global in v71 to match the current shared key-table contract; treat tmux-style session scope as a separate core refactor. |
 | Lock wire | Exclude it from v71; if F5 is approved, use a separate bump with an explicit client process-execution policy. |
@@ -1010,8 +1121,9 @@ is not a drop-in (all shipped 2026-08-16):
   divergence matrix).
 - Window activation clears its panes' bells, so `next-window -a` steps instead of re-picking
   the same window, and the terminal bell latch is released on the same transition.
-- `source-file` globs every path (`conf.d/*.conf` works); `-` stdin is a loud refusal;
-  `-F`/`-n`/`-v` are deferred to the phase-4 grind (options table row below).
+- `source-file` expands wildcard patterns for every declared path (`conf.d/*.conf` works), and
+  Unix matching now follows tmux's `glob(3)` edge cases. `-` stdin is a loud refusal. `-F` shipped
+  in the later path-context slice; `-n` and `-v` remain loud.
 - `bind-key` payloads validate at bind time (names + flags; arity and targets still surface
   at keypress), and invalid config lines now reach the import report.
 
@@ -1076,7 +1188,8 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 | Behavior options, sizing/boot half | `aggressive-resize` stored at global-window/window scope; ON selects componentwise smallest rows and columns from clients actually viewing each window, while the existing zoom gate, active-pane writer, one-cell dead-band, and repeat memo remain unchanged (verified by positive control; seeded convergence sims pass on real sockets). Lazy-create boot parity: fresh daemons empty+unarmed, session 0 on the first default Interactive attach, ids aligned with tmux from the first `new-session` — the harness prologue's auto-session kill is gone and the GEO id-stripping is DELETED, so raw layout checksums and leaf pane ids byte-compare against the pin across all 25 scenarios | **shipped 2026-08-17** (wave 4f-2, one review round, CONFIRMED-CLOSED — phase 4 complete) |
 | Daemon boot parity | CLI-spawned daemons boot empty; the first CLI `new-session` takes name `0` and ids `$0`/`@0`/`%0`, while an empty-target Interactive attach lazily materializes that next numeric session. The harness no longer kills zz session `0` in its prologue and now compares raw layout checksums and leaf ids | **shipped 2026-08-17** (wave 4f-2, phase 4 closed) |
 | Styles (`#[…]`, `*-style`) | GUI titlebar strip and tabs render them since waves A/B (2026-08-20); zz-tui still drops them before the wire; the terminal-renderer styles (`pane-*border-style`, `window-style`, `mode-style`) are C3 | partial |
-| `source-file -F`/`-n`/`-v` | format-expanded paths, parse-only, verbose printing — deferred from phase 1 | later |
+| `source-file -F` | format-expanded paths | **shipped 2026-08-22** |
+| `source-file -n`/`-v` | parse-only and verbose printing — deferred from phase 1 | later |
 
 `switch-client` shipped as protocol v70 on 2026-08-20. A pane script can retarget the
 Interactive client selected from its retained `ClientHello.origin`; the daemon reuses its
@@ -1471,27 +1584,30 @@ appendix: arity/flag rejection wording, the `usage:` fallback, and the
   `~` expansion** for unquoted and just-inside-double-quote leading tildes, because
   stored bindings are `list-keys`-visible and the pin stores absolute paths.
 
-## Phase 8 — the attach contract (CLOSED 2026-08-20; all four rows)
+## Phase 8 — the attach contract (closed 2026-08-20; empty-daemon regression repaired 2026-08-22)
 
 The four invocations the alias lives on (rows 3-4 largely closed by 7a
 2026-08-18, row 1 by the launcher wave 2026-08-19):
 
 | Invocation | tmux | zz today |
 | --- | --- | --- |
-| `tmux` | new session + attach this TTY | CLOSED 2026-08-19 — the installed launcher rewrites bare argv to `attach`: TUI on a TTY, lazy first-session create. A re-invocation attaches to the live session where tmux would stack a new one (deliberate); the GUI moved behind the exact verb `zz app` |
-| `tmux new -s foo` | create **and** attach this process | CLOSED 2026-08-20 — the CLI routes attaching forms through the TUI on an Interactive connection; the engine runs the pin's check order and refuses off a TTY without creating anything |
+| `tmux` | new session + attach this TTY | works — the installed launcher rewrites bare argv to `new-session -A`, so an empty daemon atomically creates and attaches session zero while a live daemon attaches its current session; the GUI lives behind `zz app`. |
+| `tmux new -s foo` | create **and** attach this process | CLOSED 2026-08-20 — the CLI routes attaching forms through the TUI on an Interactive connection and refuses off a TTY without creating anything; nested duplicate-name error precedence is the loud exception ledgered below |
 | `tmux attach -t foo` | attach this TTY | works — full `-t`/`-d` grammar, TUI attach on a TTY, engine-identical `can't find session:` headless (7a) |
-| `tmux attach` | attach, starting the server if needed | works — autostarts the daemon (CMD_STARTSERVER), `no sessions` on an empty server, TTY check last (7a) |
+| `tmux attach` | attach, starting the server if needed | works — autostarts the daemon (CMD_STARTSERVER) and returns `no sessions`, exit 1, on an empty server, preserving `attach || new-session`; TTY check last (7a) |
 
-The 2026-08-19 launcher wave closed row 1 and the alias boundary around it: bare `zz`
-rewrites to `attach` (TUI, per the [TUI client](/designs/tui-client.md) design), the GUI
+The 2026-08-19 launcher wave moved bare `zz` into the TUI, per the
+[TUI client](/designs/tui-client.md) design), the GUI
 lives behind the exact verb `zz app` (Launch Services carries the caller's cwd via
 `ZZ_APP_STARTUP_DIRECTORY`), `$TMUX` without `ZZ_SOCKET` is refused instead of dialed as a
 zz endpoint (decision 4's boundary made loud), and startup config re-enters through a
 private `tmux` PATH shim gated by the `ZZ_STARTUP_REENTRY` capability so `run-shell`/
 `if-shell`/TPM lines work while the daemon is still sourcing its config. Linux packages
 ship the CLI launcher as `cli`, `/usr/bin/zz` points at it, and the desktop entry runs
-`zz app`.
+`zz app`. A later TUI target preflight exposed the distinction between bare product launch and the
+tmux `attach` verb. The 2026-08-22 repair routes only empty launcher argv through existing
+`new-session -A`, keeps explicit attach's `no sessions` contract, and adds deterministic first-run
+race plus `attach || new-session` coverage, so rows 1 and 4 are both closed.
 
 The 2026-08-20 client-seam wave closed row 2. `zz new -s foo` on a TTY now creates the
 session and attaches the calling process; off a TTY it refuses exactly like the pin and
@@ -1506,9 +1622,11 @@ Interactive connection. The engine gained tmux's `CLIENT_TERMINAL` as a three-st
 declares its terminal through a `client-terminal-v1` token in `ClientHello.capabilities` —
 a free-form `Vec<String>`, so the encoding is unchanged and `PROTOCOL_VERSION` stays 69.
 
-The pin's check order is reproduced exactly, and **no failing check creates a session**:
-`-A` delegate (which ignores `-d`) → duplicate → nested → terminal → `-x`/`-y`
-(`cmd-new-session.c:122-238`). Three states, not two, because the pin distinguishes a NULL
+The pin checks `-A` delegation (which ignores `-d`), duplicate names, nesting, terminal presence,
+then `-x`/`-y` (`cmd-new-session.c:122-238`). zz follows that order except for one loud edge: its
+atomic daemon-side nesting guard runs before mux execution, so a nested attaching
+`new-session -s existing` reports the nesting refusal where the pin reports `duplicate session`.
+Neither server mutates state. Three states, not two, because the pin distinguishes a NULL
 client from a client without a terminal: `if (c == NULL) detached = 1` (`:164-167`) makes a
 config's bare `new-session` create detached, and `if (c == NULL) return CMD_RETURN_NORMAL`
 (`cmd-attach-session.c:71-72`) — placed *above* target resolution — makes a config's
@@ -1520,12 +1638,11 @@ Also closed with the wave: `-P`/`-F` output (default template `#{session_name}:`
 `width/height too small|too large|invalid` family, literal `-x -`/`-y -`, and the
 `duplicate session:` string (it had carried a stray `name` word since before the campaign).
 
-Still open on this surface, ledgered rather than done: `-x -`/`-y -` use 80×24 instead of
-the *client's* size (the pin reads `c->tty.sx/sy`, which needs the client's terminal size
-plumbed to the engine); the nested-session check (`server_client_check_nested` compares the
-client's tty against this server's pane ttys — keying off `$TMUX` alone is wrong, since a
-fake `$TMUX` on a non-pane pty still attaches on the pin). Protocol v70 closed the
-client-exit notices and `switch-client` retargeting on 2026-08-20.
+Terminal size now reaches `new-session -x -/-y -`. Since 2026-08-22, attaching
+`new-session` and `attach-session` both compare the client tty with this daemon's pane ttys and
+issue the pinned nested-session refusal before any mux mutation. The duplicate-name error precedence
+above is ledgered in the divergence matrix. Protocol v70 closed client-exit notices and
+`switch-client` retargeting on 2026-08-20.
 
 # Acceptance
 
@@ -1583,9 +1700,9 @@ this list is the campaign-level index of it plus the items that never got a matr
   `to_string_lossy` at the CLI boundary; OsString plumbing judged not worth it.
 - `update-environment` markers at session create honor the stored array (Wave C run 1) but
   source from the daemon's environment, not the attaching client's (the wire carries no
-  client environ); diverges when the daemon outlives the shell that started it. The same
-  missing field keeps `-E` rejected, attach re-seeding absent, and `fnmatch` value patterns
-  unexpanded.
+  client environ); diverges when the daemon outlives the shell that started it. Creation-time
+  `new-session -e/-E` is implemented, but the same missing field leaves attach re-seeding absent,
+  `attach-session -E` rejected, and `fnmatch` value patterns unexpanded.
 - Two upstream layout bugs refused rather than reproduced (two-pane `main-*` preset,
   mixed-parent `-E` spread) — `known/` scenarios pin them.
 - Grouped sessions / linked windows / socket interop / fleet broadcast — the permanent
@@ -1598,8 +1715,8 @@ this list is the campaign-level index of it plus the items that never got a matr
   Lane-2 sweep (2026-08-20); three are now consumed — `status-format[]` (B1) plus
   `command-alias[]` and `update-environment[]` (Wave C run 1, 2026-08-21). The remaining
   five still drive nothing (TUI phases).
-- Styles (`#[…]`, `*-style` options) and `source-file -F/-n/-v` (marked *later* in the
-  phase-4 table; styles are TUI-meaningful).
+- Styles (`#[…]`, `*-style` options) and `source-file -n/-v` (marked *later* in the phase-4 table;
+  styles are TUI-meaningful). Format-expanded `source-file -F` paths shipped 2026-08-22.
 - `#()` job bodies: both sides strftime the whole string first (pinned by test), but the
   pin also format-expands `#{…}` *inside* the body before running it; zz hands the shell
   hook the body raw (phase 5/6 — status-seam surface).
@@ -1607,7 +1724,8 @@ this list is the campaign-level index of it plus the items that never got a matr
   grows choose-tree sort commands, the loop default must track the mutable criteria
   (choose-tree work).
 - Positional-arity validation is unguarded and the daemon buffer family hand-rolls its
-  parsing (phase-0 leftovers); `move-pane -p` is zz-lax.
+  parsing (phase-0 leftovers). zz now rejects tmux-invalid `move-pane -p` and accepts the pin's
+  `move-pane -l` grammar.
 - The TTY attach contract closed 2026-08-20 (phase 8); protocol v70 then closed
   `switch-client` and the client-exit notice seam. Control mode is phase 6; `tmux -V`/`$TMUX`
   shape is phase 7.
@@ -1764,6 +1882,20 @@ underscore, last/current style washes, styled halves in BOTH chrome modes with
 padding preserved, default `[#S]` beside the badge (accepted duplication — UX call
 open), `#[reverse]` on status halves, empty-vs-blank status halves.
 
+**GUI status replacement SHIPPED 2026-08-23:** the Wave B tab pills, titlebar halves,
+and sidebar footer were deleted. One native GPUI status surface now consumes every
+semantic status region: `status-left`, the attached session's snapshot windows, and
+`status-right`. The GUI no longer paints `status-format[]` terminal cells or any tmux
+style. Powerline glyphs divide left/right content into borderless theme-owned chunks,
+recognized glyphs become zz-ui icons, arbitrary text and `#()` output survive, and
+snapshot index/name/focus/zoom/bell state drives the window controls. Those controls
+retain stable-id selection, rename/close menus, focused overflow, and one filled active
+surface; window-format strings and the full style family remain TUI-only visually. The surface is full-width bottom in sidebar mode
+and full-width top in titlebar mode, regardless of `status-position`. Settings and
+layout remain one top-chrome cluster in both modes and take width from the titlebar
+rail; the bottom status bar is tmux-only, has no agent rollup, and disappears when
+`status off` leaves it empty.
+
 **Honest-knobs wave C1 SHIPPED 2026-08-20 (17 more options; 72/180):** `focus-events`
 (delivery gated at the daemon funnel — pin default OFF is a user-visible change: apps
 stop receiving focus events until `set -g focus-events on`), `bell-action` +
@@ -1781,7 +1913,7 @@ COMPOSITION now matches resize.c: ON is a candidate filter, window-size aggregat
 ON no longer forces smallest — and `allow-set-title` gating OSC 0/2 adoption
 (`allow-rename` storage-only, no ESC-k scanner). `list-keys -T <nonexistent>` now
 errors byte-exactly like the pin (a zz-invented exemption for key-table-named tables
-was removed). Ledgered: bare `list-keys` flags-column padding (key-string wave),
+was removed). Bare `list-keys` flags-column padding subsequently closed on 2026-08-22;
 sensible/own-conf skip counts dropped to 1 and 6. Guards: four C1 differential
 scenarios (defaults/errors/layout/readback, all live-probed).
 
@@ -1830,9 +1962,10 @@ tabs stay interactive widgets fed format-expanded labels. All nine alert options
 Layout: `main-pane-width/height`, `other-pane-width/height`, `tiled-layout-max-columns`
 (today five hardcoded constants in `layout.rs`), `window-size`, `default-size`. Overlays:
 `display-panes-time/-format`, `remain-on-exit-format`. Shared: `command-alias[]` (shipped
-2026-08-21). Maintainer decisions folded in: `pane-border-style`/`pane-active-border-style` HONOR
-explicitly-set colors over the theme (attributes beyond color ignored, one divergence
-row); `window-style`/`window-active-style` (inactive-pane dimming) and the
+2026-08-21). Maintainer correction 2026-08-24: the raw TUI honors explicit
+`pane-border-style`/`pane-active-border-style` colors, while the GPUI client keeps its
+pane borders under the zz chrome theme (attributes beyond color remain ignored, one
+divergence row); `window-style`/`window-active-style` (inactive-pane dimming) and the
 `mode-style`/`copy-mode-*-style` selection/match/mark styles ALL render in the GUI
 terminal renderer — content styling, no chrome-doctrine conflict. The remaining lifecycle
 flags (`exit-empty`, `exit-unattached`, `destroy-unattached`) are honored when a config
@@ -1876,14 +2009,17 @@ payload through the VT parser.
 
 **Grammar wave — SHIPPED 2026-08-19 (codex implement → adversarial review → two fix
 rounds; reviewer seat moved to grok-4.6 xhigh mid-wave, verdict MERGE-READY):** the
-pin's config grammar landed whole — `$VAR`/`${VAR}` expansion (charset, `${9}` vs `$9`,
+main config grammar surface landed — `$VAR`/`${VAR}` expansion (charset, `${9}` vs `$9`,
 `\$`, undefined→empty), the full escape set (`\NNN`/`\u`/`\U`/singles, invalid forms
 error byte-exact), `NAME=value` + `%hidden` assignments (applied at parse time BEFORE
-the file's commands, visible same-line, SURVIVING a parse abort — all pin-probed), and
+the file's commands, visible same-line, with assignment side effects surviving parser
+diagnostics — all pin-probed), and
 `%if`/`%elif`/`%else`/`%endif` EVALUATION (engine format expansion at server/global
 scope, `FORMAT_NOJOBS` — `#()` renders empty and never spawns, pin `format_true`,
-same-line + nested forms, balanced-through-whitespace `#{…}` conditions). Whole-file
-abort on the first diagnostic with the pin's `syntax error` strings. The five re-parse
+same-line + nested forms, balanced-through-whitespace `#{…}` conditions). The parser emits
+the pin's `syntax error` strings for individual diagnostics, but end-to-end `source-file`
+abort behavior is not compatible: the pin discards the file's command list at the first cause,
+while zz can report multiple diagnostics and still apply later valid commands. The five re-parse
 sites (bind `{}` bodies, set-hook, if-shell, confirm-before, command-prompt) expand
 against the LIVE engine global environment (hidden included). Guards: 25 parser unit
 tests, daemon readback regressions, and the 15-step `smoke/config-grammar` harness
@@ -1894,10 +2030,10 @@ re-parse sites expand at bind/execution time vs the pin's config-tokenization ti
 byte/NUL-truncation (String storage, test-pinned); the pin's `%elif`/`%else`
 assignment-leak quirk is NOT reproduced (zz keeps single-branch assignment scope);
 `%if c ; cmd ; %endif` is zz-lax (pin rejects the `;`). Oh My Tmux joined the smoke
-corpus on 2026-08-20. NEW TICKET exposed with a live repro: zz's
-`source-file` swallows parse diagnostics and exits 0 where the pin prints
-`path:line: message` rc 1 / `%config-error` — pre-existing, documented asymmetrically
-in the config-grammar scenario's warn expectations.
+corpus on 2026-08-20. The later source-file diagnostics wave fixed command-stream delivery and
+exit status for the file's own parser diagnostics, but first-diagnostic whole-file abort remains
+live in `config.parser-edge-cases`, and a replayed command that fails at runtime is still dropped at
+exit 0 under `config.replayed-command-errors`.
 
 # Risks
 

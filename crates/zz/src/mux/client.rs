@@ -4457,6 +4457,7 @@ mod tests {
                 search: None,
                 selected: 0,
                 kind: zz_protocol::ChooseTreeKind::Windows,
+                filter_no_matches: false,
             }),
         });
     }

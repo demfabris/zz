@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v71)
+title: zz wire protocol (v72)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-21T12:00:00-03:00
+timestamp: 2026-08-23T12:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 71`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 72`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (71) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (72) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -73,7 +73,7 @@ fields in declaration order.
 
 | Variant | Fields | Purpose |
 |---------|--------|---------|
-| `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>` | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane |
+| `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>`, `working_directory: Option<PathBuf>` (≤16 KiB) | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane; eligible local endpoints publish an absolute UTF-8 cwd while SSH, unrepresentable, and oversized paths omit it |
 | `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
 | `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation` | tmux-style command from any client |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code, stderr }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code. `stderr` (appended at v71) is populated for `source-file` diagnostics issued by a Command client since Wave E (2026-08-22) and stays empty for every other command; `Success` with a nonzero `exit_code` is a COMPLETED command, so `Error` stays reserved for dispatch, transport, and server failures |
@@ -383,9 +383,19 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 71`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 72`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v72 appends `ClientHello.working_directory`, an optional daemon-host path bounded to 16 KiB.
+  Local command, control, GUI, TUI, and FFI connections publish their absolute UTF-8 process cwd
+  when it fits; an unrepresentable or oversized cwd is omitted rather than failing the connection.
+  An SSH endpoint never publishes its caller-host path. The daemon retains the value per client and
+  uses it to prefix relative top-level `source-file` paths after `-F` expansion and before globbing.
+  zz still resolves nested sources from the containing config file, while the pin repeats its
+  client/session cwd lookup; `source-file.path-semantics` tracks that separate residue.
+  The same unshipped version appends `ChooseTreeState.filter_no_matches` and
+  `ChooseBufferState.filter_no_matches` as canonical bool tails. Full chooser events carry the
+  static-filter fallback state; the existing search and selection delta events leave it unchanged.
 - v71 is the tmux-campaign append bundle: `MuxOptionKey::{Mouse, EscapeTime, Prefix2}` (tags 14-16)
   with per-recipient session-effective `mouse` publication; the personalized `StatusLine` tail
   (`title`, `base_style`, bounded `rows`, `position`, `message_line`, `customized`);

@@ -255,14 +255,24 @@ pub enum ChooserPaneKind {
     Editor,
 }
 
-/// The shortcut gutter every chooser row carries, blank when this row has no
-/// key. `mode_tree_draw` gives the whole list one key column and pads the rows
-/// without a shortcut to the same width, so the labels stay aligned.
 fn chooser_key_label(key: &str) -> SharedString {
     if key.is_empty() {
         SharedString::default()
     } else {
         SharedString::from(format!("({key})"))
+    }
+}
+
+pub fn chooser_has_key_gutter<'a>(keys: impl IntoIterator<Item = &'a str>) -> bool {
+    keys.into_iter().any(|key| !key.is_empty())
+}
+
+pub fn chooser_subtitle(summary: impl Into<String>, filter_no_matches: bool) -> String {
+    let summary = summary.into();
+    if filter_no_matches {
+        format!("{summary} · filter: no matches")
+    } else {
+        summary
     }
 }
 
@@ -286,6 +296,7 @@ pub fn tree_chooser_row(
     id: &'static str,
     index: usize,
     key: impl Into<SharedString>,
+    show_key_gutter: bool,
     target: impl Into<SharedString>,
     label: impl Into<SharedString>,
     detail: impl Into<SharedString>,
@@ -298,6 +309,7 @@ pub fn tree_chooser_row(
     font_family: impl Into<SharedString>,
 ) -> ListItem {
     let font_family = font_family.into();
+    let key = key.into();
     chooser_row(id, index, selected, theme.selection_background)
         .pr(px(10.0))
         .pl(px(10.0))
@@ -306,7 +318,9 @@ pub fn tree_chooser_row(
                 .w_full()
                 .flex()
                 .items_center()
-                .child(chooser_key_cell(&key.into(), theme, font_family.clone()))
+                .when(show_key_gutter, |row| {
+                    row.child(chooser_key_cell(&key, theme, font_family.clone()))
+                })
                 .child(div().w(px(f32::from(depth) * 18.0)).flex_none())
                 .child(
                     div()
@@ -395,6 +409,7 @@ pub fn buffer_chooser_row(
     id: &'static str,
     index: usize,
     key: impl Into<SharedString>,
+    show_key_gutter: bool,
     name: impl Into<SharedString>,
     preview: impl Into<SharedString>,
     size: impl Into<SharedString>,
@@ -404,6 +419,7 @@ pub fn buffer_chooser_row(
     font_family: impl Into<SharedString>,
 ) -> ListItem {
     let font_family = font_family.into();
+    let key = key.into();
     chooser_row(id, index, selected, theme.selection_background)
         .gap(px(12.0))
         .px(px(10.0))
@@ -413,7 +429,9 @@ pub fn buffer_chooser_row(
                 .flex()
                 .items_center()
                 .gap(px(12.0))
-                .child(chooser_key_cell(&key.into(), theme, font_family.clone()))
+                .when(show_key_gutter, |row| {
+                    row.child(chooser_key_cell(&key, theme, font_family.clone()))
+                })
                 .child(
                     div()
                         .w(px(142.0))
@@ -498,12 +516,23 @@ fn chooser_shadow(cx: &App) -> Vec<BoxShadow> {
 
 #[cfg(test)]
 mod tests {
-    use super::chooser_key_label;
+    use super::{chooser_has_key_gutter, chooser_key_label, chooser_subtitle};
 
     #[test]
     fn row_shortcuts_wear_the_parentheses_mode_tree_draws() {
         assert_eq!(chooser_key_label("0").as_ref(), "(0)");
         assert_eq!(chooser_key_label("M-a").as_ref(), "(M-a)");
         assert_eq!(chooser_key_label("").as_ref(), "");
+    }
+
+    #[test]
+    fn key_gutter_and_filter_subtitle_follow_list_level_state() {
+        assert!(chooser_has_key_gutter(["", "M-a", ""]));
+        assert!(!chooser_has_key_gutter(["", ""]));
+        assert_eq!(chooser_subtitle("2 buffers", false), "2 buffers");
+        assert_eq!(
+            chooser_subtitle("2 buffers", true),
+            "2 buffers · filter: no matches"
+        );
     }
 }

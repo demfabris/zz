@@ -330,6 +330,10 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   computation serves every client.
 - **Presence.** `snapshot_presence` turns the attached set into `SessionViewer` rows carrying the
   device name from `ClientHello` (falling back to `device-{id}`) and that viewer's focused window.
+- **Caller cwd.** Protocol v72 retains each local client's bounded absolute UTF-8 working directory
+  when representable. Top-level relative `source-file` paths use that client fact after format
+  expansion and before globbing; SSH clients omit it. Nested sources still use the containing
+  config's directory, a tracked divergence from the pin's repeated client/session cwd lookup.
 - **Steal.** `attach-session -d` runs `evict_other_clients`: every other client of the target session
   gets `EventPayload::Detached { by: Some(stealer's device name) }` and loses its attachment. A
   command-only client cannot attach but can still evict. Session teardown sends the same event with

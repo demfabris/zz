@@ -334,7 +334,7 @@ impl Default for KeyTables {
                 key,
                 Binding {
                     commands: vec![CommandInvocation::new("send-keys", ["-X", action])],
-                    repeat: true,
+                    repeat: !matches!(table, "copy-mode" | "copy-mode-vi"),
                     note: None,
                 },
             );
@@ -348,7 +348,7 @@ impl Default for KeyTables {
                 key,
                 Binding {
                     commands: vec![CommandInvocation::new("send-keys", ["-X", action])],
-                    repeat: true,
+                    repeat: false,
                     note: None,
                 },
             );
@@ -362,7 +362,7 @@ impl Default for KeyTables {
                         "copy-mode-repeat",
                         [digit.to_string()],
                     )],
-                    repeat: true,
+                    repeat: false,
                     note: None,
                 },
             );
@@ -473,10 +473,23 @@ impl KeyTables {
     }
 
     pub fn unbind(&mut self, table: &str, key: &str) -> bool {
-        self.tables
+        let removed = self
+            .tables
             .get_mut(table)
             .and_then(|bindings| bindings.remove(&canonical_key(key)))
-            .is_some()
+            .is_some();
+        if removed && self.tables.get(table).is_some_and(BTreeMap::is_empty) {
+            self.tables.remove(table);
+        }
+        removed
+    }
+
+    pub fn remove_table(&mut self, table: &str) -> bool {
+        self.tables.remove(table).is_some()
+    }
+
+    pub fn ensure_table(&mut self, table: &str) {
+        self.tables.entry(table.to_owned()).or_default();
     }
 
     #[must_use]
@@ -2049,6 +2062,53 @@ mod tests {
                 "send-keys",
                 ["-X", "search-reverse"],
             )]
+        );
+    }
+
+    #[test]
+    fn stock_copy_tables_keep_runtime_repetition_out_of_binding_metadata() {
+        let mut tables = KeyTables::default();
+        for table in ["copy-mode", "copy-mode-vi"] {
+            let bindings = tables.tables.get(table).expect("stock copy table");
+            assert!(!bindings.is_empty());
+            assert!(bindings.values().all(|binding| !binding.repeat));
+        }
+        assert!(tables.get("prefix", "Left").expect("prefix repeat").repeat);
+        assert!(
+            tables
+                .get("choose-tree", "Up")
+                .expect("chooser repeat")
+                .repeat
+        );
+        tables.bind(
+            "user",
+            "x",
+            Binding {
+                commands: vec![CommandInvocation::new("display-message", ["user"])],
+                repeat: true,
+                note: None,
+            },
+        );
+        assert!(tables.get("user", "x").expect("user repeat").repeat);
+
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode-vi".to_owned()));
+        assert_eq!(
+            engine.handle(&tables, "h"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "cursor-left"],
+            )])
+        );
+        assert_eq!(engine.handle(&tables, "3"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "x"),
+            KeyDecision::Commands(
+                (0..3)
+                    .map(|_| CommandInvocation::new("send-keys", ["-X", "jump-forward", "x"]))
+                    .collect(),
+            )
         );
     }
 

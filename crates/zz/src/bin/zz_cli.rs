@@ -35,7 +35,7 @@ fn main() -> ExitCode {
 
 fn cli_arguments(mut arguments: Vec<OsString>) -> Vec<OsString> {
     if arguments.is_empty() {
-        arguments.push(OsString::from("attach"));
+        arguments.extend([OsString::from("new-session"), OsString::from("-A")]);
     }
     arguments
 }
@@ -176,14 +176,16 @@ mod tests {
 
     #[test]
     fn resolves_the_executable_beside_the_launcher() {
-        let bundle = tempfile::tempdir().expect("temporary bundle");
-        let executable = bundle.path().join("zz");
+        let bundle = tempfile::Builder::new()
+            .prefix("zz launcher bundle ")
+            .tempdir()
+            .expect("temporary bundle");
+        let directory = bundle.path().join("path with spaces");
+        std::fs::create_dir(&directory).expect("create bundle directory");
+        let executable = directory.join("zz");
         std::fs::write(&executable, b"").expect("write executable");
 
-        assert_eq!(
-            bundled_executable(&bundle.path().join("cli")),
-            Ok(executable)
-        );
+        assert_eq!(bundled_executable(&directory.join("cli")), Ok(executable));
     }
 
     #[test]
@@ -200,12 +202,26 @@ mod tests {
     }
 
     #[test]
-    fn bare_cli_launch_becomes_tmux_attach() {
-        assert_eq!(cli_arguments(Vec::new()), [OsString::from("attach")]);
+    fn bare_cli_launch_becomes_create_or_attach() {
         assert_eq!(
-            cli_arguments(vec![OsString::from("list-sessions")]),
-            [OsString::from("list-sessions")]
+            cli_arguments(Vec::new()),
+            [OsString::from("new-session"), OsString::from("-A")]
         );
+        for arguments in [
+            vec![
+                OsString::from("new"),
+                OsString::from("-s"),
+                OsString::from("work"),
+            ],
+            vec![
+                OsString::from("attach"),
+                OsString::from("-t"),
+                OsString::from("work"),
+            ],
+            vec![OsString::from("list-sessions")],
+        ] {
+            assert_eq!(cli_arguments(arguments.clone()), arguments);
+        }
     }
 
     #[cfg(target_os = "macos")]

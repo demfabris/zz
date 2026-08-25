@@ -1106,6 +1106,55 @@ mod tests {
     }
 
     #[test]
+    fn chooser_deltas_preserve_static_filter_fallback_state() {
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::ChooseTree {
+            state: Some(ChooseTreeState {
+                items: Vec::new(),
+                search: None,
+                selected: 0,
+                kind: zz_protocol::ChooseTreeKind::Windows,
+                filter_no_matches: true,
+            }),
+        }));
+        core.handle_message(event(EventPayload::ChooseTreeUpdate {
+            search: Some(ChooseTreeSearchState {
+                query: "tree".to_owned(),
+                reverse: false,
+            }),
+            selected: 4,
+        }));
+        let tree = core.choose_tree().expect("retained tree chooser");
+        assert!(tree.filter_no_matches);
+        assert_eq!(
+            tree.search.as_ref().map(|search| search.query.as_str()),
+            Some("tree")
+        );
+
+        core.handle_message(event(EventPayload::ChooseBuffer {
+            state: Some(ChooseBufferState {
+                items: Vec::new(),
+                search: None,
+                selected: 0,
+                filter_no_matches: true,
+            }),
+        }));
+        core.handle_message(event(EventPayload::ChooseBufferUpdate {
+            search: Some(ChooseBufferSearchState {
+                query: "buffer".to_owned(),
+                reverse: true,
+            }),
+            selected: 5,
+        }));
+        let buffer = core.choose_buffer().expect("retained buffer chooser");
+        assert!(buffer.filter_no_matches);
+        assert_eq!(
+            buffer.search.as_ref().map(|search| search.query.as_str()),
+            Some("buffer")
+        );
+    }
+
+    #[test]
     fn popup_descriptor_owns_its_synthetic_viewport_lifetime() {
         let pane = PaneId(u64::MAX - 1);
         let state = PopupState {

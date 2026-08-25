@@ -1056,19 +1056,29 @@ impl Renderer {
                 model.appearance.background,
                 model.appearance.link_color,
             );
-            let start_row = if let Some(search) = &state.search {
+            let mut start_row = 1;
+            if state.filter_no_matches {
                 write_colored_text(
                     &mut self.output,
                     0,
-                    1,
+                    start_row,
+                    &padded_segment("filter: no matches", model.size.columns, ' '),
+                    model.appearance.foreground,
+                    model.appearance.background,
+                );
+                start_row += 1;
+            }
+            if let Some(search) = &state.search {
+                write_colored_text(
+                    &mut self.output,
+                    0,
+                    start_row,
                     &padded_segment(&format!("/{}", search.query), model.size.columns, ' '),
                     model.appearance.foreground,
                     model.appearance.background,
                 );
-                2
-            } else {
-                1
-            };
+                start_row += 1;
+            }
             let key_column = chooser_key_column(state.items.iter().map(|item| item.key.as_str()));
             for (index, item) in state.items.iter().enumerate() {
                 let row = start_row + u16::try_from(index).unwrap_or(u16::MAX);
@@ -1101,19 +1111,29 @@ impl Renderer {
                 model.appearance.background,
                 model.appearance.link_color,
             );
-            let start_row = if let Some(search) = &state.search {
+            let mut start_row = 1;
+            if state.filter_no_matches {
                 write_colored_text(
                     &mut self.output,
                     0,
-                    1,
+                    start_row,
+                    &padded_segment("filter: no matches", model.size.columns, ' '),
+                    model.appearance.foreground,
+                    model.appearance.background,
+                );
+                start_row += 1;
+            }
+            if let Some(search) = &state.search {
+                write_colored_text(
+                    &mut self.output,
+                    0,
+                    start_row,
                     &padded_segment(&format!("/{}", search.query), model.size.columns, ' '),
                     model.appearance.foreground,
                     model.appearance.background,
                 );
-                2
-            } else {
-                1
-            };
+                start_row += 1;
+            }
             let key_column = chooser_key_column(state.items.iter().map(|item| item.key.as_str()));
             for (index, item) in state.items.iter().enumerate() {
                 let row = start_row + u16::try_from(index).unwrap_or(u16::MAX);
@@ -2217,6 +2237,7 @@ mod tests {
             search: None,
             selected: 0,
             kind: zz_protocol::ChooseTreeKind::Windows,
+            filter_no_matches: false,
         });
         let mut renderer = Renderer::new();
         renderer.paint_chooser(&model);
@@ -2225,5 +2246,29 @@ mod tests {
         assert!(output.contains("(0)   alpha"), "{output}");
         assert!(output.contains("(M-a) beta"), "{output}");
         assert!(output.contains("      gamma"), "{output}");
+    }
+
+    #[test]
+    fn chooser_fallback_status_keeps_fully_keyless_rows_selectable_without_a_gutter() {
+        let mut model = block_model(60, 12);
+        model.choose_buffer = Some(zz_protocol::ChooseBufferState {
+            items: vec![zz_protocol::ChooseBufferItem {
+                name: "keyless".to_owned(),
+                preview: "fallback row".to_owned(),
+                size_bytes: 1,
+                created_unix_seconds: 0,
+                key: String::new(),
+            }],
+            search: None,
+            selected: 0,
+            filter_no_matches: true,
+        });
+        let mut renderer = Renderer::new();
+        renderer.paint_chooser(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("filter: no matches"), "{output}");
+        assert!(output.contains("> keyless  1 bytes"), "{output}");
+        assert!(!output.contains(">      keyless"), "{output}");
     }
 }

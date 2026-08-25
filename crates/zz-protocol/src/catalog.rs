@@ -23,9 +23,7 @@ pub struct CommandOptionSpec {
     pub description: &'static str,
     /// Whether the option is part of the implemented completion surface.
     pub completable: bool,
-    /// tmux's `X::` optional-argument form: the option takes a value only when
-    /// it is attached (`-R10`); a bare `-R` stays a flag and never consumes the
-    /// next argument.
+    /// Whether zz accepts a value only when it is attached to the flag.
     pub attached_value: bool,
     /// Whether the option is catalogued only so its value can be rejected.
     pub unsupported: bool,
@@ -164,6 +162,10 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "lsc",
     "show-messages",
     "showmsgs",
+    "clear-prompt-history",
+    "clearphist",
+    "show-prompt-history",
+    "showphist",
     "refresh-client",
     "refresh",
     "switch-client",
@@ -199,13 +201,29 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "linkw",
     "unlink-window",
     "unlinkw",
-    "resize-window",
-    "resizew",
-    "clear-prompt-history",
-    "clearphist",
-    "show-prompt-history",
-    "showphist",
     "switch-mode",
+];
+
+pub static NATIVE_COMMAND_NAMES: &[&str] = &[
+    "agent-send",
+    "capture-browser",
+    "copy-mode-search-prompt",
+    "debug-marker",
+    "focus-sidebar",
+    "new-browser",
+    "reload-config",
+    "restart-agent-pane",
+    "select-pane-kind",
+    "send-last-output",
+    "set-agent-provider",
+    "set-agent-session",
+    "set-browser-profile",
+    "set-browser-tabs",
+    "set-browser-url",
+    "set-editor-path",
+    "split-browser",
+    "split-picker",
+    "tools",
 ];
 
 pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
@@ -234,6 +252,88 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_flag("-P"),
             CommandOptionSpec::unsupported_flag("-R"),
         ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "agent-send",
+        aliases: &[],
+        description: "Send text to an agent pane",
+        usage: "[-t target-pane] [--target target-pane] [--submit] [--context context] [text ...]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::value("--target", Pane, "target pane"),
+            CommandOptionSpec::flag(
+                "--submit",
+                "submit the text instead of filling the composer",
+            ),
+            CommandOptionSpec::value("--context", FreeForm, "file and optional line range"),
+        ],
+        positionals: &[],
+        variadic: Some(FreeForm),
+    },
+    CommandSpec {
+        name: "send-last-output",
+        aliases: &[],
+        description: "Send a terminal's last command and output to an agent pane",
+        usage: "[-t target-pane]",
+        options: &[CommandOptionSpec::value("-t", Pane, "target terminal pane")],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "capture-browser",
+        aliases: &[],
+        description: "Save a browser pane's current frame as a PNG",
+        usage: "[-t target-pane] [-o output-path]",
+        options: &[
+            CommandOptionSpec::value("-t", Pane, "target browser pane"),
+            CommandOptionSpec::value("-o", FreeForm, "absolute output path"),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "debug-marker",
+        aliases: &[],
+        description: "Write a marker to the daemon log",
+        usage: "[note ...]",
+        options: &[],
+        positionals: &[],
+        variadic: Some(FreeForm),
+    },
+    CommandSpec {
+        name: "tools",
+        aliases: &[],
+        description: "Show commands for controlling a zz workspace",
+        usage: "[argument ...]",
+        options: &[],
+        positionals: &[],
+        variadic: Some(FreeForm),
+    },
+    CommandSpec {
+        name: "clear-prompt-history",
+        aliases: &["clearphist"],
+        description: "Clear command prompt history",
+        usage: "[-T prompt-type]",
+        options: &[CommandOptionSpec::value(
+            "-T",
+            FreeForm,
+            "prompt type: command or search",
+        )],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "show-prompt-history",
+        aliases: &["showphist"],
+        description: "Show command prompt history",
+        usage: "[-T prompt-type]",
+        options: &[CommandOptionSpec::value(
+            "-T",
+            FreeForm,
+            "prompt type: command or search",
+        )],
         positionals: &[],
         variadic: None,
     },
@@ -301,10 +401,10 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "load-buffer",
         aliases: &["loadb"],
         description: "Load a file into a paste buffer",
-        usage: "[-b buffer-name] path",
+        usage: "[-b buffer-name] [-t target-client] path",
         options: &[
             CommandOptionSpec::value("-b", FreeForm, "buffer name"),
-            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::value("-t", FreeForm, "compatibility target client"),
             CommandOptionSpec::unsupported_flag("-w"),
         ],
         positionals: &[],
@@ -343,12 +443,12 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-buffer",
         aliases: &["setb"],
         description: "Set the contents of a paste buffer",
-        usage: "[-a] [-b buffer-name] [data]",
+        usage: "[-a] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
         options: &[
             CommandOptionSpec::flag("-a", "append to the buffer"),
             CommandOptionSpec::value("-b", FreeForm, "buffer name"),
-            CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_value("-n"),
+            CommandOptionSpec::value("-n", FreeForm, "rename the source buffer"),
+            CommandOptionSpec::value("-t", FreeForm, "compatibility target client"),
             CommandOptionSpec::unsupported_flag("-w"),
         ],
         positionals: &[],
@@ -522,14 +622,14 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-d", "do not attach"),
             CommandOptionSpec::flag("-A", "attach to the named session when it exists"),
             CommandOptionSpec::flag("-D", "with -A, detach other clients"),
-            CommandOptionSpec::unsupported_flag("-E"),
+            CommandOptionSpec::flag("-E", "do not apply update-environment when creating"),
             CommandOptionSpec::flag("-P", "print information about the new session"),
             CommandOptionSpec::unsupported_flag("-X"),
             CommandOptionSpec::value("-s", FreeForm, "session name"),
             CommandOptionSpec::value("-n", FreeForm, "initial window name"),
             CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
             CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_value("-e"),
+            CommandOptionSpec::value("-e", FreeForm, "session environment"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
             CommandOptionSpec::unsupported_value("-f"),
             CommandOptionSpec::value("-x", FreeForm, "initial width"),
@@ -565,13 +665,13 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-session",
         aliases: &[],
         description: "Destroy a session",
-        usage: "[-aC] [-t target-session]",
+        usage: "[-aC] [-f filter] [-t target-session]",
         options: &[
             CommandOptionSpec::value("-t", Session, "target session"),
             CommandOptionSpec::flag("-a", "kill every other session"),
             CommandOptionSpec::flag("-C", "clear alerts in the session instead of killing"),
             CommandOptionSpec::unsupported_flag("-g"),
-            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::value("-f", FreeForm, "filter sessions killed by -a"),
         ],
         positionals: &[],
         variadic: None,
@@ -660,20 +760,20 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "new-window",
         aliases: &["neww"],
         description: "Create a terminal window",
-        usage: "[-adkPS] [-c start-directory] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]",
+        usage: "[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("-t", Window, "destination session or window index"),
             CommandOptionSpec::value("-n", FreeForm, "window name"),
             CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
             CommandOptionSpec::flag("-d", "do not select the new window"),
             CommandOptionSpec::flag("-a", "insert after the target window"),
+            CommandOptionSpec::flag("-b", "insert before the target window"),
             CommandOptionSpec::flag("-k", "replace the window at the target index"),
             CommandOptionSpec::flag("-P", "print information about the new window"),
             CommandOptionSpec::value("-F", FreeForm, "print format"),
             CommandOptionSpec::flag("-S", "select an existing window with the same name"),
-            CommandOptionSpec::unsupported_flag("-b"),
-            CommandOptionSpec::unsupported_flag("-E"),
-            CommandOptionSpec::unsupported_value("-e"),
+            CommandOptionSpec::flag("-E", "create an empty pane"),
+            CommandOptionSpec::value("-e", FreeForm, "pane environment"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
@@ -772,11 +872,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-window",
         aliases: &["killw"],
         description: "Destroy a window",
-        usage: "[-a] [-t target-window]",
+        usage: "[-a] [-f filter] [-t target-window]",
         options: &[
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::flag("-a", "kill every other window in the session"),
-            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::value("-f", FreeForm, "filter windows killed by -a"),
         ],
         positionals: &[],
         variadic: None,
@@ -870,7 +970,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-window",
         aliases: &["splitw"],
         description: "Split a pane with a terminal",
-        usage: "[-bdfhPv] [-c start-directory] [-F format] [-l size] [-p percentage] [-t target-pane] [shell-command [argument ...]]",
+        usage: "[-bdEfhPvZ] [-c start-directory] [-e environment] [-F format] [-l size] [-p percentage] [-t target-pane] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
@@ -883,8 +983,8 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-P", "print information about the new pane"),
             CommandOptionSpec::value("-F", FreeForm, "print format"),
             CommandOptionSpec::flag("-v", "vertical split"),
-            CommandOptionSpec::unsupported_value("-e"),
-            CommandOptionSpec::unsupported_flag("-E"),
+            CommandOptionSpec::value("-e", FreeForm, "pane environment"),
+            CommandOptionSpec::flag("-E", "create an empty pane"),
             CommandOptionSpec::unsupported_flag("-I"),
             CommandOptionSpec::unsupported_flag("-k"),
             CommandOptionSpec::unsupported_value("-m"),
@@ -893,7 +993,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_value("-S"),
             CommandOptionSpec::unsupported_value("-T"),
             CommandOptionSpec::unsupported_flag("-W"),
-            CommandOptionSpec::unsupported_flag("-Z"),
+            CommandOptionSpec::flag("-Z", "zoom the active pane after splitting"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
@@ -931,16 +1031,16 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "break-pane",
         aliases: &["breakp"],
         description: "Move a pane into a new window",
-        usage: "[-dP] [-F format] [-n window-name] [-s src-pane] [-t dst-window]",
+        usage: "[-abdP] [-F format] [-n window-name] [-s src-pane] [-t dst-window]",
         options: &[
             CommandOptionSpec::value("-n", FreeForm, "new window name"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
             CommandOptionSpec::value("-t", Window, "destination session or window index"),
+            CommandOptionSpec::flag("-a", "insert after the destination window"),
+            CommandOptionSpec::flag("-b", "insert before the destination window"),
             CommandOptionSpec::flag("-d", "do not select the new window"),
             CommandOptionSpec::flag("-P", "print information about the new window"),
             CommandOptionSpec::value("-F", FreeForm, "print format"),
-            CommandOptionSpec::unsupported_flag("-a"),
-            CommandOptionSpec::unsupported_flag("-b"),
             CommandOptionSpec::unsupported_flag("-W"),
             CommandOptionSpec::unsupported_value("-x"),
             CommandOptionSpec::unsupported_value("-y"),
@@ -954,8 +1054,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "join-pane",
         aliases: &["joinp"],
         description: "Join a pane into another window",
-        usage: "[-bdfhv] [-p percentage] [-s src-pane] [-t dst-pane]",
+        usage: "[-bdfhv] [-l size] [-p percentage] [-s src-pane] [-t dst-pane]",
         options: &[
+            CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
             CommandOptionSpec::value("-p", FreeForm, "split percentage"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
@@ -964,7 +1065,6 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-f", "fill target space"),
             CommandOptionSpec::flag("-h", "horizontal split"),
             CommandOptionSpec::flag("-v", "vertical split"),
-            CommandOptionSpec::unsupported_value("-l"),
         ],
         positionals: &[],
         variadic: None,
@@ -973,9 +1073,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "move-pane",
         aliases: &["movep"],
         description: "Move a pane into another window",
-        usage: "[-bdfhv] [-p percentage] [-s src-pane] [-t dst-pane]",
+        usage: "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
         options: &[
-            CommandOptionSpec::value("-p", FreeForm, "split percentage"),
+            CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-b", "place before target"),
@@ -990,7 +1090,6 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_attached("-U"),
             CommandOptionSpec::unsupported_value("-X"),
             CommandOptionSpec::unsupported_value("-Y"),
-            CommandOptionSpec::unsupported_value("-l"),
             CommandOptionSpec::unsupported_value("-z"),
             CommandOptionSpec::unsupported_flag("-M"),
         ],
@@ -1098,12 +1197,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "last-pane",
         aliases: &["lastp"],
         description: "Select the last pane",
-        usage: "[-Z] [-t target-window]",
+        usage: "[-deZ] [-t target-window]",
         options: &[
             CommandOptionSpec::value("-t", Window, "target window"),
+            CommandOptionSpec::flag("-d", "disable input to the last pane"),
+            CommandOptionSpec::flag("-e", "enable input to the last pane"),
             CommandOptionSpec::flag("-Z", "preserve zoom"),
-            CommandOptionSpec::unsupported_flag("-d"),
-            CommandOptionSpec::unsupported_flag("-e"),
         ],
         positionals: &[],
         variadic: None,
@@ -1162,6 +1261,25 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: None,
     },
     CommandSpec {
+        name: "resize-window",
+        aliases: &["resizew"],
+        description: "Resize a window and select manual sizing",
+        usage: "[-DLRU] [-x width] [-y height] [-t target-window] [adjustment]",
+        options: &[
+            CommandOptionSpec::value("-t", Window, "target window"),
+            CommandOptionSpec::value("-x", FreeForm, "width in cells"),
+            CommandOptionSpec::value("-y", FreeForm, "height in cells"),
+            CommandOptionSpec::flag("-D", "increase height"),
+            CommandOptionSpec::flag("-L", "decrease width"),
+            CommandOptionSpec::flag("-R", "increase width"),
+            CommandOptionSpec::flag("-U", "decrease height"),
+            CommandOptionSpec::unsupported_flag("-a"),
+            CommandOptionSpec::unsupported_flag("-A"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
         name: "select-layout",
         aliases: &["selectl"],
         description: "Select a pane layout",
@@ -1212,11 +1330,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "kill-pane",
         aliases: &["killp"],
         description: "Destroy a pane",
-        usage: "[-a] [-t target-pane]",
+        usage: "[-a] [-f filter] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-a", "kill every other pane in the window"),
-            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::value("-f", FreeForm, "filter panes killed by -a"),
         ],
         positionals: &[],
         variadic: None,
@@ -1255,18 +1373,15 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "send-keys",
         aliases: &["send"],
         description: "Send keys or a copy-mode command",
-        usage: "[-CHPloX] [-N repeat-count] [-t target-pane] [key ...]",
+        usage: "[-FHlX] [-N repeat-count] [-t target-pane] [key ...]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-N", FreeForm, "repeat count"),
             CommandOptionSpec::flag("-X", "copy-mode command"),
-            CommandOptionSpec::flag("-C", "do not copy to the system clipboard"),
             CommandOptionSpec::flag("-H", "keys are hexadecimal character codes"),
-            CommandOptionSpec::flag("-P", "do not create a paste buffer"),
+            CommandOptionSpec::flag("-F", "compatibility no-op"),
             CommandOptionSpec::flag("-l", "literal text"),
-            CommandOptionSpec::flag("-o", "operate on command output"),
             CommandOptionSpec::unsupported_value("-c"),
-            CommandOptionSpec::unsupported_flag("-F"),
             CommandOptionSpec::unsupported_flag("-K"),
             CommandOptionSpec::unsupported_flag("-M"),
             CommandOptionSpec::unsupported_flag("-R"),
@@ -1399,16 +1514,16 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-message",
         aliases: &["display"],
         description: "Display or print a formatted message",
-        usage: "[-Cp] [-d delay] [-F format] [-t target-pane] [message]",
+        usage: "[-Clp] [-d delay] [-F format] [-t target-pane] [message]",
         options: &[
             CommandOptionSpec::flag("-p", "print the message"),
             CommandOptionSpec::flag("-C", "keep terminal updates flowing while it shows"),
             CommandOptionSpec::value("-d", FreeForm, "milliseconds to show the message"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
+            CommandOptionSpec::flag("-l", "do not expand the message template"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::unsupported_flag("-a"),
             CommandOptionSpec::unsupported_value("-c"),
-            CommandOptionSpec::unsupported_flag("-l"),
             CommandOptionSpec::unsupported_flag("-I"),
             CommandOptionSpec::unsupported_flag("-N"),
             CommandOptionSpec::unsupported_flag("-v"),
@@ -1433,12 +1548,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-panes",
         aliases: &["displayp"],
         description: "Display pane numbers",
-        usage: "[-b] [-d duration]",
+        usage: "[-bN] [-d duration] [-t target-client]",
         options: &[
             CommandOptionSpec::value("-d", FreeForm, "duration in milliseconds"),
             CommandOptionSpec::flag("-b", "do not block other commands, always on in zz"),
-            CommandOptionSpec::unsupported_flag("-N"),
-            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::flag("-N", "disable pane selection"),
+            CommandOptionSpec::value("-t", FreeForm, "target client"),
         ],
         positionals: &[],
         variadic: None,
@@ -1473,12 +1588,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "unbind-key",
         aliases: &["unbind"],
         description: "Remove a key binding",
-        usage: "[-n] [-T key-table] key",
+        usage: "[-anq] [-T key-table] key",
         options: &[
             CommandOptionSpec::value("-T", KeyTable, "key table"),
-            CommandOptionSpec::unsupported_flag("-a"),
+            CommandOptionSpec::flag("-a", "remove every binding in the key table"),
             CommandOptionSpec::flag("-n", "root table"),
-            CommandOptionSpec::unsupported_flag("-q"),
+            CommandOptionSpec::flag("-q", "suppress errors"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -1487,18 +1602,18 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "list-keys",
         aliases: &["lsk"],
         description: "List key bindings",
-        usage: "[-F format] [-T key-table]",
+        usage: "[-1aNr] [-F format] [-O order] [-P prefix-string][-T key-table] [key]",
         options: &[
+            CommandOptionSpec::flag("-1", "show only the first binding"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
+            CommandOptionSpec::value("-O", FreeForm, "sort order"),
+            CommandOptionSpec::value("-P", FreeForm, "displayed prefix string"),
             CommandOptionSpec::value("-T", KeyTable, "key table"),
-            CommandOptionSpec::unsupported_flag("-1"),
-            CommandOptionSpec::unsupported_flag("-a"),
-            CommandOptionSpec::unsupported_flag("-N"),
-            CommandOptionSpec::unsupported_value("-O"),
-            CommandOptionSpec::unsupported_value("-P"),
-            CommandOptionSpec::unsupported_flag("-r"),
+            CommandOptionSpec::flag("-a", "include bindings without notes"),
+            CommandOptionSpec::flag("-N", "list key notes"),
+            CommandOptionSpec::flag("-r", "reverse the sort order"),
         ],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -1647,11 +1762,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "source-file",
         aliases: &["source"],
         description: "Load a tmux configuration file",
-        usage: "[-q] path ...",
+        usage: "[-Fq] path ...",
         options: &[
+            CommandOptionSpec::flag("-F", "expand formats in file paths"),
             CommandOptionSpec::flag("-q", "do not report a missing file"),
             CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_flag("-F"),
             CommandOptionSpec::unsupported_flag("-n"),
             CommandOptionSpec::unsupported_flag("-v"),
         ],
@@ -1695,6 +1810,19 @@ pub fn command_spec(name: &str) -> Option<&'static CommandSpec> {
         .find(|spec| spec.name == name || spec.aliases.contains(&name))
 }
 
+#[must_use]
+pub fn catalog_command_spec(name: &str) -> Option<&'static CommandSpec> {
+    command_spec(name).or_else(|| {
+        DAEMON_COMMAND_SPECS
+            .iter()
+            .find(|spec| spec.name == name || spec.aliases.contains(&name))
+    })
+}
+
+pub fn command_specs() -> impl Iterator<Item = &'static CommandSpec> {
+    COMMAND_SPECS.iter().chain(DAEMON_COMMAND_SPECS)
+}
+
 /// Resolve a known alias while preserving unknown input for structured errors.
 #[must_use]
 pub fn canonical_command(command: &str) -> &str {
@@ -1712,44 +1840,37 @@ pub enum CommandResolution {
     Unknown,
 }
 
-/// tmux's `cmd_find` contract: an exact alias match wins outright, otherwise
-/// the name is matched as a prefix over the alphabetical command table — a
-/// unique prefix resolves, several matches are ambiguous, none is unknown.
 #[must_use]
 pub fn resolve_command(command: &str) -> CommandResolution {
     if command.is_empty() {
         return CommandResolution::Unknown;
     }
-    let mut found: Option<(&'static str, bool)> = None;
-    let mut ambiguous = false;
     for (name, aliases, implemented) in command_table() {
-        if aliases.contains(&command) {
-            return resolved(name, implemented);
-        }
-        if !name.starts_with(command) {
-            continue;
-        }
-        if found.is_some() {
-            ambiguous = true;
-        }
-        found = Some((name, implemented));
-        if name == command {
+        if name == command || aliases.contains(&command) {
             return resolved(name, implemented);
         }
     }
-    if ambiguous {
-        let matches = command_table()
-            .filter(|(name, _, _)| name.starts_with(command))
-            .map(|(name, _, _)| name)
-            .collect::<Vec<_>>()
-            .join(", ");
-        return CommandResolution::Ambiguous(format!(
-            "ambiguous command: {command}, could be: {matches}"
-        ));
-    }
-    match found {
-        Some((name, implemented)) => resolved(name, implemented),
-        None => CommandResolution::Unknown,
+    prefix_resolution(command, false)
+        .or_else(|| prefix_resolution(command, true))
+        .unwrap_or(CommandResolution::Unknown)
+}
+
+fn prefix_resolution(command: &str, native: bool) -> Option<CommandResolution> {
+    let matches = command_table()
+        .filter(|(name, _, _)| NATIVE_COMMAND_NAMES.contains(name) == native)
+        .filter(|(name, _, _)| name.starts_with(command))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => None,
+        [(name, _, implemented)] => Some(resolved(name, *implemented)),
+        _ => Some(CommandResolution::Ambiguous(format!(
+            "ambiguous command: {command}, could be: {}",
+            matches
+                .iter()
+                .map(|(name, _, _)| *name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
     }
 }
 
@@ -1763,14 +1884,11 @@ fn resolved(name: &'static str, implemented: bool) -> CommandResolution {
 
 static UNIMPLEMENTED_TMUX_COMMAND_TABLE: &[(&str, &[&str])] = &[
     ("choose-client", &[]),
-    ("clear-prompt-history", &["clearphist"]),
     ("clock-mode", &[]),
     ("customize-mode", &[]),
     ("link-window", &["linkw"]),
     ("new-pane", &["newp"]),
-    ("resize-window", &["resizew"]),
     ("server-access", &[]),
-    ("show-prompt-history", &["showphist"]),
     ("suspend-client", &["suspendc"]),
     ("switch-mode", &[]),
     ("unlink-window", &["unlinkw"]),
@@ -1852,9 +1970,84 @@ mod tests {
         assert_eq!(resolve_command(""), CommandResolution::Unknown);
         assert_eq!(canonical_command("show-option"), "show-options");
         assert_eq!(canonical_command("kill-s"), "kill-s");
+        for (spelling, canonical) in [
+            ("attach", "attach-session"),
+            ("capturep", "capture-pane"),
+            ("setb", "set-buffer"),
+            ("splitw", "split-window"),
+        ] {
+            assert_eq!(
+                resolve_command(spelling),
+                CommandResolution::Canonical(canonical)
+            );
+        }
+        for (spelling, canonical) in [
+            ("agent-s", "agent-send"),
+            ("capture-b", "capture-browser"),
+            ("copy-mode-s", "copy-mode-search-prompt"),
+            ("debug-m", "debug-marker"),
+            ("select-pane-k", "select-pane-kind"),
+            ("send-last", "send-last-output"),
+            ("tool", "tools"),
+        ] {
+            assert_eq!(
+                resolve_command(spelling),
+                CommandResolution::Canonical(canonical)
+            );
+            assert_eq!(catalog_command_spec(canonical).unwrap().name, canonical);
+        }
+        for canonical in [
+            "capture-browser",
+            "copy-mode-search-prompt",
+            "select-pane-kind",
+            "split-browser",
+            "split-picker",
+        ] {
+            assert_eq!(
+                resolve_command(canonical),
+                CommandResolution::Canonical(canonical)
+            );
+        }
     }
 
-    fn usage_options(usage: &str) -> BTreeMap<char, bool> {
+    #[test]
+    fn native_names_do_not_change_the_affected_tmux_prefixes() {
+        for (prefix, canonical) in [
+            ("a", "attach-session"),
+            ("ca", "capture-pane"),
+            ("cap", "capture-pane"),
+            ("capt", "capture-pane"),
+            ("captu", "capture-pane"),
+            ("captur", "capture-pane"),
+            ("capture", "capture-pane"),
+            ("capture-", "capture-pane"),
+            ("cop", "copy-mode"),
+            ("copy", "copy-mode"),
+            ("copy-", "copy-mode"),
+            ("copy-m", "copy-mode"),
+            ("copy-mo", "copy-mode"),
+            ("copy-mod", "copy-mode"),
+            ("f", "find-window"),
+            ("select-p", "select-pane"),
+            ("select-pa", "select-pane"),
+            ("select-pan", "select-pane"),
+            ("set-b", "set-buffer"),
+            ("set-e", "set-environment"),
+            ("sp", "split-window"),
+            ("spl", "split-window"),
+            ("spli", "split-window"),
+            ("split", "split-window"),
+            ("split-", "split-window"),
+        ] {
+            assert_eq!(
+                resolve_command(prefix),
+                CommandResolution::Canonical(canonical),
+                "{prefix}"
+            );
+        }
+    }
+
+    fn usage_options(usage: &str) -> BTreeMap<String, bool> {
         let mut options = BTreeMap::new();
         for usage_option in usage.split("[-").skip(1) {
             let (body, _) = usage_option
@@ -1864,29 +2057,36 @@ mod tests {
             let flags = tokens.next().expect("usage option has a flag");
             let takes_value = tokens.next().is_some();
             assert!(tokens.next().is_none(), "usage option has one value label");
+            let names = if flags.starts_with('-') {
+                vec![format!("-{flags}")]
+            } else if flags.contains('|') {
+                flags
+                    .split('|')
+                    .map(|flag| format!("-{}", flag.trim_start_matches('-')))
+                    .collect()
+            } else {
+                flags.chars().map(|flag| format!("-{flag}")).collect()
+            };
             if takes_value {
-                assert_eq!(flags.len(), 1, "valued usage option is not grouped");
+                assert_eq!(names.len(), 1, "valued usage option is not grouped");
             }
-            for flag in flags.chars().filter(|flag| !matches!(flag, '|' | '-')) {
+            for name in names {
                 assert!(
-                    options.insert(flag, takes_value).is_none(),
-                    "duplicate usage option -{flag}"
+                    options.insert(name.clone(), takes_value).is_none(),
+                    "duplicate usage option {name}"
                 );
             }
         }
         options
     }
 
-    fn accepted_options(spec: &CommandSpec) -> BTreeMap<char, bool> {
+    fn accepted_options(spec: &CommandSpec) -> BTreeMap<String, bool> {
         spec.options
             .iter()
             .filter(|option| !option.unsupported)
             .map(|option| {
-                let bytes = option.name.as_bytes();
-                assert_eq!(bytes.len(), 2, "{} has a non-short option", spec.name);
-                assert_eq!(bytes[0], b'-', "{} has an invalid option", spec.name);
                 (
-                    char::from(bytes[1]),
+                    option.name.to_owned(),
                     option.value.is_some() || option.attached_value,
                 )
             })
@@ -1896,7 +2096,7 @@ mod tests {
     #[test]
     fn catalog_names_aliases_and_options_are_unique() {
         let mut names = BTreeSet::new();
-        for spec in COMMAND_SPECS {
+        for spec in command_specs() {
             assert!(names.insert(spec.name), "duplicate command {}", spec.name);
             let mut options = BTreeSet::new();
             for option in spec.options {
@@ -1909,7 +2109,7 @@ mod tests {
             }
         }
 
-        for spec in COMMAND_SPECS {
+        for spec in command_specs() {
             for alias in spec.aliases {
                 assert!(names.insert(*alias), "duplicate command alias {alias}");
                 assert_eq!(canonical_command(alias), spec.name);
@@ -1925,9 +2125,8 @@ mod tests {
                 spec.options
                     .iter()
                     .map(|option| {
-                        let bytes = option.name.as_bytes();
                         (
-                            char::from(bytes[1]),
+                            option.name.to_owned(),
                             option.value.is_some() || option.attached_value,
                         )
                     })
@@ -1948,11 +2147,7 @@ mod tests {
                 .options
                 .iter()
                 .filter(|option| option.completable)
-                .map(|option| {
-                    let flag = option.name.trim_start_matches('-');
-                    assert_eq!(flag.len(), 1, "single-letter option for {}", spec.name);
-                    (flag.chars().next().unwrap(), option.value.is_some())
-                })
+                .map(|option| (option.name.to_owned(), option.value.is_some()))
                 .collect::<BTreeMap<_, _>>();
             assert_eq!(
                 usage_options(spec.usage),
@@ -1970,6 +2165,31 @@ mod tests {
     }
 
     #[test]
+    fn send_keys_outer_options_match_the_tmux_pin() {
+        let spec = command_spec("send-keys").expect("send-keys catalog entry");
+        let options = spec
+            .options
+            .iter()
+            .map(|option| (option.name, option.value.is_some()))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            options,
+            BTreeSet::from([
+                ("-F", false),
+                ("-H", false),
+                ("-K", false),
+                ("-M", false),
+                ("-N", true),
+                ("-R", false),
+                ("-X", false),
+                ("-c", true),
+                ("-l", false),
+                ("-t", true),
+            ])
+        );
+    }
+
+    #[test]
     fn external_command_name_lists_are_unique_and_disjoint() {
         let mut names = BTreeSet::new();
         for name in DAEMON_COMMAND_NAMES {
@@ -1981,6 +2201,11 @@ mod tests {
             for alias in spec.aliases {
                 assert_eq!(canonical_command(alias), spec.name);
             }
+        }
+        for name in DAEMON_COMMAND_NAMES {
+            let spec = catalog_command_spec(name)
+                .unwrap_or_else(|| panic!("daemon command {name} has no shared spec"));
+            assert_eq!(canonical_command(name), spec.name);
         }
         for name in UNIMPLEMENTED_TMUX_COMMANDS {
             assert!(
@@ -2060,6 +2285,7 @@ mod tests {
             "swap-pane",
             "list-panes",
             "resize-pane",
+            "resize-window",
             "select-layout",
             "next-layout",
             "previous-layout",

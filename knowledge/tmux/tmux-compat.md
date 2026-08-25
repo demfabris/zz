@@ -1,100 +1,207 @@
 ---
 type: Concept
 title: tmux compatibility philosophy
-description: zz reimplements a deliberately-scoped subset of tmux behavior in pure Rust, checked against a pinned upstream commit; it never compiles, links, or runs tmux.
+description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmux meaning or fail loudly, native GUI behavior uses zz-only verbs, and compatibility is measured against one pinned upstream commit."
 resource: third_party/tmux-reference/UPSTREAM.md
-tags: [tmux, compatibility, philosophy, reimplementation]
-timestamp: 2026-07-14T00:00:00Z
+tags: [tmux, compatibility, philosophy, reimplementation, cli]
+timestamp: 2026-08-24T00:00:00-03:00
 ---
 
 # Overview
 
-zz's multiplexer is a **Rust reimplementation** of tmux behavior, not a wrapper: it does not compile,
-link, or run tmux, and no tmux C source is copied into the Rust code. Command names, aliases,
-key-table behavior, copy-mode actions, and configuration syntax are checked by hand against a single
-pinned upstream commit recorded in [`third_party/tmux-reference/UPSTREAM.md`](/references/tmux-upstream.md).
-The goal is that a user's muscle memory and existing `~/.tmux.conf` bindings work, while presentation
-is native GPUI (no status line, copy-mode screen, prompt, chooser, or pane indicator is ever emitted
-as terminal escape sequences; the [status line](/tmux/status-line.md) is expanded by the daemon and
-rendered in the sidebar's bottom section). The behavioral model lives entirely in [`crates/zz-mux`](/crates/zz-mux.md).
+zz's multiplexer is a Rust reimplementation of tmux behavior. It does not compile, link, or run
+tmux, and no tmux C source is copied into the Rust code. Command names, aliases, configuration
+grammar, key tables, formats, options, hooks, targets, and layout arithmetic are checked against one
+pinned tmux commit recorded in
+[`third_party/tmux-reference/UPSTREAM.md`](/references/tmux-upstream.md).
+
+The product target is a **compatible enough CLI plus a native superset**:
+
+1. A tmux command spelling means what it means in tmux.
+2. If zz cannot honor that meaning, it returns a loud error. It does not reuse the spelling for a
+   different GUI action.
+3. Native behavior uses zz-only verbs such as `split-picker`, `split-browser`, `focus-sidebar`,
+   `agent-send`, and `capture-browser`.
+4. zz's default bindings may call those native verbs. A binding imported from tmux that names
+   `split-window` still creates a terminal split.
+
+This boundary lets the GUI be better than a terminal-emulated tmux surface without making copied
+tmux config ambiguous.
 
 # Pinned reference
 
-The reference commit is tmux `d77c9dc6aa021e4bc61f0da128c591af695e6466`. Each behavioral area maps to
-specific upstream files that were consulted, for example:
+The reference commit is tmux `d77c9dc6aa021e4bc61f0da128c591af695e6466`
+(`next-3.8`). Important upstream ownership areas include:
 
 | Behavior | Upstream files consulted |
 | --- | --- |
-| Tokenization / config loading | `cmd-parse.y`, `arguments.c`, `cfg.c` |
-| Root/prefix key tables | `key-bindings.c`, `cmd-bind-key.c`, `cmd-unbind-key.c`, `cmd-list-keys.c` |
-| Command prompt | `cmd-command-prompt.c`, `prompt.c`, `status.c` |
-| Copy/view mode + word classes | `window-copy.c`, `grid-reader.c`, `tmux.1` |
-| Choosers | `cmd-choose-tree.c`, `mode-tree.c`, `window-tree.c`, `window-buffer.c` |
-| Targets `$`/`@`/`%` | `cmd-find.c` |
-| Layouts / splits / resize | `layout.c`, `layout-set.c`, `cmd-select-layout.c`, `cmd-resize-pane.c` |
-| Client-driven window sizing | `resize.c`, `server-client.c`, `options-table.c` |
-| Empty-server boot and first IDs | `server.c`, `session.c`, `window.c` |
-| Options and environments | `options-table.c`, `cmd-set-option.c`, `cmd-show-options.c`, `options.c`, `cmd-set-environment.c`, `cmd-show-environment.c`, `environ.c` |
-| Status options and FORMATS subset | `options-table.c`, `status.c`, `format.c`, `tmux.1` |
+| Tokenization and config loading | `cmd-parse.y`, `arguments.c`, `cfg.c` |
+| Command catalog and aliases | `cmd.c`, `cmd-*.c` |
+| Root, prefix, copy, and chooser tables | `key-bindings.c`, `window-copy.c`, `mode-tree.c` |
+| Targets | `cmd-find.c` |
+| Layout and geometry | `layout.c`, `layout-set.c`, `resize.c` |
+| Options and environments | `options-table.c`, `options.c`, `environ.c` |
+| Formats and status | `format.c`, `format-draw.c`, `status.c` |
+| Hooks and jobs | `hooks.c`, `cmd-run-shell.c`, `cmd-wait-for.c`, `window.c` |
+| Client and control mode | `server-client.c`, `control.c`, `control-notify.c` |
 
-# Scope of emulation
+The pin is an oracle, not a dependency. Updating it is a separate compatibility event.
 
-Only a deliberately supported subset is implemented; **supported commands must not silently implement
-partial semantics**, and unsupported input is reported and skipped rather than approximated or run as
-shell code. Concretely:
+Oracle schema 3 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
+valueless, 246 required-value, and 8 optional-value. Each command also carries positional minimum
+and maximum metadata. The remaining inventories contain 180 options, 198 global format-table
+names, 14 source-enumerated names across three selected format contexts, 68 hooks, and 303 default
+bindings across five tables. The context selection consists of 1 shared `command-item` name, 3
+`list-commands` names, and 10 `list-keys` names. zz implements all 14. The 13 list-specific names
+came first, and `formats.command-item-context` closed on 2026-08-24 when the shared `command` name
+became a command-queue-item fact that every command the mux engine runs carries.
 
-- **Emulated:** sessions/windows/panes/splits, target resolution, 59 cataloged tmux commands and
-  their aliases plus the daemon-side buffer family
-  ([commands](/tmux/commands.md)), root/prefix/`copy-mode`/`copy-mode-vi` key tables with repeat
-  bindings and `send-keys -X` ([key tables](/tmux/key-tables.md)), the seven named layouts, lossless
-  zoom, swap/rotate/break/join, `synchronize-panes`/`history-limit`/`word-separators`/`mode-keys`
-  options, the nine phase-4f behavior options, retained dead panes with in-place
-  `respawn-pane`/`respawn-window`, native [copy mode](/tmux/copy-mode.md),
-  [choose-tree/choose-buffer](/tmux/choose-tree.md),
-  command prompt, pane-number overlay, the `status`/`status-interval`/`status-left`/`status-right`
-  options with a documented [FORMATS subset](/tmux/status-line.md) (including `#()` command
-  substitution), exact option readback, free-form `@` storage at every scope, global/session
-  environment overlays and readback, and the [`.tmux.conf` subset](/tmux/conf-parser.md). Since
-  2026-08-09 this also covers tmux's environment contract (`ZZ_PANE`/`ZZ_SESSION`/`ZZ_SOCKET` in
-  terminal panes, with the CLI resolving untargeted commands against the invoking pane the way
-  `$TMUX_PANE` does and originless Command clients falling back to the most-recent session),
-  `[shell-command]` positionals on `new-session`/`new-window`/`split-window`, `last-window`,
-  cell-accurate `resize-pane`, and (since the 2026-08-19 grammar wave) the pin's config
-  grammar — `$VAR`/`${VAR}` expansion, the full escape set, `NAME=value`/`%hidden`
-  assignments, and evaluated `%if`/`%elif`/`%else` conditionals; the
-  scriptability layer (`-F` formats, `display-message`, compound targets) is tracked in the
-  [tmux superset roadmap](/designs/tmux-superset-roadmap.md).
-- **Out of scope as shipped** (this list describes current behavior; the 2026-08-16
-  [drop-in plan](/designs/tmux-drop-in.md) schedules most of it — control mode,
-  hooks, exec commands, styles, cell-size placement — with the permanent exclusions named
-  there): binary/socket compatibility with a real tmux server, control mode, the rest of the status-line options (`status-style`, `status-justify`,
-  `status-position`, `status-format`), plugins, hooks, `#[…]` styling, floating panes, and
-  cell-size placement. These are rejected with diagnostics, not partially applied. The one
-  exception is `#[…]`, which is dropped from a status format rather than failing it.
+The same command-item hooks reach the five arguments that tmux expands: both rename names, both
+show-option names, and `select-pane -T`. Each handler expands after target resolution in the old
+target context. Directional `select-pane -T` reads the original pane and writes the expanded title
+to the destination pane.
 
-zz reimplements the *behavior*; the daemon sources the zz-owned `~/.config/zz/mux.conf` on startup
-and applies the supported subset, logging and skipping the rest. It never reads `~/.tmux.conf`; the
-client’s import flow copies a user's tmux config there verbatim (see the
-[conf parser](/tmux/conf-parser.md)).
+The selected context rosters do not describe tmux's whole context-format vocabulary. Queue state,
+hook arguments, options, user options, and environment variables can contribute names at runtime.
+The tracker treats that open-ended surface as semantic work.
 
-# Empty boot and lazy Interactive attach
+The canonical check recaptures the inventory from a `tmux next-3.8` binary at the root of a clean
+source checkout at the exact pin. The companion build stamp must also match the commit, version,
+fetch recipe, and binary checksum. `ZZ_COMPAT_TMUX` may select another cache produced by that
+fetcher; an unstamped checkout or an arbitrary prebuilt that reports the same version fails the
+oracle check.
 
-A daemon started by a Command client begins with no sessions, windows, or panes. The first explicit
-`new-session` therefore takes numeric name `0` and ids `$0`, `@0`, and `%0`, matching the pinned
-server's zero-based allocation. A registered client or background fleet connection alone does not
-materialize anything.
+# Status authority
 
-An Interactive client that sends `Attach { session: "" }` while the daemon is still empty lazily
-creates the next numeric session and attaches to it. This keeps the native GUI and TUI from landing
-on an empty first-run surface without shifting ids for CLI scripts. An explicit missing target and
-a Command-kind attach remain errors.
+`compat/tmux-gaps.json` is the sole live TODO and status source for tmux compatibility. Schema 3
+stores its update date, active gaps, and closed history. The generated
+[gap report](/tmux/gaps.md) presents that registry for readers. `status` records an active gap's
+product disposition as open, blocked, or accepted. `depends_on` records delivery order and does not
+set status.
+
+`just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, then
+runs the full `zz-mux` library suite. The Rust gate reconciles upstream command and alias names,
+flag arities, positional bounds, option names, global and selected context-format names, and hook
+names. It classifies native commands, native aliases, zz-only flags on tmux command names, and every
+zz-only default key. It derives the guarded native-name roster from the catalog minus the pinned
+oracle, then checks every pinned canonical prefix against the live resolver. It pairs every
+constant-backed format with a manifest item and tracks every missing default key across `root`,
+`prefix`, `copy-mode`, `copy-mode-vi`, and `move`. For each shared default key, it reconciles the
+rendered command and repeat bit or requires a named `binding:` divergence.
+
+The gate does not prove custom `args_parse` callbacks, open-ended or dynamic context-format names,
+nonconstant format behavior, hook production, runtime behavior for shared bindings, consumer truth
+for `BEHAVES`, or daemon runtime handling of invalid flags. `tracker.semantic-coverage` owns those
+seven blind spots. Differential scenarios, attached-client fixtures, unit tests, and manual GUI
+checks supply behavioral evidence.
+
+The [2026-08-22 CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
+preserves the measured baseline at commit `202f322`. Its counts describe that audit date. The
+[divergence matrix](/tmux/divergences.md) keeps the source rationale and probe evidence behind
+accepted differences. Neither document tracks live completion.
+
+# What “compatible enough” means
+
+The alias goal is not a percentage. It is a workload contract:
+
+- Core session, window, pane, buffer, target, layout, and query commands used from a shell work.
+- `new-session`, bare attach, reattach, read-only attach, detach, and kill preserve the calling TTY
+  contract.
+- A user's config and the pinned plugin smoke corpus load without a SKIP. Any SKIP fails the run.
+- Script-facing stdout, stderr, exit status, formats, and errors match where the workload observes
+  them.
+- Ordinary `capture-pane` text follows tmux's `-p` versus named/automatic-buffer routing, clustered
+  value flags, inclusive and reversed ranges, target-scoped bound expansion, and invalid-bound
+  fallback. Trailing blank rows at a fallback visible end, richer raw and metadata transports, and
+  saved-alternate capture remain excluded.
+- Bindings explicitly declared in an imported tmux config retain tmux command meaning. Import does
+  not synthesize stock bindings absent from the file; zz's own defaults remain free to use native
+  verbs.
+- Any accepted divergence is named, tested where possible, and excluded from the promise.
+- Missing low-value models do not hold the alias hostage.
+
+One loud error-precedence edge sits outside that workload promise. From a nested client,
+`new-session -s existing` reports zz's nesting refusal before the mux sees the duplicate name;
+pinned tmux reports the duplicate first. Both reject without changing state.
+
+The compatibility gate should name the supported workload and its exclusions. “80 commands” alone
+is too weak because a command can still reject flags or produce different output. “All 92 commands”
+is too expensive because linked sessions, shared-server ACLs, and tmux floating panes do not fit the
+zz model.
+
+# Permanent exclusions
+
+- **Real tmux socket protocol.** `alias tmux=zz` means zz handles the argv. zz never speaks tmux's
+  private client/server wire format.
+- **Linked windows and session groups.** A zz window belongs to one session. `link-window`,
+  `unlink-window`, and `new-session -t` stay loud.
+
+Floating tmux panes, client suspension, and shared-server ACLs are parked, not part of the practical
+alias target. They should be revisited only if a real workload needs them and their semantics fit
+the product.
+
+# Native presentation
+
+tmux draws status rows, prompts, choosers, copy mode, pane indicators, menus, and popups with terminal
+cells. zz publishes daemon-owned state and renders it in its clients:
+
+- `status-format[]` rows render in the TUI and in a top or bottom GUI row when a config customizes
+  status. Native sidebar and titlebar presentation remain at defaults.
+- Prompts, choosers, menus, popups, copy mode, and pane indicators use native surfaces.
+- A native surface may look different. Its command, key, target, exit, and state semantics remain
+  part of the compatibility contract.
+
+This is a presentation divergence, not permission to reinterpret a tmux command.
+
+# Config ownership
+
+By default the daemon sources the first existing zz-owned platform candidate for `zz/mux.conf`:
+XDG config, the home config directory, macOS Application Support, or Windows AppData in platform
+order. One or more top-level startup `-f` files replace that default for the initial load and remain
+visible through `#{config_files}`. `reload-config` returns to the first existing platform candidate
+and updates the fact to that path, or to empty when no candidate exists. The import flow copies a
+donor `.tmux.conf` to the first existing or first constructible candidate. The daemon does not read
+`~/.tmux.conf` directly on every boot.
+
+The config parser implements tmux grammar and reports unsupported commands. On Unix, shell and
+status jobs spawned by the daemon receive a private `tmux` PATH shim so their subprocess calls
+return to the same zz daemon. A user's shell alias does not cover direct process lookup, and
+packages do not currently install a global shim.
+
+# Empty boot and attach
+
+A daemon started by a command query begins with no sessions, windows, or panes. The first explicit
+`new-session` gets numeric name `0` and ids `$0`, `@0`, and `%0`, matching the pin's allocation.
+
+The installed bare launcher rewrites an empty argv to `new-session -A`. That existing tmux-shaped
+verb creates session zero on an empty daemon and attaches the current session on a live daemon.
+Explicit targetless `attach` and `attach-session` still preflight the server and return tmux's exact
+`no sessions` with exit 1, so `attach || new-session` keeps working. The daemon's lower-level lazy
+attach remains serialized: simultaneous first attaches and a command client creating a session at
+the same boundary converge instead of creating duplicates or failing. Therefore:
+
+- bare packaged `zz` creates and attaches session zero on an empty daemon;
+- bare packaged `zz` attaches the current session when one exists;
+- `zz attach` and `zz attach-session` return `no sessions` on an empty daemon;
+- `zz new -s NAME` creates and attaches on a TTY;
+- `zz attach -t NAME` attaches an existing session;
+- direct bundle launch or `zz app` opens the GUI.
+
+Attaching `new-session` also applies the same nested-session refusal as `attach-session` before mux
+state changes. The packaged PTY fixture pins detached dash sizing, attached client dimensions,
+read-only input rejection and output visibility, requested detach, and `attach -d` peer eviction
+through the real spaced-path launcher. Both detach paths require exit zero and the tmux-shaped
+`[detached (from session NAME)]` notice after terminal restoration.
 
 # Related
 
-- Where compatibility is going, and what is refused by doctrine:
-  [tmux superset roadmap](/designs/tmux-superset-roadmap.md).
-- Realized by the [mux crate](/crates/zz-mux.md) across [commands](/tmux/commands.md),
-  [key tables](/tmux/key-tables.md), and the [conf parser](/tmux/conf-parser.md).
-- The pinned commit and provenance: [tmux upstream reference](/references/tmux-upstream.md).
-- Native (non-terminal-escape) presentation: [copy mode](/tmux/copy-mode.md) and
-  [choosers](/tmux/choose-tree.md).
+- [live tmux compatibility gaps](/tmux/gaps.md)
+- [tmux CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
+- [tmux divergence matrix](/tmux/divergences.md)
+- [tmux drop-in plan](/designs/tmux-drop-in.md)
+- [tmux superset roadmap](/designs/tmux-superset-roadmap.md)
+- [tmux commands](/tmux/commands.md)
+- [key tables](/tmux/key-tables.md)
+- [status line and formats](/tmux/status-line.md)
+- [configuration parser](/tmux/conf-parser.md)
+- [compatibility harness](/playbooks/compat-harness.md)

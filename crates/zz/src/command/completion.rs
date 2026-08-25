@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, ops::Range};
 
 use zz_mux::LayoutPreset;
 use zz_protocol::MuxSnapshot;
-use zz_protocol::{COMMAND_SPECS, CommandSpec, CommandValueKind, command_spec};
+use zz_protocol::{CommandSpec, CommandValueKind, catalog_command_spec, command_specs};
 
 const MAX_COMPLETIONS: usize = 64;
 const KEY_TABLES: &[&str] = &[
@@ -14,11 +14,19 @@ const KEY_TABLES: &[&str] = &[
     "choose-buffer",
 ];
 const BROWSER_COMMANDS: &[&str] = &[
+    "capture-browser",
     "new-browser",
     "split-browser",
     "set-browser-url",
     "set-browser-tabs",
     "set-browser-profile",
+];
+const AGENT_COMMANDS: &[&str] = &[
+    "agent-send",
+    "restart-agent-pane",
+    "send-last-output",
+    "set-agent-provider",
+    "set-agent-session",
 ];
 const SET_OPTIONS: &[&str] = &[
     "base-index",
@@ -116,7 +124,7 @@ pub(crate) fn complete_command(
         add_commands(&mut ranked, &query, replacement, availability);
         return finish(ranked);
     };
-    let Some(spec) = command_spec(&command_token.value) else {
+    let Some(spec) = catalog_command_spec(&command_token.value) else {
         let discovery_query = input[command_token.range.start..cursor].trim();
         let discovery_end = replacement.end.max(cursor);
         add_commands(
@@ -267,8 +275,11 @@ fn add_commands(
     replacement: Range<usize>,
     availability: PaneKindAvailability,
 ) {
-    for (order, spec) in COMMAND_SPECS.iter().enumerate() {
+    for (order, spec) in command_specs().enumerate() {
         if !availability.browser && BROWSER_COMMANDS.contains(&spec.name) {
+            continue;
+        }
+        if !availability.agent && AGENT_COMMANDS.contains(&spec.name) {
             continue;
         }
         let Some((rank, matched_alias)) = command_rank(spec, query, order) else {
@@ -989,6 +1000,84 @@ mod tests {
                 !commands
                     .iter()
                     .any(|completion| completion.label == *command)
+            );
+        }
+    }
+
+    #[test]
+    fn daemon_native_commands_and_their_arguments_are_completed_from_the_catalog() {
+        let available = PaneKindAvailability {
+            browser: true,
+            agent: true,
+            editor: true,
+        };
+        for command in [
+            "agent-send",
+            "send-last-output",
+            "capture-browser",
+            "debug-marker",
+            "tools",
+        ] {
+            let completions = complete_command(command, command.len(), &[], &snapshot(), available);
+            assert!(
+                completions
+                    .iter()
+                    .any(|completion| completion.label == command),
+                "missing {command}"
+            );
+        }
+
+        let agent_options = complete_command(
+            "agent-send --",
+            "agent-send --".len(),
+            &[],
+            &snapshot(),
+            available,
+        );
+        for option in ["--context", "--submit", "--target"] {
+            assert!(
+                agent_options
+                    .iter()
+                    .any(|completion| completion.label == option),
+                "missing {option}"
+            );
+        }
+
+        let targets = complete_command(
+            "capture-browser -t ",
+            "capture-browser -t ".len(),
+            &[],
+            &snapshot(),
+            available,
+        );
+        assert!(targets.iter().any(|completion| completion.label == "%3"));
+    }
+
+    #[test]
+    fn native_command_completion_respects_pane_kind_availability() {
+        let unavailable = PaneKindAvailability {
+            browser: false,
+            agent: false,
+            editor: false,
+        };
+        for command in ["agent-send", "send-last-output", "capture-browser"] {
+            let completions =
+                complete_command(command, command.len(), &[], &snapshot(), unavailable);
+            assert!(
+                !completions
+                    .iter()
+                    .any(|completion| completion.label == command),
+                "advertised unavailable {command}"
+            );
+        }
+        for command in ["debug-marker", "tools"] {
+            let completions =
+                complete_command(command, command.len(), &[], &snapshot(), unavailable);
+            assert!(
+                completions
+                    .iter()
+                    .any(|completion| completion.label == command),
+                "hid available {command}"
             );
         }
     }

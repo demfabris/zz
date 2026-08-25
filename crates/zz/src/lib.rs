@@ -800,7 +800,7 @@ fn run_command_mode(
         return Some(run_kill_server(socket_path, invocation.args));
     }
 
-    if command == "agent-send" && zz_daemon::agent_send_reads_stdin(&invocation.args) {
+    if command_reads_stdin(&invocation) {
         match read_stdin_payload() {
             Ok(payload) => {
                 if !invocation.args.iter().any(|argument| argument == "--") {
@@ -815,7 +815,7 @@ fn run_command_mode(
         }
     }
 
-    if new_session_tui {
+    if new_session_tui || attach_prefix_uses_tui(&command) {
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
             host: host.map(str::to_owned),
@@ -846,7 +846,7 @@ fn run_command_mode(
         );
     }
 
-    if canonical_command(&command) == "attach-session" {
+    if matches!(command.as_str(), "attach" | "attach-session") {
         let options = match parse_native_attach_arguments(invocation.args) {
             Ok(options) => options,
             Err(NativeAttachArgumentError::Usage) => {
@@ -942,6 +942,18 @@ fn run_command_mode(
 fn new_session_uses_tui(invocation: &CommandInvocation) -> bool {
     canonical_command(&invocation.name) == "new-session"
         && MuxEngine::new_session_attaches(&invocation.args).unwrap_or(false)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn attach_prefix_uses_tui(command: &str) -> bool {
+    canonical_command(command) == "attach-session"
+        && !matches!(command, "attach" | "attach-session")
+}
+
+#[cfg(not(target_os = "ios"))]
+fn command_reads_stdin(invocation: &CommandInvocation) -> bool {
+    canonical_command(&invocation.name) == "agent-send"
+        && zz_daemon::agent_send_reads_stdin(&invocation.args)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1940,11 +1952,11 @@ mod tests {
 
     use super::{
         ApplicationArgumentError, CommandOutcome, TMUX_USAGE, TMUX_VERSION_OUTPUT,
-        application_arguments, application_working_directory, command_chain_uses_tui,
-        command_error_message, daemon_is_missing, execute_command_chain,
-        implicit_tmux_endpoint_conflict, is_kill_server_command, new_session_uses_tui,
-        parse_native_attach_arguments, protocol_version_output, run_command_mode,
-        split_command_chain, terminal_color_scheme, tmux_command_starts_server,
+        application_arguments, application_working_directory, attach_prefix_uses_tui,
+        command_chain_uses_tui, command_error_message, command_reads_stdin, daemon_is_missing,
+        execute_command_chain, implicit_tmux_endpoint_conflict, is_kill_server_command,
+        new_session_uses_tui, parse_native_attach_arguments, protocol_version_output,
+        run_command_mode, split_command_chain, terminal_color_scheme, tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
@@ -2045,6 +2057,34 @@ mod tests {
         assert!(!routes("new-session", &["-dsfoo"]));
         assert!(!routes("new-session", &["-s"]));
         assert!(!routes("list-sessions", &[]));
+    }
+
+    #[test]
+    fn attach_prefix_routing_keeps_exact_native_attach_commands() {
+        for command in ["a", "att", "attach-", "attach-s"] {
+            assert!(attach_prefix_uses_tui(command), "{command}");
+        }
+        for command in ["attach", "attach-session", "list-sessions"] {
+            assert!(!attach_prefix_uses_tui(command), "{command}");
+        }
+    }
+
+    #[test]
+    fn agent_send_stdin_routing_uses_the_canonical_static_command() {
+        for command in ["agent-send", "agent-s"] {
+            assert!(command_reads_stdin(&CommandInvocation::new(
+                command,
+                ["--submit"]
+            )));
+            assert!(!command_reads_stdin(&CommandInvocation::new(
+                command,
+                ["text"]
+            )));
+        }
+        assert!(!command_reads_stdin(&CommandInvocation::new(
+            "list-sessions",
+            [] as [&str; 0]
+        )));
     }
 
     #[test]

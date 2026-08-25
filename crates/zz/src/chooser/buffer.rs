@@ -9,7 +9,7 @@ use crate::{
     mux::client::MuxClient,
     terminal::view::TERMINAL_FONT,
 };
-use zz_ui::chooser::buffer_chooser_row;
+use zz_ui::chooser::{buffer_chooser_row, chooser_subtitle};
 
 const BUFFER_HINTS: &[ChooserHint] = &[
     ChooserHint {
@@ -67,6 +67,10 @@ impl ChooserSpec for BufferChooser {
         &state.items
     }
 
+    fn item_key(item: &Self::Item) -> &str {
+        &item.key
+    }
+
     fn search(state: &Self::State) -> Option<ChooserSearch<'_>> {
         state.search.as_ref().map(|search| ChooserSearch {
             query: &search.query,
@@ -78,18 +82,22 @@ impl ChooserSpec for BufferChooser {
         "Paste buffer"
     }
 
-    fn subtitle(_: &Self::State, count: usize) -> String {
-        format!("{count} buffers · daemon-owned")
+    fn subtitle(state: &Self::State, count: usize) -> String {
+        chooser_subtitle(
+            format!("{count} buffers · daemon-owned"),
+            state.filter_no_matches,
+        )
     }
 
     fn row(
         item: Self::Item,
         index: usize,
         selected: bool,
+        show_key_gutter: bool,
         mux: Entity<MuxClient>,
         theme: ChooserRowTheme,
     ) -> AnyElement {
-        buffer_row(item, index, selected, mux, theme)
+        buffer_row(item, index, selected, show_key_gutter, mux, theme)
     }
 
     fn key(input: KeyInput) -> Self::Action {
@@ -113,6 +121,7 @@ fn buffer_row(
     item: ChooseBufferItem,
     index: usize,
     selected: bool,
+    show_key_gutter: bool,
     mux: Entity<MuxClient>,
     theme: ChooserRowTheme,
 ) -> AnyElement {
@@ -120,6 +129,7 @@ fn buffer_row(
         BufferChooser::ROW_ID,
         index,
         item.key,
+        show_key_gutter,
         item.name,
         item.preview,
         format_buffer_size(item.size_bytes),

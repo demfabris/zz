@@ -51,6 +51,7 @@ fn tmux_without_a_zz_socket_fails_before_dialing_a_foreign_server() {
 mod daemon_autostart {
     use std::{
         ffi::OsString,
+        fmt::Write as _,
         fs::File,
         io::{self, Read as _, Write as _},
         os::fd::FromRawFd as _,
@@ -65,6 +66,11 @@ mod daemon_autostart {
         _directory: tempfile::TempDir,
         socket: PathBuf,
         config: PathBuf,
+    }
+
+    struct CargoLauncher {
+        _directory: tempfile::TempDir,
+        path: PathBuf,
     }
 
     impl Fixture {
@@ -83,8 +89,8 @@ mod daemon_autostart {
             }
         }
 
-        fn command(&self) -> Command {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_zz"));
+        fn command_from(&self, executable: &Path) -> Command {
+            let mut command = Command::new(executable);
             command
                 .arg("-f")
                 .arg(&self.config)
@@ -93,8 +99,25 @@ mod daemon_autostart {
             command
         }
 
+        fn command(&self) -> Command {
+            self.command_from(Path::new(env!("CARGO_BIN_EXE_zz")))
+        }
+
         fn run(&self, arguments: &[&str]) -> Output {
             self.command()
+                .args(arguments)
+                .output()
+                .expect("run zz command")
+        }
+
+        fn run_with_configs(&self, configs: &[&Path], arguments: &[&str]) -> Output {
+            let mut command = Command::new(Path::new(env!("CARGO_BIN_EXE_zz")));
+            for config in configs {
+                command.arg("-f").arg(config);
+            }
+            command
+                .arg("-S")
+                .arg(&self.socket)
                 .args(arguments)
                 .output()
                 .expect("run zz command")
@@ -142,6 +165,36 @@ mod daemon_autostart {
                 !identity_path(&self.socket).exists(),
                 "identity was created"
             );
+        }
+    }
+
+    impl CargoLauncher {
+        fn new() -> Self {
+            let directory = tempfile::Builder::new()
+                .prefix("zz launcher fixture ")
+                .tempdir_in("/tmp")
+                .expect("temporary launcher directory");
+            let install = directory.path().join("installed zz with spaces");
+            std::fs::create_dir_all(&install).expect("create launcher install directory");
+            let path = install.join("cli");
+            std::fs::copy(env!("CARGO_BIN_EXE_zz_cli"), &path).expect("copy Cargo launcher");
+            std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_zz"), install.join("zz"))
+                .expect("link Cargo zz executable");
+            assert!(path.to_string_lossy().contains(' '));
+            Self {
+                _directory: directory,
+                path,
+            }
+        }
+
+        fn command(&self, fixture: &Fixture) -> Command {
+            let mut command = Command::new(&self.path);
+            let home = fixture.config.parent().expect("fixture config directory");
+            command
+                .env("ZZ_SOCKET", &fixture.socket)
+                .env("XDG_CONFIG_HOME", home)
+                .env("HOME", home);
+            command
         }
     }
 
@@ -295,6 +348,63 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn startup_config_shares_a_fifty_source_command_budget() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let directory = fixture
+            .config
+            .parent()
+            .expect("fixture config directory")
+            .join("startup-sources");
+        std::fs::create_dir_all(&directory).expect("startup source directory");
+        let source = |first: usize, last: usize| {
+            let mut config = String::new();
+            for index in first..=last {
+                let leaf = directory.join(format!("leaf{index}.conf"));
+                std::fs::write(&leaf, format!("set-option -g @startup{index} yes\n"))
+                    .expect("startup source leaf");
+                let _ = writeln!(config, "source-file '{}'", leaf.display());
+            }
+            config
+        };
+        std::fs::write(&fixture.config, source(1, 45)).expect("first startup config");
+        let second = directory.join("second-root.conf");
+        let mut tail = source(46, 60);
+        tail.push_str("set-option -g @startup-after yes\n");
+        std::fs::write(&second, tail).expect("second startup config");
+
+        let started = fixture.run_with_configs(
+            &[fixture.config.as_path(), second.as_path()],
+            &["new-session", "-d", "-s", "startup-depth"],
+        );
+        assert_eq!(started.status.code(), Some(0));
+        assert!(started.stdout.is_empty());
+        assert!(started.stderr.is_empty());
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@startup45"]).stdout,
+            b"yes\n"
+        );
+        assert_eq!(
+            fixture.run(&["show-options", "-gqv", "@startup50"]).stdout,
+            b"yes\n"
+        );
+        assert!(
+            fixture
+                .run(&["show-options", "-gqv", "@startup51"])
+                .stdout
+                .is_empty()
+        );
+        assert_eq!(
+            fixture
+                .run(&["show-options", "-gqv", "@startup-after"])
+                .stdout,
+            b"yes\n"
+        );
+    }
+
+    #[test]
     fn event_and_command_hooks_create_sessions_without_a_client_terminal() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -375,6 +485,139 @@ mod daemon_autostart {
         let path = directory.join(name);
         std::fs::write(&path, body).expect("write source fixture");
         path.to_str().expect("UTF-8 source fixture path").to_owned()
+    }
+
+    #[test]
+    fn source_file_resolves_relative_paths_from_the_command_client_cwd() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let daemon_cwd = std::fs::canonicalize(source_directory(&fixture, "daemon cwd"))
+            .expect("canonical daemon cwd");
+        let caller_cwd = std::fs::canonicalize(source_directory(
+            &fixture,
+            "caller cwd [literal]*? with spaces",
+        ))
+        .expect("canonical caller cwd");
+        let daemon_home = std::fs::canonicalize(source_directory(
+            &fixture,
+            "daemon home [literal]*? with spaces",
+        ))
+        .expect("canonical daemon home");
+        assert_ne!(daemon_cwd, caller_cwd);
+
+        let literal_tilde_name = "literal-source.conf";
+        std::fs::write(
+            daemon_home.join(literal_tilde_name),
+            b"set-option -g @literal_tilde_source decoy-home\n",
+        )
+        .expect("write home-expansion decoy source");
+        let literal_tilde_directory = caller_cwd.join("~");
+        std::fs::create_dir(&literal_tilde_directory).expect("literal tilde directory");
+        std::fs::write(
+            literal_tilde_directory.join(literal_tilde_name),
+            b"set-option -g @literal_tilde_source caller-literal\n",
+        )
+        .expect("write literal tilde source");
+
+        let relative_directory = "relative configs with spaces";
+        let sources = caller_cwd.join(relative_directory);
+        std::fs::create_dir_all(&sources).expect("relative source directory");
+        std::fs::write(
+            sources.join("source-file-w-0-0-10.conf"),
+            b"set-option -g @cwd_order ten\n",
+        )
+        .expect("write first relative source");
+        std::fs::write(
+            sources.join("source-file-w-0-0-20.conf"),
+            b"set-option -g @cwd_order twenty\n",
+        )
+        .expect("write second relative source");
+        assert!(!daemon_cwd.join(relative_directory).exists());
+
+        let started = fixture
+            .command()
+            .env("HOME", &daemon_home)
+            .current_dir(&daemon_cwd)
+            .args(["new-session", "-d", "-s", "w"])
+            .output()
+            .expect("start daemon from its cwd");
+        assert_eq!(
+            started.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&started.stderr)
+        );
+
+        let run_from_caller = |arguments: &[&str]| {
+            fixture
+                .command()
+                .env("HOME", &daemon_home)
+                .current_dir(&caller_cwd)
+                .args(arguments)
+                .output()
+                .expect("run command from caller cwd")
+        };
+        let format_prefix = format!(
+            "{relative_directory}/source-file-#{{session_name}}-#{{window_index}}-#{{pane_index}}"
+        );
+        let glob = format!("{format_prefix}-[12]0.conf");
+        let ten = format!("{format_prefix}-10.conf");
+        let twenty = format!("{format_prefix}-20.conf");
+        let missing = format!("{relative_directory}/source-file-#{{session_name}}-missing.conf");
+
+        let literal_tilde = format!("~/{literal_tilde_name}");
+        let sourced_literal_tilde = run_from_caller(&["source-file", &literal_tilde]);
+        assert_eq!(sourced_literal_tilde.status.code(), Some(0));
+        assert!(sourced_literal_tilde.stdout.is_empty());
+        assert!(sourced_literal_tilde.stderr.is_empty());
+        let literal_tilde_value =
+            run_from_caller(&["show-options", "-gqv", "@literal_tilde_source"]);
+        assert_eq!(literal_tilde_value.status.code(), Some(0));
+        assert_eq!(literal_tilde_value.stdout, b"caller-literal\n");
+        assert!(literal_tilde_value.stderr.is_empty());
+
+        let globbed = run_from_caller(&["source-file", "-F", &glob]);
+        assert_eq!(globbed.status.code(), Some(0));
+        assert!(globbed.stdout.is_empty());
+        assert!(globbed.stderr.is_empty());
+        let glob_order = run_from_caller(&["show-options", "-gqv", "@cwd_order"]);
+        assert_eq!(glob_order.status.code(), Some(0));
+        assert_eq!(glob_order.stdout, b"twenty\n");
+        assert!(glob_order.stderr.is_empty());
+
+        let explicit = run_from_caller(&["source-file", "-F", &twenty, &ten]);
+        assert_eq!(explicit.status.code(), Some(0));
+        assert!(explicit.stdout.is_empty());
+        assert!(explicit.stderr.is_empty());
+        let explicit_order = run_from_caller(&["show-options", "-gqv", "@cwd_order"]);
+        assert_eq!(explicit_order.status.code(), Some(0));
+        assert_eq!(explicit_order.stdout, b"ten\n");
+        assert!(explicit_order.stderr.is_empty());
+
+        let quiet = run_from_caller(&["source-file", "-Fq", &missing, &twenty]);
+        assert_eq!(quiet.status.code(), Some(0));
+        assert!(quiet.stdout.is_empty());
+        assert!(quiet.stderr.is_empty());
+        let quiet_continued = run_from_caller(&["show-options", "-gqv", "@cwd_order"]);
+        assert_eq!(quiet_continued.status.code(), Some(0));
+        assert_eq!(quiet_continued.stdout, b"twenty\n");
+        assert!(quiet_continued.stderr.is_empty());
+
+        let loud = run_from_caller(&["source-file", "-F", &missing]);
+        assert_eq!(loud.status.code(), Some(1));
+        assert!(loud.stdout.is_empty());
+        assert_eq!(
+            loud.stderr,
+            format!(
+                "No such file or directory: {}\n",
+                Path::new(relative_directory)
+                    .join("source-file-w-missing.conf")
+                    .display()
+            )
+            .into_bytes()
+        );
     }
 
     #[test]
@@ -502,6 +745,134 @@ mod daemon_autostart {
         assert_eq!(stopped.status.code(), Some(1));
         assert!(stopped.stdout.is_empty());
         assert_eq!(stopped.stderr, b"can't find window: nosuchwindow\n");
+    }
+
+    fn write_source_chain(directory: &Path, invocations: usize) -> String {
+        write_source_chain_with_deepest(
+            directory,
+            invocations,
+            "source-file leaf.conf\nsource-file -q leaf.conf\n",
+        )
+    }
+
+    fn write_source_chain_with_deepest(
+        directory: &Path,
+        invocations: usize,
+        deepest: &str,
+    ) -> String {
+        for level in 1..=invocations {
+            let nested = if level < invocations {
+                format!("source-file f{}.conf\n", level + 1)
+            } else {
+                deepest.to_owned()
+            };
+            let body =
+                format!("set-option -g @depth {level}\n{nested}set-option -g @after{level} yes\n");
+            write_source(directory, &format!("f{level}.conf"), &body);
+        }
+        write_source(
+            directory,
+            "leaf.conf",
+            &format!("set-option -g @leaf{invocations} yes\n"),
+        );
+        directory
+            .join("f1.conf")
+            .to_str()
+            .expect("UTF-8 chain entry")
+            .to_owned()
+    }
+
+    #[test]
+    fn source_file_allows_fifty_invocations_and_refuses_the_fifty_first() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert_eq!(
+            fixture
+                .run(&["new-session", "-d", "-s", "depth"])
+                .status
+                .code(),
+            Some(0)
+        );
+
+        let allowed = source_directory(&fixture, "depth-allowed");
+        let entry = write_source_chain(&allowed, 49);
+        let sourced = fixture.run(&["source-file", &entry]);
+        assert_eq!(sourced.status.code(), Some(0));
+        assert!(sourced.stdout.is_empty());
+        assert!(sourced.stderr.is_empty());
+        assert_eq!(
+            fixture.run(&["show-options", "-gv", "@depth"]).stdout,
+            b"49\n"
+        );
+        assert_eq!(
+            fixture.run(&["show-options", "-gv", "@leaf49"]).stdout,
+            b"yes\n"
+        );
+
+        let refused = source_directory(&fixture, "depth-refused");
+        let entry = write_source_chain(&refused, 50);
+        let sourced = fixture.run(&["source-file", &entry]);
+        assert_eq!(sourced.status.code(), Some(1));
+        assert!(sourced.stdout.is_empty());
+        assert_eq!(
+            sourced.stderr,
+            b"too many nested files\ntoo many nested files\n"
+        );
+        assert_eq!(
+            fixture.run(&["show-options", "-gv", "@depth"]).stdout,
+            b"50\n"
+        );
+        assert_eq!(
+            fixture.run(&["show-options", "-gv", "@after50"]).stdout,
+            b"yes\n"
+        );
+        assert!(
+            fixture
+                .run(&["show-options", "-gqv", "@leaf50"])
+                .stdout
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn source_file_diagnoses_a_malformed_refused_invocation_instead_of_the_depth_limit() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert_eq!(
+            fixture
+                .run(&["new-session", "-d", "-s", "malformed-depth"])
+                .status
+                .code(),
+            Some(0)
+        );
+
+        for (name, deepest, message) in [
+            ("depth-no-path", "source-file\n", "source-file needs a path"),
+            (
+                "depth-bad-flag",
+                "source-file -z leaf.conf\n",
+                "source-file does not support -z",
+            ),
+        ] {
+            let directory = source_directory(&fixture, name);
+            let entry = write_source_chain_with_deepest(&directory, 50, deepest);
+            let deepest_path = directory
+                .join("f50.conf")
+                .to_str()
+                .expect("UTF-8 chain leaf")
+                .to_owned();
+            let sourced = fixture.run(&["source-file", &entry]);
+            assert_eq!(sourced.status.code(), Some(1));
+            assert_eq!(
+                sourced.stdout,
+                format!("{deepest_path}:2: {message}\n").into_bytes()
+            );
+            assert!(sourced.stderr.is_empty());
+        }
     }
 
     #[test]
@@ -931,15 +1302,22 @@ mod daemon_autostart {
         attach: &[&str],
         needles: &[&[u8]],
     ) -> (bool, Vec<u8>, Option<std::process::ExitStatus>) {
+        let mut command = fixture.command();
+        command.args(attach);
+        capture_command_until(command, needles)
+    }
+
+    fn capture_command_until(
+        mut command: Command,
+        needles: &[&[u8]],
+    ) -> (bool, Vec<u8>, Option<std::process::ExitStatus>) {
         let Ok((mut master, slave)) = open_pty() else {
             return (true, Vec::new(), None);
         };
         rustix::io::ioctl_fionbio(&master, true).expect("set pty master nonblocking");
         let stdin = slave.try_clone().expect("clone pty stdin");
         let stdout = slave.try_clone().expect("clone pty stdout");
-        let mut child = fixture
-            .command()
-            .args(attach)
+        let mut child = command
             .stdin(Stdio::from(stdin))
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(slave))
@@ -1266,6 +1644,50 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn attach_prefix_defers_live_user_aliases_to_the_daemon() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "named"]);
+        assert_eq!(created.status.code(), Some(0));
+
+        let unaliased = fixture.run(&["a"]);
+        assert_eq!(unaliased.status.code(), Some(1));
+        assert!(unaliased.stdout.is_empty());
+        assert_eq!(unaliased.stderr, b"open terminal failed: not a terminal\n");
+
+        let configured = fixture.run(&[
+            "set-option",
+            "-s",
+            "command-alias[40]",
+            "a=list-sessions -F '#{session_name}'",
+        ]);
+        assert_eq!(configured.status.code(), Some(0));
+        let aliased = fixture.run(&["a"]);
+        assert_eq!(aliased.status.code(), Some(0));
+        assert_eq!(aliased.stdout, b"named\n");
+        assert!(aliased.stderr.is_empty());
+    }
+
+    #[test]
+    fn agent_send_prefix_reads_stdin_before_dispatch() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "agent-stdin"]);
+        assert_eq!(created.status.code(), Some(0));
+        let sent = fixture.run_with_stdin(&["agent-s", "-t", "%0"], b"review this\n");
+        assert_eq!(sent.status.code(), Some(1));
+        assert!(sent.stdout.is_empty());
+        assert_eq!(
+            sent.stderr,
+            b"target not found: no agent pane in the window holding %0\n"
+        );
+    }
+
+    #[test]
     fn headless_attach_resolves_the_target_before_rejecting_the_terminal() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -1282,23 +1704,134 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn headless_attach_autostarts_before_reporting_no_sessions() {
+    fn explicit_targetless_attach_autostarts_then_reports_no_sessions() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
             return;
         }
         std::fs::write(&fixture.config, b"set-environment -g started YES\n")
             .expect("write autostart marker config");
-        let output = fixture.run(&["attach"]);
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, b"no sessions\n");
-        assert!(fixture.socket.exists());
+        for command in ["attach", "attach-session"] {
+            let output = fixture.run(&[command]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            assert_eq!(output.stderr, b"no sessions\n");
+            assert!(fixture.socket.exists());
+        }
 
         let started = fixture.run(&["show-environment", "-g", "started"]);
         assert_eq!(started.status.code(), Some(0));
         assert_eq!(started.stdout, b"started=YES\n");
         assert!(started.stderr.is_empty());
+    }
+
+    #[test]
+    fn cargo_launcher_pair_routes_bare_new_and_attach_across_empty_and_existing_daemons() {
+        let Ok((master, slave)) = open_pty() else {
+            return;
+        };
+        drop((master, slave));
+        let launcher = CargoLauncher::new();
+        let cases = [
+            ("bare-empty", &[][..], false, &["0"][..]),
+            ("bare-existing", &[][..], true, &["existing"][..]),
+            (
+                "new-empty",
+                &["new", "-s", "created"][..],
+                false,
+                &["created"][..],
+            ),
+            (
+                "new-existing",
+                &["new", "-s", "created"][..],
+                true,
+                &["created", "existing"][..],
+            ),
+            (
+                "attach-existing",
+                &["attach", "-t", "existing"][..],
+                true,
+                &["existing"][..],
+            ),
+        ];
+
+        for (name, arguments, existing, expected) in cases {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            if existing {
+                let created = fixture.run(&["new-session", "-d", "-s", "existing"]);
+                assert_eq!(
+                    created.status.code(),
+                    Some(0),
+                    "{name}: {}",
+                    String::from_utf8_lossy(&created.stderr)
+                );
+            }
+            let mut command = launcher.command(&fixture);
+            command.args(arguments);
+            let (rendered, captured, early_status) =
+                capture_command_until(command, &[b"\x1b[?1049h"]);
+            assert!(
+                rendered,
+                "{name}: child exited early={early_status:?}; pty output={}",
+                String::from_utf8_lossy(&captured)
+            );
+
+            let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+            assert_eq!(
+                listed.status.code(),
+                Some(0),
+                "{name}: {}",
+                String::from_utf8_lossy(&listed.stderr)
+            );
+            let output = String::from_utf8_lossy(&listed.stdout);
+            let mut actual = output.lines().collect::<Vec<_>>();
+            actual.sort_unstable();
+            assert_eq!(actual, expected, "{name}");
+        }
+
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let explicit = launcher.command(&fixture).arg("attach").output().unwrap();
+        assert_eq!(explicit.status.code(), Some(1));
+        assert!(explicit.stdout.is_empty());
+        assert_eq!(explicit.stderr, b"no sessions\n");
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert!(listed.stdout.is_empty());
+    }
+
+    #[test]
+    fn explicit_attach_can_fall_back_to_new_session() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(concat!(
+                "\"$ZZ_BIN\" -f \"$ZZ_CONF\" -S \"$ZZ_TEST_SOCKET\" attach || ",
+                "exec \"$ZZ_BIN\" -f \"$ZZ_CONF\" -S \"$ZZ_TEST_SOCKET\" new-session -s fallback"
+            ))
+            .env("ZZ_BIN", env!("CARGO_BIN_EXE_zz"))
+            .env("ZZ_CONF", &fixture.config)
+            .env("ZZ_TEST_SOCKET", &fixture.socket);
+        let (rendered, captured, early_status) = capture_command_until(command, &[b"\x1b[?1049h"]);
+        assert!(
+            rendered,
+            "child exited early={early_status:?}; pty output={}",
+            String::from_utf8_lossy(&captured)
+        );
+        assert!(captured.windows(11).any(|window| window == b"no sessions"));
+
+        let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
+        assert_eq!(listed.status.code(), Some(0));
+        assert_eq!(listed.stdout, b"fallback\n");
     }
 
     #[test]
@@ -1423,7 +1956,13 @@ mod daemon_autostart {
         if !local_socket_bind_available(&fixture.socket) {
             return;
         }
-        let created = fixture.run(&["new-session", "-d", "-s", "ro"]);
+        let created = fixture.run(&[
+            "new-session",
+            "-d",
+            "-s",
+            "ro",
+            "printf 'ZZ_ATTACH_READY\\r\\n'; exec /bin/cat",
+        ]);
         assert_eq!(created.status.code(), Some(0));
 
         let attach_and_type = |attach: &[&str], text: &[u8]| -> (bool, Vec<u8>, String) {
@@ -1452,8 +1991,8 @@ mod daemon_autostart {
                     Err(_) => {}
                 }
                 if captured
-                    .windows(b"[ro]".len())
-                    .any(|window| window == b"[ro]")
+                    .windows(b"ZZ_ATTACH_READY".len())
+                    .any(|window| window == b"ZZ_ATTACH_READY")
                 {
                     break true;
                 }
@@ -1497,9 +2036,13 @@ mod daemon_autostart {
             "client_flags must report read-only without ignore-size: {flags}"
         );
 
-        let (rendered, _captured, flags) =
+        let (rendered, writable_attach, flags) =
             attach_and_type(&["attach-session", "-t", "ro"], b"echo ZZRW\r");
-        assert!(rendered, "writable attach did not render");
+        assert!(
+            rendered,
+            "writable attach did not render: {}",
+            String::from_utf8_lossy(&writable_attach)
+        );
         assert!(
             flags.lines().any(|line| line == "attached"),
             "plain attach reports no read-only flag: {flags}"
@@ -1519,7 +2062,8 @@ mod daemon_autostart {
             }
             assert!(
                 Instant::now() < deadline,
-                "writable keystrokes never reached the pane: {pane_text}"
+                "writable keystrokes never reached the pane: {pane_text}; client flags: {flags}; attach output: {}",
+                String::from_utf8_lossy(&writable_attach)
             );
             thread::sleep(Duration::from_millis(50));
         }
@@ -2076,6 +2620,98 @@ mod daemon_autostart {
                     .collect::<Vec<_>>(),
                 "config-error",
             );
+        }
+
+        #[test]
+        fn control_source_diagnostics_keep_tmux_chain_semantics() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("nested control");
+            std::fs::create_dir(&directory).expect("create nested source directory");
+            let loud = directory.join("loud entry.conf");
+            let quiet = directory.join("quiet entry.conf");
+            let invalid = directory.join("invalid entry.conf");
+            std::fs::write(&loud, "source-file nested-missing.conf\n")
+                .expect("write loud nested source");
+            std::fs::write(&quiet, "source-file -q nested-missing.conf\n")
+                .expect("write quiet nested source");
+            std::fs::write(&invalid, "wibble\n").expect("write invalid source");
+            let input = format!(
+                "source-file '{}' ; display-message -p same-nested\nsource-file top-missing.conf ; display-message -p same-top-missing\nsource-file '{}' ; display-message -p same-invalid\nsource-file '{}'\ndisplay-message -p fresh\n\n",
+                loud.display(),
+                invalid.display(),
+                quiet.display()
+            );
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "nested-source-error"],
+                input.as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 9);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(
+                &stream.blocks[2],
+                3,
+                1,
+                &["No such file or directory: nested-missing.conf"],
+                true,
+            );
+            assert_block(&stream.blocks[3], 4, 1, &["same-nested"], false);
+            assert_block(
+                &stream.blocks[4],
+                5,
+                1,
+                &["No such file or directory: top-missing.conf"],
+                true,
+            );
+            assert_block(&stream.blocks[5], 6, 1, &[], false);
+            assert_block(&stream.blocks[6], 7, 1, &["same-invalid"], false);
+            assert_block(&stream.blocks[7], 8, 1, &[], false);
+            assert_block(&stream.blocks[8], 9, 1, &["fresh"], false);
+            assert!(stream.outside.contains(&format!(
+                "%config-error {}:1: unknown command: wibble",
+                invalid.display()
+            )));
+            assert_attached_startup(
+                &stream
+                    .outside
+                    .iter()
+                    .filter(|line| !line.starts_with("%config-error "))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                "nested-source-error",
+            );
+        }
+
+        #[test]
+        fn control_nested_source_depth_limit_uses_zz_synthesized_error_frames() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control depth");
+            std::fs::create_dir(&directory).expect("create control depth directory");
+            let entry = write_source_chain(&directory, 50);
+            let input = format!("source-file '{entry}' ; display-message -p after-the-limit\n\n");
+            let output = fixture.run_with_stdin(
+                &["-C", "new-session", "-s", "control-depth"],
+                input.as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 5);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &["too many nested files"], true);
+            assert_block(&stream.blocks[3], 4, 1, &["too many nested files"], true);
+            assert_block(&stream.blocks[4], 5, 1, &["after-the-limit"], false);
+            assert_attached_startup(&stream.outside, "control-depth");
         }
 
         #[test]

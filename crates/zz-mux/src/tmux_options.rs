@@ -832,6 +832,7 @@ pub const BEHAVES: &[&str] = &[
     "window-pane-current-status-format",
     "window-status-format",
     "window-status-current-format",
+    "window-status-separator",
     "window-status-style",
     "window-status-current-style",
     "window-status-last-style",
@@ -1049,10 +1050,16 @@ const OPTION_TABLE_ORDER: &[&str] = &[
 ];
 
 pub(crate) fn tmux_option_table_order(name: &str) -> usize {
-    OPTION_TABLE_ORDER
+    if let Some(index) = OPTION_TABLE_ORDER
         .iter()
         .position(|candidate| *candidate == name)
-        .unwrap_or(usize::MAX)
+    {
+        return index;
+    }
+    HOOK_NAMES
+        .iter()
+        .position(|candidate| *candidate == name)
+        .map_or(usize::MAX, |index| OPTION_TABLE_ORDER.len() + index)
 }
 
 pub(crate) fn tmux_options() -> impl Iterator<Item = TmuxOption> {
@@ -1350,12 +1357,19 @@ mod tests {
                 .map(|option| option.name)
                 .collect()
         );
+        assert_eq!(
+            HOOK_NAMES
+                .iter()
+                .map(|name| tmux_option_table_order(name))
+                .collect::<Vec<_>>(),
+            (180..248).collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn behaving_option_roster_is_complete_unique_and_catalogued() {
-        assert_eq!(BEHAVES.len(), 104);
-        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 104);
+        assert_eq!(BEHAVES.len(), 105);
+        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 105);
         let catalog = tmux_options()
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();

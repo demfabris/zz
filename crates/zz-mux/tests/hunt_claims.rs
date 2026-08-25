@@ -52,7 +52,7 @@ fn pane_size(engine: &MuxEngine, pane: PaneId) -> (u16, u16) {
 
 #[test]
 fn catalog_covers_the_options_the_handlers_read() {
-    assert_eq!(COMMAND_SPECS.len(), 75);
+    assert_eq!(COMMAND_SPECS.len(), 76);
     for name in ["kill-session", "kill-window", "kill-pane"] {
         let spec = COMMAND_SPECS
             .iter()
@@ -136,7 +136,9 @@ fn catalog_covers_the_options_the_handlers_read() {
             "{name} is missing -t"
         );
     }
-    assert!(spec("source-file").option("-q").is_some());
+    for flag in ["-F", "-q"] {
+        assert!(spec("source-file").option(flag).is_some());
+    }
     assert!(
         spec("source-file").variadic.is_some(),
         "source-file takes every path it is given"
@@ -441,7 +443,7 @@ fn brace_command_lists_bind_as_a_single_command_sequence() {
     assert!(
         listed
             .lines()
-            .any(|line| line == "bind-key -T root F2 send-keys \"a ; b\" \\; new-window"),
+            .any(|line| line == "bind-key  -T root F2 send-keys \"a ; b\" \\; new-window"),
         "{listed}"
     );
 }
@@ -838,11 +840,11 @@ fn kill_session_dash_c_clears_alerts_and_kills_nothing() {
     let error = engine
         .execute(
             &mut context,
-            &command("kill-session", &["-f", "-t", "work"]),
+            &command("kill-session", &["-f", "1", "-t", "work"]),
         )
         .unwrap_err();
-    assert!(matches!(error, ServerError::UnsupportedCommand(ref message)
-        if message == "kill-session -f"));
+    assert!(matches!(error, ServerError::InvalidCommand(ref message)
+        if message == "-f only valid with -a"));
 }
 
 #[test]
@@ -1206,7 +1208,15 @@ fn send_keys_reports_the_flags_it_cannot_honor() {
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
-    for flag in ["-R", "-M", "-K", "-F"] {
+    let plain = engine
+        .execute(&mut context, &command("send-keys", &["x"]))
+        .unwrap();
+    let formatted = engine
+        .execute(&mut context, &command("send-keys", &["-F", "x"]))
+        .unwrap();
+    assert_eq!(formatted, plain);
+
+    for flag in ["-R", "-M", "-K"] {
         let error = engine
             .execute(&mut context, &command("send-keys", &[flag, "x"]))
             .unwrap_err();
@@ -1643,7 +1653,7 @@ fn attach_session_reports_the_client_flags_it_cannot_honor() {
 }
 
 #[test]
-fn list_keys_rejects_the_selectors_it_does_not_implement() {
+fn list_keys_remaining_selectors_share_the_catalog_and_runtime_contract() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     let error = engine
@@ -1654,24 +1664,79 @@ fn list_keys_rejects_the_selectors_it_does_not_implement() {
             if message == "list-keys does not support -n"),
         "{error:?}"
     );
-    for flag in ["-a", "-N", "-1"] {
-        let error = engine
-            .execute(&mut context, &command("list-keys", &[flag]))
-            .unwrap_err();
-        assert!(
-            matches!(&error, ServerError::UnsupportedCommand(message)
-                if message == &format!("list-keys {flag}")),
-            "{error:?}"
-        );
-    }
-    let error = engine
-        .execute(&mut context, &command("list-keys", &["c"]))
-        .unwrap_err();
-    assert!(
-        matches!(&error, ServerError::UnsupportedCommand(message)
-            if message == "list-keys c (key filter)"),
-        "{error:?}"
+    engine
+        .execute(
+            &mut context,
+            &command("bind-key", &["-T", "zzlk", "a", "display-message", "a"]),
+        )
+        .unwrap();
+    engine
+        .execute(
+            &mut context,
+            &command(
+                "bind-key",
+                &["-r", "-T", "zzlk", "x", "display-message", "x"],
+            ),
+        )
+        .unwrap();
+    let base = engine
+        .execute(
+            &mut context,
+            &command(
+                "list-keys",
+                &["-T", "zzlk", "-F", "#{key_string}:#{key_repeat}"],
+            ),
+        )
+        .unwrap()
+        .output;
+    assert_eq!(base, "a:0\nx:1");
+    assert_eq!(
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-keys",
+                    &["-r", "-T", "zzlk", "-F", "#{key_string}:#{key_repeat}"],
+                ),
+            )
+            .unwrap()
+            .output,
+        base
     );
+    assert_eq!(
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-keys",
+                    &["-O", "key", "-r", "-T", "zzlk", "-F", "#{key_string}",],
+                ),
+            )
+            .unwrap()
+            .output,
+        "x\na"
+    );
+    assert_eq!(
+        engine
+            .execute(
+                &mut context,
+                &command("list-keys", &["-T", "zzlk", "-F", "#{key_string}", "a"]),
+            )
+            .unwrap()
+            .output,
+        "a"
+    );
+    assert!(matches!(
+        engine
+            .execute(
+                &mut context,
+                &command("list-keys", &["-1", "-T", "zzlk", "-F", "#{key_string}"]),
+            )
+            .unwrap()
+            .effects
+            .as_slice(),
+        [MuxEffect::PrintOrMessage { text, freeze: true, .. }] if text == "a"
+    ));
     let error = engine
         .execute(&mut context, &command("list-keys", &["-T", "bogus"]))
         .unwrap_err();
@@ -1680,16 +1745,15 @@ fn list_keys_rejects_the_selectors_it_does_not_implement() {
             if message == "table bogus doesn't exist"),
         "{error:?}"
     );
-    let listed = engine
-        .execute(&mut context, &command("list-keys", &["-T", "root"]))
-        .unwrap();
-    assert!(listed.output.lines().all(|line| line.contains("-T root")));
 }
 
 #[test]
 fn source_file_keeps_every_path_in_order() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
     let sourced = engine
         .execute(&mut context, &command("source-file", &["first", "second"]))
         .unwrap();
@@ -1716,6 +1780,32 @@ fn source_file_keeps_every_path_in_order() {
             quiet: true,
         }]
     );
+    let formatted = engine
+        .execute(
+            &mut context,
+            &command(
+                "source-file",
+                &[
+                    "-F",
+                    "#{session_name}-#{window_index}-#{pane_index}-first.conf",
+                    "#{session_name}-#{window_index}-#{pane_index}-second.conf",
+                ],
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        formatted.effects,
+        [
+            MuxEffect::SourceFile {
+                path: "work-0-0-first.conf".to_owned(),
+                quiet: false,
+            },
+            MuxEffect::SourceFile {
+                path: "work-0-0-second.conf".to_owned(),
+                quiet: false,
+            },
+        ]
+    );
     let stdin = engine
         .execute(&mut context, &command("source-file", &["-"]))
         .unwrap();
@@ -1732,6 +1822,14 @@ fn source_file_keeps_every_path_in_order() {
     assert!(
         matches!(&error, ServerError::UnsupportedCommand(message)
             if message == "source-file -v"),
+        "{error:?}"
+    );
+    let error = engine
+        .execute(&mut context, &command("source-file", &["-F", "-n"]))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::UnsupportedCommand(message)
+            if message == "source-file -n"),
         "{error:?}"
     );
 }
@@ -1940,35 +2038,6 @@ fn window_steps_error_instead_of_landing_in_place() {
         .unwrap_err();
     assert!(matches!(&error, ServerError::InvalidCommand(message)
         if message == "no next window"));
-}
-
-#[test]
-fn creation_commands_refuse_the_valued_options_they_cannot_honor() {
-    let mut engine = MuxEngine::default();
-    let mut context = ExecutionContext::default();
-    engine
-        .execute(&mut context, &command("new-session", &["-s", "work"]))
-        .unwrap();
-    for (name, args) in [
-        ("new-session", &["-e", "FOO=bar"]),
-        ("new-window", &["-e", "FOO=bar"]),
-        ("split-window", &["-e", "FOO=bar"]),
-    ] {
-        let error = engine
-            .execute(&mut context, &command(name, args))
-            .unwrap_err();
-        assert!(
-            matches!(&error, ServerError::UnsupportedCommand(message)
-                if message.starts_with(name)),
-            "{name} {args:?} produced {error:?}"
-        );
-    }
-    let error = engine
-        .execute(&mut context, &command("split-window", &["-Z"]))
-        .unwrap_err();
-    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
-        if message == "split-window -Z"));
-    assert_eq!(window_count(&engine, "work"), 1);
 }
 
 #[test]

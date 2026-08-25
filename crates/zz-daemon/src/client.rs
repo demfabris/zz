@@ -1,7 +1,7 @@
 use std::{
     fmt,
     io::{self, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         OnceLock,
         atomic::{AtomicU64, Ordering},
@@ -12,8 +12,9 @@ use parking_lot::Mutex;
 use zz_protocol::{
     AgentImage, AgentSessionOpKind, ClientHello, ClientInstanceId, ClientKind, CommandInvocation,
     CommandRequest, CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage,
-    MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId, PasteUploadPurpose, ProtocolMessage,
-    ServerError, ServerHello, encode_protocol_message_into, read_protocol_message_into,
+    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
+    PasteUploadPurpose, ProtocolMessage, ServerError, ServerHello, encode_protocol_message_into,
+    read_protocol_message_into,
 };
 
 static CLIENT_INSTANCE_ID: OnceLock<ClientInstanceId> = OnceLock::new();
@@ -117,7 +118,7 @@ impl CommandClient {
             None,
             false,
             true,
-            TerminalFactsScope::Full,
+            EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
         )?;
         Ok(Self::from_connected(connected))
     }
@@ -135,7 +136,7 @@ impl CommandClient {
                     None,
                     false,
                     false,
-                    TerminalFactsScope::Full,
+                    EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
                 )?;
                 Ok(Self::from_connected(connected))
             }
@@ -157,7 +158,7 @@ impl CommandClient {
                         None,
                         false,
                         false,
-                        TerminalFactsScope::SizeOnly,
+                        EndpointFactsScope::PortableTerminalSize,
                     )?;
                     Ok(Self::from_connected_with_ssh(connected, ssh_forward))
                 }
@@ -281,7 +282,7 @@ impl InteractiveClient {
             None,
             false,
             false,
-            TerminalFactsScope::None,
+            EndpointFactsScope::LocalHostWorkingDirectory,
         )?;
         Ok(Self::from_connected(connected))
     }
@@ -387,9 +388,9 @@ impl InteractiveClient {
                     client_has_terminal,
                     false,
                     if terminal_surface {
-                        TerminalFactsScope::Full
+                        EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal
                     } else {
-                        TerminalFactsScope::None
+                        EndpointFactsScope::LocalHostWorkingDirectory
                     },
                 )?;
                 Ok(Self::from_connected(connected))
@@ -407,9 +408,9 @@ impl InteractiveClient {
                         client_has_terminal,
                         false,
                         if terminal_surface {
-                            TerminalFactsScope::SizeOnly
+                            EndpointFactsScope::PortableTerminalSize
                         } else {
-                            TerminalFactsScope::None
+                            EndpointFactsScope::None
                         },
                     )?;
                     let mut client = Self::from_connected(connected);
@@ -429,9 +430,9 @@ impl InteractiveClient {
                         client_has_terminal,
                         false,
                         if terminal_surface {
-                            TerminalFactsScope::SizeOnly
+                            EndpointFactsScope::PortableTerminalSize
                         } else {
-                            TerminalFactsScope::None
+                            EndpointFactsScope::None
                         },
                     )?;
                     Ok(Self::from_connected_with_ssh(connected, ssh_forward))
@@ -844,10 +845,31 @@ impl<S: TransportStream> ProtocolSender<S> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum TerminalFactsScope {
+enum EndpointFactsScope {
     None,
-    SizeOnly,
-    Full,
+    LocalHostWorkingDirectory,
+    PortableTerminalSize,
+    LocalHostWorkingDirectoryAndTerminal,
+}
+
+impl EndpointFactsScope {
+    fn includes_working_directory(self) -> bool {
+        matches!(
+            self,
+            Self::LocalHostWorkingDirectory | Self::LocalHostWorkingDirectoryAndTerminal
+        )
+    }
+
+    fn includes_terminal_size(self) -> bool {
+        matches!(
+            self,
+            Self::PortableTerminalSize | Self::LocalHostWorkingDirectoryAndTerminal
+        )
+    }
+
+    fn includes_tty(self) -> bool {
+        self == Self::LocalHostWorkingDirectoryAndTerminal
+    }
 }
 
 #[cfg(unix)]
@@ -881,8 +903,8 @@ fn caller_tty() -> Option<String> {
     None
 }
 
-fn terminal_facts_capabilities(scope: TerminalFactsScope, capabilities: &mut Vec<String>) {
-    if scope == TerminalFactsScope::None {
+fn terminal_facts_capabilities(scope: EndpointFactsScope, capabilities: &mut Vec<String>) {
+    if !scope.includes_terminal_size() {
         return;
     }
     if let Some((columns, rows)) = caller_terminal_size() {
@@ -891,7 +913,7 @@ fn terminal_facts_capabilities(scope: TerminalFactsScope, capabilities: &mut Vec
             ClientHello::CLIENT_SIZE_CAPABILITY_PREFIX
         ));
     }
-    if scope == TerminalFactsScope::Full
+    if scope.includes_tty()
         && std::env::var("TMUX").is_ok_and(|value| !value.is_empty())
         && let Some(tty) = caller_tty()
     {
@@ -902,6 +924,21 @@ fn terminal_facts_capabilities(scope: TerminalFactsScope, capabilities: &mut Vec
     }
 }
 
+fn client_working_directory(
+    scope: EndpointFactsScope,
+    current_dir: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    scope
+        .includes_working_directory()
+        .then(current_dir)
+        .flatten()
+        .filter(|working_directory| working_directory.to_str().is_some())
+        .filter(|working_directory| {
+            working_directory.as_os_str().as_encoded_bytes().len()
+                <= MAX_CLIENT_WORKING_DIRECTORY_BYTES
+        })
+}
+
 fn connect<T: Transport>(
     endpoint: &T::Endpoint,
     endpoint_display: impl fmt::Display,
@@ -910,7 +947,7 @@ fn connect<T: Transport>(
     color_scheme: Option<TerminalColorScheme>,
     client_has_terminal: bool,
     send_origin: bool,
-    terminal_facts: TerminalFactsScope,
+    client_facts: EndpointFactsScope,
 ) -> Result<Connected<T::Stream>, DaemonError> {
     let stream = T::connect(endpoint)?;
     connect_stream(
@@ -921,7 +958,7 @@ fn connect<T: Transport>(
         color_scheme,
         client_has_terminal,
         send_origin,
-        terminal_facts,
+        client_facts,
     )
 }
 
@@ -934,7 +971,7 @@ fn connect_stream<S: TransportStream>(
     color_scheme: Option<TerminalColorScheme>,
     client_has_terminal: bool,
     send_origin: bool,
-    terminal_facts: TerminalFactsScope,
+    client_facts: EndpointFactsScope,
 ) -> Result<Connected<S>, DaemonError> {
     let started = diagnostic_timer();
     let mut reader = ProtocolReceiver::new(stream.try_clone()?);
@@ -957,7 +994,7 @@ fn connect_stream<S: TransportStream>(
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
     }
-    terminal_facts_capabilities(terminal_facts, &mut capabilities);
+    terminal_facts_capabilities(client_facts, &mut capabilities);
     writer.send(&ProtocolMessage::ClientHello(ClientHello {
         protocol_version: PROTOCOL_VERSION,
         client_instance_id: client_instance_id(),
@@ -969,6 +1006,7 @@ fn connect_stream<S: TransportStream>(
             .then(|| std::env::var("ZZ_PANE").ok())
             .flatten()
             .and_then(|pane| pane.parse().ok()),
+        working_directory: client_working_directory(client_facts, || std::env::current_dir().ok()),
     }))?;
     let hello = match reader.recv()? {
         ProtocolMessage::ServerHello(hello) => hello,
@@ -996,4 +1034,70 @@ pub fn short_device_name() -> Option<String> {
         .next()
         .filter(|name| !name.is_empty())
         .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use zz_protocol::MAX_CLIENT_WORKING_DIRECTORY_BYTES;
+
+    use super::{EndpointFactsScope, client_working_directory};
+
+    #[test]
+    fn local_client_fact_scopes_publish_the_supplied_working_directory() {
+        let fixture = PathBuf::from("/tmp/zz-client-cwd-fixture");
+        for scope in [
+            EndpointFactsScope::LocalHostWorkingDirectory,
+            EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal,
+        ] {
+            assert_eq!(
+                client_working_directory(scope, || Some(fixture.clone())),
+                Some(fixture.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn remote_client_fact_scopes_never_read_or_publish_a_local_working_directory() {
+        for scope in [
+            EndpointFactsScope::None,
+            EndpointFactsScope::PortableTerminalSize,
+        ] {
+            assert_eq!(client_working_directory(scope, || panic!()), None);
+        }
+    }
+
+    #[test]
+    fn local_client_fact_scopes_omit_oversized_working_directories() {
+        let fixture = PathBuf::from("x".repeat(MAX_CLIENT_WORKING_DIRECTORY_BYTES + 1));
+        assert_eq!(
+            client_working_directory(EndpointFactsScope::LocalHostWorkingDirectory, || Some(
+                fixture
+            )),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_client_fact_scopes_omit_non_utf8_working_directories() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let fixture = PathBuf::from(OsString::from_vec(vec![b'/', b't', b'm', b'p', b'/', 0xff]));
+        assert_eq!(
+            client_working_directory(EndpointFactsScope::LocalHostWorkingDirectory, || Some(
+                fixture
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn portable_terminal_facts_never_include_a_local_tty() {
+        assert!(EndpointFactsScope::PortableTerminalSize.includes_terminal_size());
+        assert!(!EndpointFactsScope::PortableTerminalSize.includes_tty());
+        assert!(EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal.includes_terminal_size());
+        assert!(EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal.includes_tty());
+    }
 }

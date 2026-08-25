@@ -4,7 +4,7 @@ use zz_protocol::{
     InputMessage,
 };
 use zz_terminal::KeyInput;
-use zz_ui::chooser::{ChooserPaneKind, tree_chooser_row};
+use zz_ui::chooser::{ChooserPaneKind, chooser_subtitle, tree_chooser_row};
 
 use crate::{
     chooser::{Chooser, ChooserHint, ChooserRowTheme, ChooserSearch, ChooserSpec},
@@ -69,6 +69,10 @@ impl ChooserSpec for TreeChooser {
         &state.items
     }
 
+    fn item_key(item: &Self::Item) -> &str {
+        &item.key
+    }
+
     fn search(state: &Self::State) -> Option<ChooserSearch<'_>> {
         state.search.as_ref().map(|search| ChooserSearch {
             query: &search.query,
@@ -88,17 +92,21 @@ impl ChooserSpec for TreeChooser {
             ChooseTreeKind::Windows => "sessions and windows",
             ChooseTreeKind::Panes => "sessions, windows, and panes",
         };
-        format!("{count} {targets} · daemon-owned")
+        chooser_subtitle(
+            format!("{count} {targets} · daemon-owned"),
+            state.filter_no_matches,
+        )
     }
 
     fn row(
         item: Self::Item,
         index: usize,
         selected: bool,
+        show_key_gutter: bool,
         mux: Entity<MuxClient>,
         theme: ChooserRowTheme,
     ) -> AnyElement {
-        tree_row(item, index, selected, mux, theme)
+        tree_row(item, index, selected, show_key_gutter, mux, theme)
     }
 
     fn key(input: KeyInput) -> Self::Action {
@@ -122,10 +130,11 @@ fn tree_row(
     item: ChooseTreeItem,
     index: usize,
     selected: bool,
+    show_key_gutter: bool,
     mux: Entity<MuxClient>,
     theme: ChooserRowTheme,
 ) -> AnyElement {
-    tree_row_element(item, index, selected, theme)
+    tree_row_element(item, index, selected, show_key_gutter, theme)
         .on_mouse_down(MouseButton::Left, move |event, _, cx| {
             let index = u32::try_from(index).unwrap_or(u32::MAX);
             TreeChooser::send(
@@ -145,6 +154,7 @@ fn tree_row_element(
     item: ChooseTreeItem,
     index: usize,
     selected: bool,
+    show_key_gutter: bool,
     theme: ChooserRowTheme,
 ) -> zz_ui::list::ListItem {
     let target = item.target.to_string();
@@ -164,6 +174,7 @@ fn tree_row_element(
         TreeChooser::ROW_ID,
         index,
         item.key,
+        show_key_gutter,
         target,
         item.label,
         item.detail,

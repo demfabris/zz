@@ -37,7 +37,7 @@ every one of them, so an attached client still never has the daemon die under it
 [session persistence](/concepts/session-persistence.md).
 
 A GUI process auto-starts a daemon if none is running, then attaches as a client. The installed
-launcher reserves `zz app` for this path; bare `zz` uses the tmux-compatible terminal attach path.
+launcher reserves `zz app` for this path; bare `zz` uses the raw-terminal `new-session -A` path.
 On Unix the spawned daemon gets its own session, so Ctrl+C or a closing tty in the launching
 terminal never signals the daemon and its sessions. The daemon initially has no session unless
 config created one; the GUI's actual empty-target Interactive attach lazily creates numeric session

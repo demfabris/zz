@@ -285,7 +285,7 @@ fn execute_command<W: Write>(
                 ProtocolMessage::CommandResponse(response)
                     if response_request_id(&response) == request_id =>
                 {
-                    let abort_line = matches!(&response, CommandResponse::Error { .. });
+                    let abort_line = response_aborts_line(&response);
                     let exit_code = output.response(&frame, response)?;
                     return Ok(CommandResult {
                         exit_code,
@@ -472,6 +472,12 @@ fn handle_protocol<W: Write>(
                 output.notify(&line)?;
             }
             EventPayload::ClientMessage { kind, text, .. }
+                if kind == zz_protocol::ClientMessageKind::Warning
+                    && is_source_error_message(&text) =>
+            {
+                output.diagnostic_error(&text)?;
+            }
+            EventPayload::ClientMessage { kind, text, .. }
                 if kind == zz_protocol::ClientMessageKind::Warning && is_config_message(&text) =>
             {
                 output.notify(format!("%config-error {text}").as_bytes())?;
@@ -650,7 +656,6 @@ fn render_message(text: &str) -> Vec<u8> {
 
 fn is_config_message(text: &str) -> bool {
     text.starts_with("source-file ")
-        || text.starts_with("no such file: ")
         || text.contains(" invalid line")
         || text.starts_with("invalid line")
         || (text.starts_with("skipped ") && text.contains("unsupported tmux command"))
@@ -658,6 +663,18 @@ fn is_config_message(text: &str) -> bool {
             .split_once(": ")
             .and_then(|(location, _)| location.rsplit_once(':'))
             .is_some_and(|(_, line)| line.parse::<u32>().is_ok())
+}
+
+fn is_source_error_message(text: &str) -> bool {
+    text.starts_with("No such file or directory: ")
+        || text.starts_with("Invalid argument: ")
+        || text.starts_with("Cannot allocate memory: ")
+        || text.starts_with("Pattern syntax error")
+        || text == "too many nested files"
+}
+
+fn response_aborts_line(response: &CommandResponse) -> bool {
+    matches!(response, CommandResponse::Error { .. })
 }
 
 fn response_request_id(response: &CommandResponse) -> u64 {
@@ -831,12 +848,17 @@ fn unix_timestamp() -> u64 {
         .as_secs()
 }
 
+enum DeferredOutput {
+    Notification(Vec<u8>),
+    DiagnosticError { time: u64, text: String },
+}
+
 struct ControlWriter<W: Write> {
     output: W,
     double: bool,
     next_number: u64,
     block_open: bool,
-    deferred: VecDeque<Vec<u8>>,
+    deferred: VecDeque<DeferredOutput>,
     st_sent: bool,
 }
 
@@ -862,7 +884,8 @@ impl<W: Write> ControlWriter<W> {
 
     fn notify(&mut self, line: &[u8]) -> io::Result<()> {
         if self.block_open {
-            self.deferred.push_back(line.to_vec());
+            self.deferred
+                .push_back(DeferredOutput::Notification(line.to_vec()));
             return Ok(());
         }
         self.output.write_all(line)?;
@@ -871,11 +894,40 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn flush_deferred(&mut self) -> io::Result<()> {
-        while let Some(line) = self.deferred.pop_front() {
-            self.output.write_all(&line)?;
-            self.output.write_all(b"\n")?;
+        while let Some(deferred) = self.deferred.pop_front() {
+            match deferred {
+                DeferredOutput::Notification(line) => {
+                    self.output.write_all(&line)?;
+                    self.output.write_all(b"\n")?;
+                }
+                DeferredOutput::DiagnosticError { time, text } => {
+                    let frame = self.allocate_frame(time, 1);
+                    self.write_frame_begin(&frame)?;
+                    self.write_line(&text)?;
+                    self.write_frame_end(&frame, true)?;
+                }
+            }
         }
         Ok(())
+    }
+
+    fn diagnostic_error(&mut self, text: &str) -> io::Result<()> {
+        self.diagnostic_error_at(unix_timestamp(), text)
+    }
+
+    fn diagnostic_error_at(&mut self, time: u64, text: &str) -> io::Result<()> {
+        if self.block_open {
+            self.deferred.push_back(DeferredOutput::DiagnosticError {
+                time,
+                text: text.to_owned(),
+            });
+            return Ok(());
+        }
+        let frame = self.allocate_frame(time, 1);
+        self.write_frame_begin(&frame)?;
+        self.write_line(text)?;
+        self.write_frame_end(&frame, true)?;
+        self.output.flush()
     }
 
     fn begin(&mut self, flags: u8) -> io::Result<Frame> {
@@ -883,20 +935,38 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn begin_at(&mut self, time: u64, flags: u8) -> io::Result<Frame> {
+        let frame = self.allocate_frame(time, flags);
+        self.block_open = true;
+        self.write_frame_begin(&frame)?;
+        self.output.flush()?;
+        Ok(frame)
+    }
+
+    fn allocate_frame(&mut self, time: u64, flags: u8) -> Frame {
         let frame = Frame {
             time,
             number: self.next_number,
             flags,
         };
         self.next_number = self.next_number.saturating_add(1);
-        self.block_open = true;
+        frame
+    }
+
+    fn write_frame_begin(&mut self, frame: &Frame) -> io::Result<()> {
         writeln!(
             self.output,
             "%begin {} {} {}",
             frame.time, frame.number, frame.flags
-        )?;
-        self.output.flush()?;
-        Ok(frame)
+        )
+    }
+
+    fn write_frame_end(&mut self, frame: &Frame, error: bool) -> io::Result<()> {
+        let marker = if error { "%error" } else { "%end" };
+        writeln!(
+            self.output,
+            "{marker} {} {} {}",
+            frame.time, frame.number, frame.flags
+        )
     }
 
     fn response(&mut self, frame: &Frame, response: CommandResponse) -> io::Result<u8> {
@@ -947,12 +1017,7 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn end(&mut self, frame: &Frame, error: bool) -> io::Result<()> {
-        let marker = if error { "%error" } else { "%end" };
-        writeln!(
-            self.output,
-            "{marker} {} {} {}",
-            frame.time, frame.number, frame.flags
-        )?;
+        self.write_frame_end(frame, error)?;
         self.block_open = false;
         self.flush_deferred()?;
         self.output.flush()
@@ -1168,6 +1233,157 @@ mod tests {
         assert_eq!(
             writer.output,
             b"%begin 17 1 0\none\ntwo\n%end 17 1 0\n%begin 18 2 1\nhook\n\ncan't find session: gone\n%error 18 2 1\n%begin 19 3 1\nunknown command: bogus-command\n%error 19 3 1\n%begin 20 4 1\nunsupported command: new-pane\n%error 20 4 1\n%begin 21 5 0\n\n%end 21 5 0\n"
+        );
+    }
+
+    #[test]
+    fn source_errors_use_direct_nested_and_quiet_control_shapes() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let direct = writer.begin_at(17, 1).unwrap();
+        assert_eq!(
+            writer
+                .response(
+                    &direct,
+                    CommandResponse::Error {
+                        request_id: 1,
+                        error: ServerError::InvalidCommand(
+                            "No such file or directory: direct.conf".to_owned(),
+                        ),
+                        output: String::new(),
+                    },
+                )
+                .unwrap(),
+            1
+        );
+        let nested = writer.begin_at(18, 1).unwrap();
+        writer
+            .diagnostic_error_at(
+                19,
+                "No such file or directory: nested-a.conf\nNo such file or directory: nested-b.conf",
+            )
+            .unwrap();
+        assert_eq!(
+            writer
+                .response(
+                    &nested,
+                    CommandResponse::Success {
+                        request_id: 2,
+                        output: String::new(),
+                        exit_code: 0,
+                        stderr: String::new(),
+                    },
+                )
+                .unwrap(),
+            0
+        );
+        let quiet = writer.begin_at(20, 1).unwrap();
+        writer
+            .response(
+                &quiet,
+                CommandResponse::Success {
+                    request_id: 3,
+                    output: String::new(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 17 1 1\nNo such file or directory: direct.conf\n%error 17 1 1\n%begin 18 2 1\n%end 18 2 1\n%begin 19 3 1\nNo such file or directory: nested-a.conf\nNo such file or directory: nested-b.conf\n%error 19 3 1\n%begin 20 4 1\n%end 20 4 1\n"
+        );
+    }
+
+    #[test]
+    fn generic_nonzero_success_ends_and_continues() {
+        let success = CommandResponse::Success {
+            request_id: 1,
+            output: String::new(),
+            exit_code: 3,
+            stderr: String::new(),
+        };
+        assert!(!response_aborts_line(&success));
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin_at(17, 1).unwrap();
+        assert_eq!(writer.response(&frame, success).unwrap(), 3);
+        assert_eq!(writer.output, b"%begin 17 1 1\n%end 17 1 1\n");
+        assert!(response_aborts_line(&CommandResponse::Error {
+            request_id: 2,
+            error: ServerError::InvalidCommand("failed".to_owned()),
+            output: String::new(),
+        }));
+    }
+
+    #[test]
+    fn nested_source_warning_defers_a_plain_error_without_config_error() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin_at(21, 1).unwrap();
+        let mut state = ControlState::default();
+        handle_protocol(
+            ProtocolMessage::Event(zz_protocol::Event {
+                sequence: 1,
+                payload: EventPayload::ClientMessage {
+                    pane: None,
+                    kind: zz_protocol::ClientMessageKind::Warning,
+                    text: "No such file or directory: nested-a.conf\nNo such file or directory: nested-b.conf"
+                        .to_owned(),
+                },
+            }),
+            &mut state,
+            &mut writer,
+        )
+        .unwrap();
+        writer
+            .response(
+                &frame,
+                CommandResponse::Success {
+                    request_id: 1,
+                    output: String::new(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+
+        let output = std::str::from_utf8(&writer.output).unwrap();
+        assert!(!output.contains("%config-error"));
+        let lines = output.lines().collect::<Vec<_>>();
+        assert_eq!(lines[0], "%begin 21 1 1");
+        assert_eq!(lines[1], "%end 21 1 1");
+        assert!(lines[2].starts_with("%begin "));
+        assert_eq!(lines[3], "No such file or directory: nested-a.conf");
+        assert_eq!(lines[4], "No such file or directory: nested-b.conf");
+        assert_eq!(
+            lines[2].strip_prefix("%begin "),
+            lines[5].strip_prefix("%error ")
+        );
+        assert_eq!(lines.len(), 6);
+    }
+
+    #[test]
+    fn separate_nested_source_warnings_defer_separate_error_frames() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin_at(17, 1).unwrap();
+        writer
+            .diagnostic_error_at(18, "No such file or directory: first.conf")
+            .unwrap();
+        writer
+            .diagnostic_error_at(19, "No such file or directory: second.conf")
+            .unwrap();
+        writer
+            .response(
+                &frame,
+                CommandResponse::Success {
+                    request_id: 1,
+                    output: String::new(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 17 1 1\n%end 17 1 1\n%begin 18 2 1\nNo such file or directory: first.conf\n%error 18 2 1\n%begin 19 3 1\nNo such file or directory: second.conf\n%error 19 3 1\n"
         );
     }
 
@@ -1459,14 +1675,8 @@ mod tests {
         ));
     }
 
-    /// Every warning the daemon's config loader can publish, verbatim. The
-    /// daemon side is pinned by
-    /// `config_diagnostics_pin_the_control_mode_sniffer_wording`; if a producer
-    /// is reworded there, that test fails first and this one records what
-    /// `%config-error` depends on. A typed wire marker would retire the sniffer
-    /// entirely, but it needs a protocol bump.
     #[test]
-    fn every_daemon_config_diagnostic_reaches_the_config_error_channel() {
+    fn daemon_diagnostics_are_partitioned_between_config_and_source_channels() {
         for text in [
             "/tmp/mux.conf:1: unknown command: wibble",
             "skipped 1 unsupported tmux command: focus-events",
@@ -1475,11 +1685,20 @@ mod tests {
              1 invalid line: /tmp/mux.conf:3: unknown command: wibble",
             "2 invalid lines: /tmp/mux.conf:1: unknown command: wibble, \
              /tmp/mux.conf:2: unknown command: blorp",
-            "no such file: /tmp/mux.conf",
-            "source-file glob error for /tmp/[: Pattern syntax error",
             "source-file from standard input is not supported",
         ] {
             assert!(is_config_message(text), "{text}");
+            assert!(!is_source_error_message(text), "{text}");
+        }
+        for text in [
+            "No such file or directory: /tmp/mux.conf",
+            "Invalid argument: /tmp/mux.conf",
+            "Cannot allocate memory: /tmp/mux.conf",
+            "Pattern syntax error: /tmp/[",
+            "too many nested files",
+        ] {
+            assert!(is_source_error_message(text), "{text}");
+            assert!(!is_config_message(text), "{text}");
         }
         assert!(!is_config_message(
             "Reloaded zz configuration; skipped 1 unsupported tmux command: focus-events"

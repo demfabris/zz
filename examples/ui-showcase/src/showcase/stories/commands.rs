@@ -207,6 +207,8 @@ fn tree_row(
     tree_chooser_row(
         "cmd-tree-row",
         index,
+        index.to_string(),
+        true,
         target,
         label,
         detail,
@@ -237,6 +239,8 @@ fn buffer_row(
     buffer_chooser_row(
         "cmd-buffer-row",
         index,
+        index.to_string(),
+        true,
         name,
         preview,
         size,

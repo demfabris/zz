@@ -10,7 +10,9 @@ use zz_terminal::{
     TerminalPatchRows, TerminalPresentation, TerminalViewport, TerminalViewportPatch,
 };
 
-use crate::message::{MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES};
+use crate::message::{
+    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES,
+};
 use crate::{
     AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
     MAX_AGENT_OPTION_BYTES, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_PROMPT_IMAGES,
@@ -259,13 +261,20 @@ fn decode_protocol_payload(lane: Lane, payload: &[u8]) -> Result<ProtocolMessage
 }
 
 fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolError> {
-    if let ProtocolMessage::ClientHello(hello) = message
-        && !capabilities_are_bounded(&hello.capabilities)
-    {
-        return Err(ProtocolError::InvalidClientHello(format!(
-            "capabilities must contain at most {MAX_SERVER_CAPABILITIES} entries of at most \
-             {MAX_SERVER_CAPABILITY_BYTES} bytes"
-        )));
+    if let ProtocolMessage::ClientHello(hello) = message {
+        if !capabilities_are_bounded(&hello.capabilities) {
+            return Err(ProtocolError::InvalidClientHello(format!(
+                "capabilities must contain at most {MAX_SERVER_CAPABILITIES} entries of at most \
+                 {MAX_SERVER_CAPABILITY_BYTES} bytes"
+            )));
+        }
+        if hello.working_directory.as_ref().is_some_and(|path| {
+            path.as_os_str().as_encoded_bytes().len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES
+        }) {
+            return Err(ProtocolError::InvalidClientHello(format!(
+                "working directory must be at most {MAX_CLIENT_WORKING_DIRECTORY_BYTES} bytes"
+            )));
+        }
     }
     if let ProtocolMessage::ServerHello(hello) = message {
         if hello.protocol_version != PROTOCOL_VERSION {
@@ -2459,6 +2468,7 @@ mod tests {
                 capabilities,
                 color_scheme: Some(zz_terminal::TerminalColorScheme::Dark),
                 origin: None,
+                working_directory: None,
             });
             assert!(matches!(
                 encode_protocol_message(&message),
@@ -2473,6 +2483,42 @@ mod tests {
                 Err(ProtocolError::Decode(_))
             ));
         }
+    }
+
+    #[test]
+    fn client_hello_bounds_working_directories_on_encode_and_decode() {
+        let hello_with_working_directory = |length| {
+            ProtocolMessage::ClientHello(crate::ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                client_instance_id: crate::ClientInstanceId(13),
+                kind: crate::ClientKind::Command,
+                device_name: None,
+                capabilities: Vec::new(),
+                color_scheme: None,
+                origin: None,
+                working_directory: Some(std::path::PathBuf::from("x".repeat(length))),
+            })
+        };
+        let boundary = hello_with_working_directory(MAX_CLIENT_WORKING_DIRECTORY_BYTES);
+        let frame = encode_protocol_message(&boundary).expect("encode boundary fixture");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode boundary fixture"),
+            boundary
+        );
+
+        let oversized = hello_with_working_directory(MAX_CLIENT_WORKING_DIRECTORY_BYTES + 1);
+        assert!(matches!(
+            encode_protocol_message(&oversized),
+            Err(ProtocolError::InvalidClientHello(_))
+        ));
+
+        let payload = postcard::to_stdvec(&oversized).expect("serialize malformed fixture");
+        let frame = crate::framing::encode_enveloped(Lane::Control, &payload)
+            .expect("envelope malformed fixture");
+        assert!(matches!(
+            decode_protocol_frame(&frame),
+            Err(ProtocolError::Decode(_))
+        ));
     }
 
     #[test]
@@ -2609,6 +2655,7 @@ mod tests {
             capabilities: Vec::new(),
             color_scheme: None,
             origin: None,
+            working_directory: Some(std::path::PathBuf::from("/tmp/client-fixture")),
         });
         let mut bytes = Vec::new();
         write_protocol_message(&mut bytes, &message).expect("write message");
@@ -4143,6 +4190,7 @@ mod tests {
                     search: None,
                     selected: 0,
                     kind: crate::ChooseTreeKind::Windows,
+                    filter_no_matches: true,
                 }),
             },
         });
@@ -4183,6 +4231,7 @@ mod tests {
                     }],
                     search: None,
                     selected: 0,
+                    filter_no_matches: true,
                 }),
             },
         });

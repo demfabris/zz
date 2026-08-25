@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 71;
+pub const PROTOCOL_VERSION: u16 = 72;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 /// Value-token prefix naming the caller's controlling tty, `client-tty-v1:/dev/ttys007`.
@@ -37,6 +37,7 @@ pub const MAX_CHOOSE_ITEM_KEY_BYTES: usize = 64;
 pub const MAX_AGENT_SEND_BYTES: usize = 1024 * 1024;
 /// Longest path or human-readable message carried by a GUI request or its reply.
 pub const MAX_GUI_TEXT_BYTES: usize = 64 * 1024;
+pub const MAX_CLIENT_WORKING_DIRECTORY_BYTES: usize = 16 * 1024;
 /// Largest complete agent prompt: its text plus every attached image. Clients
 /// normalize prompt images the way pasted ones are, so this mirrors
 /// [`MAX_PASTE_UPLOAD_BYTES`].
@@ -807,6 +808,70 @@ where
     Ok(text)
 }
 
+struct BoundedClientWorkingDirectory(PathBuf);
+
+impl<'de> Deserialize<'de> for BoundedClientWorkingDirectory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct WorkingDirectoryVisitor;
+
+        impl<'de> Visitor<'de> for WorkingDirectoryVisitor {
+            type Value = BoundedClientWorkingDirectory;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "a client working directory no longer than \
+                     {MAX_CLIENT_WORKING_DIRECTORY_BYTES} bytes"
+                )
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_str(value)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES {
+                    return Err(E::invalid_length(value.len(), &self));
+                }
+                Ok(BoundedClientWorkingDirectory(PathBuf::from(value)))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES {
+                    return Err(E::invalid_length(value.len(), &self));
+                }
+                Ok(BoundedClientWorkingDirectory(PathBuf::from(value)))
+            }
+        }
+
+        deserializer.deserialize_str(WorkingDirectoryVisitor)
+    }
+}
+
+fn deserialize_client_working_directory<'de, D>(
+    deserializer: D,
+) -> Result<Option<PathBuf>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(
+        Option::<BoundedClientWorkingDirectory>::deserialize(deserializer)?
+            .map(|working_directory| working_directory.0),
+    )
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientHello {
     pub protocol_version: u16,
@@ -820,6 +885,8 @@ pub struct ClientHello {
     /// The pane the client was invoked from (`$ZZ_PANE`). Untargeted commands
     /// resolve against it, matching tmux's `$TMUX_PANE`.
     pub origin: Option<PaneId>,
+    #[serde(deserialize_with = "deserialize_client_working_directory")]
+    pub working_directory: Option<PathBuf>,
 }
 
 impl ClientHello {
@@ -1556,6 +1623,7 @@ pub struct ChooseTreeState {
     pub search: Option<ChooseTreeSearchState>,
     pub selected: u32,
     pub kind: ChooseTreeKind,
+    pub filter_no_matches: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1609,6 +1677,7 @@ pub struct ChooseBufferState {
     pub items: Vec<ChooseBufferItem>,
     pub search: Option<ChooseBufferSearchState>,
     pub selected: u32,
+    pub filter_no_matches: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3031,7 +3100,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 71);
+        assert_eq!(super::PROTOCOL_VERSION, 72);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

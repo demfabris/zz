@@ -38,10 +38,13 @@ cargo xtask bundle-cef --release --output dist/zz
 dist\zz\zz.exe
 ```
 
-The installed macOS and Linux `zz` command is the tmux-compatible launcher. Bare `zz` enters the
-raw-terminal attach client, which makes `alias tmux=zz` work for tmux commands and terminal attach.
-Use `zz app` when you want a new GUI process. Direct bundle launches and `cargo run -p zz` keep the
-no-argument GUI behavior used by development tools and platform launchers.
+The installed macOS and Linux `zz` command is the tmux-compatible launcher. Bare `zz` rewrites to
+`new-session -A` and enters the raw-terminal client: an empty daemon creates numeric session `0`,
+while a live daemon attaches its current session. Explicit `zz attach` and `zz attach-session`
+remain tmux-compatible and return `no sessions` on an empty daemon. Use `zz new -s NAME` when the
+first session needs a name and `zz app` for a new GUI process. Direct bundle launches and
+`cargo run -p zz` keep the no-argument GUI behavior used by development tools and platform
+launchers.
 
 `zz app` starts the first session in the directory where you ran the command. A Dock or Finder
 launch starts it in your home directory. The GUI includes that path when it creates a session, so
@@ -49,17 +52,32 @@ the first terminal does not inherit the process directory of an empty daemon sta
 
 `ZZ_SOCKET` owns daemon routing. `TMUX` carries compatibility metadata inside a pane or plugin job;
 zz refuses to parse a real tmux socket from it. An explicit `-S`, `-L`, or `--socket` still selects
-a zz endpoint. Daemon shell jobs export the exact `ZZ_SOCKET` and prepend a private `tmux` shim to
-their `PATH`, so config and plugin scripts can keep invoking the tmux command name.
+a zz endpoint. On Unix, daemon-spawned shell and status jobs export the exact `ZZ_SOCKET` and
+prepend a private `tmux` shim to their `PATH`, so config and plugin scripts launched by zz can keep
+invoking the tmux command name.
 
 A daemon started by a CLI query can remain empty. The GUI's first default Interactive attach
 materializes numeric session `0` only when no session exists, so CLI-first allocation keeps tmux's
-zero-based session/window/pane ids.
+zero-based session/window/pane ids. The installed TUI launcher now shares this behavior. First
+materialization is serialized, so simultaneous default attaches and a command-side session creator
+converge on one session.
 
 The normal development loop is `just run <mac|linux>`. On Linux this runs the binary straight from
 Cargo; on macOS it builds an unoptimized, locally signed bundle separately from the release output
 and launches a fresh app instance. `just run` does not accept `windows`. Extra args are
 `--verbose` and `--features <list>` (merged into `ZZ_CARGO_FEATURES`), not Cargo passthrough.
+
+To verify the installed-command shape without replacing `/Applications/zz.app`, build the release
+bundle and run its packaged launcher fixture:
+
+```sh
+just build mac
+compat/packaged-cli.sh dist/zz/zz.app
+```
+
+The fixture clones the complete signed bundle beneath a space-containing temporary path and checks
+bare, `new`, and `attach` against empty and existing isolated daemons. It never installs or notarizes
+the app.
 
 `zz attach [session]` is the raw-terminal client (`zz-tui`). It speaks the same wire protocol as
 the GUI and can render kitty-graphics browser panes when CEF is available in the environment.
@@ -106,11 +124,12 @@ one step: it quits a running GUI instance first (CEF spawns helpers by bundle pa
 must never be deleted under a live GUI), replaces the bundle with `ditto`, and relaunches. The
 daemon . same binary, ` daemon`-suffixed command line . is deliberately left running so sessions
 survive the swap; it serves the previous build until restarted. Local signing keeps the
-`dev.zz.app` identity, so TCC grants persist across installs. The script also puts `zz` on `PATH`
-the way the Homebrew cask does: a symlink to the bundle's `cli` launcher (never the real binary,
-which would run bundle-less) in the first writable `PATH` directory of `/opt/homebrew/bin` then
-`/usr/local/bin`, leaving any foreign `zz` untouched. Run `zz app` through that launcher to open the
-GUI; bare `zz` enters terminal attach.
+`dev.zz.app` identity, so TCC grants persist across installs. The script also tries to put `zz` on
+`PATH` the way the Homebrew cask does: it links the bundle's `cli` launcher (never the real binary,
+which would run bundle-less) into the first existing, writable candidate already on `PATH`, checking
+`/opt/homebrew/bin` then `/usr/local/bin`. It leaves any foreign `zz` untouched and prints a manual
+link command if neither candidate qualifies. Run `zz app` through that launcher to open the GUI;
+bare `zz` runs `new-session -A` through the raw-terminal client.
 
 The recipe writes `dist/zz-dev/zz.app`. Its debug CEF runtime uses Chromium's mock keychain so
 local rebuilds do not repeatedly prompt for Chromium Safe Storage; release bundles continue using

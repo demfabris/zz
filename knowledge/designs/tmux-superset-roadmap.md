@@ -38,19 +38,21 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-26
 
-The live tracker has 93 active groups, 665 classified active items, 61 closed groups, and two known
-differentials. `control-mode.hook-command-frames` is closed. Protocol v77 carries explicit command
+The live tracker has 93 active groups, 666 classified active items, 62 closed groups, and two known
+differentials. `control-mode.hook-command-frames` and
+`control-mode.background-inserted-command-frames` are closed. Protocol v77 carries explicit command
 frame flags and independent sticky status in `ControlCommandGuard`, so parser replay stays at flags 1
-while immediate command hooks and all of their sourced descendants use flags 0. The strict ten-step
-`smoke/source-file-control` differential is clean with no skips; the stored canonical summary remains
-unchanged until the final full strict and attached-client run.
+while immediate command hooks, background callbacks, and all of their sourced descendants use flags
+0. The strict eleven-step `smoke/source-file-control` differential is clean with no skips; the stored
+canonical summary remains unchanged until the final full strict and attached-client run.
 
-The next dependency-free slice is `control-mode.background-inserted-command-frames` for
-shell-evaluated `if-shell -b` and `run-shell -bC`. The hook closure also isolated
-`control-mode.hook-source-read-diagnostics`: pinned tmux places a matched hook-source OS or path read
-failure as raw unframed text, while zz currently emits a standalone flags-1 Error frame. Deferred
-event hooks, sourced-hook cwd, event-hook cwd, missing hook producers, config byte input, and TUI
-command-output navigation remain separate.
+The next dependency-free slice is `control-mode.hook-source-read-diagnostics`. Pinned tmux closes
+both parser flags-1 and immediate-hook flags-0 source guards, writes matched OS or path read failures
+as raw unframed text, and consumes an invisible completion command number per source invocation. zz
+currently emits standalone typed Error frames without those hidden numbers.
+`control-mode.disconnect-cancels-command-queue` separately owns hard disconnect after an immediate
+hook or source queue has started. Deferred event hooks, sourced-hook cwd, event-hook cwd, missing hook
+producers, config byte input, and TUI command-output navigation remain separate.
 
 # Baseline captured 2026-08-22
 
@@ -508,10 +510,11 @@ command, and an inserted source before its children. Output, failures, status, a
 remain command-scoped without folding or leakage. An unsupported zz-only inserted command gets an
 empty success guard and later siblings continue, but it does not join `ConfigLoadReport`'s skipped
 summary. An unknown child command produces successful parent and source guards, then `%config-error`
-without its own guard, matching the pin. The closure reuses protocol v76. Hook commands remain
-flags 0 under `control-mode.hook-command-frames`; shell-evaluated `if-shell -b` and `run-shell -bC`
-remain asynchronous flags 0 under `control-mode.background-inserted-command-frames`; ordinary
-`run-shell -b` output remains under `control-mode.async-command-output`.
+without its own guard, matching the pin. The closure reuses protocol v76. The later protocol v77
+closures give immediate hook commands and shell-evaluated `if-shell -b` or `run-shell -bC` callbacks
+flags 0. Source-read placement and completion numbering plus hard-disconnect queue cancellation remain
+under their active Control groups; ordinary `run-shell -b` output remains under
+`control-mode.async-command-output`.
 The nesting limit is closed for guard
 placement, depth wording, count, and
 later-line continuation: both sides run 50 concurrent source invocations counting the initial

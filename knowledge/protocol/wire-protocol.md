@@ -238,7 +238,8 @@ guard per command that survived name resolution. v77 renames the same tag in pla
 `ControlCommandGuard { output, error, sticky_failure, flags }`. The tag stays 47, but the field shape
 changes, so exact-version peers reject v76/v77 skew. `error` selects `%error` rather than `%end`,
 `sticky_failure` independently retains Control retval 1, and `flags` carries tmux's command-frame
-state. The pinned states observed here are 1 for parser-owned replay and 0 for fresh hook queues.
+state. The pinned states observed here are 1 for parser-owned replay and 0 for fresh immediate-hook
+and background-callback queues.
 
 Parser-owned replay, foreground shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`,
 and foreground `run-shell -C` retain flags 1. Per-client and per-thread capture publishes the
@@ -258,11 +259,23 @@ classification and execution. `set-hook -R` copies only the hidden Control targe
 hook context. A mixed missing-and-matched hook source ends `%end` but sets `sticky_failure`, retaining
 process status 1 while later hook commands continue.
 
-Matched parser-owned OS and path read failures, including numeric OS errors and colon-space paths,
-still follow the source guard through the typed standalone Error path. A matched read failure from a
-flags-0 hook source has a narrower open mismatch: pinned tmux places raw unframed text after the source
-guards with a frame-number gap, while zz's typed Error writer adds a standalone flags-1 frame.
-`control-mode.hook-source-read-diagnostics` owns that placement. Non-UTF-8 content remains under
+Shell-evaluated `if-shell -b` and `run-shell -bC` retain the same exact Control recipient after the
+triggering flags-1 frame closes, clear `replay_client`, and map every callback command to flags 0.
+Later flags-1 input may finish before the callback. Inserted sources keep parent-before-child order,
+and missing sources or runtime failures set `sticky_failure` without folding output into the trigger.
+Malformed delayed lists stay silent and status-neutral. Before callback execution begins, the
+callback verifies that its originating Control client remains registered. A client disconnected
+before that point gets no callback frame or inserted effect, and a replacement client receives
+nothing from it. `control-mode.disconnect-cancels-command-queue` separately owns hard disconnect
+after an immediate hook or source queue has already started. Ordinary `run-shell -b` shell jobs
+remain outside this command-guard path.
+
+Matched parser-owned and immediate-hook OS or path read failures still differ from the pin. Pinned
+tmux closes the flags-1 parser or flags-0 hook source guard with `%end`, writes the read diagnostic as
+raw unframed Control output, retains status 1, and consumes an invisible completion callback command
+number for every source invocation. zz instead routes the read failure through a typed standalone
+Error frame and does not model that hidden number. `control-mode.hook-source-read-diagnostics` owns
+both placements and source-completion numbering. Non-UTF-8 content remains under
 `config.non-utf8-file-bytes`. Config command-name and lexer diagnostics remain generic Warning events
 on the `%config-error` classification path.
 
@@ -275,10 +288,8 @@ failures, synchronous inserted runtime errors, hook sticky failures, and typed p
 read errors set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not.
 Return and detach precedence remain unchanged.
 
-Shell-evaluated `if-shell -b` and `run-shell -bC` still clear the Control target before their later
-callbacks and remain under `control-mode.background-inserted-command-frames`. Deferred event hooks
-also clear it and remain separate. Sourced-hook cwd, event-hook cwd, and missing hook producers stay
-under their named gaps.
+Deferred event hooks clear the Control target and remain separate. Sourced-hook cwd, event-hook cwd,
+and missing hook producers stay under their named gaps.
 
 Command and Interactive replay transcripts closed without another wire field. Each source invocation
 appends its complete verbose batch, replay output, and buffered command-name or parser diagnostics in
@@ -287,8 +298,9 @@ invocations insert their complete frame at the parent replay position. Command r
 transcript once in its existing response output. Interactive renders one existing command-output
 viewport from the same transcript, subject to the existing command-output size bound. This is
 per-invocation batching, not a claim of physical interleaving.
-Generic config Warning typing, startup diagnostic delivery, background flags-0 frames, hook-source
-read placement, config byte input, and TUI command-output navigation remain open.
+Generic config Warning typing, startup diagnostic delivery, Control source read placement and
+completion numbering, hard-disconnect queue cancellation, config byte input, and TUI command-output
+navigation remain open.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other

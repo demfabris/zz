@@ -92,7 +92,7 @@ Synchronous inserted lists reached during parser-owned Control replay now retain
 recipient. This covers foreground shell-evaluated `if-shell`, immediate `if-shell -F` including
 `-bF`, and foreground `run-shell -C`. Control closes the direct outer frame, then publishes the
 containing replay command before each inserted command. An inserted `source-file` guard precedes
-its sourced child guards. Success output, diagnostics, terminators, and `client_failure` remain on
+its sourced child guards. Success output, diagnostics, terminators, and `sticky_failure` remain on
 the command that produced them. Per-client and per-thread capture prevents nested frames from
 folding into a parent, intercepting another thread's event, or leaking into the next input command.
 The parser-owned path now uses the v77 event shape; its command frames remain flags 1.
@@ -110,11 +110,14 @@ command list, later entries continue, and output never folds into the triggering
 ambiguous sourced names publish `%config-error` without a guard or `command-error`; aliases use one
 frozen resolution for classification and execution. A mixed missing-and-matched hook source ends
 `%end` but sets `sticky_failure`, retaining process status 1 while later hook commands continue.
-Matched hook-source OS or path read failures still differ in raw diagnostic placement under
+Matched parser and hook-source OS or path read failures still differ in raw diagnostic placement,
+and zz does not model the pin's invisible source-completion command numbers. Both residues stay under
 `control-mode.hook-source-read-diagnostics`.
 
-Shell-evaluated `if-shell -b` and `run-shell -bC` run later with flags 0 under
-`control-mode.background-inserted-command-frames`. Ordinary `run-shell -b` output remains under
+Shell-evaluated `if-shell -b` and `run-shell -bC` run later with flags 0, retain the exact originating
+Control recipient through callback entry, and cancel before any callback work when that origin is
+gone. Hard disconnect after an immediate hook or source queue has already started stays under
+`control-mode.disconnect-cancels-command-queue`. Ordinary `run-shell -b` output remains under
 `control-mode.async-command-output`.
 
 The Control writer defers flags-1 guards FIFO until the direct outer frame closes. The loader
@@ -174,9 +177,11 @@ still run, and a containing `source-file` propagates the inner error and status 
 inner or outer continuation. Unknown command names and malformed set-option syntax retain the
 existing file-prefixed parse-diagnostic path. Protocol v77 carries parser-owned runtime failures
 inside their own Control command guards. Synchronous foreground inserted lists use the same flags-1
-path. Immediate command hooks use independent flags-0 guards; background inserted lists retain their
-flags-0 gap. Successful stdout before and after a failure remains in the invocation transcript;
-the original stderr and status 1 remain separate. Clientless startup delivery stays separate.
+path. Immediate command hooks and background inserted lists use independent flags-0 guards.
+Parser and hook-source read placement plus completion numbering and hard-disconnect queue cancellation
+remain under their active Control groups. Successful stdout before and after a failure remains in the
+invocation transcript; the original stderr and status 1 remain separate. Clientless startup delivery
+stays separate.
 `source-file -n` runs the same lexer and condition evaluation, retains syntax diagnostics and
 optional verbose output, and applies neither parser environment assignments nor parsed commands.
 One invocation parses all of its top-level matches before replay. A bare assignment applies during

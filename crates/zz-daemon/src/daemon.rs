@@ -7645,16 +7645,25 @@ impl Shared {
                 if parsed.background {
                     let shared = Arc::clone(self);
                     let mut command_context = command_context;
+                    let control_target = command_context
+                        .control_command_target()
+                        .map(|(client, _)| (client, CONTROL_COMMAND_FRAME_FLAGS_NONE));
                     command_context.set_replay_client(None);
-                    command_context.set_control_command_target(None);
+                    command_context.set_control_command_target(control_target);
                     self.spawn_delay(delay, move || {
+                        if control_target
+                            .is_some_and(|(client, _)| !shared.control_client_is_connected(client))
+                        {
+                            return;
+                        }
                         let mut context = command_context;
-                        match shared.execute_inserted_commands(
+                        match shared.execute_inserted_commands_with_control_target(
                             client,
                             kind,
                             &mut context,
                             &source,
                             "<run-shell -C>",
+                            control_target,
                         ) {
                             Ok(result) => {
                                 let _ = shared.finish_inserted_run_shell(
@@ -7663,6 +7672,7 @@ impl Shared {
                                     &result,
                                 );
                             }
+                            Err(_) if control_target.is_some() => {}
                             Err(error) => {
                                 if let Some(output) = daemon_error_output(&error) {
                                     shared.route_background_inserted_output(
@@ -7833,8 +7843,11 @@ impl Shared {
             let branches = parsed.positional;
             let condition_for_error = condition.clone();
             let mut command_context = command_context;
+            let control_target = command_context
+                .control_command_target()
+                .map(|(client, _)| (client, CONTROL_COMMAND_FRAME_FLAGS_NONE));
             command_context.set_replay_client(None);
-            command_context.set_control_command_target(None);
+            command_context.set_control_command_target(control_target);
             self.spawn_shell_job(
                 condition,
                 cwd,
@@ -7843,6 +7856,11 @@ impl Shared {
                 false,
                 Duration::ZERO,
                 move |result| {
+                    if control_target
+                        .is_some_and(|(client, _)| !shared.control_client_is_connected(client))
+                    {
+                        return;
+                    }
                     if let Ok(result) = result {
                         let Some(branch) =
                             select_if_shell_branch(&branches, result.status.success())
@@ -7851,12 +7869,13 @@ impl Shared {
                         };
                         let source = inserted_command_source(branch);
                         let mut context = command_context;
-                        match shared.execute_inserted_commands(
+                        match shared.execute_inserted_commands_with_control_target(
                             client,
                             kind,
                             &mut context,
                             &source,
                             "<if-shell>",
+                            control_target,
                         ) {
                             Ok(result) => shared.route_background_inserted_output(
                                 client,
@@ -7865,6 +7884,7 @@ impl Shared {
                                 "if-shell".to_owned(),
                                 &result.output,
                             ),
+                            Err(_) if control_target.is_some() => {}
                             Err(error) => {
                                 if let Some(output) = daemon_error_output(&error) {
                                     shared.route_background_inserted_output(
@@ -15388,6 +15408,12 @@ impl Shared {
         if let Some(subscriber) = subscriber {
             Self::send_event(&subscriber, payload);
         }
+    }
+
+    fn control_client_is_connected(&self, client: ClientId) -> bool {
+        let inner = self.inner.lock();
+        inner.client_kinds.get(&client) == Some(&ClientKind::Control)
+            && inner.subscribers.contains_key(&client)
     }
 
     fn begin_control_command_event_capture(
@@ -35398,7 +35424,7 @@ mod tests {
                 control,
                 ClientKind::Control,
                 &mut context,
-                2,
+                1,
                 &CommandInvocation::new("source-file", [source.display().to_string()]),
             ),
             CommandResponse::Success {
@@ -36825,7 +36851,7 @@ mod tests {
                 control,
                 ClientKind::Control,
                 &mut context,
-                3,
+                2,
                 &CommandInvocation::new("source-file", [error_root.display().to_string()]),
             ),
             CommandResponse::Success {
@@ -44965,6 +44991,235 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(shared.inner.lock().active_shell_jobs, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_background_inserted_commands_emit_flags_zero_frames() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("child.conf");
+        fs::write(&child, "display-message -p BACKGROUND_CHILD\n")
+            .expect("background child source");
+        let missing = directory.path().join("missing.conf");
+
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "control-background-frames"]),
+            )
+            .expect("background frame session");
+        let session = context.session.expect("background frame session id");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, session)
+            .expect("attach background frame client");
+        take_reliable_messages(&mailbox);
+
+        for (request_id, command, expected) in [
+            (
+                1,
+                CommandInvocation::new("run-shell", ["-bC", "display-message -p BACKGROUND_RUN"]),
+                vec![("BACKGROUND_RUN".to_owned(), false, false, 0)],
+            ),
+            (
+                2,
+                CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-b".to_owned(),
+                        "true".to_owned(),
+                        format!("source-file '{}'", child.display()),
+                    ],
+                ),
+                vec![
+                    (String::new(), false, false, 0),
+                    ("BACKGROUND_CHILD".to_owned(), false, false, 0),
+                ],
+            ),
+            (
+                3,
+                CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-b".to_owned(),
+                        "false".to_owned(),
+                        "display-message -p WRONG_BRANCH".to_owned(),
+                        "display-message -p BACKGROUND_ELSE".to_owned(),
+                    ],
+                ),
+                vec![("BACKGROUND_ELSE".to_owned(), false, false, 0)],
+            ),
+            (
+                4,
+                CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-b".to_owned(),
+                        "true".to_owned(),
+                        format!("source-file '{}'", missing.display()),
+                    ],
+                ),
+                vec![(missing_source_error(&missing), true, true, 0)],
+            ),
+            (
+                5,
+                CommandInvocation::new(
+                    "if-shell",
+                    ["-b", "true", "kill-session -t background-runtime-missing"],
+                ),
+                vec![(
+                    "can't find session: background-runtime-missing".to_owned(),
+                    true,
+                    true,
+                    0,
+                )],
+            ),
+        ] {
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                wait_for_control_command_frames(&mailbox, expected.len()),
+                expected
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_background_callbacks_cancel_after_disconnect() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let ready = directory.path().join("ready");
+        let release = directory.path().join("release");
+        let finished = directory.path().join("finished");
+        let condition = format!(
+            "touch '{}'; while [ ! -e '{}' ]; do sleep 0.01; done; touch '{}'; true",
+            ready.display(),
+            release.display(),
+            finished.display(),
+        );
+
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "control-background-cancel"]),
+            )
+            .expect("background cancellation session");
+        let session = context.session.expect("background cancellation session id");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, session)
+            .expect("attach background cancellation client");
+        take_reliable_messages(&mailbox);
+
+        assert!(matches!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                2,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-bC", "-d", "0.5", "set-option -g @disconnected-run yes",],
+                ),
+            ),
+            CommandResponse::Success { .. }
+        ));
+        assert!(matches!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                3,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-b".to_owned(),
+                        condition,
+                        "set-option -g @disconnected-if yes".to_owned(),
+                    ],
+                ),
+            ),
+            CommandResponse::Success { .. }
+        ));
+        let ready_deadline = Instant::now() + Duration::from_secs(2);
+        while !ready.exists() {
+            assert!(Instant::now() < ready_deadline, "condition did not start");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        shared.unregister(control);
+        let replacement_mailbox = OutboundMailbox::new();
+        let (replacement, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&replacement_mailbox),
+        );
+        shared
+            .attach(replacement, session)
+            .expect("attach replacement Control client");
+        take_reliable_messages(&replacement_mailbox);
+        fs::write(&release, b"").expect("release background condition");
+        let finished_deadline = Instant::now() + Duration::from_secs(2);
+        while !finished.exists() {
+            assert!(
+                Instant::now() < finished_deadline,
+                "condition did not finish"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        thread::sleep(Duration::from_millis(600));
+
+        for option in ["@disconnected-run", "@disconnected-if"] {
+            let execution = shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-options", ["-gqv", option]),
+                )
+                .expect("query disconnected callback side effect");
+            assert!(execution.output.is_empty(), "{option} was set");
+        }
+        for mailbox in [&mailbox, &replacement_mailbox] {
+            assert!(take_reliable_messages(mailbox).into_iter().all(|message| {
+                !matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandGuard { .. }
+                            | EventPayload::ClientMessage { .. },
+                        ..
+                    })
+                )
+            }));
+        }
     }
 
     #[test]
@@ -65260,6 +65515,23 @@ bind - split-window -v -c "#{pane_current_path}"
                 _ => None,
             })
             .collect()
+    }
+
+    fn wait_for_control_command_frames(
+        mailbox: &OutboundMailbox,
+        expected: usize,
+    ) -> Vec<(String, bool, bool, u8)> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut frames = Vec::new();
+        while frames.len() < expected {
+            frames.extend(control_command_frames(take_reliable_messages(mailbox)));
+            assert!(
+                Instant::now() < deadline,
+                "expected {expected} Control command frames, got {frames:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        frames
     }
 
     fn drain_reliable_messages_until_quiet(mailboxes: &[&OutboundMailbox]) {

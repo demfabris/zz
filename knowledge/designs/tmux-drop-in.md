@@ -98,7 +98,7 @@ difference and every other channel clean. A fresh canonical run is deferred unti
 settle. The checked-in summary is intentionally stale for `buffer-path-format`,
 `command-item-format`, `display-message` (27 steps), `resize-directions` (16 focused steps versus 8
 stored), `send-keys-repeat`, `smoke/cli-chain-parse-abort`,
-`smoke/control-alias-prepare`, `smoke/source-file-control` (10 focused steps versus 3 stored),
+`smoke/control-alias-prepare`, `smoke/source-file-control` (11 focused steps versus 3 stored),
 `smoke/source-file-diagnostics`, and
 `source-file-format`; root will replace the totals and rows from that final run rather than hand-edit
 them. The combined summary still records the attached-client fixture separately as `PASS`, and the
@@ -884,11 +884,11 @@ success guard and later siblings continue, but it does not join `ConfigLoadRepor
 An unknown command in the child matches the pin's successful parent and source guards followed by
 `%config-error` without its own guard. Protocol v76 carries the closure without a version bump.
 
-Hooks still need flags-0 commands and child sources under `control-mode.hook-command-frames`.
-Shell-evaluated `if-shell -b` and `run-shell -bC` need asynchronous flags-0 frames under
-`control-mode.background-inserted-command-frames`. Immediate `if-shell -bF` stays on the synchronous
+The later protocol v77 closures give immediate hooks and shell-evaluated `if-shell -b` or
+`run-shell -bC` callbacks flags-0 command trees. Immediate `if-shell -bF` stays on the synchronous
 flags-1 path. Foreground `run-shell -C` stays in this closure, while ordinary `run-shell -b` output
-remains under `control-mode.async-command-output`.
+remains under `control-mode.async-command-output`. Source-read placement and completion numbering plus
+hard-disconnect queue cancellation remain under their active Control groups.
 The focused inserted-list matrix and cross-thread capture tests pass. Focused `source_file` tests
 pass 6 of 6 and replayed tests pass 5 of 5. A fresh debug build, strict daemon clippy, formatting,
 shell syntax, and diff checks pass. The strict nine-step `smoke/source-file-control` and 12-step
@@ -957,9 +957,10 @@ deeper replay; the then-six-step scenario and focused daemon regression prove th
 production change. Registered-client nested cwd rebasing is closed. The later focused eight-step
 scenario closes Control return status and detach precedence without changing the wire; the stored
 canonical row remains at three steps.
-Synchronous foreground inserted recursion now shares that flags-1 recipient path. Hook flags-0
-recursion remains under `control-mode.hook-command-frames`, and asynchronous inserted recursion
-remains under `control-mode.background-inserted-command-frames`.
+Synchronous foreground inserted recursion shares that flags-1 recipient path. Later protocol v77
+closures give immediate hook and background callback recursion flags 0. Parser and hook-source read
+placement plus invisible completion numbering remain under `control-mode.hook-source-read-diagnostics`;
+hard-disconnect queue cancellation remains under `control-mode.disconnect-cancels-command-queue`.
 The nesting limit is closed for depth wording, count, and continuation. Counting the initial
 `source-file` as invocation 1, both sides run 50 concurrent source invocations and refuse invocation
 51 before any of its paths are matched or loaded: Command stderr at rc 1, the same lowercase text on
@@ -2210,9 +2211,10 @@ OS or path read failures retain their existing error channels. Non-UTF-8 config 
 `config.non-utf8-file-bytes`. First-diagnostic whole-file abort remains live in
 `config.parser-edge-cases`; TUI output-view navigation remains under
 `clients.tui-command-output-navigation`. Immediate command-hook flags-0 frames closed later in
-protocol v77. Background flags-0 frames remain under
-`control-mode.background-inserted-command-frames`, and raw matched hook-source read placement remains
-under `control-mode.hook-source-read-diagnostics`.
+protocol v77. Background `if-shell -b` and `run-shell -bC` flags-0 frames closed later without a wire
+bump. Hard disconnect after an immediate hook or source queue starts remains under
+`control-mode.disconnect-cancels-command-queue`; parser and hook-source raw read placement plus
+invisible completion command numbering remain under `control-mode.hook-source-read-diagnostics`.
 
 # Risks
 

@@ -105,10 +105,12 @@ retriggering. Unknown sourced commands remain `%config-error` without a guard or
 The flags-0 terminator and `sticky_failure` are independent, so a mixed source hit and miss can end
 `%end`, continue later commands, and still retain process status 1.
 
-Shell-evaluated `if-shell -b` and `run-shell -bC` still clear the target before their asynchronous
-callbacks and remain under `control-mode.background-inserted-command-frames`. A matched OS or path
-read failure reached from a flags-0 hook source still differs in raw placement under
-`control-mode.hook-source-read-diagnostics`. Existing daemon preflight also guarantees root
+Shell-evaluated `if-shell -b` and `run-shell -bC` retain the exact originating Control target through
+callback entry and emit flags-0 command trees. A missing origin cancels callback work before entry;
+hard disconnect after an immediate hook or source queue has started remains under
+`control-mode.disconnect-cancels-command-queue`. Parser and hook-source OS or path read failures still
+differ in raw placement, and zz does not model the pin's invisible source-completion command numbers;
+`control-mode.hook-source-read-diagnostics` owns both residues. Existing daemon preflight guarantees root
 missing-path guard, then middle missing-path guard, then leaf output guard in a three-level replay,
 each exactly once.
 

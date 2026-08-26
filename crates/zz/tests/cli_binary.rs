@@ -3433,6 +3433,38 @@ mod daemon_autostart {
             }
         }
 
+        fn wait_for_control_error_marker(
+            path: &Path,
+            marker: &str,
+            child: &mut Child,
+            label: &str,
+        ) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let output = std::fs::read(path).expect("read live control output");
+                let mut marker_seen = false;
+                let completed = String::from_utf8_lossy(&output).lines().any(|line| {
+                    if line == marker {
+                        marker_seen = true;
+                        false
+                    } else {
+                        marker_seen && line.starts_with("%error ")
+                    }
+                });
+                if completed {
+                    return;
+                }
+                if let Some(status) = child.try_wait().expect("poll control error process") {
+                    panic!("control process exited before {label}: {status}");
+                }
+                if Instant::now() >= deadline {
+                    child.kill().expect("kill stalled control error process");
+                    panic!("control process did not reach {label}");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
         fn spawn_control_to_file(
             fixture: &Fixture,
             arguments: &[&str],
@@ -4881,6 +4913,324 @@ mod daemon_autostart {
             assert_block(&stream.blocks[153], 154, 1, &["after-the-limit"], false);
             assert_block(&stream.blocks[154], 155, 1, &[], false);
             assert_attached_startup(&stream.outside, "control-depth");
+        }
+
+        #[test]
+        fn control_background_inserted_commands_use_flags_zero_after_later_input() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let session = "control-background-frames";
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let directory = fixture._directory.path().join("control background frames");
+            std::fs::create_dir(&directory).expect("create background frame directory");
+            let child_source = write_source(
+                &directory,
+                "child.conf",
+                "display-message -p BACKGROUND_CHILD\n",
+            );
+            let missing_source = directory.join("missing.conf");
+            let output_path = directory.join("control.raw");
+            let (mut child, mut stdin) = spawn_control_to_file(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                &output_path,
+            );
+            writeln!(
+                stdin,
+                "run-shell -bC -d 0.3 'source-file \"{child_source}\"'"
+            )
+            .expect("write background source command");
+            writeln!(
+                stdin,
+                "run-shell -bC -d 0.6 'source-file \"{}\"'",
+                missing_source.display()
+            )
+            .expect("write background missing source command");
+            writeln!(
+                stdin,
+                "run-shell -bC -d 0.9 'kill-session -t background-runtime-missing'"
+            )
+            .expect("write background runtime command");
+            writeln!(
+                stdin,
+                "run-shell -bC -d 1.2 'display-message -p BACKGROUND_RUN'"
+            )
+            .expect("write background success command");
+            writeln!(
+                stdin,
+                "if-shell -b 'sleep 1.5; false' 'display-message -p WRONG_BRANCH' 'display-message -p BACKGROUND_ELSE'"
+            )
+            .expect("write background false branch");
+            writeln!(stdin, "display-message -p BACKGROUND_LATER")
+                .expect("write later flags-one command");
+            stdin.flush().expect("flush background commands");
+
+            wait_for_control_output_marker(
+                &output_path,
+                "BACKGROUND_LATER",
+                &mut child,
+                "later flags-one frame",
+            );
+            wait_for_control_output_marker(
+                &output_path,
+                "BACKGROUND_CHILD",
+                &mut child,
+                "background child frame",
+            );
+            wait_for_control_error_marker(
+                &output_path,
+                &format!("No such file or directory: {}", missing_source.display()),
+                &mut child,
+                "background missing source frame",
+            );
+            wait_for_control_error_marker(
+                &output_path,
+                "can't find session: background-runtime-missing",
+                &mut child,
+                "background runtime frame",
+            );
+            wait_for_control_output_marker(
+                &output_path,
+                "BACKGROUND_RUN",
+                &mut child,
+                "background run-shell frame",
+            );
+            wait_for_control_output_marker(
+                &output_path,
+                "BACKGROUND_ELSE",
+                &mut child,
+                "background false branch frame",
+            );
+            writeln!(stdin, "display-message -p BACKGROUND_STICKY_LATER")
+                .expect("write sticky-status later command");
+            stdin.flush().expect("flush sticky-status later command");
+            wait_for_control_output_marker(
+                &output_path,
+                "BACKGROUND_STICKY_LATER",
+                &mut child,
+                "sticky-status later frame",
+            );
+            writeln!(stdin).expect("write background return");
+            stdin.flush().expect("flush background return");
+            let output = collect_control_process(child, Some(stdin), "background flags zero");
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stdout = std::fs::read(&output_path).expect("read background control output");
+            let stream = parse_stream(&stdout, false);
+            assert_eq!(stream.blocks.len(), 14, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_block(&stream.blocks[3], 4, 1, &[], false);
+            assert_block(&stream.blocks[4], 5, 1, &[], false);
+            assert_block(&stream.blocks[5], 6, 1, &[], false);
+            assert_block(&stream.blocks[6], 7, 1, &["BACKGROUND_LATER"], false);
+            assert_block(&stream.blocks[7], 8, 0, &[], false);
+            assert_block(&stream.blocks[8], 9, 0, &["BACKGROUND_CHILD"], false);
+            assert_block(
+                &stream.blocks[9],
+                10,
+                0,
+                &[&format!(
+                    "No such file or directory: {}",
+                    missing_source.display()
+                )],
+                true,
+            );
+            assert_block(
+                &stream.blocks[10],
+                11,
+                0,
+                &["can't find session: background-runtime-missing"],
+                true,
+            );
+            assert_block(&stream.blocks[11], 12, 0, &["BACKGROUND_RUN"], false);
+            assert_block(&stream.blocks[12], 13, 0, &["BACKGROUND_ELSE"], false);
+            assert_block(
+                &stream.blocks[13],
+                14,
+                1,
+                &["BACKGROUND_STICKY_LATER"],
+                false,
+            );
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == &format!("%session-changed $0 {session}"))
+            );
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
+        fn control_background_malformed_lists_and_shell_jobs_stay_unframed() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let session = "control-background-silent";
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let directory = fixture._directory.path().join("control background silent");
+            std::fs::create_dir(&directory).expect("create silent background directory");
+            let finished = directory.join("condition.finished");
+            let output_path = directory.join("control.raw");
+            let (mut child, mut stdin) = spawn_control_to_file(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                &output_path,
+            );
+            writeln!(
+                stdin,
+                "if-shell -b 'sleep 0.1; touch \"{}\"; true' 'if -x {{'",
+                finished.display()
+            )
+            .expect("write malformed background command");
+            writeln!(stdin, "run-shell -bC -d 0.15 'if -x {{'")
+                .expect("write malformed background run-shell command");
+            writeln!(stdin, "run-shell -b 'sleep 0.05; printf ordinary'")
+                .expect("write ordinary background shell command");
+            writeln!(stdin, "display-message -p MALFORMED_LATER")
+                .expect("write malformed later command");
+            stdin.flush().expect("flush malformed commands");
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !finished.exists() {
+                if let Some(status) = child.try_wait().expect("poll malformed process") {
+                    panic!("control process exited before malformed callback: {status}");
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "malformed background condition did not finish"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            thread::sleep(Duration::from_millis(200));
+            writeln!(stdin, "display-message -p MALFORMED_DONE")
+                .expect("write malformed completion command");
+            stdin.flush().expect("flush malformed completion command");
+            wait_for_control_output_marker(
+                &output_path,
+                "MALFORMED_DONE",
+                &mut child,
+                "malformed completion frame",
+            );
+            writeln!(stdin).expect("write malformed return");
+            stdin.flush().expect("flush malformed return");
+            let output = collect_control_process(child, Some(stdin), "malformed background list");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stdout = std::fs::read(&output_path).expect("read malformed control output");
+            let stream = parse_stream(&stdout, false);
+            assert_eq!(stream.blocks.len(), 6, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_block(&stream.blocks[3], 4, 1, &[], false);
+            assert_block(&stream.blocks[4], 5, 1, &["MALFORMED_LATER"], false);
+            assert_block(&stream.blocks[5], 6, 1, &["MALFORMED_DONE"], false);
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == &format!("%session-changed $0 {session}"))
+            );
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
+        fn control_disconnect_cancels_background_inserted_side_effects() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let session = "control-background-disconnect";
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let wait_marker = fixture._directory.path().join("disconnect.waited");
+            assert!(
+                fixture
+                    .run(&[
+                        "run-shell",
+                        "-b",
+                        &format!("sleep 0.8; touch '{}'", wait_marker.display()),
+                    ])
+                    .status
+                    .success()
+            );
+            let output_path = fixture._directory.path().join("disconnect.raw");
+            let (mut child, mut stdin) = spawn_control_to_file(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                &output_path,
+            );
+            writeln!(
+                stdin,
+                "run-shell -bC -d 0.5 'set-option -g @disconnected-run yes'"
+            )
+            .expect("write disconnected run-shell command");
+            writeln!(
+                stdin,
+                "if-shell -b 'sleep 0.5; true' 'set-option -g @disconnected-if yes'"
+            )
+            .expect("write disconnected if-shell command");
+            writeln!(stdin, "display-message -p DISCONNECT_READY")
+                .expect("write disconnect readiness command");
+            stdin.flush().expect("flush disconnect commands");
+            wait_for_control_output_marker(
+                &output_path,
+                "DISCONNECT_READY",
+                &mut child,
+                "disconnect readiness frame",
+            );
+            drop(stdin);
+            let output = collect_control_process(child, None, "background disconnect");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stdout = std::fs::read(&output_path).expect("read disconnect control output");
+            let stream = parse_stream(&stdout, false);
+            assert_eq!(stream.blocks.len(), 4, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_block(&stream.blocks[3], 4, 1, &["DISCONNECT_READY"], false);
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == &format!("%session-changed $0 {session}"))
+            );
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !wait_marker.exists() {
+                assert!(
+                    Instant::now() < deadline,
+                    "disconnect wait marker did not arrive"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            for option in ["@disconnected-run", "@disconnected-if"] {
+                let shown = fixture.run(&["show-options", "-gqv", option]);
+                assert_eq!(shown.status.code(), Some(0), "{option}");
+                assert!(shown.stdout.is_empty(), "{option}");
+                assert!(shown.stderr.is_empty(), "{option}");
+            }
         }
 
         #[test]

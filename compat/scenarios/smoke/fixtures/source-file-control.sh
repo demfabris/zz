@@ -58,6 +58,9 @@ printf '%s\n' \
     printf "if-shell -F 1 'source-file %s'\n" "$if_dir/missing.conf"
     printf '%s\n' 'display-message -p IF_ROOT_LATER'
 } >"$if_dir/root.conf"
+background_dir="$control_dir/background"
+mkdir -p "$background_dir"
+printf '%s\n' 'display-message -p BACKGROUND_CHILD' >"$background_dir/child.conf"
 depth_dir="$control_dir/depth"
 mkdir -p "$depth_dir"
 printf '%s\n' 'set-option -g @leaf yes' >"$depth_dir/leaf.conf"
@@ -144,6 +147,57 @@ wait_for_control_output_marker() {
         fi
         sleep 0.05
     done
+}
+
+wait_for_control_error_marker() {
+    marker_path=$1
+    marker_value=$2
+    marker_pid=$3
+    marker_label=$4
+    marker_attempt=0
+    until awk -v target="$marker_value" '
+        $0 == target { marker = 1; next }
+        marker && /^%error [0-9]+ [0-9]+ [0-9]+$/ { complete = 1 }
+        END { exit !complete }
+    ' "$marker_path"; do
+        marker_attempt=$((marker_attempt + 1))
+        if [ "$marker_attempt" -ge 200 ] || ! kill -0 "$marker_pid" 2>/dev/null; then
+            printf 'control error marker not reached: %s\n' "$marker_label" >&2
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+
+control_frame_sequence() {
+    sed "s|$background_dir/||g" "$1" | awk '
+        function emit(terminator) {
+            if (payload == "") payload = "_"
+            printf "%s%s:%s:%s", separator, flags, terminator, payload
+            separator = "|"
+            active = 0
+            payload = ""
+        }
+        /^%begin [0-9]+ [0-9]+ [0-9]+$/ {
+            active = 1
+            flags = $4
+            payload = ""
+            next
+        }
+        /^%end [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) emit("end")
+            next
+        }
+        /^%error [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) emit("error")
+            next
+        }
+        active && !/^%/ {
+            if (payload != "") payload = payload "+"
+            payload = payload $0
+        }
+        END { print "" }
+    '
 }
 
 cleanup_probe() {
@@ -721,4 +775,133 @@ hooks_unknown="$(grep -c '^%config-error .*unknown command: wibble$' "$hooks_raw
 hooks_skipped="$(grep -c '^HOOK_ARRAY_ZERO_SKIPPED$' "$hooks_raw" || true)"
 main_client set-environment -g SOURCE_FILE_CONTROL_HOOKS \
     "rc=$hooks_status unknown=$hooks_unknown skipped=$hooks_skipped seq=$hooks_sequence"
+
+background_raw="$background_dir/background.raw"
+background_errors="$background_dir/background.err"
+background_input="$background_dir/background.in"
+: >"$background_raw"
+: >"$background_errors"
+rm -f -- "$background_input"
+mkfifo "$background_input"
+control_client <"$background_input" >"$background_raw" 2>"$background_errors" &
+control_pid=$!
+exec 3>"$background_input"
+printf "run-shell -bC -d 0.3 'source-file \"%s\"'\n" \
+    "$background_dir/child.conf" >&3
+printf "run-shell -bC -d 0.6 'source-file \"%s\"'\n" \
+    "$background_dir/missing.conf" >&3
+printf '%s\n' \
+    "run-shell -bC -d 0.9 'kill-session -t background-runtime-missing'" >&3
+printf '%s\n' \
+    "run-shell -bC -d 1.2 'display-message -p BACKGROUND_RUN'" >&3
+printf '%s\n' \
+    "if-shell -b 'sleep 1.5; false' 'display-message -p WRONG_BRANCH' 'display-message -p BACKGROUND_ELSE'" >&3
+printf '%s\n' 'display-message -p BACKGROUND_LATER' >&3
+wait_for_control_output_marker \
+    "$background_raw" BACKGROUND_LATER "$control_pid" background-later
+wait_for_control_output_marker \
+    "$background_raw" BACKGROUND_CHILD "$control_pid" background-child
+wait_for_control_error_marker \
+    "$background_raw" "No such file or directory: $background_dir/missing.conf" \
+    "$control_pid" background-missing
+wait_for_control_error_marker \
+    "$background_raw" "can't find session: background-runtime-missing" \
+    "$control_pid" background-runtime
+wait_for_control_output_marker \
+    "$background_raw" BACKGROUND_RUN "$control_pid" background-run
+wait_for_control_output_marker \
+    "$background_raw" BACKGROUND_ELSE "$control_pid" background-else
+printf '%s\n' 'display-message -p BACKGROUND_STICKY_LATER' >&3
+wait_for_control_output_marker \
+    "$background_raw" BACKGROUND_STICKY_LATER "$control_pid" background-sticky
+exec 3>&-
+if wait_for_process "$control_pid" 200; then
+    background_status=0
+else
+    background_status=$?
+fi
+control_pid=''
+if [ "$background_status" -gt 1 ] || [ -s "$background_errors" ]; then
+    sed -n '1,160p' "$background_errors" >&2
+    exit 1
+fi
+background_sequence="$(control_frame_sequence "$background_raw")"
+
+malformed_finished="$background_dir/malformed.finished"
+malformed_raw="$background_dir/malformed.raw"
+malformed_errors="$background_dir/malformed.err"
+malformed_input="$background_dir/malformed.in"
+: >"$malformed_raw"
+: >"$malformed_errors"
+rm -f -- "$malformed_finished" "$malformed_input"
+mkfifo "$malformed_input"
+control_client <"$malformed_input" >"$malformed_raw" 2>"$malformed_errors" &
+control_pid=$!
+exec 3>"$malformed_input"
+printf "if-shell -b 'sleep 0.1; touch \"%s\"; true' 'if -x {'\n" \
+    "$malformed_finished" >&3
+printf '%s\n' "run-shell -bC -d 0.15 'if -x {'" >&3
+printf '%s\n' "run-shell -b 'sleep 0.05; printf ordinary'" >&3
+printf '%s\n' 'display-message -p MALFORMED_LATER' >&3
+wait_for_marker "$malformed_finished" "$control_pid" malformed-condition
+sleep 0.2
+printf '%s\n' 'display-message -p MALFORMED_DONE' >&3
+wait_for_control_output_marker \
+    "$malformed_raw" MALFORMED_DONE "$control_pid" malformed-done
+exec 3>&-
+if wait_for_process "$control_pid" 200; then
+    malformed_status=0
+else
+    malformed_status=$?
+fi
+control_pid=''
+if [ "$malformed_status" -gt 1 ]; then
+    sed -n '1,160p' "$malformed_errors" >&2
+    exit 1
+fi
+malformed_sequence="$(control_frame_sequence "$malformed_raw")"
+malformed_loud="$(grep -Ec '^(%config-error|syntax error|parse error)' "$malformed_raw" || true)"
+malformed_ordinary="$(grep -c 'ordinary' "$malformed_raw" || true)"
+malformed_stderr="$(wc -c <"$malformed_errors" | tr -d ' ')"
+
+disconnect_wait="$background_dir/disconnect.waited"
+disconnect_raw="$background_dir/disconnect.raw"
+disconnect_errors="$background_dir/disconnect.err"
+disconnect_input="$background_dir/disconnect.in"
+rm -f -- "$disconnect_wait" "$disconnect_input"
+: >"$disconnect_raw"
+: >"$disconnect_errors"
+probe_command run-shell -b "sleep 0.8; touch '$disconnect_wait'"
+mkfifo "$disconnect_input"
+control_client <"$disconnect_input" >"$disconnect_raw" 2>"$disconnect_errors" &
+control_pid=$!
+exec 3>"$disconnect_input"
+printf '%s\n' "run-shell -bC -d 0.5 'set-option -g @disconnected-run yes'" >&3
+printf '%s\n' "if-shell -b 'sleep 0.5; true' 'set-option -g @disconnected-if yes'" >&3
+printf '%s\n' 'display-message -p DISCONNECT_READY' >&3
+wait_for_control_output_marker \
+    "$disconnect_raw" DISCONNECT_READY "$control_pid" disconnect-ready
+exec 3>&-
+if wait_for_process "$control_pid" 200; then
+    disconnect_status=0
+else
+    disconnect_status=$?
+fi
+control_pid=''
+disconnect_attempt=0
+until [ -e "$disconnect_wait" ]; do
+    disconnect_attempt=$((disconnect_attempt + 1))
+    if [ "$disconnect_attempt" -ge 200 ]; then
+        printf '%s\n' 'disconnect wait marker not reached' >&2
+        exit 1
+    fi
+    sleep 0.05
+done
+disconnect_sequence="$(control_frame_sequence "$disconnect_raw")"
+disconnect_run="$(probe_command show-options -gqv @disconnected-run || true)"
+disconnect_if="$(probe_command show-options -gqv @disconnected-if || true)"
+disconnect_stderr="$(wc -c <"$disconnect_errors" | tr -d ' ')"
+
+main_client set-environment -g SOURCE_FILE_CONTROL_BACKGROUND \
+    "success:rc=$background_status,seq=$background_sequence;malformed:rc=$malformed_status,stderr=$malformed_stderr,loud=$malformed_loud,ordinary=$malformed_ordinary,seq=$malformed_sequence;disconnect:rc=$disconnect_status,stderr=$disconnect_stderr,run=${disconnect_run:-_},if=${disconnect_if:-_},seq=$disconnect_sequence"
 exit 0

@@ -518,15 +518,18 @@ current command list, later array entries continue, and hook output or errors do
 triggering flags-1 frame. Unknown or ambiguous sourced commands are rejected before execution, emit
 only `%config-error`, and do not fire `command-error`. Alias source classification and execution share
 one frozen resolution. `set-hook -R` copies only the Control target into its retargeted context.
-Background callbacks and deferred event hooks clear that target. Per-client and per-thread RAII
-capture prevents cross-thread interception and recipient leakage. A mixed hook-source miss and hit
-uses `%end` with `sticky_failure`, preserving retval 1 while later hook work continues.
+Shell-evaluated background callbacks retain the exact Control target through callback entry and stop
+before callback work when that origin is gone; deferred event hooks still clear the target. Per-client
+and per-thread RAII capture prevents cross-thread interception and recipient leakage. A mixed
+hook-source miss and hit uses `%end` with `sticky_failure`, preserving retval 1 while later hook work
+continues.
 
-Shell-evaluated `if-shell -b` and `run-shell -bC` remain asynchronous flags 0 under
-`control-mode.background-inserted-command-frames`. Ordinary `run-shell -b` output remains under
-`control-mode.async-command-output`. Matched child OS and path read failures follow the parent guard
-as typed Error events on the parser-owned flags-1 path. The flags-0 hook-source form still differs
-from the pin's raw unframed diagnostic placement under `control-mode.hook-source-read-diagnostics`.
+Shell-evaluated `if-shell -b` and `run-shell -bC` now publish asynchronous flags-0 callback frames.
+Hard disconnect after an immediate hook or source queue has started remains under
+`control-mode.disconnect-cancels-command-queue`; ordinary `run-shell -b` output remains under
+`control-mode.async-command-output`. Matched parser and hook-source OS or path read failures still
+differ from the pin's raw unframed placement, and invisible source-completion command numbers are not
+modeled. `control-mode.hook-source-read-diagnostics` owns both residues.
 Invalid UTF-8 config content remains under `config.non-utf8-file-bytes` after
 the pinned lone-`0xff` case disproved the earlier zz-side typed-error assumption.
 
@@ -564,10 +567,11 @@ under `config.startup-diagnostic-delivery`.
 
 The hook matrix, source and replay clusters, protocol and client suites, and Control units pass. Strict
 clippy across protocol, client, mux, daemon, and zz, formatting, shell syntax, and diff checks pass.
-The strict `source-file-control` differential passes ten steps and `source-file-output` passes 12,
+The strict `source-file-control` differential passes 11 steps and `source-file-output` passes 12,
 both with zero differences and no skips. The stored canonical `source-file-control` row remains
-unchanged at three steps. Generic config Warning typing, background flags-0 frames, hook-source read
-placement, config byte input, retained startup causes, and TUI command-output navigation remain open.
+unchanged at three steps. Generic config Warning typing, Control source-read placement and completion
+numbering, hard-disconnect queue cancellation, config byte input, retained startup causes, and TUI
+command-output navigation remain open.
 
 # Examples
 

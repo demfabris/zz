@@ -145,7 +145,7 @@ terminal; piped Control stdin contributes none.
 | `clear-history` | `clearhist` | Clear a pane's scrollback (`-H` unsupported). |
 | `bind-key` / `unbind-key` | `bind` / `unbind` | Add/remove key bindings (`-n`,`-r`,`-T`,`-N`). `unbind-key -a` removes the selected table (`-T` outranks `-n`), resets clients using it to their session's default table, and `-q` suppresses handler errors but not parser/arity errors, matching the pin. Empty `{}` installs an empty command list, and a single trailing escaped separator is ignored. Payloads validate at bind time (names + flags; tmux validates the full template): unknown names error `unknown command: X`, cataloged commands get their flags checked, and a real-but-unimplemented tmux command errors as unsupported so config import counts it. Daemon-native verbs use the same shared specs, including long-option validation and rendering. |
 | `list-keys` | `lsk` | Print bindings as `bind-key` lines with tmux's global repeat, table, and key-column padding. `-T` errors after `unbind-key -a` removes `prefix`, `copy-mode`, or `copy-mode-vi`; `root` remains an implicit empty table because every command client uses it. `-N` prints the `prefix` table followed by `root`, sorts those tables independently, keeps bindings that carry a note, and falls back to the command text when a stored note is empty. `-a` with `-N` includes unnoted bindings; without `-N` it has no effect. `-T` selects one table before note filtering, and `-P` replaces the displayed prefix with a literal string. The optional `[key]` filters every selected table after options, with `--` ending option parsing; a valid absent or note-filtered key reports `unknown key`, while a malformed spelling reports `invalid key`. `-O` accepts tmux's case-insensitive sort names; `key` uses typed tmux key identity, `order` uses traversal order, repeated `-O` takes the last value, and `-r` reverses only an explicit sort. `-1` sorts and filters before selecting one row, then computes the repeat and width facts from that row. Command and Control clients receive the selected row on stdout; an attached Interactive client receives a frozen status message for the effective `display-time` without a command-output overlay. `-F` sees `notes_only`, `key_prefix`, and the per-row note/command plus post-filter repeat and width facts. `-n` is not a tmux `list-keys` flag. |
-| `list-commands` | `lscm` | Print the 102 shared command specs in canonical-name order with tmux's `name (alias) usage` line shape: 83 executable tmux verbs and 19 zz-native verbs. Each usage string lists the flags zz accepts, including daemon-parsed commands. `-F` formats rows and an optional command limits the result. The list excludes tmux commands zz does not implement. |
+| `list-commands` | `lscm` | Print the 104 shared command specs in canonical-name order with tmux's `name (alias) usage` line shape: 83 executable tmux verbs and 21 zz-native verbs. Each usage string lists the flags zz accepts, including daemon-parsed commands. `-F` formats rows and an optional command limits the result. The list excludes tmux commands zz does not implement. |
 | `set-option` / `set-window-option` | `set` / `setw` | Set typed options (see below) or exact free-form `@name` strings. The option name always expands as a format; `-F` additionally expands the value. `set` uses pane context and `setw` resolves a window target with its active pane for expansion. User options support set, append, and unset at server, global-session, session, global-window, window, and pane scope. Indexed scalars return tmux's `not an array`; table-known arrays parse and take the documented empty-success omission path. |
 | `show-options` | `show` | List options stored at the resolved scope or print one named option. `-v` prints only raw values, `-A` includes inherited values with `*` after the name, `-q` suppresses unknown-name and target errors, and `-s`/`-g`/`-w`/`-p` select scope for `@` names. All 180 named options store and read back; arrays support numeric and named indices. String values use the pin's `args_escape` byte shape. On a no-name listing, `-H` retains the ordinary and `@` rows and adds hooks after the ordinary option table: none at server scope, 57 global-session hooks, 11 global-window hooks, or 7 pane hooks under `-p -A`. Empty arrays disappear under `-v`; an all-options listing prints `name` for a local empty and `name*` for an inherited empty. The pin's named-query path drops that star for an inherited empty. Populated inherited arrays carry `*` on each indexed row, and one local array shadows its parent as a unit. A named hook query works with or without `-H`. Plain listings omit hooks. Explicit-name queries still reach zz-native settings. |
 | `show-window-options` | `showw` | Window-scoped spelling of `show-options` with the pin's `-g`, `-t`, and `-v` surface; `-H` is rejected. A table-known option still routes by its declared scope, so spelling this command cannot turn a session option into a window option. |
@@ -296,7 +296,7 @@ passes the daemon's normal read-only check.
 
 # Daemon-side workspace verbs
 
-Five zz-native verbs are handled by [the daemon](/crates/zz-daemon.md) before the engine sees them,
+Seven zz-native verbs are handled by [the daemon](/crates/zz-daemon.md) before the engine sees them,
 for the same reason `capture-pane` is: each acts on something `MuxState` does not own. They now have
 shared `catalog.rs` specs, so `list-commands`, stored-command validation and rendering, and
 [command-palette](/concepts/command-palette.md) completion discover them like the other 14 native
@@ -307,18 +307,39 @@ to tmux's `capture-pane`. Execution remains daemon-owned.
 | Command | Purpose |
 | --- | --- |
 | `tools` | Print the agent-readable catalog of workspace verbs. Pure output; the self-teaching entry point for an agent running in a pane. |
-| `agent-send` | `[-t %N] [--submit] [--context PATH[:START[-END]]] [TEXT]` . append text to a GUI-owned Agent composer, or submit it as a prompt. A non-agent or omitted target routes to that window's most recently focused Agent pane. Reads stdin when TEXT is omitted; capped at 1 MiB. See [Agent pane](/concepts/agent-pane.md). |
+| `agent-send` | `[-t %N] [--submit \| --wait [--timeout SECS]] [--context PATH[:START[-END]]] [TEXT]` . append text to a GUI-owned Agent composer, submit it as a prompt (daemon-side, no GUI needed; prints the pane it chose), or with `--wait` submit and block until that turn ends, printing the reply. A non-agent or omitted target routes to that window's most recently focused Agent pane. Reads stdin when TEXT is omitted; capped at 1 MiB. See [Agent pane](/concepts/agent-pane.md). |
 | `send-last-output` | `-t %N` . route a terminal pane's last completed command and output (OSC 133 marks) into the window's most recently focused Agent pane. Bound to `<prefix> e`. |
+| `show-last-output` | `-t %N` . the read twin: print that same fenced `%N $ command` block to the caller instead of routing it, so a script or an agent reads a terminal's last result without a capture-and-regex dance. Same OSC 133 requirement and 200-line / 256 KiB cap. Accepts an Agent pane too: its transcript projection frames every turn with OSC 133 marks, so the block is the last prompt and reply. |
+| `send-text` | `-t %N [--no-enter] [--timeout MS] TEXT` . deliver TEXT to a TUI in a terminal pane the way `send-keys -l … Enter` cannot: paste it (bracketed iff the app enabled DECSET 2004 — the actor decides), poll `capture` until the text's tail, or a `[Pasted text` collapse marker, is on screen, then press Enter. No echo within `--timeout` (default 2000 ms) is a non-zero exit with nothing submitted. Honors `pane_input_off` and `synchronize-panes` like `paste-buffer`. |
 | `capture-browser` | `-t %N -o /abs/path.png` . write a browser pane's latest rendered frame to a PNG. The path must be absolute because the GUI process writes it. |
 | `debug-marker` | `[NOTE]` . stamp a `user_marker` line into the daemon's log so the moment an incident was noticed is findable later. The GUI's `DebugMark` key (`cmd-shift-m`/`ctrl-shift-m`) forwards here after stamping the app's own log. |
 
-`agent-send` (in both forms) and `capture-browser` are **round trips**: the daemon publishes the
-request to the attached GUI and parks the calling command thread on
-`ProtocolMessage::GuiResponse` (5 s timeout), because only the GUI knows whether an ACP session is
-idle and only the GUI has the CEF frame. The GUI answers from its mux observation rather than its
-render loop, so a minimized window still replies. `MuxState::recent_agent_pane` picks the recipient
+Agent panes answer the read verbs like terminals: each owns a PTY-free shadow terminal fed with a
+projection of its transcript, so `capture-pane`, `show-last-output`, `pipe-pane`, and the
+activity/bell alerts work on `%agent` with no agent-specific grammar (see
+[the projection design](/designs/agent-pane-projection.md)). Input verbs still refuse them.
+
+The composer form of `agent-send` and `capture-browser` are **round trips**: the daemon publishes
+the request to the attached GUI and parks the calling command thread on
+`ProtocolMessage::GuiResponse` (5 s timeout), because only the GUI owns the composer draft and only
+the GUI has the CEF frame. The GUI answers from its mux observation rather than its render loop, so
+a minimized window still replies. `--submit` and `--wait` never touch the GUI: the daemon's own
+agent runtime takes the prompt, and `--wait` parks the command thread on the turn's reply instead
+(600 s default, no lock held). `MuxState::recent_agent_pane` picks the recipient
 for `send-last-output` and for any `agent-send` whose target is not itself an Agent pane, with the
 same active → focus-history → layout-order rule as `cwd_donor`.
+
+One superset event rides an existing verb: every user-option write or unset (`set-option -p/-w/-s/-g
+@name …`) signals the `wait-for` channel `<name>@<target>` — `@agent_state@%5`, `@fleet@$1`,
+`@x@global-session`, `@x@server` — with `wait-for -S` semantics, so a signal nobody is waiting on
+parks as sticky. A foreign agent CLI's lifecycle hook can stamp
+`zz set-option -p -t $TMUX_PANE @agent_state idle` and an orchestrator blocks on
+`zz wait-for '@agent_state@%5'` then reads `show-options -p -t %5 -v @agent_state`; the sticky flag
+makes that read-then-wait loop race-free. tmux never signals on option writes, but no tmux config
+waits on such a channel, so the differential harness cannot observe the divergence. The push form
+is the `@option-changed` user hook: `set-hook -g @option-changed 'run-shell "…#{hook_option} #{hook_target}…"'`
+runs on every user-option write with those two variables in scope; commands already running from a
+hook do not fire it again, so a hook that writes an option cannot recurse.
 
 # Effects
 

@@ -154,6 +154,7 @@ the [divergence matrix](/tmux/divergences.md#format-variables-that-remain-unback
 | Daemon config-selection feed | `config_files` (the comma-joined startup selection; native reload replaces it with the selected default path or empty, while later `source-file` calls do not append) |
 | Daemon runtime feed | `pane_current_command`, `pane_current_path`, `pane_path`, `pane_start_path`, `pane_pid`, `pane_tty`, `pane_dead_signal`, `pane_dead_time`, `pane_pipe`, `pane_pipe_pid`, `session_created` |
 | Daemon buffer hook | `buffer_created`, `buffer_full`, `buffer_name`, `buffer_sample`, `buffer_size` |
+| Daemon superset hook (`DaemonFormatHooks::variable` answers before the pinned table, so neither name is in `FORMAT_VARIABLES` or the oracle diff) | `pane_kind` (`terminal`, `agent`, `browser`, `editor`, `picker` — what `list-panes -F` needs to find the agent), and every `@name` user option, read pane → the pane's window → session → global window → global session → server, the way tmux's `#{@name}` reads |
 | Pinned tmux default, enabled | `cursor_flag`, `wrap_flag` |
 | Per-client daemon hook (every status request carries the recipient's `ClientFormatFacts`) | `client_flags`, `client_height` and `client_width` (`0` without a stored size), `client_name`, `client_session`, `client_theme`, `client_uid`, `client_user` |
 | `list-clients`-only injection | `client_activity`, `client_key_table`, `client_last_session`, `client_readonly`, `session_last_attached` |

@@ -43,7 +43,7 @@ pub(crate) type AgentStreamSink =
 
 #[derive(Debug)]
 pub(crate) enum HostCommand {
-    Prompt(AgentPrompt),
+    Prompt(QueuedPrompt),
     Cancel,
     /// Hand the queued prompts back so the composer can refill.
     Unqueue,
@@ -77,6 +77,56 @@ pub(crate) enum HostCommand {
         client: ClientId,
         session_id: String,
     },
+}
+
+pub(crate) const MAX_AGENT_TURN_REPLY_BYTES: usize = 1024 * 1024;
+
+/// What a turn said back, for whoever submitted its prompt and waited.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AgentTurnReply {
+    pub(crate) text: String,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AgentTurnFailure {
+    Failed(String),
+    Cancelled,
+    Reclaimed,
+    Closed,
+}
+
+pub(crate) type AgentTurnResult = Result<AgentTurnReply, AgentTurnFailure>;
+pub(crate) type AgentTurnWaiter = crossbeam_channel::Sender<AgentTurnResult>;
+
+/// A prompt on its way to a pane, with the waiter that wants its reply. The
+/// prompt itself stays the wire type; the waiter never leaves the process.
+#[derive(Debug)]
+pub(crate) struct QueuedPrompt {
+    pub(crate) prompt: AgentPrompt,
+    pub(crate) waiter: Option<AgentTurnWaiter>,
+}
+
+impl QueuedPrompt {
+    pub(crate) fn settle(&mut self, result: AgentTurnResult) {
+        if let Some(waiter) = self.waiter.take() {
+            let _ = waiter.try_send(result);
+        }
+    }
+
+    fn into_reclaimed(mut self, failure: AgentTurnFailure) -> AgentPrompt {
+        self.settle(Err(failure));
+        self.prompt
+    }
+}
+
+impl From<AgentPrompt> for QueuedPrompt {
+    fn from(prompt: AgentPrompt) -> Self {
+        Self {
+            prompt,
+            waiter: None,
+        }
+    }
 }
 
 /// What an agent pane is opened against.
@@ -178,7 +228,7 @@ enum PaneInput {
 struct PaneHandle {
     inbox: Sender<PaneInput>,
     control: Sender<HostCommand>,
-    prompts: Sender<AgentPrompt>,
+    prompts: Sender<QueuedPrompt>,
     close: Sender<()>,
     state: Arc<Mutex<AgentPaneState>>,
     thread: JoinHandle<()>,
@@ -438,7 +488,7 @@ async fn run_pane(
     inbox_tx: Sender<PaneInput>,
     inbox_rx: Receiver<PaneInput>,
     host_control_rx: Receiver<HostCommand>,
-    prompt_rx: Receiver<AgentPrompt>,
+    prompt_rx: Receiver<QueuedPrompt>,
     close_tx: Sender<()>,
     close_rx: Receiver<()>,
 ) {
@@ -500,6 +550,9 @@ async fn run_pane(
         next_turn_id: 0,
         active_turn: None,
         dispatched_prompt: None,
+        active_waiter: None,
+        turn_text: String::new(),
+        turn_text_truncated: false,
         closing: false,
     };
 
@@ -523,11 +576,14 @@ struct PanePump {
     controls: Sender<RuntimeControl>,
     close: Sender<()>,
     seq: u64,
-    queue: VecDeque<AgentPrompt>,
+    queue: VecDeque<QueuedPrompt>,
     git_refresh: GitRefreshGate,
     next_turn_id: u64,
     active_turn: Option<u64>,
     dispatched_prompt: Option<(u64, AgentPrompt)>,
+    active_waiter: Option<AgentTurnWaiter>,
+    turn_text: String,
+    turn_text_truncated: bool,
     closing: bool,
 }
 
@@ -584,7 +640,7 @@ impl PanePump {
         mut self,
         inbox: Receiver<PaneInput>,
         control: Receiver<HostCommand>,
-        prompts: Receiver<AgentPrompt>,
+        prompts: Receiver<QueuedPrompt>,
         close: Receiver<()>,
     ) {
         self.send(RuntimeCommand::Open {
@@ -638,18 +694,18 @@ impl PanePump {
 
     fn reclaim_accepted_inputs(
         &mut self,
-        prompts: &Receiver<AgentPrompt>,
+        prompts: &Receiver<QueuedPrompt>,
         inbox: &Receiver<PaneInput>,
     ) {
-        while let Ok(prompt) = prompts.try_recv() {
+        while let Ok(queued) = prompts.try_recv() {
             self.emit(AgentStreamPayload::PromptsReclaimed {
-                prompts: vec![prompt],
+                prompts: vec![queued.into_reclaimed(AgentTurnFailure::Closed)],
             });
         }
         while let Ok(input) = inbox.try_recv() {
-            if let PaneInput::Command(HostCommand::Prompt(prompt)) = input {
+            if let PaneInput::Command(HostCommand::Prompt(queued)) = input {
                 self.emit(AgentStreamPayload::PromptsReclaimed {
-                    prompts: vec![prompt],
+                    prompts: vec![queued.into_reclaimed(AgentTurnFailure::Closed)],
                 });
             }
         }
@@ -774,19 +830,22 @@ impl PanePump {
         {
             return;
         }
-        if matches!(
-            &payload,
-            AgentStreamPayload::AuthenticationFailed { .. } | AgentStreamPayload::PaneFailed { .. }
-        ) {
-            self.reclaim_dispatched_prompt();
+        if let AgentStreamPayload::AuthenticationFailed { message }
+        | AgentStreamPayload::PaneFailed { message } = &payload
+        {
+            self.reclaim_dispatched_prompt(AgentTurnFailure::Failed(message.clone()));
+        }
+        if let AgentStreamPayload::Update { update } = &payload {
+            self.record_reply_chunk(update);
         }
         let mut follow = FollowUp::None;
+        let mut turn_result = None;
         if matches!(
             &payload,
             AgentStreamPayload::SessionReset { .. } | AgentStreamPayload::SessionSwitched { .. }
         ) {
             self.active_turn = None;
-            self.reclaim_dispatched_prompt();
+            self.reclaim_dispatched_prompt(AgentTurnFailure::Reclaimed);
         }
         if matches!(&payload, AgentStreamPayload::SessionReset { .. }) {
             self.git_refresh.invalidate();
@@ -865,7 +924,16 @@ impl PanePump {
                         AgentPromptOutcome::Finished { stop_reason } => {
                             state.phase = AgentConnectionPhase::Ready;
                             settle_turn(&mut state);
-                            follow = if stop_reason.as_str() == Some("cancelled") {
+                            let cancelled = stop_reason.as_str() == Some("cancelled");
+                            turn_result = Some(if cancelled {
+                                Err(AgentTurnFailure::Cancelled)
+                            } else {
+                                Ok(AgentTurnReply {
+                                    text: std::mem::take(&mut self.turn_text),
+                                    truncated: self.turn_text_truncated,
+                                })
+                            });
+                            follow = if cancelled {
                                 FollowUp::ReclaimQueue
                             } else {
                                 FollowUp::DrainQueue
@@ -875,6 +943,7 @@ impl PanePump {
                             state.phase = AgentConnectionPhase::Failed;
                             state.error = Some(message.clone());
                             settle_turn(&mut state);
+                            turn_result = Some(Err(AgentTurnFailure::Failed(message.clone())));
                             follow = FollowUp::ReclaimQueue;
                         }
                     }
@@ -904,6 +973,9 @@ impl PanePump {
                 | AgentStreamPayload::PromptsRestored { .. } => {}
             }
         }
+        if let Some(result) = turn_result {
+            self.settle_active_turn(result);
+        }
         self.emit(payload);
         if refresh_git {
             self.start_git_refresh();
@@ -928,38 +1000,43 @@ impl PanePump {
     /// Send the prompt, or queue it behind the turn already running. A queued
     /// prompt is dispatched when that turn settles on its own; a turn the user
     /// stops, or one the runtime loses, hands the queue back to the composer.
-    fn prompt(&mut self, prompt: AgentPrompt) {
-        if prompt.is_empty() {
+    fn prompt(&mut self, mut queued: QueuedPrompt) {
+        if queued.prompt.is_empty() {
+            queued.settle(Err(AgentTurnFailure::Reclaimed));
             return;
         }
         if self.state.lock().phase.accepts_prompt() {
-            self.dispatch(prompt);
+            self.dispatch(queued);
             return;
         }
         let queued_bytes = self.queue.iter().fold(0usize, |total, queued| {
-            total.saturating_add(queued.byte_len())
+            total.saturating_add(queued.prompt.byte_len())
         });
         if self.queue.len() >= MAX_AGENT_QUEUED_PROMPTS
-            || queued_bytes.saturating_add(prompt.byte_len()) > MAX_AGENT_PROMPT_BYTES
+            || queued_bytes.saturating_add(queued.prompt.byte_len()) > MAX_AGENT_PROMPT_BYTES
         {
             self.emit(AgentStreamPayload::PromptsReclaimed {
-                prompts: vec![prompt],
+                prompts: vec![queued.into_reclaimed(AgentTurnFailure::Reclaimed)],
             });
             return;
         }
-        self.queue.push_back(prompt);
+        self.queue.push_back(queued);
         self.publish_queue_depth();
     }
 
-    fn dispatch(&mut self, prompt: AgentPrompt) {
+    fn dispatch(&mut self, queued: QueuedPrompt) {
         self.next_turn_id = self.next_turn_id.saturating_add(1).max(1);
         let turn_id = self.next_turn_id;
         self.active_turn = Some(turn_id);
+        self.active_waiter = queued.waiter;
+        self.turn_text.clear();
+        self.turn_text_truncated = false;
         {
             let mut state = self.state.lock();
             state.phase = AgentConnectionPhase::Running;
             state.error = None;
         }
+        let prompt = queued.prompt;
         let retained = prompt.clone();
         match self
             .commands
@@ -979,7 +1056,10 @@ impl PanePump {
                 let RuntimeCommand::Prompt { prompt, .. } = error.into_inner() else {
                     return;
                 };
-                self.queue.push_front(prompt);
+                self.queue.push_front(QueuedPrompt {
+                    prompt,
+                    waiter: self.active_waiter.take(),
+                });
                 self.reclaim_queue();
             }
         }
@@ -987,11 +1067,11 @@ impl PanePump {
 
     /// Start the next queued prompt now that the pane accepts prompts again.
     fn dispatch_next(&mut self) {
-        let Some(prompt) = self.queue.pop_front() else {
+        let Some(queued) = self.queue.pop_front() else {
             return;
         };
         self.publish_queue_depth();
-        self.dispatch(prompt);
+        self.dispatch(queued);
     }
 
     /// Hand every queued prompt back. The at-least-once rule: a prompt the
@@ -1001,9 +1081,42 @@ impl PanePump {
         if self.queue.is_empty() {
             return;
         }
-        let prompts = self.queue.drain(..).collect::<Vec<_>>();
+        let prompts = self
+            .queue
+            .drain(..)
+            .map(|queued| queued.into_reclaimed(AgentTurnFailure::Reclaimed))
+            .collect::<Vec<_>>();
         self.publish_queue_depth();
         self.emit(AgentStreamPayload::PromptsReclaimed { prompts });
+    }
+
+    fn settle_active_turn(&mut self, result: AgentTurnResult) {
+        if let Some(waiter) = self.active_waiter.take() {
+            let _ = waiter.try_send(result);
+        }
+    }
+
+    fn record_reply_chunk(&mut self, update: &Value) {
+        if self.active_waiter.is_none()
+            || update.get("sessionUpdate").and_then(Value::as_str) != Some("agent_message_chunk")
+        {
+            return;
+        }
+        let Some(text) = update
+            .get("content")
+            .filter(|content| content.get("type").and_then(Value::as_str) == Some("text"))
+            .and_then(|content| content.get("text"))
+            .and_then(Value::as_str)
+        else {
+            return;
+        };
+        if self.turn_text_truncated
+            || self.turn_text.len().saturating_add(text.len()) > MAX_AGENT_TURN_REPLY_BYTES
+        {
+            self.turn_text_truncated = true;
+            return;
+        }
+        self.turn_text.push_str(text);
     }
 
     fn cancel(&mut self) {
@@ -1102,7 +1215,7 @@ impl PanePump {
         }
         self.closing = true;
         self.resolve_pending_permissions();
-        self.reclaim_dispatched_prompt();
+        self.reclaim_dispatched_prompt(AgentTurnFailure::Closed);
         self.reclaim_queue();
         self.send(RuntimeCommand::Shutdown);
         self.close.close();
@@ -1118,7 +1231,8 @@ impl PanePump {
         }
     }
 
-    fn reclaim_dispatched_prompt(&mut self) {
+    fn reclaim_dispatched_prompt(&mut self, failure: AgentTurnFailure) {
+        self.settle_active_turn(Err(failure));
         let Some((_, prompt)) = self.dispatched_prompt.take() else {
             return;
         };
@@ -1128,17 +1242,22 @@ impl PanePump {
     }
 
     fn finish(&mut self, result: &Result<(), String>) {
-        self.resolve_pending_permissions();
-        self.reclaim_dispatched_prompt();
-        self.reclaim_queue();
-        if self.closing || self.close.is_closed() {
-            self.state.lock().phase = AgentConnectionPhase::Disconnected;
-            return;
-        }
+        let closing = self.closing || self.close.is_closed();
         let message = result.as_ref().err().map_or_else(
             || "agent process disconnected unexpectedly".to_owned(),
             String::clone,
         );
+        self.resolve_pending_permissions();
+        self.reclaim_dispatched_prompt(if closing {
+            AgentTurnFailure::Closed
+        } else {
+            AgentTurnFailure::Failed(message.clone())
+        });
+        self.reclaim_queue();
+        if closing {
+            self.state.lock().phase = AgentConnectionPhase::Disconnected;
+            return;
+        }
         {
             let mut state = self.state.lock();
             state.phase = AgentConnectionPhase::Failed;
@@ -1173,6 +1292,7 @@ impl PanePump {
             settle_turn(&mut state);
         }
         self.active_turn = None;
+        self.settle_active_turn(Err(AgentTurnFailure::Failed(message.clone())));
         self.emit(AgentStreamPayload::PaneFailed { message });
         self.close.close();
     }
@@ -1429,11 +1549,27 @@ mod tests {
         }
 
         fn prompt(&self, text: &str) {
-            self.command(HostCommand::Prompt(AgentPrompt {
-                owner: ClientInstanceId::default(),
-                text: text.to_owned(),
-                images: Vec::new(),
+            self.command(HostCommand::Prompt(
+                AgentPrompt {
+                    owner: ClientInstanceId::default(),
+                    text: text.to_owned(),
+                    images: Vec::new(),
+                }
+                .into(),
+            ));
+        }
+
+        fn prompt_waiting(&self, text: &str) -> crossbeam_channel::Receiver<AgentTurnResult> {
+            let (waiter, reply) = crossbeam_channel::bounded(1);
+            self.command(HostCommand::Prompt(QueuedPrompt {
+                prompt: AgentPrompt {
+                    owner: ClientInstanceId::default(),
+                    text: text.to_owned(),
+                    images: Vec::new(),
+                },
+                waiter: Some(waiter),
             }));
+            reply
         }
 
         fn state(&self) -> AgentPaneState {
@@ -1514,6 +1650,87 @@ mod tests {
         assert_eq!(state.session_id.as_deref(), Some("fixture-session"));
         assert_eq!(state.last_seq, seqs.len() as u64);
         assert_eq!(state.queued_prompts, 0);
+        fixture.close();
+    }
+
+    #[test]
+    fn a_waiting_prompt_receives_the_turns_text() {
+        let fixture = Fixture::open(Behavior::Chunk, false);
+        fixture.wait_for_session();
+        let reply = fixture.prompt_waiting("go");
+        assert_eq!(
+            reply.recv_timeout(DEADLINE).expect("the turn settles"),
+            Ok(AgentTurnReply {
+                text: "turn 0".to_owned(),
+                truncated: false,
+            })
+        );
+        fixture.close();
+    }
+
+    #[test]
+    fn a_prompt_queued_behind_a_hung_turn_is_handed_back_on_cancel() {
+        let fixture = Fixture::open(Behavior::Hang, false);
+        fixture.wait_for_session();
+        let hung = fixture.prompt_waiting("first");
+        fixture.recorder.wait("the turn to start", |payload| {
+            matches!(payload, AgentStreamPayload::TurnStarted { .. })
+        });
+        let queued = fixture.prompt_waiting("second");
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().queued_prompts != 1 {
+            assert!(Instant::now() < deadline, "the second prompt queues");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            queued.try_recv().is_err(),
+            "a queued prompt is still pending"
+        );
+
+        fixture.command(HostCommand::Cancel);
+        assert_eq!(
+            queued
+                .recv_timeout(DEADLINE)
+                .expect("cancel hands the queue back"),
+            Err(AgentTurnFailure::Reclaimed)
+        );
+        fixture.close();
+        assert!(matches!(
+            hung.recv_timeout(DEADLINE)
+                .expect("closing settles the hung turn"),
+            Err(AgentTurnFailure::Cancelled | AgentTurnFailure::Closed)
+        ));
+    }
+
+    #[test]
+    fn a_prompt_past_the_queue_limit_settles_as_reclaimed() {
+        let fixture = Fixture::open(Behavior::Hang, false);
+        fixture.wait_for_session();
+        let _hung = fixture.prompt_waiting("first");
+        fixture.recorder.wait("the turn to start", |payload| {
+            matches!(payload, AgentStreamPayload::TurnStarted { .. })
+        });
+        let queued = (0..MAX_AGENT_QUEUED_PROMPTS)
+            .map(|index| fixture.prompt_waiting(&format!("queued {index}")))
+            .collect::<Vec<_>>();
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().queued_prompts != MAX_AGENT_QUEUED_PROMPTS {
+            assert!(Instant::now() < deadline, "the queue fills");
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        let overflow = fixture.prompt_waiting("one too many");
+        assert_eq!(
+            overflow
+                .recv_timeout(DEADLINE)
+                .expect("overflow settles at once"),
+            Err(AgentTurnFailure::Reclaimed)
+        );
+        let payloads = fixture.recorder.wait("the overflow to be handed back", |payload| {
+            matches!(payload, AgentStreamPayload::PromptsReclaimed { prompts } if prompts.iter().any(|prompt| prompt.text == "one too many"))
+        });
+        assert!(queued_prompt_texts(&payloads).contains(&"one too many".to_owned()));
+        assert!(queued.iter().all(|reply| reply.try_recv().is_err()));
         fixture.close();
     }
 
@@ -1806,11 +2023,14 @@ mod tests {
             assert!(
                 host.command(
                     pane,
-                    HostCommand::Prompt(AgentPrompt {
-                        owner: ClientInstanceId::default(),
-                        text: text.to_owned(),
-                        images: Vec::new(),
-                    })
+                    HostCommand::Prompt(
+                        AgentPrompt {
+                            owner: ClientInstanceId::default(),
+                            text: text.to_owned(),
+                            images: Vec::new(),
+                        }
+                        .into()
+                    )
                 )
                 .is_ok()
             );
@@ -1865,14 +2085,17 @@ mod tests {
         let fixture = Fixture::open(Behavior::Hang, false);
         fixture.wait_for_session();
         fixture.prompt("running");
-        fixture.command(HostCommand::Prompt(AgentPrompt {
-            owner: ClientInstanceId::default(),
-            text: "queued".to_owned(),
-            images: vec![AgentImage {
-                format: "image/png".to_owned(),
-                data: b"zz".to_vec(),
-            }],
-        }));
+        fixture.command(HostCommand::Prompt(
+            AgentPrompt {
+                owner: ClientInstanceId::default(),
+                text: "queued".to_owned(),
+                images: vec![AgentImage {
+                    format: "image/png".to_owned(),
+                    data: b"zz".to_vec(),
+                }],
+            }
+            .into(),
+        ));
         let deadline = Instant::now() + DEADLINE;
         while fixture.state().queued_prompts == 0 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(2));
@@ -1901,27 +2124,33 @@ mod tests {
         let fixture = Fixture::open(Behavior::Hang, false);
         fixture.wait_for_session();
         fixture.prompt("running");
-        fixture.command(HostCommand::Prompt(AgentPrompt {
-            owner: ClientInstanceId::default(),
-            text: "queued".to_owned(),
-            images: vec![AgentImage {
-                format: "image/png".to_owned(),
-                data: vec![0; MAX_AGENT_PROMPT_BYTES - 1024],
-            }],
-        }));
+        fixture.command(HostCommand::Prompt(
+            AgentPrompt {
+                owner: ClientInstanceId::default(),
+                text: "queued".to_owned(),
+                images: vec![AgentImage {
+                    format: "image/png".to_owned(),
+                    data: vec![0; MAX_AGENT_PROMPT_BYTES - 1024],
+                }],
+            }
+            .into(),
+        ));
         let deadline = Instant::now() + DEADLINE;
         while fixture.state().queued_prompts == 0 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(2));
         }
 
-        fixture.command(HostCommand::Prompt(AgentPrompt {
-            owner: ClientInstanceId::default(),
-            text: "returned".to_owned(),
-            images: vec![AgentImage {
-                format: "image/png".to_owned(),
-                data: vec![0; 2048],
-            }],
-        }));
+        fixture.command(HostCommand::Prompt(
+            AgentPrompt {
+                owner: ClientInstanceId::default(),
+                text: "returned".to_owned(),
+                images: vec![AgentImage {
+                    format: "image/png".to_owned(),
+                    data: vec![0; 2048],
+                }],
+            }
+            .into(),
+        ));
         let payloads = fixture.recorder.wait("the overflow prompt", |payload| {
             matches!(payload, AgentStreamPayload::PromptsReclaimed { .. })
         });
@@ -2179,11 +2408,14 @@ mod tests {
         fixture.recorder.wait("the permission request", |payload| {
             matches!(payload, AgentStreamPayload::PermissionRequested { .. })
         });
-        fixture.command(HostCommand::Prompt(AgentPrompt {
-            owner: ClientInstanceId::default(),
-            text: "queued".to_owned(),
-            images: Vec::new(),
-        }));
+        fixture.command(HostCommand::Prompt(
+            AgentPrompt {
+                owner: ClientInstanceId::default(),
+                text: "queued".to_owned(),
+                images: Vec::new(),
+            }
+            .into(),
+        ));
         let deadline = Instant::now() + DEADLINE;
         while fixture.state().queued_prompts == 0 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(2));

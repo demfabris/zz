@@ -197,10 +197,10 @@ overflowed; `AgentSessions` is the JSON session-list reply.
   item exactly once.
 - **A dedicated lane.** Agent frames get their own `OutboundMailbox` slot, drained
   `reliable` → `command_output` → `agent` (one frame per pane per turn) → `terminals`. It is capped
-  at `MAX_PENDING_AGENT_BYTES` (4 MiB) per pane, and overflow does **not** close the connection the
+  at `MAX_PENDING_AGENT_BYTES` (9 MiB + 64 KiB) per pane, and overflow does **not** close the connection the
   way a reliable-lane overflow does: the pane's queued frames are dropped and a tiny `AgentLagged`
   marker is queued, so a slow client degrades to replay instead of dying.
-- **Replay.** Each pane keeps a 16 MiB in-memory ring of encoded items. A replay inside the ring is
+- **Replay.** Each pane keeps an 18 MiB (2 × `MAX_AGENT_UPDATES_BYTES`) in-memory ring of encoded items. A replay inside the ring is
   served straight to the asking client. A replay older than the ring falls back to the journal. The
   lane emits its cached `Ready`, `SessionReset { restoring: true }`, the journalled updates, and a
   closing `SessionReady` with the current session and configuration as freshly numbered items. An
@@ -216,8 +216,8 @@ overflowed; `AgentSessions` is the JSON session-list reply.
 
 # Driving a pane from outside: `agent-send`
 
-`agent-send [-t %N] [--submit] [--context PATH[:START[-END]]] [TEXT]` is how a shell (or an agent
-running inside another pane) puts work into an Agent pane. TEXT comes from argv, or from standard
+`agent-send [-t %N] [--submit | --wait [--timeout SECS]] [--context PATH[:START[-END]]] [TEXT]` is
+how a shell (or an agent running inside another pane) puts work into an Agent pane. TEXT comes from argv, or from standard
 input when it is omitted, which is the reason the verb exists: `git diff | zz agent-send`. The
 CLI is the only process with a stdin, so it reads the pipe and re-sends it after a `--` so a payload
 starting with `-` is not mistaken for a flag. A target that is not itself an Agent pane, including
@@ -234,7 +234,20 @@ The two halves of the verb now sit on opposite sides of the wire:
 - **`--submit` is the daemon's own business.** `deliver_to_agent` hands the text straight to the
   pane's host (`submit_agent_prompt`), which dispatches it or queues it behind the running turn. It
   works with only a TUI attached, or with nothing attached at all . the pane's runtime is what has
-  to be alive, not a GUI. A pane the daemon has no runtime for answers `PaneExited`.
+  to be alive, not a GUI. A pane the daemon has no runtime for answers `PaneExited`. For command
+  and control clients the verb prints the pane it resolved, so a script learns which agent "next
+  to me" meant.
+- **`--wait` is request/reply.** The prompt travels to the host as a `QueuedPrompt` carrying a
+  crossbeam waiter beside the wire-typed `AgentPrompt`; the pump moves the waiter into
+  `active_waiter` when it dispatches that prompt (so a prompt queued behind a GUI turn is still
+  attributed to the right turn), accumulates the turn's `agent_message_chunk` text up to
+  `MAX_AGENT_TURN_REPLY_BYTES` (1 MiB, then a truncation marker), and settles the waiter on
+  `PromptFinished` — or with `Cancelled`, `Failed`, `Reclaimed` (queue overflow, cancel, session
+  switch), or `Closed` when the pane goes away. The daemon parks the calling command thread on that
+  channel with no lock held, like `wait-for`; the default deadline is 600 s (`--timeout 0` waits
+  forever) and a timeout leaves the turn running with its reply lost. The reply is stdout, the pane
+  id stderr, and every failure is a non-zero exit. Interactive clients are refused: any command
+  output would open as a popup.
 - **The draft is still the view's.** Without `--submit` the text is composer draft, and an Agent
   pane in another window has no `AgentView` at all, so the daemon publishes
   `EventPayload::AgentCommand { pane, request_id, command: ComposerAppend }` and parks the calling
@@ -253,6 +266,16 @@ The two halves of the verb now sit on opposite sides of the wire:
 and output from OSC 133 marks and appends it to `MuxState::recent_agent_pane`'s answer for that
 window. Both verbs are daemon-side commands like `capture-pane`; see
 [the command set](/tmux/commands.md).
+
+# Reading a pane from outside: the transcript projection
+
+An Agent pane also owns a PTY-free shadow `TerminalSession` fed with a text projection of its
+transcript, so the tmux read grammar works on it: `capture-pane -p -t %agent` prints what the agent
+said, `show-last-output -t %agent` returns the last turn as a `> prompt` / reply pair (each turn is
+framed with OSC 133 marks), `pipe-pane` taps it live, and a turn ending or a permission request
+rings the bell for `alert-bell`. Clients never receive frames for the shadow and cannot type into
+it; the mechanism and the hazards it closes are in
+[the projection design](/designs/agent-pane-projection.md).
 
 # Workspace environment for the ACP child
 
@@ -863,7 +886,7 @@ The journal now serves two readers. Daemon-side it restores a transcript when th
 RESTORING rather than flashing STARTING at a transcript about to appear; the restored updates are
 re-journalled under the new live session ID and the superseded file removed, so a chain of adapter
 respawns leaves exactly one journal per conversation. Fanout-side it is the floor under the replay
-ring: a client asking for a sequence older than the pane's 16 MiB in-memory ring receives cached
+ring: a client asking for a sequence older than the pane's 18 MiB in-memory ring receives cached
 adapter metadata, `SessionReset { restoring: true }`, the journalled updates, and `SessionReady` as
 freshly numbered items.
 

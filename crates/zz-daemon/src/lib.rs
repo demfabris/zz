@@ -53,7 +53,7 @@ pub use askpass::run_helper;
 pub use askpass::{ASKPASS_SOCKET_ENV, AskpassPrompt, AskpassPromptKind, AskpassReply, SshPrompts};
 pub use client::{CommandClient, CommandOutcome, InteractiveClient, short_device_name};
 #[cfg(feature = "daemon")]
-pub use daemon::{Daemon, agent_send_reads_stdin};
+pub use daemon::{Daemon, agent_send_reads_stdin, send_text_reads_stdin};
 pub use endpoint::{Endpoint, EndpointError, SshEndpoint, run_socket_proxy};
 pub use fleet_hosts::{
     HostEntry, RejectedHost, apply_fleet_host_entry, configured_fleet_hosts, validate_fleet_host,

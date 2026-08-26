@@ -1394,6 +1394,13 @@ impl TerminalSession {
             })?
     }
 
+    /// Feed bytes straight into a PTY-free session's parser, as if a child
+    /// had written them: the daemon's projection of an agent transcript.
+    /// Sessions with a real child ignore it.
+    pub fn feed(&self, bytes: Arc<[u8]>) -> bool {
+        self.send_command(Command::Output(bytes))
+    }
+
     fn send_command(&self, command: Command) -> bool {
         let started = diagnostic_timer();
         let queue_before = if started.is_some() {
@@ -1556,6 +1563,7 @@ enum Command {
         bracketed: bool,
     },
     RawInput(Arc<[u8]>),
+    Output(Arc<[u8]>),
     ArmRawOutputTap {
         token: u64,
         output: Sender<Arc<[u8]>>,
@@ -1596,6 +1604,7 @@ impl Command {
             Self::ViewAction { .. } => "view-action",
             Self::PastePreparedBytes { .. } => "paste-prepared-bytes",
             Self::RawInput(_) => "raw-input",
+            Self::Output(_) => "output",
             Self::ArmRawOutputTap { .. } => "arm-raw-output-tap",
             Self::DisarmRawOutputTap { .. } => "disarm-raw-output-tap",
             Self::Capture(_) => "capture",
@@ -3380,9 +3389,11 @@ fn run_output_view(
     let color_scheme_source = Rc::clone(&reported_color_scheme);
     terminal.on_color_scheme(move |_| Some(color_scheme_source.get()))?;
     apply_terminal_appearance(&mut terminal, appearance)?;
+    register_bell(&mut terminal, publisher.clone())?;
     if frozen {
         write_output_view_content(&mut terminal, title, text);
     }
+    let mut raw_output_tap: Option<(u64, Sender<Arc<[u8]>>)> = None;
 
     let mut render_state = RenderState::new()?;
     let mut row_iterator = RowIterator::new()?;
@@ -3679,10 +3690,41 @@ fn run_output_view(
                         | Command::PendingPasteOpened { .. }
                     | Command::UnbindPastedImage { .. },
                 ) => {}
-                Ok(Command::ArmRawOutputTap { reply, .. }) => {
-                    let _ = reply.send(false);
+                Ok(Command::Output(bytes)) => {
+                    if let Some(token) = tap_raw_output_arc(&mut raw_output_tap, &bytes) {
+                        publisher.raw_output_tap_closed(token)?;
+                    }
+                    terminal.vt_write(&bytes);
+                    publisher.mark_output_activity();
+                    publish_active_views(
+                        &mut terminal,
+                        publisher,
+                        &mut render_state,
+                        &mut row_iterator,
+                        &mut cell_iterator,
+                        &mut generations,
+                        SnapshotChange::Content,
+                        &mut dictionary,
+                        &mut active_views,
+                        &word_separators,
+                        SessionStatus::Running,
+                    )?;
                 }
-                Ok(Command::DisarmRawOutputTap { reply, .. }) => {
+                Ok(Command::ArmRawOutputTap {
+                    token,
+                    output,
+                    reply,
+                }) => {
+                    raw_output_tap = Some((token, output));
+                    let _ = reply.send(true);
+                }
+                Ok(Command::DisarmRawOutputTap { token, reply }) => {
+                    if raw_output_tap
+                        .as_ref()
+                        .is_some_and(|(armed, _)| *armed == token)
+                    {
+                        raw_output_tap = None;
+                    }
                     let _ = reply.send(());
                 }
                 Ok(Command::Terminate | Command::Shutdown) | Err(_) => return Ok(()),
@@ -4398,6 +4440,7 @@ fn run_terminal(
                         }
                     }
                 }
+                Command::Output(_) => {}
                 Command::RawInput(bytes) => {
                     if exit_status.is_none() {
                         writer.write_all(&bytes)?;
@@ -15712,18 +15755,58 @@ mod tests {
     }
 
     #[test]
-    fn pty_free_surface_rejects_a_raw_output_tap() {
+    fn pty_free_surface_feeds_bytes_into_capture_marks_taps_and_bell() {
         let session = TerminalSession::spawn_empty_with_appearance(
-            16,
+            64,
             Arc::new(TerminalAppearance::default()),
         );
-        let (output, _) = TerminalSession::raw_output_tap_channel();
-        assert_eq!(
-            session
-                .arm_raw_output_tap(1, output)
-                .expect_err("PTY-free tap"),
-            RawOutputTapError::Unavailable
-        );
+        let events = session.events();
+        let (output, tapped) = TerminalSession::raw_output_tap_channel();
+        session
+            .arm_raw_output_tap(1, output)
+            .expect("a PTY-free surface accepts a tap");
+
+        assert!(session.feed(Arc::from(
+            b"\x1b]133;A\x07> \x1b]133;B\x07say hi\x1b]133;C\x07\r\nhello from the agent\r\n\x1b]133;D;0\x07\x07"
+                .as_slice()
+        )));
+        let capture =
+            wait_for_test_capture(&session, |capture| capture.contains("hello from the agent"));
+        assert!(capture.contains("> say hi"), "{capture:?}");
+        let last = session
+            .capture_last_command()
+            .expect("OSC 133 marks land from fed bytes");
+        assert_eq!(last.command, "say hi");
+        assert_eq!(last.output, "hello from the agent");
+
+        let tapped = tapped
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the tap sees the fed bytes");
+        assert!(tapped.starts_with(b"\x1b]133;A"));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.recv_blocking().expect("events stay open") {
+                TerminalEvent::Bell => break,
+                _ => assert!(Instant::now() < deadline, "no bell from the fed BEL"),
+            }
+        }
+    }
+
+    fn wait_for_test_capture(session: &TerminalSession, accept: impl Fn(&str) -> bool) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let capture = session
+                .capture(CaptureOptions::default())
+                .expect("capture the fed surface");
+            if accept(&capture) {
+                return capture;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "capture never converged: {capture:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[cfg(unix)]

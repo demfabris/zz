@@ -603,3 +603,18 @@ fn agent_stream_soak_slow_client() {
         "the terminal pane kept running: {captured}"
     );
 }
+
+#[test]
+fn agent_send_wait_round_trip() {
+    let mut soak = Soak::start("wait", 4, 3, 16);
+    let outcome = soak
+        .commands
+        .execute_streams(CommandInvocation::new(
+            "agent-send",
+            ["-t", &soak.agent.to_string(), "--wait", "hi"],
+        ))
+        .expect("agent-send --wait");
+    assert_eq!(outcome.exit_code, 0, "stderr: {}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim_end(), "1 the2 the3 the4 the");
+    assert_eq!(outcome.stderr.trim_end(), soak.agent.to_string());
+}

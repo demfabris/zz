@@ -706,6 +706,17 @@ permanent product decision has been recorded for them.
   the selected context rosters is `command`; custom `args_parse` callbacks and open-ended context
   names remain semantic work. The generated report owns the work queue; this roadmap keeps dated
   sequencing and delivery evidence.
+- 2026-08-26: agent-backbone superset surface landed as additive daemon verbs and hook-seam formats:
+  `agent-send --wait` (request/reply parked on the host's turn waiter), `show-last-output` (read
+  twin of `send-last-output`), `#{pane_kind}` and `#{@name}` through `DaemonFormatHooks` rather than
+  the pinned format table, and user-option writes signalling `wait-for` `<name>@<target>`. No tmux
+  verb changed meaning and nothing new appears in unadorned `-C`/`-CC` output. Phase 2 added
+  `send-text` (paste, wait for the echo, then Enter — the only multiplexer-level fix for the
+  paste/Enter race every tmux orchestrator works around) and the `@option-changed` user hook;
+  then agent panes learned to speak bytes: a PTY-free shadow terminal per Agent pane fed with the
+  transcript projection ([design](/designs/agent-pane-projection.md)), so `capture-pane`,
+  `show-last-output`, `pipe-pane`, and the alerts work on `%agent` — excluded from client frames
+  and from control-mode `%output`.
 - 2026-08-24: `send-keys` adopted tmux's two parser boundaries. The command parser rejects outer
   `-C`, `-P`, and `-o`; the window-copy parser recognizes them on their action-specific tables.
   Invalid local syntax stays silent and resets the copy-mode repeat prefix. Four unimplemented

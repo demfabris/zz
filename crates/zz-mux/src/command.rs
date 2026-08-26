@@ -530,6 +530,11 @@ pub enum MuxEffect {
     /// `mode-style` or a `copy-mode-*-style` changed; the daemon refreshes the
     /// published appearance so client copy-mode chrome picks the styles up.
     ModeStylesChanged,
+    /// A user option was written or unset; the daemon signals the `wait-for`
+    /// channel `<name>@<target>` so a script can block on the change.
+    UserOptionChanged {
+        channel: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -845,6 +850,57 @@ enum ShowOptionArgument {
 }
 
 type UserOptions = BTreeMap<String, String>;
+
+/// What format expansion reads without holding the engine: `#{pane_kind}` and
+/// `#{@name}` readback, keyed by the ids a `StatusContext` already carries.
+#[derive(Clone, Debug, Default)]
+pub struct FormatFacts {
+    pane_kinds: BTreeMap<String, &'static str>,
+    pane_windows: BTreeMap<String, String>,
+    server: UserOptions,
+    global_session: UserOptions,
+    sessions: BTreeMap<String, UserOptions>,
+    global_window: UserOptions,
+    windows: BTreeMap<String, UserOptions>,
+    panes: BTreeMap<String, UserOptions>,
+}
+
+impl FormatFacts {
+    #[must_use]
+    pub fn pane_kind(&self, pane: &str) -> Option<&'static str> {
+        self.pane_kinds.get(pane).copied()
+    }
+
+    /// A user option as `#{@name}` sees it: pane, then the pane's window,
+    /// session, global window, global session, server.
+    #[must_use]
+    pub fn user_option(&self, pane: &str, window: &str, session: &str, name: &str) -> Option<&str> {
+        let window = self.pane_windows.get(pane).map_or(window, String::as_str);
+        self.panes
+            .get(pane)
+            .and_then(|values| values.get(name))
+            .or_else(|| self.windows.get(window).and_then(|values| values.get(name)))
+            .or_else(|| {
+                self.sessions
+                    .get(session)
+                    .and_then(|values| values.get(name))
+            })
+            .or_else(|| self.global_window.get(name))
+            .or_else(|| self.global_session.get(name))
+            .or_else(|| self.server.get(name))
+            .map(String::as_str)
+    }
+}
+
+fn pane_kind_name(kind: &PaneKind) -> &'static str {
+    match kind {
+        PaneKind::Picker { .. } => "picker",
+        PaneKind::Terminal => "terminal",
+        PaneKind::Browser(_) => "browser",
+        PaneKind::Agent(_) => "agent",
+        PaneKind::Editor(_) => "editor",
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ArrayIndex {
@@ -7510,8 +7566,14 @@ impl MuxEngine {
                     }
                 }
             }
-            self.user_options_at_target_mut(target).remove(option);
-            return Ok(Execution::default());
+            if self
+                .user_options_at_target_mut(target)
+                .remove(option)
+                .is_none()
+            {
+                return Ok(Execution::default());
+            }
+            return Ok(self.user_option_changed(context, target, option));
         }
         let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
         let values = self.user_options_at_target_mut(target);
@@ -7522,7 +7584,65 @@ impl MuxEngine {
         } else {
             values.insert(option.to_owned(), value.to_owned());
         }
-        Ok(Execution::default())
+        Ok(self.user_option_changed(context, target, option))
+    }
+
+    /// A user option changed: signal its `wait-for` channel and, when one is
+    /// set for the target, run the `@option-changed` user hook with
+    /// `hook_option` and `hook_target` in scope. Commands already running
+    /// from a hook do not fire it again.
+    fn user_option_changed(
+        &self,
+        context: &ExecutionContext,
+        target: TmuxOptionTarget,
+        option: &str,
+    ) -> Execution {
+        let label = match target {
+            TmuxOptionTarget::Server => "server".to_owned(),
+            TmuxOptionTarget::GlobalSession => "global-session".to_owned(),
+            TmuxOptionTarget::Session(session) => session.to_string(),
+            TmuxOptionTarget::GlobalWindow => "global-window".to_owned(),
+            TmuxOptionTarget::Window(window) => window.to_string(),
+            TmuxOptionTarget::Pane(pane) => pane.to_string(),
+        };
+        let mut effects = vec![MuxEffect::UserOptionChanged {
+            channel: format!("{option}@{label}"),
+        }];
+        if !context.no_hooks {
+            let mut hook_context = match target {
+                TmuxOptionTarget::Pane(pane) => {
+                    ExecutionContext::for_pane(&self.state, pane).unwrap_or_else(|| context.clone())
+                }
+                TmuxOptionTarget::Window(window) => ExecutionContext {
+                    window: Some(window),
+                    ..context.clone()
+                },
+                TmuxOptionTarget::Session(session) => ExecutionContext {
+                    session: Some(session),
+                    ..context.clone()
+                },
+                TmuxOptionTarget::Server
+                | TmuxOptionTarget::GlobalSession
+                | TmuxOptionTarget::GlobalWindow => context.clone(),
+            };
+            if let Some(commands) = self.user_hook_commands(&hook_context, "@option-changed") {
+                hook_context
+                    .format_variables
+                    .insert("hook_option".to_owned(), option.to_owned());
+                hook_context
+                    .format_variables
+                    .insert("hook_target".to_owned(), label);
+                effects.push(MuxEffect::RunHook {
+                    name: "@option-changed".to_owned(),
+                    commands,
+                    context: hook_context,
+                });
+            }
+        }
+        Execution {
+            output: String::new(),
+            effects,
+        }
     }
 
     fn show_options(
@@ -12127,6 +12247,39 @@ fn exactly_one_argument<'a>(
         Err(ServerError::CommandParse(format!(
             "{command} requires exactly one new name"
         )))
+    }
+}
+
+impl MuxEngine {
+    #[must_use]
+    pub fn format_facts(&self) -> FormatFacts {
+        let mut pane_kinds = BTreeMap::new();
+        let mut pane_windows = BTreeMap::new();
+        for (window, entry) in &self.state.windows {
+            for (pane, entry) in &entry.panes {
+                pane_kinds.insert(pane.to_string(), pane_kind_name(&entry.kind));
+                pane_windows.insert(pane.to_string(), window.to_string());
+            }
+        }
+        fn keyed<K: std::fmt::Display>(
+            options: &BTreeMap<K, UserOptions>,
+        ) -> BTreeMap<String, UserOptions> {
+            options
+                .iter()
+                .filter(|(_, values)| !values.is_empty())
+                .map(|(id, values)| (id.to_string(), values.clone()))
+                .collect()
+        }
+        FormatFacts {
+            pane_kinds,
+            pane_windows,
+            server: self.server_user_options.clone(),
+            global_session: self.global_session_user_options.clone(),
+            sessions: keyed(&self.session_user_options),
+            global_window: self.global_window_user_options.clone(),
+            windows: keyed(&self.window_user_options),
+            panes: keyed(&self.pane_user_options),
+        }
     }
 }
 
@@ -30867,7 +31020,7 @@ mod tests {
         assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
         assert!(rows.contains(&"start-server (start) "));
         assert!(rows.contains(
-            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--context context] [text ...]"
+            &"agent-send [-t target-pane] [--target target-pane] [--submit] [--wait] [--timeout seconds] [--context context] [text ...]"
         ));
         assert!(rows.contains(&"send-last-output [-t target-pane]"));
         assert!(rows.contains(&"capture-browser [-t target-pane] [-o output-path]"));

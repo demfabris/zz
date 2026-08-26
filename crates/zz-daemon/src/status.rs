@@ -58,6 +58,7 @@ pub(crate) struct FormatHookFacts {
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) message: Option<MessageFormatFacts>,
+    pub(crate) mux: Arc<zz_mux::FormatFacts>,
 }
 
 #[derive(Clone)]
@@ -644,7 +645,24 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         {
             return Some(value.clone());
         }
+        if name.starts_with('@') {
+            return self
+                .facts
+                .mux
+                .user_option(
+                    &context.pane_id,
+                    &context.window_id,
+                    &context.session_id,
+                    name,
+                )
+                .map(str::to_owned);
+        }
         match name {
+            "pane_kind" => self
+                .facts
+                .mux
+                .pane_kind(&context.pane_id)
+                .map(str::to_owned),
             "buffer_created" => Some(
                 self.facts
                     .buffer

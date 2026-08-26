@@ -32,10 +32,13 @@ use zz_protocol::{
 };
 
 use crate::agent::{
-    host::{AgentConnectionPhase, AgentHost, AgentPaneSpec, AgentPaneState, HostCommand},
+    host::{
+        AgentConnectionPhase, AgentHost, AgentPaneSpec, AgentPaneState, AgentTurnFailure,
+        AgentTurnWaiter, HostCommand, QueuedPrompt,
+    },
     journal::{AgentJournal, JournalEntry},
     runtime::AgentSpawnConfig,
-    stream::{AgentPrompt, AgentStreamItem, AgentStreamPayload},
+    stream::{AgentPrompt, AgentPromptOutcome, AgentStreamItem, AgentStreamPayload},
 };
 
 /// How long items are gathered before one frame leaves. An ACP turn bursts
@@ -91,6 +94,9 @@ pub(crate) trait AgentPublisher: Send + Sync + 'static {
         cwd: Option<PathBuf>,
     );
     fn title_agent_pane(&self, pane: PaneId, title: String);
+    /// Bytes of the pane's transcript projection — what `capture-pane` and
+    /// `pipe-pane` see for an agent pane.
+    fn feed_agent_pane_text(&self, pane: PaneId, bytes: Vec<u8>);
 }
 
 /// The daemon's handle on the agent runtime: one host, one lane per pane.
@@ -187,16 +193,33 @@ impl AgentRuntime {
     /// Dispatch a prompt and, on the pane's first one, name it after what was
     /// asked.
     pub(crate) fn prompt(&self, pane: PaneId, prompt: AgentPrompt) -> bool {
+        self.prompt_with_waiter(pane, prompt, None)
+    }
+
+    /// Dispatch a prompt whose reply somebody is blocking on; the waiter is
+    /// settled when the turn ends, or when the prompt is handed back.
+    pub(crate) fn prompt_with_waiter(
+        &self,
+        pane: PaneId,
+        prompt: AgentPrompt,
+        waiter: Option<AgentTurnWaiter>,
+    ) -> bool {
         let _lifecycle = self.lifecycle.lock();
         let title = self.fanout.propose_title(pane, &prompt.text);
-        let sent = match self.host.command(pane, HostCommand::Prompt(prompt)) {
+        let text = prompt.text.clone();
+        let queued = QueuedPrompt { prompt, waiter };
+        let sent = match self.host.command(pane, HostCommand::Prompt(queued)) {
             Ok(()) => true,
-            Err(HostCommand::Prompt(prompt)) => self.fanout.reclaim_prompt(pane, prompt),
+            Err(HostCommand::Prompt(mut queued)) => {
+                queued.settle(Err(AgentTurnFailure::Reclaimed));
+                self.fanout.reclaim_prompt(pane, queued.prompt)
+            }
             Err(_) => unreachable!(),
         };
         if !sent {
             return false;
         }
+        self.fanout.remember_prompt(pane, text);
         if let Some((title, publisher)) = title.zip(self.fanout.publisher.upgrade()) {
             publisher.title_agent_pane(pane, title);
         }
@@ -291,6 +314,7 @@ struct PaneLane {
     reclaimed: VecDeque<ReclaimedPrompt>,
     reclaimed_bytes: usize,
     next_reclaim_id: u64,
+    pending_prompts: VecDeque<String>,
     /// Bumped whenever a blob the pane state carries is replaced, so the
     /// per-item comparison never copies a quarter-megabyte of JSON.
     blobs: u64,
@@ -306,7 +330,66 @@ struct ReclaimedPrompt {
     prompt: AgentPrompt,
 }
 
+fn push_projected_text(bytes: &mut Vec<u8>, text: &str) {
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            bytes.extend_from_slice(b"\r\n");
+        }
+        bytes.extend_from_slice(line.as_bytes());
+    }
+}
+
 impl PaneLane {
+    /// The transcript as terminal bytes: the prompt between OSC 133 `A`/`B`
+    /// and `C` marks, the reply as output, `D` plus a BEL when the turn ends,
+    /// so `show-last-output` and `alert-bell` treat a turn like a command.
+    fn project(&mut self, payload: &AgentStreamPayload) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        match payload {
+            AgentStreamPayload::TurnStarted { .. } => {
+                let prompt = self.pending_prompts.pop_front().unwrap_or_default();
+                bytes.extend_from_slice(b"\x1b]133;A\x07> \x1b]133;B\x07");
+                push_projected_text(&mut bytes, &prompt);
+                bytes.extend_from_slice(b"\x1b]133;C\x07\r\n");
+            }
+            AgentStreamPayload::Update { update } => {
+                if update.get("sessionUpdate").and_then(Value::as_str)
+                    == Some("agent_message_chunk")
+                    && let Some(text) = update
+                        .get("content")
+                        .filter(|content| {
+                            content.get("type").and_then(Value::as_str) == Some("text")
+                        })
+                        .and_then(|content| content.get("text"))
+                        .and_then(Value::as_str)
+                {
+                    push_projected_text(&mut bytes, text);
+                }
+            }
+            AgentStreamPayload::PromptFinished { outcome, .. } => {
+                let status = u8::from(matches!(outcome, AgentPromptOutcome::Failed { .. }));
+                bytes.extend_from_slice(format!("\r\n\x1b]133;D;{status}\x07\x07").as_bytes());
+            }
+            AgentStreamPayload::PermissionRequested { .. } => {
+                bytes.extend_from_slice(b"\r\n[zz] permission requested\r\n\x07");
+            }
+            AgentStreamPayload::PromptsReclaimed { prompts } => {
+                for prompt in prompts {
+                    if let Some(index) = self
+                        .pending_prompts
+                        .iter()
+                        .position(|pending| *pending == prompt.text)
+                    {
+                        self.pending_prompts.remove(index);
+                    }
+                }
+            }
+            AgentStreamPayload::SessionReset { .. } => self.pending_prompts.clear(),
+            _ => {}
+        }
+        bytes
+    }
+
     fn new(generation: u64, provider: AgentProvider, session_id: Option<String>) -> Self {
         Self {
             generation,
@@ -331,6 +414,7 @@ impl PaneLane {
             reclaimed: VecDeque::new(),
             reclaimed_bytes: 0,
             next_reclaim_id: 1,
+            pending_prompts: VecDeque::new(),
             blobs: 0,
             fingerprint: None,
             state: None,
@@ -528,8 +612,9 @@ impl AgentFanout {
                     message: "agent command queue is busy".to_owned(),
                 }
             }
-            HostCommand::Prompt(prompt) => {
-                return self.reclaim_prompt(pane, prompt);
+            HostCommand::Prompt(mut queued) => {
+                queued.settle(Err(AgentTurnFailure::Reclaimed));
+                return self.reclaim_prompt(pane, queued.prompt);
             }
             HostCommand::Cancel | HostCommand::Unqueue | HostCommand::RespondPermission { .. } => {
                 AgentStreamPayload::PaneFailed {
@@ -565,6 +650,7 @@ impl AgentFanout {
         };
         let mut adoption = None;
         let mut reply = None;
+        let mut projection = Vec::new();
         let mut lanes = self.lanes.lock();
         let Some(lane) = lanes.get_mut(&pane) else {
             return;
@@ -582,6 +668,7 @@ impl AgentFanout {
             return;
         }
         if let Some(item) = item {
+            projection = lane.project(&item.payload);
             match &item.payload {
                 AgentStreamPayload::Ready { .. } => {
                     lane.ready = Some(item.payload.clone());
@@ -713,6 +800,9 @@ impl AgentFanout {
         }
         drop(lanes);
         self.wake.notify_all();
+        if !projection.is_empty() {
+            publisher.feed_agent_pane_text(pane, projection);
+        }
         if let Some(reply) = reply {
             publisher.send_agent_reply(pane, reply);
         }
@@ -721,6 +811,15 @@ impl AgentFanout {
         }
         if let Some(next_state) = next_state {
             publisher.publish_agent_state(pane, next_state);
+        }
+    }
+
+    /// A prompt is on its way to the pane: the projection echoes it when the
+    /// turn it becomes actually starts, so a queued prompt lands after the
+    /// running turn's output rather than in the middle of it.
+    fn remember_prompt(&self, pane: PaneId, text: String) {
+        if let Some(lane) = self.lanes.lock().get_mut(&pane) {
+            lane.pending_prompts.push_back(text);
         }
     }
 
@@ -1326,6 +1425,8 @@ mod tests {
         fn title_agent_pane(&self, pane: PaneId, title: String) {
             self.titles.lock().push((pane, title));
         }
+
+        fn feed_agent_pane_text(&self, _pane: PaneId, _bytes: Vec<u8>) {}
     }
 
     struct Fixture {

@@ -1068,8 +1068,10 @@ fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> 
 
 #[cfg(not(target_os = "ios"))]
 fn prepared_command_reads_stdin(command: &PreparedCommand) -> bool {
-    prepared_command_is(command, "agent-send")
-        && zz_daemon::agent_send_reads_stdin(&command.invocation.args)
+    (prepared_command_is(command, "agent-send")
+        && zz_daemon::agent_send_reads_stdin(&command.invocation.args))
+        || (prepared_command_is(command, "send-text")
+            && zz_daemon::send_text_reads_stdin(&command.invocation.args))
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1143,8 +1145,11 @@ fn attach_prefix_uses_tui(command: &str) -> bool {
 
 #[cfg(not(target_os = "ios"))]
 fn command_reads_stdin(invocation: &CommandInvocation) -> bool {
-    canonical_command(&invocation.name) == "agent-send"
-        && zz_daemon::agent_send_reads_stdin(&invocation.args)
+    match canonical_command(&invocation.name) {
+        "agent-send" => zz_daemon::agent_send_reads_stdin(&invocation.args),
+        "send-text" => zz_daemon::send_text_reads_stdin(&invocation.args),
+        _ => false,
+    }
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -2308,6 +2313,16 @@ mod tests {
             assert!(!command_reads_stdin(&CommandInvocation::new(
                 command,
                 ["text"]
+            )));
+        }
+        for command in ["send-text", "send-t"] {
+            assert!(command_reads_stdin(&CommandInvocation::new(
+                command,
+                ["-t", "%1"]
+            )));
+            assert!(!command_reads_stdin(&CommandInvocation::new(
+                command,
+                ["hello"]
             )));
         }
         assert!(!command_reads_stdin(&CommandInvocation::new(

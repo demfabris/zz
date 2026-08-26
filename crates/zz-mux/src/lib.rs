@@ -18,7 +18,7 @@ mod tmux_options;
 
 pub use command::{
     AgentOptions, CommandAliasBodyError, CommandAliasResolution, CopyModeStyleValues,
-    DEFAULT_BUFFER_LIMIT, DetachRequest, DetachScope, Execution, ExecutionContext,
+    DEFAULT_BUFFER_LIMIT, DetachRequest, DetachScope, Execution, ExecutionContext, FormatFacts,
     MAX_WORD_SEPARATORS_BYTES, MenuOptions, MuxEffect, MuxEngine, PaneBorderStyleValues,
     PaneRuntimeFacts, PopupOptions, StatusRowVariables, TerminalWorkerOptions, WindowStyleValues,
     copy_mode_action_is_read_only_safe, format_command, hook_format_variables, if_shell_truthy,

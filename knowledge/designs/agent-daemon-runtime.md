@@ -73,7 +73,8 @@ Client → daemon (`ProtocolMessage`, appended, never reordered):
 
 Daemon → client (`EventPayload`, appended):
 - `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }` — JSON `AgentStreamItem`s,
-  batch ≤ 1 MiB (split into multiple frames when larger), per-pane monotonic `seq`.
+  batch ≤ `MAX_AGENT_UPDATES_BYTES` (9 MiB; split into multiple frames when larger), per-pane
+  monotonic `seq`.
 - `AgentState { pane, state: AgentPaneWire }` — small typed struct: connection phase, queued
   count, active session id, title, auth methods, pending permission `(request_id, payload ≤ 64
   KiB)`, current Git summary (branch ≤ 4 KiB plus `u32` totals), and the adapter's config options
@@ -98,11 +99,11 @@ hundreds of updates, so agent streams get their own `OutboundState` lane, preced
 `terminals` slot:
 
 - `agent: BTreeMap<PaneId, PendingAgent>` where `PendingAgent` accumulates encoded
-  `AgentUpdates` batches with a per-pane cap (`MAX_PENDING_AGENT_BYTES`, 4 MiB). The fanout
+  `AgentUpdates` batches with a per-pane cap (`MAX_PENDING_AGENT_BYTES`, 9 MiB + 64 KiB). The fanout
   coalesces items into 25 ms windows (`BATCH_WINDOW`) before enqueueing, on one shared flush
   thread that parks whenever no pane has anything gathered, so a healthy client sees a few
   frames per second, not one per token.
-- Each pane also keeps a `MAX_REPLAY_RING_BYTES` (16 MiB) in-memory ring of encoded items. A
+- Each pane also keeps a `MAX_REPLAY_RING_BYTES` (2 × 9 MiB = 18 MiB) in-memory ring of encoded items. A
   replay inside the ring is served straight to the asking client and nothing else moves. A
   replay older than the ring falls back to the journal. The lane emits cached adapter `Ready`,
   `SessionReset { restoring: true }`, the journalled updates, and `SessionReady` with the current
@@ -176,7 +177,7 @@ depend on `zz-daemon` with `default-features = false` and never inherit
   deletions after session readiness, a session switch, and prompt completion. The host publishes
   the lifecycle boundary and drains queued prompts first; generation, refresh, and cwd guards reject
   stale results before a state-only publication.
-- The journal moved file-for-file (`agent-journal/<session>.jsonl`, 32 MiB cap, 30-day prune,
+- The journal moved file-for-file (`agent-journal/<session>.jsonl`, 18 MiB / 4,096-record cap, 30-day prune,
   torn-tail tolerance) under `<data>/zz/daemon/`, with the `user_data.rs`
   permission-hardening helpers now living in `zz-daemon::user_data` and re-exported for the
   GUI's preferences file.
@@ -249,7 +250,7 @@ Every delta sits inside the lanes' own run-to-run spread (main's three ASCII run
 Gate 2 — 50k-item turn, three release runs, 1.2% wall-clock spread:
 `SOAK items=50001 secs=5.19 items_per_sec≈9600 frames≈192 ratio≈260 bytes=20853809`,
 zero `AgentLagged` for a draining client; the `--ignore`d debug run holds ratio ≈112 at
-≈3860 items/sec. The slow-client test trips the 4 MiB lane cap into exactly one
+≈3860 items/sec. The slow-client test trips the 9 MiB lane cap into exactly one
 `AgentLagged`, replays to a gapless transcript, and the terminal lane keeps delivering
 throughout. The batcher's binding constraint at release speed is `MAX_AGENT_UPDATES_BYTES`
 (1 MiB frames), not the 25 ms window.

@@ -4884,6 +4884,193 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn control_command_hook_frames_are_inserted_and_retain_failure_status() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let session = "control-hook-frames";
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let directory = fixture._directory.path().join("control hook frames");
+            std::fs::create_dir(&directory).expect("create hook frame directory");
+            let hook_source = write_source(
+                &directory,
+                "hook.conf",
+                "display-message -p HOOK_CHILD\n\
+                 kill-session -t hook-runtime-missing\n\
+                 display-message -p HOOK_AFTER_ERROR\n",
+            );
+            assert!(
+                fixture
+                    .run(&[
+                        "set-hook",
+                        "-g",
+                        "after-display-message[0]",
+                        &format!("source-file '{hook_source}'"),
+                    ])
+                    .status
+                    .success()
+            );
+            assert!(
+                fixture
+                    .run(&[
+                        "set-hook",
+                        "-g",
+                        "after-display-message[1]",
+                        "display-message -p HOOK_LATER_ARRAY",
+                    ])
+                    .status
+                    .success()
+            );
+
+            let marker = directory.join("complete");
+            let output = run_control_until_return(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                "display-message -p TRIGGER\n\
+                 set-hook -gu after-display-message\n\
+                 display-message -p LATER_FLAGS_ONE\n",
+                &marker,
+                "control command hook frames",
+            );
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "stdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 10, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &["TRIGGER"], false);
+            assert_block(&stream.blocks[2], 3, 0, &[], false);
+            assert_block(&stream.blocks[3], 4, 0, &["HOOK_CHILD"], false);
+            assert_block(
+                &stream.blocks[4],
+                5,
+                0,
+                &["can't find session: hook-runtime-missing"],
+                true,
+            );
+            assert_block(&stream.blocks[5], 6, 0, &["HOOK_AFTER_ERROR"], false);
+            assert_block(&stream.blocks[6], 7, 0, &["HOOK_LATER_ARRAY"], false);
+            assert_block(&stream.blocks[7], 8, 1, &[], false);
+            assert_block(&stream.blocks[8], 9, 1, &["LATER_FLAGS_ONE"], false);
+            assert_block(&stream.blocks[9], 10, 1, &[], false);
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == &format!("%session-changed $0 {session}"))
+            );
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
+        fn control_hook_source_diagnostics_keep_trigger_frames_and_status() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let session = "control-hook-source-diagnostics";
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let directory = fixture
+                ._directory
+                .path()
+                .join("control hook source diagnostics");
+            std::fs::create_dir(&directory).expect("create hook source diagnostic directory");
+            let hit = write_source(&directory, "hit.conf", "display-message -p MIXED_HIT\n");
+            let missing = directory.join("missing.conf");
+            assert!(
+                fixture
+                    .run(&[
+                        "set-hook",
+                        "-g",
+                        "after-display-message",
+                        &format!("source-file '{}' '{hit}'", missing.display()),
+                    ])
+                    .status
+                    .success()
+            );
+
+            let mixed_marker = directory.join("mixed-complete");
+            let mixed = run_control_until_return(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                "display-message -p MIXED_TRIGGER\n\
+                 set-hook -gu after-display-message\n\
+                 display-message -p MIXED_LATER\n",
+                &mixed_marker,
+                "control mixed hook source",
+            );
+            assert_eq!(mixed.status.code(), Some(1));
+            assert!(mixed.stderr.is_empty());
+            let mixed = parse_stream(&mixed.stdout, false);
+            assert_eq!(mixed.blocks.len(), 7, "{mixed:?}");
+            assert_block(&mixed.blocks[0], 1, 0, &[], false);
+            assert_block(&mixed.blocks[1], 2, 1, &["MIXED_TRIGGER"], false);
+            assert_block(
+                &mixed.blocks[2],
+                3,
+                0,
+                &[&format!("No such file or directory: {}", missing.display())],
+                false,
+            );
+            assert_block(&mixed.blocks[3], 4, 0, &["MIXED_HIT"], false);
+            assert_block(&mixed.blocks[4], 5, 1, &[], false);
+            assert_block(&mixed.blocks[5], 6, 1, &["MIXED_LATER"], false);
+            assert_block(&mixed.blocks[6], 7, 1, &[], false);
+
+            assert!(
+                fixture
+                    .run(&[
+                        "set-hook",
+                        "-g",
+                        "after-display-message",
+                        &format!("source-file '{}'", directory.display()),
+                    ])
+                    .status
+                    .success()
+            );
+            let read_error = std::fs::read_to_string(&directory)
+                .expect_err("source directory must fail as a file read");
+            let read_error = format!("{read_error}: {}", directory.display());
+            let read_marker = directory.join("read-complete");
+            let read = run_control_until_return(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                "display-message -p READ_TRIGGER\n\
+                 set-hook -gu after-display-message\n\
+                 display-message -p READ_LATER\n",
+                &read_marker,
+                "control hook source read error",
+            );
+            assert_eq!(read.status.code(), Some(1));
+            assert!(read.stderr.is_empty());
+            let read = parse_stream(&read.stdout, false);
+            assert_eq!(read.blocks.len(), 7, "{read:?}");
+            assert_block(&read.blocks[0], 1, 0, &[], false);
+            assert_block(&read.blocks[1], 2, 1, &["READ_TRIGGER"], false);
+            assert_block(&read.blocks[2], 3, 0, &[], false);
+            assert_block(&read.blocks[3], 4, 1, &[&read_error], true);
+            assert_block(&read.blocks[4], 5, 1, &[], false);
+            assert_block(&read.blocks[5], 6, 1, &["READ_LATER"], false);
+            assert_block(&read.blocks[6], 7, 1, &[], false);
+        }
+
+        #[test]
         fn control_kill_server_closes_its_block_before_exit() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {

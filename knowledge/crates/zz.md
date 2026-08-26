@@ -4,7 +4,7 @@ title: zz crate (the GPUI client)
 description: The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
-timestamp: 2026-08-19T00:00:00Z
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -89,20 +89,26 @@ askpass . and only refuses to open the GUI, pointing at the bundle instead.
 
 ## Control-mode front end (`control_mode.rs`)
 
-The `-C` front end owns direct flags-1 command frames, stdin and protocol ordering, deferred sourced
-guards, and the process exit code. Protocol v76 supplies one `SourcedCommandGuard` for each replayed
-command that survives command-name resolution. The daemon now uses the same event for synchronous
-foreground shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`, and foreground
-`run-shell -C` reached during parser-owned replay. The writer closes the direct outer frame, then
+The `-C` front end owns direct flags-1 command frames, stdin and protocol ordering, deferred Control
+command guards, and the process exit code. Protocol v77 supplies
+`ControlCommandGuard { output, error, sticky_failure, flags }` at the existing tail tag 47. Parser
+replay plus synchronous foreground shell-evaluated `if-shell`, immediate `if-shell -F` including
+`-bF`, and foreground `run-shell -C` keep flags 1. The writer closes the direct outer frame, then
 emits the containing command before each inserted command, and an inserted source before its child
-commands. Per-client and per-thread capture keeps nested trees isolated. Unknown child commands stay
-on `%config-error` without a guard. Unsupported zz-only inserted commands receive an empty success
-guard and continue, but do not enter `ConfigLoadReport`'s skipped summary. This closure reused v76
-without a new field or version.
+commands. Per-client and per-thread capture keeps nested trees isolated.
 
-Hook commands still require flags-0 frames under `control-mode.hook-command-frames`.
-Shell-evaluated `if-shell -b` and `run-shell -bC` remain asynchronous flags 0 under
-`control-mode.background-inserted-command-frames`. Existing daemon preflight also guarantees root
+Immediate `after-*` and `command-error` hooks retain the originating recipient in a separate Control
+target while clearing parser replay state. Every hook command, hook source, and sourced descendant
+therefore emits an independent flags-0 frame. Hook arrays stay ordered, a failure stops only its
+current command list, output does not fold into the trigger, and the no-hooks state prevents automatic
+retriggering. Unknown sourced commands remain `%config-error` without a guard or `command-error`.
+The flags-0 terminator and `sticky_failure` are independent, so a mixed source hit and miss can end
+`%end`, continue later commands, and still retain process status 1.
+
+Shell-evaluated `if-shell -b` and `run-shell -bC` still clear the target before their asynchronous
+callbacks and remain under `control-mode.background-inserted-command-frames`. A matched OS or path
+read failure reached from a flags-0 hook source still differs in raw placement under
+`control-mode.hook-source-read-diagnostics`. Existing daemon preflight also guarantees root
 missing-path guard, then middle missing-path guard, then leaf output guard in a three-level replay,
 each exactly once.
 

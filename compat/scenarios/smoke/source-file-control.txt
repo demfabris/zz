@@ -20,3 +20,4 @@ out: show-environment -g SOURCE_FILE_CONTROL_IF_SHELL
 out: show-environment -g SOURCE_FILE_CONTROL_DEPTH
 out: show-environment -g SOURCE_FILE_CONTROL_STATUS_MATRIX
 out: show-environment -g SOURCE_FILE_CONTROL_RETURN_PRECEDENCE
+out: show-environment -g SOURCE_FILE_CONTROL_HOOKS

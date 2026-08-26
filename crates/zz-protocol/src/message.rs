@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 76;
+pub const PROTOCOL_VERSION: u16 = 77;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -2156,10 +2156,11 @@ pub enum EventPayload {
     TimedClientMessageCleared {
         message_id: u64,
     },
-    SourcedCommandGuard {
+    ControlCommandGuard {
         output: String,
         error: bool,
-        client_failure: bool,
+        sticky_failure: bool,
+        flags: u8,
     },
 }
 
@@ -3153,21 +3154,26 @@ mod tests {
     }
 
     #[test]
-    fn sourced_command_guard_holds_wire_tag_forty_seven() {
-        let event = super::Event {
-            sequence: 7,
-            payload: super::EventPayload::SourcedCommandGuard {
-                output: "diagnostic\n".to_owned(),
-                error: true,
-                client_failure: false,
-            },
-        };
-        let bytes = postcard::to_stdvec(&event).expect("sourced command guard encodes");
-        assert_eq!(bytes[1], 47);
-        assert_eq!(
-            postcard::from_bytes::<super::Event>(&bytes).expect("sourced command guard decodes"),
-            event
-        );
+    fn control_command_guard_holds_wire_tag_forty_seven_and_round_trips_flags() {
+        for flags in [0, 1] {
+            let event = super::Event {
+                sequence: 7,
+                payload: super::EventPayload::ControlCommandGuard {
+                    output: "diagnostic\n".to_owned(),
+                    error: true,
+                    sticky_failure: false,
+                    flags,
+                },
+            };
+            let bytes = postcard::to_stdvec(&event).expect("control command guard encodes");
+            assert_eq!(bytes[1], 47);
+            assert_eq!(bytes.last(), Some(&flags));
+            assert_eq!(
+                postcard::from_bytes::<super::Event>(&bytes)
+                    .expect("control command guard decodes"),
+                event
+            );
+        }
     }
 
     #[test]
@@ -3285,7 +3291,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 76);
+        assert_eq!(super::PROTOCOL_VERSION, 77);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

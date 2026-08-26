@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -488,15 +488,17 @@ existing variants. Callers can abort a parse failure before effects without chan
 ordering. Cold CLI preparation and full config or source prevalidation remain under
 `mux.chain-parse-abort`.
 
-The same protocol version appends `EventPayload::SourcedCommandGuard` at tail tag 47 for Control
-replay. `load_config_file_with_report_for_terminal_and_options` emits one guard for each
+Protocol v76 originally appended `EventPayload::SourcedCommandGuard` at tail tag 47 for Control
+replay. Protocol v77 renames that tag in place to
+`ControlCommandGuard { output, error, sticky_failure, flags }`.
+`load_config_file_with_report_for_terminal_and_options` emits one guard for each
 parser-owned replayed command that survives command-name resolution before it recurses to later
 commands. An alias resolved to `source-file` before replay retains that path. Unknown or ambiguous
 command names and malformed alias names publish a located Warning that Control renders as
 `%config-error`, without a guard. Ordinary success and quiet misses carry an empty success guard. A
 partial source match carries its misses but still ends `%end`; an all-miss, flag or arity failure,
-runtime failure, or depth refusal ends `%error`. Runtime failures set the separate `client_failure`
-bit, which sets Control retval 1 independently of the frame terminator.
+runtime failure, or depth refusal ends `%error`. Runtime failures set `sticky_failure`, which sets
+Control retval 1 independently of the frame terminator. Parser replay uses flags 1.
 
 `execute_foreground_inserted_commands` extends that flags-1 path through synchronous foreground
 shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`, and foreground `run-shell -C`.
@@ -507,13 +509,25 @@ without folding into the parent or intercepting another thread's event. An unsup
 inserted command receives an empty success guard and later inserted siblings continue, but it does
 not join `ConfigLoadReport`'s skipped summary. An unknown command inside the child file produces the
 pin's successful parent and source guards followed by `%config-error` without another guard. The
-implementation reuses v76 without a new field, tag, or protocol version.
+v77 representation keeps the existing tag and adds only the fields needed by later queue states.
 
-Hook commands remain flags 0 under `control-mode.hook-command-frames`. Shell-evaluated
-`if-shell -b` and `run-shell -bC` remain asynchronous flags 0 under
+Immediate command hooks retain the Control recipient separately from `replay_client`, clear parser
+replay state, and enter a no-hooks context with flags 0. Each hook command, hook source command, and
+sourced child publishes independently. Hook arrays remain ordered; a failed command stops only its
+current command list, later array entries continue, and hook output or errors do not fold into the
+triggering flags-1 frame. Unknown or ambiguous sourced commands are rejected before execution, emit
+only `%config-error`, and do not fire `command-error`. Alias source classification and execution share
+one frozen resolution. `set-hook -R` copies only the Control target into its retargeted context.
+Background callbacks and deferred event hooks clear that target. Per-client and per-thread RAII
+capture prevents cross-thread interception and recipient leakage. A mixed hook-source miss and hit
+uses `%end` with `sticky_failure`, preserving retval 1 while later hook work continues.
+
+Shell-evaluated `if-shell -b` and `run-shell -bC` remain asynchronous flags 0 under
 `control-mode.background-inserted-command-frames`. Ordinary `run-shell -b` output remains under
 `control-mode.async-command-output`. Matched child OS and path read failures follow the parent guard
-as typed Error events. Invalid UTF-8 config content remains under `config.non-utf8-file-bytes` after
+as typed Error events on the parser-owned flags-1 path. The flags-0 hook-source form still differs
+from the pin's raw unframed diagnostic placement under `control-mode.hook-source-read-diagnostics`.
+Invalid UTF-8 config content remains under `config.non-utf8-file-bytes` after
 the pinned lone-`0xff` case disproved the earlier zz-side typed-error assumption.
 
 Generic config and lexer warnings still use the Control client's prose classifier under
@@ -548,13 +562,12 @@ detached launch remains silent. A separate manual probe of pinned tmux `d77c9dc6
 cause while list output is discarded. zz still drops that retained cause, which remains
 under `config.startup-diagnostic-delivery`.
 
-The synchronous inserted-list matrix and cross-thread capture tests pass. The focused `source_file`
-set passes 6 of 6 and the replayed set passes 5 of 5. A fresh debug build, strict daemon clippy,
-formatting, shell syntax, and diff checks pass. The strict `source-file-control` differential passes
-nine steps and `source-file-output` passes 12, both with zero differences and no skips. The stored
-canonical `source-file-control` row remains unchanged at three steps. Generic config Warning typing,
-hook and background flags-0 frames, config byte input, retained startup causes, and TUI
-command-output navigation remain open.
+The hook matrix, source and replay clusters, protocol and client suites, and Control units pass. Strict
+clippy across protocol, client, mux, daemon, and zz, formatting, shell syntax, and diff checks pass.
+The strict `source-file-control` differential passes ten steps and `source-file-output` passes 12,
+both with zero differences and no skips. The stored canonical `source-file-control` row remains
+unchanged at three steps. Generic config Warning typing, background flags-0 frames, hook-source read
+placement, config byte input, retained startup causes, and TUI command-output navigation remain open.
 
 # Examples
 

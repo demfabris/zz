@@ -13,8 +13,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_seventy_six() {
-    assert_eq!(PROTOCOL_VERSION, 76);
+fn protocol_version_on_this_commit_is_seventy_seven() {
+    assert_eq!(PROTOCOL_VERSION, 77);
 }
 
 #[test]
@@ -117,6 +117,23 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         }),
         45
     );
+    for flags in [0, 1] {
+        let event = Event {
+            sequence: 0,
+            payload: EventPayload::ControlCommandGuard {
+                output: String::new(),
+                error: false,
+                sticky_failure: false,
+                flags,
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("encode control command guard");
+        assert_eq!(bytes, [0, 47, 0, 0, 0, flags]);
+        assert_eq!(
+            postcard::from_bytes::<Event>(&bytes).expect("decode control command guard"),
+            event
+        );
+    }
 
     let window = WindowSnapshot {
         id: WindowId(1),
@@ -184,7 +201,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4c, 0x00, 0x00, 0x4c, 0x00, 0x00, 0x00, 0x00,
+            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4d, 0x00, 0x00, 0x4d, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00,
         ]
     );

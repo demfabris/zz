@@ -203,6 +203,7 @@ pub struct ExecutionContext {
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     repeat_binding: bool,
     replay_client: Option<ClientId>,
+    control_command_target: Option<(ClientId, u8)>,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
 }
@@ -228,6 +229,7 @@ impl Default for ExecutionContext {
             client_attached_context: None,
             repeat_binding: false,
             replay_client: None,
+            control_command_target: None,
             no_hooks: false,
             format_variables: BTreeMap::new(),
         }
@@ -343,6 +345,15 @@ impl ExecutionContext {
 
     pub fn set_replay_client(&mut self, client: Option<ClientId>) {
         self.replay_client = client;
+    }
+
+    #[must_use]
+    pub fn control_command_target(&self) -> Option<(ClientId, u8)> {
+        self.control_command_target
+    }
+
+    pub fn set_control_command_target(&mut self, target: Option<(ClientId, u8)>) {
+        self.control_command_target = target;
     }
 
     pub fn retarget_to_pane(&mut self, state: &MuxState, pane: PaneId) -> bool {
@@ -7245,9 +7256,12 @@ impl MuxEngine {
                 .filter(|pane| self.state.pane(*pane).is_some())
                 .or_else(|| self.resolve_pane(None, context.window, context.pane).ok()),
         };
-        Ok(pane
+        let control_command_target = context.control_command_target();
+        let mut target = pane
             .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
-            .unwrap_or_else(|| context.clone()))
+            .unwrap_or_else(|| context.clone());
+        target.set_control_command_target(control_command_target);
+        Ok(target)
     }
 
     fn set_option(
@@ -22609,6 +22623,10 @@ mod tests {
                 .execute(&mut context, &command("set-hook", args))
                 .unwrap();
         }
+        let control_target = (ClientId(41), 0);
+        context.set_control_command_target(Some(control_target));
+        context.set_replay_client(Some(ClientId(42)));
+        context.set_client_working_directory(Some(PathBuf::from("/caller/working-directory")));
 
         let execution = engine
             .execute(
@@ -22638,6 +22656,9 @@ mod tests {
                 context: target,
             }] if name == "after-select-window"
                 && target.pane == Some(pane)
+                && target.control_command_target() == Some(control_target)
+                && target.replay_client().is_none()
+                && target.client_working_directory().is_none()
                 && commands == &expected_commands
         ));
         assert_eq!(

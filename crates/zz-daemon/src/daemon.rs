@@ -123,6 +123,8 @@ const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_ITEMS: usize = 20;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_BYTES: usize = 32 * 1024;
 const MAX_COMMAND_PROMPT_OUTPUT_BYTES: usize = 1024 * 1024;
 const COMMAND_PROMPT_OUTPUT_TRUNCATED: &str = "… output truncated";
+const CONTROL_COMMAND_FRAME_FLAGS_NONE: u8 = 0;
+const CONTROL_COMMAND_FRAME_FLAGS_CONTROL: u8 = 1;
 const MAX_CHOOSE_TREE_ITEMS: usize = 4_096;
 const MAX_CHOOSE_TREE_ITEM_BYTES: usize = 512;
 const CHOOSE_TREE_PAGE_ROWS: usize = 10;
@@ -4021,13 +4023,19 @@ impl Shared {
             }
             client_name
         };
-        let response = match self.execute_with_mux_source_routed(
+        let previous_control_target = context.control_command_target();
+        if kind == ClientKind::Control {
+            context.set_control_command_target(Some((client, CONTROL_COMMAND_FRAME_FLAGS_CONTROL)));
+        }
+        let execution = self.execute_with_mux_source_routed(
             client,
             kind,
             context,
             &command,
             MuxOptionSource::RuntimeCommand,
-        ) {
+        );
+        context.set_control_command_target(previous_control_target);
+        let response = match execution {
             Ok(execution) => CommandResponse::Success {
                 request_id,
                 output: execution.output,
@@ -4528,28 +4536,55 @@ impl Shared {
         for commands in commands {
             let mut hook_context = context.clone();
             hook_context.set_no_client();
-            let replaying_control = hook_context.replay_client().is_some_and(|client| {
-                self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Control)
-            });
-            if replaying_control {
+            let control_target = hook_context
+                .control_command_target()
+                .map(|(client, _)| (client, CONTROL_COMMAND_FRAME_FLAGS_NONE));
+            if let Some(target) = control_target {
+                hook_context.set_control_command_target(Some(target));
                 hook_context.set_replay_client(None);
+            } else {
+                let replaying_control = hook_context.replay_client().is_some_and(|client| {
+                    self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Control)
+                });
+                if replaying_control {
+                    hook_context.set_replay_client(None);
+                }
             }
             hook_context.enter_hook(variables.clone());
             for command in commands {
                 hook_context.no_hooks = true;
                 hook_context.format_variables.clone_from(variables);
-                match self.execute(client, kind, &mut hook_context, &command) {
+                let execution = match control_target {
+                    Some(target) => self.execute_control_command_with_guard(
+                        client,
+                        kind,
+                        &mut hook_context,
+                        &command,
+                        target,
+                    ),
+                    None => self.execute(client, kind, &mut hook_context, &command),
+                };
+                match execution {
                     Ok(execution) => {
-                        append_inserted_output(&mut output, &execution.output);
+                        if control_target.is_none() {
+                            append_inserted_output(&mut output, &execution.output);
+                        }
                     }
                     Err(error) => {
                         if skip_resolution_errors && hook_resolution_error(&error) {
                             break;
                         }
-                        if let Some(error_output) = daemon_error_output(&error) {
-                            append_inserted_output(&mut output, error_output);
+                        if control_target.is_none() {
+                            if let Some(error_output) = daemon_error_output(&error) {
+                                append_inserted_output(&mut output, error_output);
+                            }
+                            self.publish_background_command_error(
+                                client,
+                                &hook_context,
+                                &error,
+                                false,
+                            );
                         }
-                        self.publish_background_command_error(client, &hook_context, &error, false);
                         break;
                     }
                 }
@@ -4580,6 +4615,7 @@ impl Shared {
                 let inner = self.inner.lock();
                 let mut context = event.context.clone();
                 inner.engine.repair_event_context(&mut context);
+                context.set_control_command_target(None);
                 let commands = inner.engine.event_hook_commands(&context, event.name);
                 (context, commands)
             };
@@ -6312,6 +6348,11 @@ impl Shared {
                 .then(|| source_working_directory.clone())
                 .flatten()
         };
+        let control_target = context.control_command_target().or_else(|| {
+            (source_kind == ClientKind::Control)
+                .then_some((source_client, CONTROL_COMMAND_FRAME_FLAGS_CONTROL))
+        });
+        let control_client = control_target.map(|(client, _)| client);
         let mut source_file_error = None;
         let mut control_source_errors = Vec::new();
         let mut control_source_matched = false;
@@ -6320,9 +6361,9 @@ impl Shared {
         let mut source_diagnostics_output = String::new();
         let mut source_invocations = SourceInvocationAccounting::default();
         let mut pending_source_files = Vec::new();
-        let captured_control_source = source_kind == ClientKind::Control
-            && !source_files.is_empty()
-            && self.is_capturing_sourced_command_guards(source_client);
+        let captured_control_source = control_client.is_some_and(|client| {
+            !source_files.is_empty() && self.is_capturing_control_command_events(client)
+        });
         for request in source_files {
             let path = request.path;
             if path == "-" {
@@ -6330,7 +6371,7 @@ impl Shared {
                     control_source_errors.push(STANDARD_INPUT_SOURCE_WARNING.to_owned());
                 } else {
                     self.publish_to_client(
-                        source_client,
+                        control_client.unwrap_or(source_client),
                         EventPayload::ClientMessage {
                             pane: request.context.pane,
                             kind: ClientMessageKind::Warning,
@@ -6338,7 +6379,7 @@ impl Shared {
                         },
                     );
                 }
-                if source_kind == ClientKind::Command {
+                if control_target.is_none() && source_kind == ClientKind::Command {
                     self.record_command_stderr(source_client, STANDARD_INPUT_SOURCE_WARNING);
                     self.record_command_failure(source_client);
                 }
@@ -6349,7 +6390,7 @@ impl Shared {
             let matches = source_glob_matches(&pattern);
             for error in &matches.errors {
                 let text = source_glob_error_warning(&declared_path, error);
-                if source_kind == ClientKind::Control {
+                if control_target.is_some() {
                     control_source_errors.push(text);
                 } else {
                     self.route_source_error(
@@ -6363,7 +6404,7 @@ impl Shared {
             if matches.paths.is_empty() && matches.errors.is_empty() {
                 if !request.quiet {
                     let error = missing_source_error(&declared_path);
-                    if source_kind == ClientKind::Control {
+                    if control_target.is_some() {
                         control_source_errors.push(error);
                     } else {
                         self.route_source_error(
@@ -6376,7 +6417,7 @@ impl Shared {
                 }
                 continue;
             }
-            if source_kind == ClientKind::Control && !matches.paths.is_empty() {
+            if control_target.is_some() && !matches.paths.is_empty() {
                 control_source_matched = true;
             }
             for path in matches.paths {
@@ -6385,10 +6426,9 @@ impl Shared {
                     context: request.context.clone(),
                     options: SourceFileLoadOptions {
                         parse_only: request.parse_only,
-                        verbose: request.verbose && source_kind != ClientKind::Control,
-                        suppress_verbose: source_kind == ClientKind::Control,
-                        control_client: (source_kind == ClientKind::Control)
-                            .then_some(source_client),
+                        verbose: request.verbose && control_target.is_none(),
+                        suppress_verbose: control_target.is_some(),
+                        control_target,
                         replay_client: (source_client != ClientId(u64::MAX))
                             .then_some(source_client),
                     },
@@ -6397,48 +6437,41 @@ impl Shared {
         }
         if captured_control_source {
             let source_command_error = !control_source_errors.is_empty();
-            if source_command_error {
+            let frame_flags = control_target
+                .map(|(_, flags)| flags)
+                .expect("captured Control source target");
+            if source_command_error && frame_flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
                 self.inner
                     .lock()
                     .command_streams
-                    .entry(source_client)
+                    .entry(control_client.expect("captured Control source client"))
                     .or_default()
                     .exit_code = 1;
             }
-            self.publish_sourced_command_guard(
-                Some(source_client),
+            self.publish_control_command_guard(
+                control_target,
                 control_source_errors.join("\n"),
                 source_command_error && !control_source_matched,
-                false,
+                source_command_error && frame_flags == CONTROL_COMMAND_FRAME_FLAGS_NONE,
             );
             control_source_errors.clear();
         }
         let mut parsed_source_files = Vec::new();
         for pending in pending_source_files {
-            let mut report =
-                if source_kind == ClientKind::Control || source_client == ClientId(u64::MAX) {
-                    ConfigLoadReport::default()
-                } else {
-                    ConfigLoadReport::with_stdout_transcript()
-                };
+            let mut report = if control_target.is_some() || source_client == ClientId(u64::MAX) {
+                ConfigLoadReport::default()
+            } else {
+                ConfigLoadReport::with_stdout_transcript()
+            };
             match self.parse_config_file(&pending.path, &mut report, pending.options, true) {
                 Ok(parsed) => parsed_source_files.push((pending, parsed, report)),
                 Err(DaemonError::Io(error)) => {
                     let warning = source_glob_error_warning(&pending.path, &error.to_string());
-                    if source_kind == ClientKind::Control {
-                        self.inner
-                            .lock()
-                            .command_streams
-                            .entry(source_client)
-                            .or_default()
-                            .exit_code = 1;
-                        self.publish_to_client(
-                            source_client,
-                            EventPayload::ClientMessage {
-                                pane: pending.context.pane,
-                                kind: ClientMessageKind::Error,
-                                text: warning,
-                            },
+                    if let Some(target) = control_target {
+                        self.publish_control_source_read_error(
+                            target,
+                            pending.context.pane,
+                            warning,
                         );
                     } else {
                         self.route_source_error(
@@ -6479,21 +6512,8 @@ impl Shared {
                 Ok(()) => {}
                 Err(DaemonError::Io(error)) => {
                     let warning = source_glob_error_warning(&path, &error.to_string());
-                    if source_kind == ClientKind::Control {
-                        self.inner
-                            .lock()
-                            .command_streams
-                            .entry(source_client)
-                            .or_default()
-                            .exit_code = 1;
-                        self.publish_to_client(
-                            source_client,
-                            EventPayload::ClientMessage {
-                                pane: context.pane,
-                                kind: ClientMessageKind::Error,
-                                text: warning,
-                            },
-                        );
+                    if let Some(target) = control_target {
+                        self.publish_control_source_read_error(target, context.pane, warning);
                     } else {
                         self.route_source_error(source_client, source_kind, context.pane, &warning);
                     }
@@ -6514,7 +6534,7 @@ impl Shared {
             if let Some(diagnostics) = report.stdout_diagnostics() {
                 append_inserted_output(&mut source_diagnostics_output, diagnostics);
             }
-            if source_kind == ClientKind::Command {
+            if control_target.is_none() && source_kind == ClientKind::Command {
                 for (index, diagnostic) in report.diagnostics().iter().enumerate() {
                     if !report.replayed_diagnostics.contains(&index) {
                         self.record_command_stdout(source_client, diagnostic);
@@ -6522,20 +6542,39 @@ impl Shared {
                     self.record_command_failure(source_client);
                 }
             }
-            self.route_config_replay_errors(source_client, source_kind, context.pane, &mut report);
-            if source_kind == ClientKind::Command
+            if let Some((client, flags)) = control_target {
+                if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                    self.route_config_replay_errors(
+                        client,
+                        ClientKind::Control,
+                        context.pane,
+                        &mut report,
+                    );
+                } else {
+                    report.delivered_replay_issues = report.replay_issues().len();
+                }
+            } else {
+                self.route_config_replay_errors(
+                    source_client,
+                    source_kind,
+                    context.pane,
+                    &mut report,
+                );
+            }
+            if control_target.is_none()
+                && source_kind == ClientKind::Command
                 && let Some(skipped) = report.skipped_summary()
             {
                 self.record_command_stderr(source_client, &skipped);
             }
-            let summary = if source_kind == ClientKind::Control && report.control_guarded {
+            let summary = if control_target.is_some() && report.control_guarded {
                 report.skipped_summary()
             } else {
                 report.message()
             };
             if let Some(summary) = summary {
                 self.publish_to_client(
-                    source_client,
+                    control_client.unwrap_or(source_client),
                     EventPayload::ClientMessage {
                         pane: context.pane,
                         kind: ClientMessageKind::Warning,
@@ -6549,7 +6588,8 @@ impl Shared {
         append_inserted_output(&mut execution.output, &source_diagnostics_output);
         if !control_source_errors.is_empty() {
             let mut inner = self.inner.lock();
-            let streams = inner.command_streams.entry(source_client).or_default();
+            let target = control_target.expect("Control source errors have a target");
+            let streams = inner.command_streams.entry(target.0).or_default();
             if control_source_matched {
                 for error in control_source_errors {
                     streams.stdout.push_str(&error);
@@ -7606,6 +7646,7 @@ impl Shared {
                     let shared = Arc::clone(self);
                     let mut command_context = command_context;
                     command_context.set_replay_client(None);
+                    command_context.set_control_command_target(None);
                     self.spawn_delay(delay, move || {
                         let mut context = command_context;
                         match shared.execute_inserted_commands(
@@ -7793,6 +7834,7 @@ impl Shared {
             let condition_for_error = condition.clone();
             let mut command_context = command_context;
             command_context.set_replay_client(None);
+            command_context.set_control_command_target(None);
             self.spawn_shell_job(
                 condition,
                 cwd,
@@ -7899,18 +7941,16 @@ impl Shared {
         source: &InsertedCommandSource,
         label: &str,
     ) -> Result<InsertedCommandResult, DaemonError> {
-        let guard_client = context.replay_client().filter(|client| {
-            let is_control =
-                self.inner.lock().client_kinds.get(client) == Some(&ClientKind::Control);
-            is_control && self.is_capturing_sourced_command_guards(*client)
-        });
-        self.execute_inserted_commands_with_control_guards(
+        let control_target = context
+            .control_command_target()
+            .filter(|(client, _)| self.is_capturing_control_command_events(*client));
+        self.execute_inserted_commands_with_control_target(
             client,
             kind,
             context,
             source,
             label,
-            guard_client,
+            control_target,
         )
     }
 
@@ -7922,19 +7962,19 @@ impl Shared {
         source: &InsertedCommandSource,
         label: &str,
     ) -> Result<InsertedCommandResult, DaemonError> {
-        self.execute_inserted_commands_with_control_guards(
+        self.execute_inserted_commands_with_control_target(
             client, kind, context, source, label, None,
         )
     }
 
-    fn execute_inserted_commands_with_control_guards(
+    fn execute_inserted_commands_with_control_target(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
         source: &InsertedCommandSource,
         label: &str,
-        guard_client: Option<ClientId>,
+        control_target: Option<(ClientId, u8)>,
     ) -> Result<InsertedCommandResult, DaemonError> {
         let input = match source {
             InsertedCommandSource::String(input) | InsertedCommandSource::Block(input) => input,
@@ -7949,45 +7989,33 @@ impl Shared {
         }
         let mut result = InsertedCommandResult::default();
         for command in parsed.commands {
-            let source_command =
-                guard_client.is_some_and(|_| self.inserted_command_is_source(&command));
-            let guard_capture =
-                guard_client.map(|client| self.begin_sourced_command_guard_capture(client));
-            let execution = self.execute(client, kind, context, &command);
-            let captured_events =
-                guard_capture.map_or_else(Vec::new, SourcedCommandGuardCapture::finish);
-            if let Some(guard_client) = guard_client {
-                if source_command && !captured_events.is_empty() {
-                    self.publish_captured_sourced_command_events(guard_client, captured_events);
-                } else {
-                    let (output, error, client_failure) =
-                        sourced_command_guard_for_execution(&execution);
-                    self.publish_sourced_command_guard_tree(
-                        Some(guard_client),
-                        output,
-                        error,
-                        client_failure,
-                        captured_events,
-                    );
+            let execution = match control_target {
+                Some(target) => {
+                    self.execute_control_command_with_guard(client, kind, context, &command, target)
                 }
+                None => self.execute(client, kind, context, &command),
+            };
+            if let Some((guard_client, flags)) = control_target {
                 match execution {
                     Ok(_) => {}
                     Err(DaemonError::CommandExit { exit_code, .. }) => {
-                        self.inner
-                            .lock()
-                            .command_streams
-                            .entry(guard_client)
-                            .or_default()
-                            .exit_code = exit_code;
+                        if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                            self.inner
+                                .lock()
+                                .command_streams
+                                .entry(guard_client)
+                                .or_default()
+                                .exit_code = exit_code;
+                        }
                         result.exit_code = exit_code;
                         break;
                     }
                     Err(error) => {
-                        let (guard_error, client_failure, _) = sourced_command_guard_error(&error);
+                        let (guard_error, sticky_failure, _) = control_command_guard_error(&error);
                         if !guard_error {
                             continue;
                         }
-                        if client_failure {
+                        if sticky_failure && flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
                             self.inner
                                 .lock()
                                 .command_streams
@@ -8019,13 +8047,48 @@ impl Shared {
         Ok(result)
     }
 
-    fn inserted_command_is_source(&self, command: &CommandInvocation) -> bool {
-        let inner = self.inner.lock();
-        inner
+    fn execute_control_command_with_guard(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        target: (ClientId, u8),
+    ) -> Result<Execution, DaemonError> {
+        let capture = self.begin_control_command_event_capture(target.0);
+        let routed = self
+            .inner
+            .lock()
             .engine
             .resolve_command_alias(command)
-            .into_command(command)
-            .is_ok_and(|command| canonical_command(&command.name) == "source-file")
+            .into_command(command);
+        let source_command = routed
+            .as_ref()
+            .is_ok_and(|command| canonical_command(&command.name) == "source-file");
+        let execution = match routed {
+            Ok(command) => self.execute_with_mux_source_routed(
+                client,
+                kind,
+                context,
+                &command,
+                MuxOptionSource::RuntimeCommand,
+            ),
+            Err(error) => Err(error.into()),
+        };
+        let captured_events = capture.finish();
+        if source_command && !captured_events.is_empty() {
+            self.publish_captured_control_command_events(target.0, captured_events);
+        } else {
+            let (output, error, sticky_failure) = control_command_guard_for_execution(&execution);
+            self.publish_control_command_guard_tree(
+                Some(target),
+                output,
+                error,
+                sticky_failure,
+                captured_events,
+            );
+        }
+        execution
     }
 
     fn finish_run_shell(
@@ -15308,12 +15371,12 @@ impl Shared {
     fn publish_to_client(&self, client: ClientId, payload: EventPayload) {
         if matches!(
             &payload,
-            EventPayload::SourcedCommandGuard { .. } | EventPayload::ClientMessage { .. }
+            EventPayload::ControlCommandGuard { .. } | EventPayload::ClientMessage { .. }
         ) {
             let capture_key = (client, thread::current().id());
             let mut inner = self.inner.lock();
             if let Some(capture) = inner
-                .sourced_command_guard_captures
+                .control_command_event_captures
                 .get_mut(&capture_key)
                 .and_then(|captures| captures.last_mut())
             {
@@ -15327,18 +15390,18 @@ impl Shared {
         }
     }
 
-    fn begin_sourced_command_guard_capture(
+    fn begin_control_command_event_capture(
         &self,
         client: ClientId,
-    ) -> SourcedCommandGuardCapture<'_> {
+    ) -> ControlCommandEventCapture<'_> {
         let thread_id = thread::current().id();
         self.inner
             .lock()
-            .sourced_command_guard_captures
+            .control_command_event_captures
             .entry((client, thread_id))
             .or_default()
             .push(Vec::new());
-        SourcedCommandGuardCapture {
+        ControlCommandEventCapture {
             shared: self,
             client,
             thread_id,
@@ -15346,31 +15409,31 @@ impl Shared {
         }
     }
 
-    fn pop_sourced_command_guard_capture(
+    fn pop_control_command_event_capture(
         &self,
         client: ClientId,
         thread_id: thread::ThreadId,
     ) -> Option<Vec<EventPayload>> {
         let capture_key = (client, thread_id);
         let mut inner = self.inner.lock();
-        let captures = inner.sourced_command_guard_captures.get_mut(&capture_key)?;
+        let captures = inner.control_command_event_captures.get_mut(&capture_key)?;
         let finished = captures.pop();
         if captures.is_empty() {
-            inner.sourced_command_guard_captures.remove(&capture_key);
+            inner.control_command_event_captures.remove(&capture_key);
         }
         finished
     }
 
-    fn is_capturing_sourced_command_guards(&self, client: ClientId) -> bool {
+    fn is_capturing_control_command_events(&self, client: ClientId) -> bool {
         let capture_key = (client, thread::current().id());
         self.inner
             .lock()
-            .sourced_command_guard_captures
+            .control_command_event_captures
             .get(&capture_key)
             .is_some_and(|captures| !captures.is_empty())
     }
 
-    fn publish_captured_sourced_command_events(
+    fn publish_captured_control_command_events(
         &self,
         client: ClientId,
         captured: Vec<EventPayload>,
@@ -15380,37 +15443,63 @@ impl Shared {
         }
     }
 
-    fn publish_sourced_command_guard_tree(
+    fn publish_control_command_guard_tree(
         &self,
-        client: Option<ClientId>,
+        target: Option<(ClientId, u8)>,
         output: String,
         error: bool,
-        client_failure: bool,
+        sticky_failure: bool,
         captured: Vec<EventPayload>,
     ) {
-        self.publish_sourced_command_guard(client, output, error, client_failure);
-        if let Some(client) = client {
-            self.publish_captured_sourced_command_events(client, captured);
+        self.publish_control_command_guard(target, output, error, sticky_failure);
+        if let Some((client, _)) = target {
+            self.publish_captured_control_command_events(client, captured);
         }
     }
 
-    fn publish_sourced_command_guard(
+    fn publish_control_command_guard(
         &self,
-        client: Option<ClientId>,
+        target: Option<(ClientId, u8)>,
         output: String,
         error: bool,
-        client_failure: bool,
+        sticky_failure: bool,
     ) {
-        if let Some(client) = client {
+        if let Some((client, flags)) = target {
             self.publish_to_client(
                 client,
-                EventPayload::SourcedCommandGuard {
+                EventPayload::ControlCommandGuard {
                     output,
                     error,
-                    client_failure,
+                    sticky_failure,
+                    flags,
                 },
             );
         }
+    }
+
+    fn publish_control_source_read_error(
+        &self,
+        target: (ClientId, u8),
+        pane: Option<PaneId>,
+        text: String,
+    ) {
+        let client = target.0;
+        if target.1 == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+            self.inner
+                .lock()
+                .command_streams
+                .entry(client)
+                .or_default()
+                .exit_code = 1;
+        }
+        self.publish_to_client(
+            client,
+            EventPayload::ClientMessage {
+                pane,
+                kind: ClientMessageKind::Error,
+                text,
+            },
+        );
     }
 
     fn sourced_command_name_error(&self, command: &CommandInvocation) -> Option<String> {
@@ -16863,7 +16952,7 @@ impl Shared {
         options: SourceFileLoadOptions,
         top_level: bool,
     ) -> Result<Option<ParsedConfig>, DaemonError> {
-        report.control_guarded |= options.control_client.is_some();
+        report.control_guarded |= options.control_target.is_some();
         let input = match fs::read_to_string(path) {
             Ok(input) => input,
             Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -16961,11 +17050,11 @@ impl Shared {
                         path.display()
                     );
                     report.note_invalid_command(&command, &message);
-                    if options.control_client.is_some()
+                    if options.control_target.is_some()
                         && let Some(name_error) = self.sourced_command_name_error(&command)
                     {
                         self.publish_sourced_config_warning(
-                            options.control_client,
+                            options.control_target.map(|(client, _)| client),
                             context.pane,
                             &command,
                             &name_error,
@@ -16973,8 +17062,8 @@ impl Shared {
                         failed_group = group;
                         continue;
                     }
-                    self.publish_sourced_command_guard(
-                        options.control_client,
+                    self.publish_control_command_guard(
+                        options.control_target,
                         config_command_error(&command, &message),
                         true,
                         false,
@@ -16986,7 +17075,7 @@ impl Shared {
                     let message = error.tmux_message();
                     log::warn!("{}: tmux command error: {message}", path.display());
                     report.note_command_error(&command, &message);
-                    self.publish_sourced_command_guard(options.control_client, message, true, true);
+                    self.publish_control_command_guard(options.control_target, message, true, true);
                     failed_group = group;
                     continue;
                 }
@@ -16996,8 +17085,8 @@ impl Shared {
                     "{}: ignoring reload-config while loading configuration",
                     path.display()
                 );
-                self.publish_sourced_command_guard(
-                    options.control_client,
+                self.publish_control_command_guard(
+                    options.control_target,
                     String::new(),
                     false,
                     false,
@@ -17036,8 +17125,8 @@ impl Shared {
                             path.display()
                         );
                         report.note_skip(&command);
-                        self.publish_sourced_command_guard(
-                            options.control_client,
+                        self.publish_control_command_guard(
+                            options.control_target,
                             String::new(),
                             false,
                             false,
@@ -17050,20 +17139,8 @@ impl Shared {
                             path.display()
                         );
                         report.note_invalid_command(&command, &message);
-                        if options.control_client.is_some()
-                            && let Some(name_error) = self.sourced_command_name_error(&command)
-                        {
-                            self.publish_sourced_config_warning(
-                                options.control_client,
-                                context.pane,
-                                &command,
-                                &name_error,
-                            );
-                            failed_group = group;
-                            continue;
-                        }
-                        self.publish_sourced_command_guard(
-                            options.control_client,
+                        self.publish_control_command_guard(
+                            options.control_target,
                             config_command_error(&command, &message),
                             true,
                             false,
@@ -17075,8 +17152,8 @@ impl Shared {
                         let message = error.tmux_message();
                         log::warn!("{}: tmux command error: {message}", path.display());
                         report.note_command_error(&command, &message);
-                        self.publish_sourced_command_guard(
-                            options.control_client,
+                        self.publish_control_command_guard(
+                            options.control_target,
                             message,
                             true,
                             true,
@@ -17094,7 +17171,7 @@ impl Shared {
                     };
                     log::warn!("{error}");
                     report.note_source_error(&mut None, &error);
-                    self.publish_sourced_command_guard(options.control_client, error, true, false);
+                    self.publish_control_command_guard(options.control_target, error, true, false);
                     failed_group = group;
                     continue;
                 }
@@ -17146,8 +17223,8 @@ impl Shared {
                     source_has_file |= !matches.paths.is_empty();
                     prepared_sources.push((source_request, matches.paths));
                 }
-                self.publish_sourced_command_guard(
-                    options.control_client,
+                self.publish_control_command_guard(
+                    options.control_target,
                     source_diagnostics,
                     source_parse_error || source_command_error && !source_has_file,
                     false,
@@ -17159,7 +17236,7 @@ impl Shared {
                         verbose: !options.suppress_verbose
                             && (options.verbose || source_request.verbose),
                         suppress_verbose: options.suppress_verbose,
-                        control_client: options.control_client,
+                        control_target: options.control_target,
                         replay_client: options.replay_client,
                     };
                     for source in sources {
@@ -17180,14 +17257,11 @@ impl Shared {
                                 source_glob_error_warning(&pending.path, &error.to_string());
                             log::warn!("{warning}");
                             report.note_source_error(&mut source_error_group, &warning);
-                            if let Some(client) = options.control_client {
-                                self.publish_to_client(
-                                    client,
-                                    EventPayload::ClientMessage {
-                                        pane: pending.context.pane,
-                                        kind: ClientMessageKind::Error,
-                                        text: warning,
-                                    },
+                            if let Some(target) = options.control_target {
+                                self.publish_control_source_read_error(
+                                    target,
+                                    pending.context.pane,
+                                    warning,
                                 );
                             }
                         }
@@ -17213,14 +17287,11 @@ impl Shared {
                                 source_glob_error_warning(&pending.path, &error.to_string());
                             log::warn!("{warning}");
                             report.note_source_error(&mut source_error_group, &warning);
-                            if let Some(client) = options.control_client {
-                                self.publish_to_client(
-                                    client,
-                                    EventPayload::ClientMessage {
-                                        pane: pending.context.pane,
-                                        kind: ClientMessageKind::Error,
-                                        text: warning,
-                                    },
+                            if let Some(target) = options.control_target {
+                                self.publish_control_source_read_error(
+                                    target,
+                                    pending.context.pane,
+                                    warning,
                                 );
                             }
                         }
@@ -17237,8 +17308,30 @@ impl Shared {
                 }
                 continue;
             }
+            if options.control_target.is_some() {
+                let name_error = match resolve_command(&routed.name) {
+                    CommandResolution::Ambiguous(message) => Some(message),
+                    CommandResolution::Unknown => Some(format!("unknown command: {}", routed.name)),
+                    CommandResolution::Canonical(_) | CommandResolution::Unimplemented(_) => None,
+                };
+                if let Some(name_error) = name_error {
+                    log::warn!(
+                        "{}: ignoring invalid tmux command: {name_error}",
+                        path.display()
+                    );
+                    report.note_invalid_command(&command, &name_error);
+                    self.publish_sourced_config_warning(
+                        options.control_target.map(|(client, _)| client),
+                        context.pane,
+                        &command,
+                        &name_error,
+                    );
+                    failed_group = group;
+                    continue;
+                }
+            }
             let previous_replay_client = context.replay_client();
-            let execution_replay_client = if options.control_client.is_some()
+            let execution_replay_client = if options.control_target.is_some()
                 && !matches!(canonical_command(&routed.name), "if-shell" | "run-shell")
             {
                 None
@@ -17246,9 +17339,12 @@ impl Shared {
                 options.replay_client
             };
             context.set_replay_client(execution_replay_client);
+            let previous_control_target = context.control_command_target();
+            context.set_control_command_target(options.control_target);
             let guard_capture = options
-                .control_client
-                .map(|client| self.begin_sourced_command_guard_capture(client));
+                .control_target
+                .map(|(client, _)| client)
+                .map(|client| self.begin_control_command_event_capture(client));
             let result = self.execute_with_mux_source_routed_for_terminal(
                 ClientId(u64::MAX),
                 ClientKind::Command,
@@ -17258,16 +17354,17 @@ impl Shared {
                 client_terminal,
             );
             context.set_replay_client(previous_replay_client);
+            context.set_control_command_target(previous_control_target);
             let captured_events =
-                guard_capture.map_or_else(Vec::new, SourcedCommandGuardCapture::finish);
+                guard_capture.map_or_else(Vec::new, ControlCommandEventCapture::finish);
             let mut captured_output = result.as_ref().map_or_else(
                 |error| daemon_error_output(error).unwrap_or_default().to_owned(),
                 |execution| execution.output.clone(),
             );
             report.note_stdout(&captured_output);
             match result.map_err(discard_command_output) {
-                Ok(_) => self.publish_sourced_command_guard_tree(
-                    options.control_client,
+                Ok(_) => self.publish_control_command_guard_tree(
+                    options.control_target,
                     captured_output,
                     false,
                     false,
@@ -17279,8 +17376,8 @@ impl Shared {
                         path.display()
                     );
                     report.note_skip(&command);
-                    self.publish_sourced_command_guard_tree(
-                        options.control_client,
+                    self.publish_control_command_guard_tree(
+                        options.control_target,
                         captured_output,
                         false,
                         false,
@@ -17293,27 +17390,12 @@ impl Shared {
                         path.display()
                     );
                     report.note_invalid_command(&command, &message);
-                    if options.control_client.is_some()
-                        && let Some(name_error) = self.sourced_command_name_error(&command)
-                    {
-                        self.publish_sourced_config_warning(
-                            options.control_client,
-                            context.pane,
-                            &command,
-                            &name_error,
-                        );
-                        if let Some(client) = options.control_client {
-                            self.publish_captured_sourced_command_events(client, captured_events);
-                        }
-                        failed_group = group;
-                        continue;
-                    }
                     append_inserted_output(
                         &mut captured_output,
                         &config_command_error(&command, &message),
                     );
-                    self.publish_sourced_command_guard_tree(
-                        options.control_client,
+                    self.publish_control_command_guard_tree(
+                        options.control_target,
                         captured_output,
                         true,
                         false,
@@ -17326,8 +17408,8 @@ impl Shared {
                     log::warn!("{}: tmux command error: {message}", path.display());
                     report.note_command_error(&command, &message);
                     append_inserted_output(&mut captured_output, &message);
-                    self.publish_sourced_command_guard_tree(
-                        options.control_client,
+                    self.publish_control_command_guard_tree(
+                        options.control_target,
                         captured_output,
                         true,
                         true,
@@ -17337,8 +17419,8 @@ impl Shared {
                 }
                 Err(error) => {
                     append_inserted_output(&mut captured_output, &daemon_error_text(&error));
-                    self.publish_sourced_command_guard_tree(
-                        options.control_client,
+                    self.publish_control_command_guard_tree(
+                        options.control_target,
                         captured_output,
                         true,
                         true,
@@ -17986,7 +18068,7 @@ struct SourceFileLoadOptions {
     parse_only: bool,
     verbose: bool,
     suppress_verbose: bool,
-    control_client: Option<ClientId>,
+    control_target: Option<(ClientId, u8)>,
     replay_client: Option<ClientId>,
 }
 
@@ -18332,28 +18414,28 @@ struct CommandStreams {
     exit_code: u8,
 }
 
-struct SourcedCommandGuardCapture<'a> {
+struct ControlCommandEventCapture<'a> {
     shared: &'a Shared,
     client: ClientId,
     thread_id: thread::ThreadId,
     active: bool,
 }
 
-impl SourcedCommandGuardCapture<'_> {
+impl ControlCommandEventCapture<'_> {
     fn finish(mut self) -> Vec<EventPayload> {
         self.active = false;
         self.shared
-            .pop_sourced_command_guard_capture(self.client, self.thread_id)
-            .expect("sourced command guard capture frame")
+            .pop_control_command_event_capture(self.client, self.thread_id)
+            .expect("control command event capture frame")
     }
 }
 
-impl Drop for SourcedCommandGuardCapture<'_> {
+impl Drop for ControlCommandEventCapture<'_> {
     fn drop(&mut self) {
         if self.active {
             let _ = self
                 .shared
-                .pop_sourced_command_guard_capture(self.client, self.thread_id);
+                .pop_control_command_event_capture(self.client, self.thread_id);
         }
     }
 }
@@ -18459,7 +18541,7 @@ struct ServerState {
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
     command_streams: BTreeMap<ClientId, CommandStreams>,
-    sourced_command_guard_captures: HashMap<(ClientId, thread::ThreadId), Vec<Vec<EventPayload>>>,
+    control_command_event_captures: HashMap<(ClientId, thread::ThreadId), Vec<Vec<EventPayload>>>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
@@ -23878,23 +23960,23 @@ fn daemon_error_output(error: &DaemonError) -> Option<&str> {
     }
 }
 
-fn sourced_command_guard_for_execution(
+fn control_command_guard_for_execution(
     result: &Result<Execution, DaemonError>,
 ) -> (String, bool, bool) {
     match result {
         Ok(execution) => (execution.output.clone(), false, false),
         Err(error) => {
             let mut output = daemon_error_output(error).unwrap_or_default().to_owned();
-            let (error, client_failure, message) = sourced_command_guard_error(error);
+            let (error, sticky_failure, message) = control_command_guard_error(error);
             append_inserted_output(&mut output, &message);
-            (output, error, client_failure)
+            (output, error, sticky_failure)
         }
     }
 }
 
-fn sourced_command_guard_error(error: &DaemonError) -> (bool, bool, String) {
+fn control_command_guard_error(error: &DaemonError) -> (bool, bool, String) {
     match error {
-        DaemonError::CommandFailed { error, .. } => sourced_command_guard_error(error),
+        DaemonError::CommandFailed { error, .. } => control_command_guard_error(error),
         DaemonError::Server(ServerError::UnsupportedCommand(_)) => (false, false, String::new()),
         DaemonError::Server(ServerError::CommandParse(message)) => (true, false, message.clone()),
         DaemonError::Server(error) => (true, true, error.tmux_message()),
@@ -35204,7 +35286,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            control_command_guards(take_reliable_messages(&control_mailbox)),
             [
                 ("can't find session: missing-runtime".to_owned(), true, true,),
                 ("invalid option: nonexistent-option".to_owned(), true, true),
@@ -35327,7 +35409,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
+            control_command_guards(take_reliable_messages(&mailbox)),
             [
                 (
                     format!(
@@ -35398,13 +35480,14 @@ mod tests {
             .filter_map(|message| match message {
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::SourcedCommandGuard {
+                        EventPayload::ControlCommandGuard {
                             output,
                             error,
-                            client_failure,
+                            sticky_failure,
+                            ..
                         },
                     ..
-                }) => Some(format!("guard:{error}:{client_failure}:{output}")),
+                }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
                     payload:
                         EventPayload::ClientMessage {
@@ -35436,6 +35519,77 @@ mod tests {
             ]
         );
         assert_eq!(read_global_option(&shared, "@after-name-errors"), "yes");
+    }
+
+    #[test]
+    fn control_sourced_unknown_command_does_not_run_command_error_hook() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("unknown.conf");
+        fs::write(&source, "wibble\n").expect("unknown source");
+        let shared = Arc::new(Shared::new(80));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "command-error",
+                        "set-option -g @unexpected-command-error yes",
+                    ],
+                ),
+            )
+            .expect("command-error hook");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let events = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandGuard { .. },
+                    ..
+                }) => Some("guard".to_owned()),
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("warning:{text}")),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events,
+            [format!(
+                "warning:{}:1: unknown command: wibble",
+                source.display()
+            )]
+        );
+        assert_eq!(read_global_option(&shared, "@unexpected-command-error"), "");
     }
 
     #[test]
@@ -35942,7 +36096,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            control_command_guards(take_reliable_messages(&control_mailbox)),
             [
                 ("ROOT_ONE".to_owned(), false, false),
                 (String::new(), false, false),
@@ -36206,16 +36360,16 @@ mod tests {
     }
 
     #[test]
-    fn sourced_command_guard_capture_does_not_intercept_other_threads() {
+    fn control_command_event_capture_does_not_intercept_other_threads() {
         let shared = Arc::new(Shared::new(79));
         let mailbox = OutboundMailbox::new();
         let (control, _) =
             shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
         take_reliable_messages(&mailbox);
 
-        let capture = shared.begin_sourced_command_guard_capture(control);
-        shared.publish_sourced_command_guard(
-            Some(control),
+        let capture = shared.begin_control_command_event_capture(control);
+        shared.publish_control_command_guard(
+            Some((control, CONTROL_COMMAND_FRAME_FLAGS_CONTROL)),
             "LOCAL_BEFORE".to_owned(),
             false,
             false,
@@ -36246,10 +36400,15 @@ mod tests {
             })] if text == "BACKGROUND_ERROR"
         ));
 
-        shared.publish_sourced_command_guard(Some(control), "LOCAL_AFTER".to_owned(), false, false);
-        shared.publish_captured_sourced_command_events(control, capture.finish());
+        shared.publish_control_command_guard(
+            Some((control, CONTROL_COMMAND_FRAME_FLAGS_CONTROL)),
+            "LOCAL_AFTER".to_owned(),
+            false,
+            false,
+        );
+        shared.publish_captured_control_command_events(control, capture.finish());
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
+            control_command_guards(take_reliable_messages(&mailbox)),
             [
                 ("LOCAL_BEFORE".to_owned(), false, false),
                 ("LOCAL_AFTER".to_owned(), false, false),
@@ -36259,8 +36418,74 @@ mod tests {
             shared
                 .inner
                 .lock()
-                .sourced_command_guard_captures
+                .control_command_event_captures
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn control_command_hook_mixed_source_retains_status_without_error_guard() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let missing = directory.path().join("missing.conf");
+        let hit = directory.path().join("hit.conf");
+        fs::write(&hit, "display-message -p MIXED_HIT\n").expect("mixed hit source");
+
+        let shared = Arc::new(Shared::new(80));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "control-hook-mixed"]),
+            )
+            .expect("mixed hook session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "after-display-message".to_owned(),
+                        format!("source-file '{}' '{}'", missing.display(), hit.display()),
+                    ],
+                ),
+            )
+            .expect("mixed source hook");
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, context.session.expect("mixed hook session id"))
+            .expect("attach mixed hook control client");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                1,
+                &CommandInvocation::new("display-message", ["-p", "MIXED_TRIGGER"]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: "MIXED_TRIGGER".to_owned(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            control_command_frames(take_reliable_messages(&mailbox)),
+            [
+                (missing_source_error(&missing), false, true, 0),
+                ("MIXED_HIT".to_owned(), false, false, 0),
+            ]
         );
     }
 
@@ -36409,7 +36634,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
+            control_command_guards(take_reliable_messages(&mailbox)),
             [
                 (String::new(), false, false),
                 ("DIRECT_INSERT".to_owned(), false, false),
@@ -36492,13 +36717,14 @@ mod tests {
                 .filter_map(|message| match message {
                     ProtocolMessage::Event(Event {
                         payload:
-                            EventPayload::SourcedCommandGuard {
+                            EventPayload::ControlCommandGuard {
                                 output,
                                 error,
-                                client_failure,
+                                sticky_failure,
+                                ..
                             },
                         ..
-                    }) => Some(format!("guard:{error}:{client_failure}:{output}")),
+                    }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                     ProtocolMessage::Event(Event {
                         payload:
                             EventPayload::ClientMessage {
@@ -36558,7 +36784,7 @@ mod tests {
                 }
             );
             assert_eq!(
-                sourced_command_guards(take_reliable_messages(&mailbox)),
+                control_command_guards(take_reliable_messages(&mailbox)),
                 [
                     (String::new(), false, false),
                     ("CHILD".to_owned(), false, false),
@@ -36582,7 +36808,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
+            control_command_guards(take_reliable_messages(&mailbox)),
             [
                 (String::new(), false, false),
                 (
@@ -36610,7 +36836,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
+            control_command_guards(take_reliable_messages(&mailbox)),
             [
                 (String::new(), false, false),
                 (
@@ -36651,12 +36877,12 @@ mod tests {
                 stderr: String::new(),
             }
         );
-        assert!(sourced_command_guards(take_reliable_messages(&mailbox)).is_empty());
+        assert!(control_command_guards(take_reliable_messages(&mailbox)).is_empty());
         assert!(
             shared
                 .inner
                 .lock()
-                .sourced_command_guard_captures
+                .control_command_event_captures
                 .is_empty()
         );
 
@@ -36691,8 +36917,265 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
-            [("HOOK_TRIGGER".to_owned(), false, false)]
+            control_command_frames(take_reliable_messages(&mailbox)),
+            [
+                ("HOOK_TRIGGER".to_owned(), false, false, 1),
+                (String::new(), false, false, 0),
+                ("HOOK_CHILD".to_owned(), false, false, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_command_hooks_use_flags_zero_without_folding_or_leaking() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let leaf = directory.path().join("hook-leaf.conf");
+        fs::write(&leaf, "display-message -p HOOK_LEAF\n").expect("hook leaf source");
+        let unknown = directory.path().join("hook-unknown.conf");
+        fs::write(&unknown, "wibble\n").expect("unknown hook source");
+        let unreadable = directory.path().join("hook-read-error");
+        fs::create_dir(&unreadable).expect("hook read error directory");
+        let unreadable_error = fs::read_to_string(&unreadable).expect_err("directory read error");
+        let unreadable_error =
+            source_glob_error_warning(&unreadable, &unreadable_error.to_string());
+        let root = directory.path().join("hook-root.conf");
+        fs::write(
+            &root,
+            format!(
+                "display-message -p HOOK_SOURCE_BEFORE\n\
+                 source-file {}\n\
+                 source-file {}\n\
+                 source-file {}\n\
+                 kill-session -t hook-source-runtime\n\
+                 display-message -p HOOK_SOURCE_AFTER\n",
+                leaf.display(),
+                unknown.display(),
+                unreadable.display(),
+            ),
+        )
+        .expect("hook root source");
+        let missing = directory.path().join("hook-missing.conf");
+        let trigger = directory.path().join("hook-trigger.conf");
+        fs::write(&trigger, "display-message -p HOOK_TRIGGER\n").expect("hook trigger source");
+        let command_error = directory.path().join("command-error.conf");
+        fs::write(
+            &command_error,
+            "kill-session -t outer-command-error\ndisplay-message -p OUTER_AFTER_ERROR\n",
+        )
+        .expect("command error source");
+        let final_source = directory.path().join("final.conf");
+        fs::write(&final_source, "display-message -p FINAL_FLAGS_ONE\n").expect("final source");
+
+        let shared = Arc::new(Shared::new(80));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "control-hook-frames"]),
+            )
+            .expect("hook frame session");
+        let session = context.session.expect("hook frame session id");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, session)
+            .expect("attach hook frame control client");
+        take_reliable_messages(&mailbox);
+
+        for (index, value) in [
+            (
+                0,
+                "display-message -p HOOK_ARRAY_ZERO ; kill-session -t hook-direct-runtime ; display-message -p HOOK_ARRAY_ZERO_SKIPPED".to_owned(),
+            ),
+            (1, format!("source-file {}", root.display())),
+            (2, format!("source-file {}", missing.display())),
+            (3, "display-message -p HOOK_ARRAY_THREE".to_owned()),
+        ] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-hook",
+                        [
+                            "-g".to_owned(),
+                            format!("after-display-message[{index}]"),
+                            value,
+                        ],
+                    ),
+                )
+                .expect("install command hook array");
+        }
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "command-error",
+                        "display-message -p COMMAND_ERROR_HOOK",
+                    ],
+                ),
+            )
+            .expect("install command-error hook");
+
+        let mut control_context = context.clone();
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                1,
+                &CommandInvocation::new("source-file", [trigger.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let first_events = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlCommandGuard {
+                            output,
+                            error,
+                            sticky_failure,
+                            flags,
+                        },
+                    ..
+                }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("warning:{text}")),
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Error,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("error:{text}")),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            first_events,
+            [
+                "guard:1:false:false:HOOK_TRIGGER".to_owned(),
+                "guard:0:false:false:HOOK_ARRAY_ZERO".to_owned(),
+                "guard:0:true:true:can't find session: hook-direct-runtime".to_owned(),
+                "guard:0:false:false:".to_owned(),
+                "guard:0:false:false:HOOK_SOURCE_BEFORE".to_owned(),
+                "guard:0:false:false:".to_owned(),
+                "guard:0:false:false:HOOK_LEAF".to_owned(),
+                "guard:0:false:false:".to_owned(),
+                format!("warning:{}:1: unknown command: wibble", unknown.display()),
+                "guard:0:false:false:".to_owned(),
+                format!("error:{unreadable_error}"),
+                "guard:0:true:true:can't find session: hook-source-runtime".to_owned(),
+                "guard:0:false:false:HOOK_SOURCE_AFTER".to_owned(),
+                format!(
+                    "guard:0:true:true:No such file or directory: {}",
+                    missing.display()
+                ),
+                "guard:0:false:false:HOOK_ARRAY_THREE".to_owned(),
+            ]
+        );
+        assert!(
+            first_events
+                .iter()
+                .all(|event| !event.contains("HOOK_ARRAY_ZERO_SKIPPED"))
+        );
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-gu", "after-display-message"]),
+            )
+            .expect("clear display command hook");
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                2,
+                &CommandInvocation::new("source-file", [command_error.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            control_command_frames(take_reliable_messages(&mailbox)),
+            [
+                (
+                    "can't find session: outer-command-error".to_owned(),
+                    true,
+                    true,
+                    1,
+                ),
+                ("COMMAND_ERROR_HOOK".to_owned(), false, false, 0),
+                ("OUTER_AFTER_ERROR".to_owned(), false, false, 1),
+            ]
+        );
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-gu", "command-error"]),
+            )
+            .expect("clear command-error hook");
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                3,
+                &CommandInvocation::new("source-file", [final_source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 3,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            control_command_frames(take_reliable_messages(&mailbox)),
+            [("FINAL_FLAGS_ONE".to_owned(), false, false, 1)]
+        );
+        assert!(
+            shared
+                .inner
+                .lock()
+                .control_command_event_captures
+                .is_empty()
         );
     }
 
@@ -37307,7 +37790,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            control_command_guards(take_reliable_messages(&control_mailbox)),
             [(expected.to_owned(), true, false)]
         );
         let response = shared.execute_command_request(
@@ -37327,7 +37810,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            control_command_guards(take_reliable_messages(&control_mailbox)),
             [(String::new(), false, false)]
         );
         let response = shared.execute_command_request(
@@ -37352,13 +37835,14 @@ mod tests {
             .filter_map(|message| match message {
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::SourcedCommandGuard {
+                        EventPayload::ControlCommandGuard {
                             output,
                             error,
-                            client_failure,
+                            sticky_failure,
+                            ..
                         },
                     ..
-                }) => Some(("guard", output, error, client_failure)),
+                }) => Some(("guard", output, error, sticky_failure)),
                 ProtocolMessage::Event(Event {
                     payload:
                         EventPayload::ClientMessage {
@@ -37460,7 +37944,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            control_command_guards(take_reliable_messages(&control_mailbox)),
             [(format!("{missing_a}\n{missing_b}"), true, false)]
         );
 
@@ -37481,7 +37965,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            control_command_guards(take_reliable_messages(&control_mailbox)),
             [
                 (missing_c.to_owned(), true, false),
                 (missing_d.to_owned(), true, false),
@@ -37509,10 +37993,11 @@ mod tests {
             messages.as_slice(),
             [
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::SourcedCommandGuard {
+                    payload: EventPayload::ControlCommandGuard {
                         output,
                         error: false,
-                        client_failure: false,
+                        sticky_failure: false,
+                        ..
                     },
                     ..
                 }),
@@ -37587,10 +38072,11 @@ mod tests {
                 messages.as_slice(),
                 [
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::SourcedCommandGuard {
+                        payload: EventPayload::ControlCommandGuard {
                             output,
                             error: false,
-                            client_failure: false,
+                            sticky_failure: false,
+                            ..
                         },
                         ..
                     }),
@@ -37718,7 +38204,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
+            control_command_guards(take_reliable_messages(&mailbox)),
             [
                 (
                     "No such file or directory: root-before-missing.conf\nNo such file or directory: root-after-missing.conf"
@@ -37793,7 +38279,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sourced_command_guards(take_reliable_messages(&mailbox)),
+            control_command_guards(take_reliable_messages(&mailbox)),
             [(expected, true, false)]
         );
     }
@@ -38028,7 +38514,7 @@ mod tests {
                 stderr: String::new(),
             }
         );
-        let failures = sourced_command_guards(take_reliable_messages(&control_mailbox))
+        let failures = control_command_guards(take_reliable_messages(&control_mailbox))
             .into_iter()
             .filter(|(_, error, _)| *error)
             .collect::<Vec<_>>();
@@ -64738,19 +65224,39 @@ bind - split-window -v -c "#{pane_current_path}"
             .collect()
     }
 
-    fn sourced_command_guards(messages: Vec<ProtocolMessage>) -> Vec<(String, bool, bool)> {
+    fn control_command_guards(messages: Vec<ProtocolMessage>) -> Vec<(String, bool, bool)> {
         messages
             .into_iter()
             .filter_map(|message| match message {
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::SourcedCommandGuard {
+                        EventPayload::ControlCommandGuard {
                             output,
                             error,
-                            client_failure,
+                            sticky_failure,
+                            ..
                         },
                     ..
-                }) => Some((output, error, client_failure)),
+                }) => Some((output, error, sticky_failure)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn control_command_frames(messages: Vec<ProtocolMessage>) -> Vec<(String, bool, bool, u8)> {
+        messages
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlCommandGuard {
+                            output,
+                            error,
+                            sticky_failure,
+                            flags,
+                        },
+                    ..
+                }) => Some((output, error, sticky_failure, flags)),
                 _ => None,
             })
             .collect()

@@ -10,14 +10,14 @@ tags:
 - protocol
 - architecture
 - multi-client
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
 
 The shipped split landed on protocol v52. v53 added the agent runtime lane, v54 completed its
 session-control shape, and v55 added stable client identity for owned Agent draft recovery. The
-live `PROTOCOL_VERSION` is 76; see the [wire protocol](/protocol/wire-protocol.md).
+live `PROTOCOL_VERSION` is 77; see the [wire protocol](/protocol/wire-protocol.md).
 `zz-protocol` owns the command catalog, key grammar, tables,
 and resolver; the daemon publishes every live table. `zz-client::ClientCore` reduces decoded
 messages into shared state and typed effects, while `ChromeKeymap` owns client-side chords. The TUI

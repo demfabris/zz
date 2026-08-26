@@ -18,6 +18,16 @@ printf '%s\n' \
     'set-option -g @runtime_after yes' >"$control_dir/runtime.conf"
 printf '%s\n' 'kill-session -t status-sourced-runtime' >"$control_dir/status-runtime.conf"
 printf '%s\n' 'source-file status-nested-missing.conf' >"$control_dir/status-source.conf"
+hooks_dir="$control_dir/hooks"
+mkdir -p "$hooks_dir"
+printf '%s\n' 'wibble' >"$hooks_dir/unknown.conf"
+printf '%s\n' 'display-message -p HOOK_LEAF' >"$hooks_dir/leaf.conf"
+printf '%s\n' \
+    'display-message -p HOOK_SOURCE_BEFORE' \
+    "source-file '$hooks_dir/leaf.conf'" \
+    "source-file '$hooks_dir/unknown.conf'" \
+    'kill-session -t hook-source-runtime' \
+    'display-message -p HOOK_SOURCE_AFTER' >"$hooks_dir/root.conf"
 queue_dir="$control_dir/queue"
 mkdir -p "$queue_dir"
 printf '%s\n' 'display-message -p CONTROL_QUEUE_LEAF' >"$queue_dir/leaf.conf"
@@ -638,4 +648,77 @@ run_control_status_case sourced-runtime-post detach-completed-eof \
 post_entry=${status_matrix#"$post_matrix_before;"}
 main_client set-environment -g SOURCE_FILE_CONTROL_RETURN_PRECEDENCE \
     "pre:rc=$pre_status,ready=1,release=1,exit=$pre_exit;post:$post_entry"
+
+probe_command set-hook -g 'after-display-message[0]' \
+    'display-message -p HOOK_ARRAY_ZERO ; kill-session -t hook-direct-runtime ; display-message -p HOOK_ARRAY_ZERO_SKIPPED'
+probe_command set-hook -g 'after-display-message[1]' \
+    "source-file '$hooks_dir/root.conf'"
+probe_command set-hook -g 'after-display-message[2]' \
+    "source-file '$hooks_dir/missing.conf'"
+probe_command set-hook -g 'after-display-message[3]' \
+    'display-message -p HOOK_ARRAY_THREE'
+probe_command set-hook -g command-error 'display-message -p COMMAND_ERROR_HOOK'
+
+hooks_raw="$control_dir/hooks.raw"
+hooks_errors="$control_dir/hooks.err"
+hooks_input="$control_dir/hooks.in"
+: >"$hooks_raw"
+: >"$hooks_errors"
+rm -f -- "$hooks_input"
+mkfifo "$hooks_input"
+control_client <"$hooks_input" >"$hooks_raw" 2>"$hooks_errors" &
+control_pid=$!
+exec 3>"$hooks_input"
+printf '%s\n' 'display-message -p HOOK_TRIGGER' >&3
+printf '%s\n' 'kill-session -t hook-outer-runtime' >&3
+printf '%s\n' 'set-hook -gu after-display-message' >&3
+printf '%s\n' 'set-hook -gu command-error' >&3
+printf '%s\n' 'display-message -p HOOK_FINAL_FLAGS_ONE' >&3
+printf '%s\n' 'display-message -p HOOKS_DONE' >&3
+wait_for_control_output_marker "$hooks_raw" HOOKS_DONE "$control_pid" hooks
+exec 3>&-
+if wait_for_process "$control_pid" 200; then
+    hooks_status=0
+else
+    hooks_status=$?
+fi
+control_pid=''
+if [ "$hooks_status" -gt 1 ] || [ -s "$hooks_errors" ]; then
+    sed -n '1,160p' "$hooks_errors" >&2
+    exit 1
+fi
+hooks_sequence="$(
+    sed "s|$hooks_dir/||g" "$hooks_raw" | awk '
+        function emit(terminator) {
+            if (payload == "") payload = "_"
+            printf "%s%s:%s:%s", separator, flags, terminator, payload
+            separator = "|"
+            active = 0
+            payload = ""
+        }
+        /^%begin [0-9]+ [0-9]+ [0-9]+$/ {
+            active = 1
+            flags = $4
+            payload = ""
+            next
+        }
+        /^%end [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) emit("end")
+            next
+        }
+        /^%error [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) emit("error")
+            next
+        }
+        active && !/^%/ {
+            if (payload != "") payload = payload "+"
+            payload = payload $0
+        }
+        END { print "" }
+    '
+)"
+hooks_unknown="$(grep -c '^%config-error .*unknown command: wibble$' "$hooks_raw" || true)"
+hooks_skipped="$(grep -c '^HOOK_ARRAY_ZERO_SKIPPED$' "$hooks_raw" || true)"
+main_client set-environment -g SOURCE_FILE_CONTROL_HOOKS \
+    "rc=$hooks_status unknown=$hooks_unknown skipped=$hooks_skipped seq=$hooks_sequence"
 exit 0

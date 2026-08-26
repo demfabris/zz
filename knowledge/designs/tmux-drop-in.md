@@ -10,8 +10,8 @@ tags:
 - layout
 - control-mode
 - roadmap
-timestamp: 2026-08-25T00:00:00-03:00
-last_updated: 2026-08-25
+timestamp: 2026-08-26T00:00:00-03:00
+last_updated: 2026-08-26
 ---
 
 # Overview
@@ -98,7 +98,7 @@ difference and every other channel clean. A fresh canonical run is deferred unti
 settle. The checked-in summary is intentionally stale for `buffer-path-format`,
 `command-item-format`, `display-message` (27 steps), `resize-directions` (16 focused steps versus 8
 stored), `send-keys-repeat`, `smoke/cli-chain-parse-abort`,
-`smoke/control-alias-prepare`, `smoke/source-file-control` (8 focused steps versus 3 stored),
+`smoke/control-alias-prepare`, `smoke/source-file-control` (10 focused steps versus 3 stored),
 `smoke/source-file-diagnostics`, and
 `source-file-format`; root will replace the totals and rows from that final run rather than hand-edit
 them. The combined summary still records the attached-client fixture separately as `PASS`, and the
@@ -894,6 +894,15 @@ pass 6 of 6 and replayed tests pass 5 of 5. A fresh debug build, strict daemon c
 shell syntax, and diff checks pass. The strict nine-step `smoke/source-file-control` and 12-step
 `source-file-output` differentials have zero differences and no skips. The stored canonical
 `source-file-control` row remains unchanged at three steps.
+
+The later 2026-08-26 hook slice supersedes the hook residue in this dated checkpoint. Protocol v77
+renames tail-tag-47 in place to `ControlCommandGuard { output, error, sticky_failure, flags }`.
+Immediate `after-*` and `command-error` hooks retain the originating Control recipient at flags 0,
+including every hook source and sourced descendant. Hook array ordering, per-list failure, output
+isolation, unknown-command `%config-error`, alias resolution, no-hooks behavior, and retained status
+match pinned tmux. The strict focused scenario now has ten clean steps with no skips. Background
+`if-shell -b` and `run-shell -bC` frames remain open, and matched hook-source OS or path read failures
+remain under `control-mode.hook-source-read-diagnostics` for raw diagnostic placement.
 The asynchronous
 `run-shell` exit text itself is excluded from the slice because zz still emits it inside the completed
 response where tmux prints it unframed after `%end`; `control-mode.async-command-output` tracks that
@@ -2200,8 +2209,10 @@ Command stdout transcript and one Interactive command-output view. Source no-mat
 OS or path read failures retain their existing error channels. Non-UTF-8 config content remains under
 `config.non-utf8-file-bytes`. First-diagnostic whole-file abort remains live in
 `config.parser-edge-cases`; TUI output-view navigation remains under
-`clients.tui-command-output-navigation`, while hook and background flags-0 frames remain under
-`control-mode.hook-command-frames` and `control-mode.background-inserted-command-frames`.
+`clients.tui-command-output-navigation`. Immediate command-hook flags-0 frames closed later in
+protocol v77. Background flags-0 frames remain under
+`control-mode.background-inserted-command-frames`, and raw matched hook-source read placement remains
+under `control-mode.hook-source-read-diagnostics`.
 
 # Risks
 

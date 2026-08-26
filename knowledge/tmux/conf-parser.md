@@ -4,7 +4,7 @@ title: tmux-grammar config parser (parser.rs)
 description: A single-pass tmux-style tokenizer plus the daemon replay layer that keeps stored zz/config mux overrides above the sourced zz/mux.conf configuration.
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -78,13 +78,14 @@ the sentinel replay client, outside this recursion base; `source-file.sourced-ho
 tracks that path.
 `clients.attach-context` still owns the attached case where the session cwd differs
 from the cwd in the client hello. Command and Interactive clients receive those diagnostics
-directly. Protocol v76 gives Control one `SourcedCommandGuard` for each parser-owned replay command
+directly. Protocol v77 gives Control one
+`ControlCommandGuard { output, error, sticky_failure, flags }` for each parser-owned replay command
 that survives command-name resolution. An alias resolved to `source-file` before replay stays on
 this path. Unknown or ambiguous command names and malformed alias names publish a located Warning
 that Control renders as `%config-error`, without a guard. Ordinary success and a quiet all-miss
 produce an empty flags-1 `%end` guard. A nested hit plus miss carries its declared-path diagnostic
 inside `%end`; an all-miss, flag or arity failure, runtime failure, or depth refusal ends `%error`.
-`client_failure` is separate from the terminator, so runtime failures set Control retval 1 while
+`sticky_failure` is separate from the terminator, so runtime failures set Control retval 1 while
 parse and source-command diagnostics can remain nonsticky.
 
 Synchronous inserted lists reached during parser-owned Control replay now retain the same flags-1
@@ -94,16 +95,27 @@ containing replay command before each inserted command. An inserted `source-file
 its sourced child guards. Success output, diagnostics, terminators, and `client_failure` remain on
 the command that produced them. Per-client and per-thread capture prevents nested frames from
 folding into a parent, intercepting another thread's event, or leaking into the next input command.
-The path reuses protocol v76 and adds no wire field or version.
+The parser-owned path now uses the v77 event shape; its command frames remain flags 1.
 
 An unsupported zz-only command in an inserted list receives an empty success guard and later
 inserted siblings continue. It does not join `ConfigLoadReport`'s skipped summary, so existing
 unimplemented command and semantic groups still own reporting parity. An unknown command in a child
 file follows the pin: the parent and source guards succeed, then a `%config-error` Warning appears
-without its own command guard. Hook commands use flags 0 under
-`control-mode.hook-command-frames`. Shell-evaluated `if-shell -b` and `run-shell -bC` run later with
-flags 0 under `control-mode.background-inserted-command-frames`. Ordinary `run-shell -b` output
-remains under `control-mode.async-command-output`.
+without its own command guard.
+
+Immediate `after-*` and `command-error` hooks retain the originating Control recipient but clear the
+parser replay client and enter a no-hooks context. Every hook command, hook source, and sourced child
+gets its own flags-0 frame. Hook array entries remain ordered. One failure stops only the current
+command list, later entries continue, and output never folds into the triggering frame. Unknown or
+ambiguous sourced names publish `%config-error` without a guard or `command-error`; aliases use one
+frozen resolution for classification and execution. A mixed missing-and-matched hook source ends
+`%end` but sets `sticky_failure`, retaining process status 1 while later hook commands continue.
+Matched hook-source OS or path read failures still differ in raw diagnostic placement under
+`control-mode.hook-source-read-diagnostics`.
+
+Shell-evaluated `if-shell -b` and `run-shell -bC` run later with flags 0 under
+`control-mode.background-inserted-command-frames`. Ordinary `run-shell -b` output remains under
+`control-mode.async-command-output`.
 
 The Control writer defers flags-1 guards FIFO until the direct outer frame closes. The loader
 preflights every declared path for one source command before recursion. A focused regression and
@@ -126,7 +138,7 @@ source guards before later root commands run. zz currently rejects that byte dur
 No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
 summaries and lexer-owned diagnostics remain generic Warning events
 behind the prose classifier in `control-mode.diagnostic-typing`. The known-family Warning fallback
-remains for legacy producers, while the exact protocol handshake rejects v75 and v76 client-daemon
+remains for legacy producers, while the exact protocol handshake rejects v76 and v77 client-daemon
 skew before either event path can mix. Counting the initial `source-file` as invocation 1, both sides run 50 concurrent
 source invocations and refuse invocation 51 with `too many nested files` before any of its
 paths are matched or loaded: Command stderr at rc 1, the same lowercase text on the Control
@@ -160,10 +172,10 @@ valid `set-option` use the pin's bare text on Command stderr at rc 1, as typed C
 the client's final status retained at 1, and as capitalized attached warnings. Later physical lines
 still run, and a containing `source-file` propagates the inner error and status without blocking
 inner or outer continuation. Unknown command names and malformed set-option syntax retain the
-existing file-prefixed parse-diagnostic path. Protocol v76 carries parser-owned runtime failures
-inside their own sourced guards. Synchronous foreground inserted lists now use the same flags-1
-path. Hook and background inserted lists retain their flags-0 gaps. Successful stdout before and
-after a failure remains in the invocation transcript;
+existing file-prefixed parse-diagnostic path. Protocol v77 carries parser-owned runtime failures
+inside their own Control command guards. Synchronous foreground inserted lists use the same flags-1
+path. Immediate command hooks use independent flags-0 guards; background inserted lists retain their
+flags-0 gap. Successful stdout before and after a failure remains in the invocation transcript;
 the original stderr and status 1 remain separate. Clientless startup delivery stays separate.
 `source-file -n` runs the same lexer and condition evaluation, retains syntax diagnostics and
 optional verbose output, and applies neither parser environment assignments nor parsed commands.

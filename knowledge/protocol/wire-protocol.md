@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v76)
+title: zz wire protocol (v77)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 76`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 77`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (76) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (77) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -232,49 +232,53 @@ timed message, produced since Wave D3 by the `zz-client-message` deadline dispat
 Surfaces must match the identity before dropping anything, so a retired message's clear can
 never take down the message that replaced it.
 
-v76 appends `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
-The daemon sends it to the Control client retained by parser-owned source replay and by synchronous
-foreground inserted lists reached from that replay. Each replayed command that survives command-name
-resolution gets one in recursive file order. An alias resolved to `source-file` before replay retains
-that path. Unknown or ambiguous command names and malformed alias names publish a located Warning
-that Control renders as `%config-error`, without a guard. This also matches an unknown command inside
-an indirectly sourced child: the containing and source guards succeed before the Warning appears.
-`output` is the command's captured output or source diagnostic; `error` selects `%error` instead of
-`%end`; `client_failure` independently sets the Control client's retained retval to 1. A runtime
-failure sets both booleans. A flag, arity, source all-miss, or depth failure can end `%error` without
-making later clean completion sticky. Ordinary success and quiet all-miss commands produce empty
-flags-1 `%end` guards, and a partial source match keeps its missing-path text inside `%end`.
+v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
+It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command
+guard per command that survived name resolution. v77 renames the same tag in place to
+`ControlCommandGuard { output, error, sticky_failure, flags }`. The tag stays 47, but the field shape
+changes, so exact-version peers reject v76/v77 skew. `error` selects `%error` rather than `%end`,
+`sticky_failure` independently retains Control retval 1, and `flags` carries tmux's command-frame
+state. The pinned states observed here are 1 for parser-owned replay and 0 for fresh hook queues.
 
-Foreground shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`, and foreground
-`run-shell -C` reuse this event. Per-client and per-thread capture publishes the containing replay
-command before each inserted command, then publishes an inserted source before its children. The
-Control writer defers the flags-1 tree until the direct outer frame closes. No field, tag, or protocol
-version changed. An unsupported zz-only inserted command receives an empty success guard and later
-inserted siblings continue, but it does not enter `ConfigLoadReport`'s skipped summary.
+Parser-owned replay, foreground shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`,
+and foreground `run-shell -C` retain flags 1. Per-client and per-thread capture publishes the
+containing replay command before each inserted command, then an inserted source before its children.
+The writer defers that tree until the direct outer frame closes. An unsupported zz-only inserted
+command receives an empty success guard and later siblings continue, but it does not enter
+`ConfigLoadReport`'s skipped summary.
 
-Matched child OS and path read failures, including numeric OS errors and colon-space paths, follow
-the parent guard through the existing typed standalone Error path. Invalid UTF-8 was a zz-side typed
-error at the earlier v76 checkpoint. Pinned tmux accepts the measured lone-`0xff` config without a
-visible error, so `config.non-utf8-file-bytes` owns that semantic mismatch.
-Config command-name and lexer diagnostics remain generic Warning events on the `%config-error`
-classification path; tag 47 does not type those diagnostics. `zz-client::ClientCore` accepts and
-ignores the Control-only event, while `crates/zz/src/control_mode.rs` renders the guard.
-The daemon preflights every declared path for one source command before it recurses, so a three-level
-replay publishes the root command's missing-path guard, the middle command's missing-path guard, and
-the leaf output guard in that order, each exactly once. Proving that order required no wire change.
-The Control front end combines that event with existing `CommandResponse` and `Detached` messages.
-Direct runtime errors, parser-owned sourced runtime errors, nonruntime source failures, synchronous
-inserted runtime errors, and typed OS or path source-read errors set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not set or change
-it, so a fresh client remains at 0 while a prior sticky failure stays at 1. A Return captured while a
-preceding non-detach command waits keeps its arrival-time snapshot and precedes later queued stdin. A
-Return observed while self-detach waits is discarded when the caller-targeted `Detached` event arrives.
-Nonself and no-victim detach commands preserve a pending Return and keep the client alive. The command
-response closes before `%exit`. This closed
-`control-mode.source-file-exit-status` without a wire change for direct and parser-owned replay.
-Hook commands need flags-0 frames under `control-mode.hook-command-frames`. Shell-evaluated
-`if-shell -b` and `run-shell -bC` need asynchronous flags-0 frames under
-`control-mode.background-inserted-command-frames`. The current payload does not carry a frame flag,
-and the writer emits only flags 1, so the hook group owns the protocol representation.
+Immediate `after-*` and `command-error` hooks retain the originating Control recipient but clear the
+parser replay client and enter a fresh no-hooks state. Every hook command, hook `source-file`, and
+sourced descendant gets its own flags-0 frame. Hook array entries run in order. A failure stops only
+the current command list, so later array entries and later parser-owned flags-1 commands continue.
+Hook output and diagnostics never fold into the triggering frame, and a hook cannot automatically
+retrigger itself. Unknown or ambiguous sourced command names are rejected before execution, publish
+only `%config-error`, and do not fire `command-error`. Alias resolution is frozen once before source
+classification and execution. `set-hook -R` copies only the hidden Control target into its retargeted
+hook context. A mixed missing-and-matched hook source ends `%end` but sets `sticky_failure`, retaining
+process status 1 while later hook commands continue.
+
+Matched parser-owned OS and path read failures, including numeric OS errors and colon-space paths,
+still follow the source guard through the typed standalone Error path. A matched read failure from a
+flags-0 hook source has a narrower open mismatch: pinned tmux places raw unframed text after the source
+guards with a frame-number gap, while zz's typed Error writer adds a standalone flags-1 frame.
+`control-mode.hook-source-read-diagnostics` owns that placement. Non-UTF-8 content remains under
+`config.non-utf8-file-bytes`. Config command-name and lexer diagnostics remain generic Warning events
+on the `%config-error` classification path.
+
+`zz-client::ClientCore` accepts and ignores `ControlCommandGuard`; `crates/zz/src/control_mode.rs`
+renders it. The daemon preflights every declared path for one source command before recursion, so a
+three-level parser replay publishes the root missing-path guard, middle missing-path guard, and leaf
+output guard once each. The Control front end combines guards with existing `CommandResponse` and
+`Detached` messages. Direct runtime errors, parser-owned sourced runtime errors, nonruntime source
+failures, synchronous inserted runtime errors, hook sticky failures, and typed parser-owned OS or path
+read errors set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not.
+Return and detach precedence remain unchanged.
+
+Shell-evaluated `if-shell -b` and `run-shell -bC` still clear the Control target before their later
+callbacks and remain under `control-mode.background-inserted-command-frames`. Deferred event hooks
+also clear it and remain separate. Sourced-hook cwd, event-hook cwd, and missing hook producers stay
+under their named gaps.
 
 Command and Interactive replay transcripts closed without another wire field. Each source invocation
 appends its complete verbose batch, replay output, and buffered command-name or parser diagnostics in
@@ -283,8 +287,8 @@ invocations insert their complete frame at the parent replay position. Command r
 transcript once in its existing response output. Interactive renders one existing command-output
 viewport from the same transcript, subject to the existing command-output size bound. This is
 per-invocation batching, not a claim of physical interleaving.
-Generic config Warning typing, startup diagnostic delivery, hook and background flags-0 frames,
-config byte input, and TUI command-output navigation remain open.
+Generic config Warning typing, startup diagnostic delivery, background flags-0 frames, hook-source
+read placement, config byte input, and TUI command-output navigation remain open.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -463,9 +467,13 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 76`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 77`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v77 renames tail-tag-47 `EventPayload::SourcedCommandGuard` in place to
+  `ControlCommandGuard { output, error, sticky_failure, flags }`. The new flag carries tmux command
+  frame state 0 or 1, and `sticky_failure` separates retained process status from the `%end` or
+  `%error` terminator. Immediate command hooks can therefore use flags 0 without changing the tag.
 - v76 appends `ServerError::CommandParse(String)` at tail tag 12 and
   `EventPayload::SourcedCommandGuard` at tail tag 47. `CommandParse` gives command parsing and
   preparation a wire-stable phase separate from target lookup and runtime command failures. The

@@ -10,8 +10,8 @@ tags:
 - cli
 - fleet
 - native-superset
-timestamp: 2026-08-25T00:00:00-03:00
-last_updated: 2026-08-25
+timestamp: 2026-08-26T00:00:00-03:00
+last_updated: 2026-08-26
 last_updated_by: Codex
 ---
 
@@ -35,6 +35,22 @@ The schema 3 [tmux compatibility gap report](/tmux/gaps.md) owns live status, or
 and closed history. The
 [2026-08-22 tmux CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
 records the source-anchored baseline used to build this plan.
+
+# Current checkpoint, 2026-08-26
+
+The live tracker has 93 active groups, 665 classified active items, 61 closed groups, and two known
+differentials. `control-mode.hook-command-frames` is closed. Protocol v77 carries explicit command
+frame flags and independent sticky status in `ControlCommandGuard`, so parser replay stays at flags 1
+while immediate command hooks and all of their sourced descendants use flags 0. The strict ten-step
+`smoke/source-file-control` differential is clean with no skips; the stored canonical summary remains
+unchanged until the final full strict and attached-client run.
+
+The next dependency-free slice is `control-mode.background-inserted-command-frames` for
+shell-evaluated `if-shell -b` and `run-shell -bC`. The hook closure also isolated
+`control-mode.hook-source-read-diagnostics`: pinned tmux places a matched hook-source OS or path read
+failure as raw unframed text, while zz currently emits a standalone flags-1 Error frame. Deferred
+event hooks, sourced-hook cwd, event-hook cwd, missing hook producers, config byte input, and TUI
+command-output navigation remain separate.
 
 # Baseline captured 2026-08-22
 
@@ -531,9 +547,10 @@ clients open one command-output view without duplicate Info or Warning events. P
 may still publish their existing Warning summary. Successful output leaves stderr empty and status
 zero. A runtime failure retains stderr and status 1 while stdout before and after it remains ordered.
 Cross-depth parser-owned Control ordering, synchronous inserted flags-1 framing, and
-return-versus-detach precedence are closed. Hook and background flags-0 frames, config byte input,
-parser abort, and error shapes remain with their named groups; the same-line close does not cover
-exact matched-read text.
+return-versus-detach precedence are closed. The later protocol-v77 slice also closes immediate command
+hook flags-0 frames. Background inserted frames, hook-source read placement, config byte input, parser
+abort, and error shapes remain with their named groups; the same-line close does not cover exact
+matched-read text.
 Startup accounting is closed: one
 budget spans every startup root, the roots do not count, source commands 1 through 50 run, and later
 source commands retain their declaring file and line while runtime sequential sources stay
@@ -691,6 +708,12 @@ permanent product decision has been recorded for them.
   otherwise zz inserts separate `-N <count>` arguments before the option argument containing `-X`.
   A list with no qualifying `-X` preserves the pending value. Raw terminal sends stop on
   backpressure. Native browser sends clamp repeats to 9,999 on both sides of the wire.
+- 2026-08-26: Protocol v77 renamed tail-tag-47 `SourcedCommandGuard` in place to
+  `ControlCommandGuard`, adding explicit frame flags and an independent `sticky_failure` bit.
+  Immediate `after-*` and `command-error` hooks now retain the originating Control recipient at flags
+  0 without copying parser replay state. Hook arrays, source descendants, failures, unknown commands,
+  alias resolution, and status retention match the pin. Background inserted frames and raw matched
+  hook-source read placement remain separate active groups.
 
 # Related
 

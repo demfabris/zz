@@ -4,7 +4,7 @@ title: tmux command set (command.rs)
 description: "MuxEngine, the tmux-style command executor: canonical names + aliases, shared option/flag parsing, -t target resolution, and structured MuxEffect side effects for the daemon."
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, commands, mux-engine, targets, effects]
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -155,6 +155,22 @@ terminal; piped Control stdin contributes none.
 | `reload-config` | . | *zz-native:* reload tmux + Ghostty config (`ReloadConfig` effect, no args). A registered caller's selected source base remains stable through relative nested sources in the default mux config. |
 | `start-server` | `start` | Ensure the daemon is running, then return success with no output. The CLI's normal connection path starts a missing daemon before the no-op reaches the engine. |
 | `kill-server` | . | Stop the daemon (`KillServer` effect). |
+
+## Control hook framing in protocol v77
+
+The `source-file` row above preserves the v76 parser-replay checkpoint. Protocol v77 renames its
+tail-tag-47 event in place to `ControlCommandGuard { output, error, sticky_failure, flags }` and closes
+immediate command-hook framing. Parser replay and synchronous foreground inserted lists keep flags 1.
+Immediate `after-*` and `command-error` hooks retain the originating Control recipient in a separate
+target, clear parser replay state, and give every hook command, hook source, and sourced descendant an
+independent flags-0 frame. Hook array entries remain ordered, one failure stops only its current
+command list, hook output does not fold into the trigger, and unknown sourced names produce only
+`%config-error`. A mixed source miss and hit may end `%end` while `sticky_failure` retains status 1.
+
+Shell-evaluated `if-shell -b` and `run-shell -bC` remain under
+`control-mode.background-inserted-command-frames`. Matched OS or path read failures reached from a
+flags-0 hook source remain under `control-mode.hook-source-read-diagnostics` because pinned tmux uses
+raw unframed placement there while zz currently adds a standalone flags-1 Error frame.
 
 Options handled by `set-option`/`set-window-option`: `synchronize-panes` (global→window→pane scope,
 `-g/-w/-p/-u/-U/-o`), `buffer-limit` (global, default 50), `message-limit` (server, default 1000),

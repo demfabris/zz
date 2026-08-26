@@ -716,15 +716,16 @@ fn handle_protocol<W: Write>(
                 line.extend(render_message(&text));
                 output.notify(&line)?;
             }
-            EventPayload::SourcedCommandGuard {
+            EventPayload::ControlCommandGuard {
                 output: text,
                 error,
-                client_failure,
+                sticky_failure,
+                flags,
             } => {
-                if client_failure || (error && is_source_error_message(&text)) {
+                if sticky_failure || (error && is_source_error_message(&text)) {
                     state.return_code = 1;
                 }
-                output.sourced_command_guard(&text, error)?;
+                output.control_command_guard(&text, error, flags)?;
             }
             EventPayload::ClientMessage {
                 kind: zz_protocol::ClientMessageKind::Error,
@@ -1201,10 +1202,11 @@ enum DeferredOutput {
         time: u64,
         text: String,
     },
-    SourcedCommandGuard {
+    ControlCommandGuard {
         time: u64,
         output: String,
         error: bool,
+        flags: u8,
     },
 }
 
@@ -1261,11 +1263,12 @@ impl<W: Write> ControlWriter<W> {
                     self.write_line(&text)?;
                     self.write_frame_end(&frame, true)?;
                 }
-                DeferredOutput::SourcedCommandGuard {
+                DeferredOutput::ControlCommandGuard {
                     time,
                     output,
                     error,
-                } => self.write_sourced_command_guard(time, &output, error)?,
+                    flags,
+                } => self.write_control_command_guard(time, &output, error, flags)?,
             }
         }
         Ok(())
@@ -1290,31 +1293,39 @@ impl<W: Write> ControlWriter<W> {
         self.output.flush()
     }
 
-    fn sourced_command_guard(&mut self, output: &str, error: bool) -> io::Result<()> {
-        self.sourced_command_guard_at(unix_timestamp(), output, error)
+    fn control_command_guard(&mut self, output: &str, error: bool, flags: u8) -> io::Result<()> {
+        self.control_command_guard_at(unix_timestamp(), output, error, flags)
     }
 
-    fn sourced_command_guard_at(&mut self, time: u64, output: &str, error: bool) -> io::Result<()> {
-        if self.block_open {
-            self.deferred
-                .push_back(DeferredOutput::SourcedCommandGuard {
-                    time,
-                    output: output.to_owned(),
-                    error,
-                });
-            return Ok(());
-        }
-        self.write_sourced_command_guard(time, output, error)?;
-        self.output.flush()
-    }
-
-    fn write_sourced_command_guard(
+    fn control_command_guard_at(
         &mut self,
         time: u64,
         output: &str,
         error: bool,
+        flags: u8,
     ) -> io::Result<()> {
-        let frame = self.allocate_frame(time, 1);
+        if self.block_open {
+            self.deferred
+                .push_back(DeferredOutput::ControlCommandGuard {
+                    time,
+                    output: output.to_owned(),
+                    error,
+                    flags,
+                });
+            return Ok(());
+        }
+        self.write_control_command_guard(time, output, error, flags)?;
+        self.output.flush()
+    }
+
+    fn write_control_command_guard(
+        &mut self,
+        time: u64,
+        output: &str,
+        error: bool,
+        flags: u8,
+    ) -> io::Result<()> {
+        let frame = self.allocate_frame(time, flags);
         self.write_frame_begin(&frame)?;
         self.payload(output)?;
         self.write_frame_end(&frame, error)
@@ -1655,7 +1666,7 @@ mod tests {
     }
 
     #[test]
-    fn sourced_guards_defer_fifo_without_leaking_into_the_next_command() {
+    fn control_command_guards_defer_fifo_with_their_own_flags() {
         let mut writer = ControlWriter::new(Vec::new(), false);
         let direct = writer.begin_at(17, 1).unwrap();
         assert_eq!(
@@ -1674,13 +1685,13 @@ mod tests {
             1
         );
         let outer = writer.begin_at(18, 1).unwrap();
-        writer.sourced_command_guard_at(19, "", false).unwrap();
-        writer.sourced_command_guard_at(20, "", false).unwrap();
+        writer.control_command_guard_at(19, "", false, 0).unwrap();
+        writer.control_command_guard_at(20, "", false, 1).unwrap();
         writer
-            .sourced_command_guard_at(21, "No such file or directory: partial.conf", false)
+            .control_command_guard_at(21, "No such file or directory: partial.conf", false, 0)
             .unwrap();
         writer
-            .sourced_command_guard_at(22, "can't find session: missing-runtime", true)
+            .control_command_guard_at(22, "can't find session: missing-runtime", true, 1)
             .unwrap();
         assert_eq!(
             writer
@@ -1712,9 +1723,9 @@ mod tests {
             writer.output,
             b"%begin 17 1 1\nNo such file or directory: direct.conf\n%error 17 1 1\n\
               %begin 18 2 1\n%end 18 2 1\n\
-              %begin 19 3 1\n%end 19 3 1\n\
+              %begin 19 3 0\n%end 19 3 0\n\
               %begin 20 4 1\n%end 20 4 1\n\
-              %begin 21 5 1\nNo such file or directory: partial.conf\n%end 21 5 1\n\
+              %begin 21 5 0\nNo such file or directory: partial.conf\n%end 21 5 0\n\
               %begin 22 6 1\ncan't find session: missing-runtime\n%error 22 6 1\n\
               %begin 23 7 1\nfresh\n%end 23 7 1\n"
         );
@@ -1777,21 +1788,29 @@ mod tests {
     }
 
     #[test]
-    fn sourced_guard_runtime_identity_sets_the_return_code() {
-        for (client_failure, output, expected) in [
-            (false, "diagnostic", 0),
-            (false, "No such file or directory: missing-source.conf", 1),
-            (true, "diagnostic", 1),
+    fn control_command_guard_status_is_independent_of_its_terminator() {
+        for (flags, sticky_failure, error, output, expected) in [
+            (0, false, false, "diagnostic", 0),
+            (1, false, true, "diagnostic", 0),
+            (
+                0,
+                false,
+                true,
+                "No such file or directory: missing-source.conf",
+                1,
+            ),
+            (1, true, false, "diagnostic", 1),
         ] {
             let mut writer = ControlWriter::new(Vec::new(), false);
             let mut state = ControlState::default();
             handle_protocol(
                 ProtocolMessage::Event(zz_protocol::Event {
                     sequence: 1,
-                    payload: EventPayload::SourcedCommandGuard {
+                    payload: EventPayload::ControlCommandGuard {
                         output: output.to_owned(),
-                        error: true,
-                        client_failure,
+                        error,
+                        sticky_failure,
+                        flags,
                     },
                 }),
                 &mut state,
@@ -1804,10 +1823,32 @@ mod tests {
                 .lines()
                 .collect::<Vec<_>>();
             assert_eq!(lines[1], output);
+            assert!(lines[0].ends_with(&format!(" {flags}")));
+            let terminator = if error { "%error " } else { "%end " };
             assert_eq!(
                 lines[0].strip_prefix("%begin "),
-                lines[2].strip_prefix("%error ")
+                lines[2].strip_prefix(terminator)
             );
+        }
+
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let mut state = ControlState::default();
+        for (sequence, sticky_failure) in [(1, true), (2, false)] {
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence,
+                    payload: EventPayload::ControlCommandGuard {
+                        output: "diagnostic".to_owned(),
+                        error: false,
+                        sticky_failure,
+                        flags: 0,
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+            assert_eq!(state.return_code, 1);
         }
     }
 

@@ -4,7 +4,7 @@ title: zz-client crate
 description: The renderer-free client core that reduces protocol messages into shared state and typed effects, plus the client-local chrome keymap used by desktop and TUI skins.
 resource: crates/zz-client/src/lib.rs
 tags: [client, core, sans-io, keybindings, crate]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -32,7 +32,8 @@ and `client-nested-v1` for a nonempty `$TMUX`. `ClientCore` neither discovers no
 facts. The Control path sends no `client-size-v1:` fact and no `ClientTerminalSize` update, so it
 adds no implicit geometry or renderer state here.
 
-`ClientCore` accepts and ignores the Control-only `SourcedCommandGuard` event. It does not own `-C`
+`ClientCore` accepts and ignores the Control-only v77 `ControlCommandGuard` event, including its
+frame flags and independent sticky-status bit. It does not own `-C`
 frame rendering, stdin ordering, or process exit state; `crates/zz/src/control_mode.rs` owns those
 front-end concerns. That front end now closes `control-mode.source-file-exit-status` by retaining the
 pin's bounded retval. A Return captured during a preceding non-detach command precedes later queued

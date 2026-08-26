@@ -212,7 +212,7 @@ The daemon is thread-per-connection with dedicated writer and per-pane watcher t
 | `zz-output-{id}` | `watch_command_output` | Stream one client's command-output-view terminal events |
 | `zz-display-panes` | `start_display_panes_deadline_dispatcher` | One deadline per client: time out `display-panes` overlays, token-validated against `ServerState.display_panes` |
 | `zz-monitor-silence` | `start_silence_deadline_dispatcher` | One deadline per window: fire `monitor-silence` alerts and re-arm, whole-struct-validated against `ServerState.silence_deadlines` |
-| `zz-client-message` | `start_client_message_deadline_dispatcher` | One deadline per client: retire that client's `display-message` status message, token-validated against `ServerState.client_messages` |
+| `zz-client-message` | `start_client_message_deadline_dispatcher` | One deadline per client: retire that client's ordinary or alert-produced status message, token-validated against `ServerState.client_messages` |
 | `zz-daemon-diagnostics` | `start_diagnostic_sampler` | Periodic state snapshot logging (only when trace logging is on) |
 | `zz-daemon-status` | `start_status_sampler` | Re-render the [status line](/tmux/status-line.md) every `status-interval`, re-running its `#()` commands |
 | `zz-daemon-signals` (Unix) | `DaemonSignalGuard` | Wait for `SIGTERM`/`SIGINT` or ordinary shutdown cancellation, then request the same graceful stop as `kill-server` |
@@ -285,12 +285,30 @@ attached client), diffs each against that view's previous viewport, and produces
 `EventPayload::TerminalViewport` or a smaller `EventPayload::TerminalPatch`. It calls
 `publish_terminal_for_pane` per view, which delivers **only to a client attached to the session that
 owns the pane, only while the pane is visible to that client** (`visible_terminals`, honoring its
-focused window and zoom), **and only while that client is not frozen**. The freeze is the whole
-mechanism behind an ordinary [`display-message`](/tmux/commands.md): while
-`ServerState.client_messages` holds a frozen record for the client, this one gate drops the frame
-and nothing else changes — the PTY keeps parsing, the watcher keeps diffing, the mux model and the
-pane-mode hooks stay live, and only this client stops receiving. It is the zz analogue of the pin's
-`TTY_FREEZE` making `tty_client_ready` return 0. Retiring a frozen message publishes one full
+focused window and zoom), **and only while that client is not frozen**. Ordinary
+[`display-message`](/tmux/commands.md) output and visual Bell, Activity, and Silence messages all
+use this gate. Each eligible attached Interactive client gets its own `ActiveClientMessage`
+identity, replacement record, and optional deadline. Each recipient also appends the exact
+`<client> message: <text>` entry to the bounded server log. `<client>` is the registered client name
+or the `device-<id>` fallback. A positive alert delay clears sticky ignore-keys; zero duration
+installs no deadline and waits for writable input. Control clients never enter this lifecycle and
+receive no alert status message or alert log entry, although Control can still observe pane BEL
+bytes through its output stream. Publication revalidates the active identity while `Shared.inner`
+remains held through reliable-mailbox admission, so a delayed producer cannot publish an older
+message after its replacement. Stale deadlines are cancelled and token-checked rather than
+reproducing the pin's bug where an old positive timer can clear a newer zero-duration alert.
+
+`TerminalSession` publishes one reliable `TerminalEvent::Bell` for every BEL callback. The mux owns
+the visible pane and window bell flags, so repeated Bell events can notify clients while those flags
+remain set. Selection or attach clears the mux-visible state without suppressing the next
+occurrence.
+
+While `ServerState.client_messages` holds a frozen record, ordinary incremental watcher publication
+drops the frame and nothing else changes: the PTY keeps parsing, the watcher keeps diffing, the mux
+model and pane-mode hooks stay live, and only this client stops receiving those updates. A forced
+structural redraw can still expose the latest parsed state while the alert remains active, so this
+is not a hermetic screen freeze. It is the zz analogue of the pin's `TTY_FREEZE` making
+`tty_client_ready` return 0 on the ordinary path. Retiring a frozen message publishes one full
 latest viewport per visible pane through `send_full` before patches resume, matching
 `status_message_clear`'s `CLIENT_ALLREDRAWFLAGS`. `enqueue_terminal` validates that a patch's base generation matches the
 last delivered

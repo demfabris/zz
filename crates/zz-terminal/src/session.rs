@@ -463,8 +463,7 @@ pub enum TerminalEvent {
         target: ClipboardTarget,
         text: String,
     },
-    /// The program rang BEL. Raised once per latch; the next arrives only
-    /// after [`TerminalSession::clear_bell`].
+    /// The program rang BEL. Raised once per occurrence.
     Bell,
     PlaceholderBound {
         token: u64,
@@ -520,7 +519,6 @@ struct EventQueueState {
     pending_reliable_bytes: AtomicUsize,
     notification_pending: AtomicBool,
     output_activity_pending: AtomicBool,
-    bell_pending: AtomicBool,
     foreground: RwLock<Option<Box<ForegroundSource>>>,
     completion: AtomicU64,
 }
@@ -532,7 +530,6 @@ impl EventQueueState {
             pending_reliable_bytes: AtomicUsize::new(0),
             notification_pending: AtomicBool::new(false),
             output_activity_pending: AtomicBool::new(false),
-            bell_pending: AtomicBool::new(false),
             foreground: RwLock::new(None),
             completion: AtomicU64::new(0),
         }
@@ -958,15 +955,6 @@ impl TerminalSession {
     #[must_use]
     pub fn tty(&self) -> Option<PathBuf> {
         self.events.state.foreground.read().as_ref()?.tty.clone()
-    }
-
-    /// Releases the bell latch so the pane's next BEL raises a fresh event. Until
-    /// then the actor collapses every further ring into the one on show.
-    pub fn clear_bell(&self) {
-        self.events
-            .state
-            .bell_pending
-            .store(false, Ordering::Release);
     }
 
     /// Replaces the word classifier used by desktop selection and copy mode.
@@ -3138,14 +3126,10 @@ impl Publisher {
     }
 
     fn bell(&self) {
-        if self.state.bell_pending.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        if let Err(error) = self.send_reliable(TerminalEvent::Bell) {
-            self.state.bell_pending.store(false, Ordering::Release);
-            if matches!(error, WorkerError::EventBackpressure) {
-                log::warn!("discarding terminal bell: reliable event backlog is full");
-            }
+        if let Err(error) = self.send_reliable(TerminalEvent::Bell)
+            && matches!(error, WorkerError::EventBackpressure)
+        {
+            log::warn!("discarding terminal bell: reliable event backlog is full");
         }
     }
 
@@ -16024,7 +16008,7 @@ mod tests {
     }
 
     #[test]
-    fn bel_raises_one_latched_bell_event_until_the_pane_is_visited() {
+    fn bel_raises_each_occurrence() {
         let event_state = Arc::new(EventQueueState::new());
         let (event_tx, events) = terminal_event_channel(&event_state);
         let publisher = Publisher {
@@ -16042,25 +16026,18 @@ mod tests {
         .expect("terminal");
         register_bell(&mut terminal, publisher).expect("bell callback");
 
-        terminal.vt_write(b"\x07");
+        terminal.vt_write(b"\x07\x07");
         assert!(matches!(
-            events.try_recv().expect("bell event"),
+            events.try_recv().expect("first bell event"),
             TerminalEvent::Bell
         ));
-
-        terminal.vt_write(&[0x07; 512]);
+        assert!(matches!(
+            events.try_recv().expect("second bell event"),
+            TerminalEvent::Bell
+        ));
         assert!(matches!(
             events.try_recv(),
             Err(async_channel::TryRecvError::Empty)
-        ));
-
-        event_state.bell_pending.store(false, Ordering::Release);
-        terminal.vt_write(b"\x07");
-        assert!(matches!(
-            events
-                .try_recv()
-                .expect("bell event after the latch cleared"),
-            TerminalEvent::Bell
         ));
     }
 

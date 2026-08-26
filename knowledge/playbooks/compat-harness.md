@@ -146,9 +146,11 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. Its current source-row inventory
-is intentionally stale as described below. The
-expanded corpus pins capture routing and ranges, manual window geometry,
+`compat/results/summary.md` is the persisted canonical artifact. The 2026-08-26 checkpoint contains
+84 scenarios and 1,475 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
+GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
+corpus pins capture routing and ranges, manual window geometry,
 join and break placement, pane-local and creation-time environments, empty panes, post-split zoom,
 last-pane input gating, buffer rename, source path formatting, and the small accepted-flag cluster.
 `list-keys-padding` contributes 46 byte-exact checks for default padding, note selectors, ordering,
@@ -184,20 +186,15 @@ servers start with `-f /dev/null` so that fact is symmetric. `native-prefix-isol
 29 steps: 28 byte-exact command-name queries plus one alias setup, without plugin-corpus
 dependencies.
 
-The checked-in summary is intentionally stale for the current focused slices and remains the last
-completed canonical artifact pending the final strict-plus-attached regeneration. The tracker
-closures record `smoke/source-file-diagnostics`, `source-file-format`, and
-`smoke/source-file-control` at 12, 40, and 12 focused steps while the summary retains 9, 20, and 3.
-The `resize-directions` focused row has 16 clean steps while the summary retains 8. Its stored
-ordinary, known-row, and attached-client results describe the earlier corpus and do not prove the
-current full inventory.
+The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
+`source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
+`resize-directions` contains 16. The summary SHA-256 is
+`5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`.
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
-requires its persisted attached-client status to be `PASS`. Until the final strict-plus-attached run
-replaces the summary, `--check-summary` is expected to fail on the 12/40/12 versus 9/20/3 source-row
-counts and the 16 versus 8 `resize-directions` count. The check exits before building or running
-either server. Linux CI first asserts that
+requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-26
+canonical checkpoint and exits before building or running either server. Linux CI first asserts that
 `compat/results/summary.md` is tracked, then runs
 the inventory and result check after checkout. A named partial run, a headless-only full run, a failed
 run, or a run with a SKIP cannot overwrite the canonical report. After a complete strict run with
@@ -256,8 +253,7 @@ commands in real 15-second deadlines, uses 500 ms bounded polls, and stops readi
 seconds. A missing case or any skip fails the run.
 
 The final debug run passes all seven cases with no skips. This focused script does not call
-`compat/run.sh`, regenerate `compat/results/summary.md`, or make the stale canonical scenario rows
-current.
+`compat/run.sh` or regenerate the current `compat/results/summary.md`.
 
 Run the real attached-client fixture separately after building zz and fetching the pin when
 debugging it in isolation:
@@ -281,10 +277,24 @@ page movement, vi Escape selection clearing without exit, search cancel, search 
 `n`/`N`, selection-to-paste-buffer, a live custom `copy-mode-vi` binding, a live switch to the emacs
 table, vi `q` cancel, and emacs Escape cancel. It verifies the created paste buffer contains the
 selected match and then removes it. The current full fixture passed for zz and pinned tmux after
-independent review of the fresh-session marker. This focused proof does not cover command-output
+independent review of the fresh-session marker.
+
+The alert-lifecycle probe uses fresh non-current monitored windows. It replaces a 1,500 ms sticky
+message with a 5,000 ms Bell alert, writes new terminal output behind it, and proves the current
+screen stays frozen for 1.8 seconds across the old deadline. F12 plus Enter then proves one key
+dismisses the alert, reaches the pane, and releases the latest viewport well before the alert's own
+expiry. The alert window remains unvisited with `#{window_bell_flag}` equal to 1. The probe rings
+that same pane again, sees a second Bell message, and repeats the 1.8-second freeze and dismissal
+proof while the flag remains set. It then waits 5.2 seconds for the pin's stale positive timer to
+drain, changes `display-time` to zero, and repeats the hidden-output and input-release check on
+another fresh window. Match the stable `Bell in window` prefix: at 80 columns, the TUI status
+surface can truncate the trailing index beside its detach hint. The probe covers ordinary
+incremental TTY freeze. A forced structural redraw may expose the latest parsed state.
+
+This focused proof does not cover command-output
 mouse behavior, OS clipboard delivery, ordinary TUI pane copy-search editing, SSH transport, pixel
-comparison, or the 29 unsupported window-copy actions. It does not update the intentionally stale
-canonical summary.
+comparison, or the 29 unsupported window-copy actions. It does not update the canonical summary on
+its own. The 2026-08-26 strict-plus-attached run persisted this fixture as `PASS`.
 Failure output includes both
 outer screens and zz daemon stderr; cleanup removes outer servers before inner servers.
 `--attached-client` runs it after the headless scenarios and includes it in the overall exit status

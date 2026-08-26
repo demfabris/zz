@@ -160,12 +160,12 @@ side_command() {
 
 capture_screen() {
   local side="$1"
-  tmux_outer_command capture-pane -p -S - -t "$OUTER_SESSION:$side"
+  tmux_outer_command capture-pane -p -S - -t "=$OUTER_SESSION:$side"
 }
 
 capture_current_screen() {
   local side="$1"
-  tmux_outer_command capture-pane -p -t "$OUTER_SESSION:$side"
+  tmux_outer_command capture-pane -p -t "=$OUTER_SESSION:$side"
 }
 
 dump_screen() {
@@ -458,6 +458,22 @@ wait_for_current_marker_absent() {
   fixture_failure "$side current screen still showed $marker after 10 seconds"
 }
 
+assert_current_marker_absent_for() {
+  local side="$1"
+  local marker="$2"
+  local attempts="$3"
+  local attempt
+  local screen
+
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+    if grep -Fq -- "$marker" <<<"$screen"; then
+      fixture_failure "$side current screen exposed $marker while its alert was active"
+    fi
+    sleep 0.05
+  done
+}
+
 wait_for_ordered_current_lines() {
   local side="$1"
   shift
@@ -528,7 +544,7 @@ wait_for_pane_marker() {
   local captured
 
   for ((attempt = 0; attempt < 200; attempt++)); do
-    captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_SESSION:0.0" 2>/dev/null || true)"
+    captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_PANE_TARGET" 2>/dev/null || true)"
     if grep -Fq -- "$marker" <<<"$captured"; then
       return 0
     fi
@@ -542,7 +558,7 @@ pane_flattened_substring_count() {
   local marker="$2"
   local captured
 
-  captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_SESSION:0.0" 2>/dev/null || true)"
+  captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_PANE_TARGET" 2>/dev/null || true)"
   awk -v marker="$marker" '
     { text = text (NR == 1 ? "" : " ") $0 }
     END {
@@ -655,6 +671,129 @@ probe_side() {
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
   wait_for_mode_state "$side" root
   wait_for_visible_mode "$side" root
+}
+
+wait_for_alert_release() {
+  local side="$1"
+  local marker="$2"
+  local ready_baseline="$3"
+  local attempt
+  local ready_count
+  local screen
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    ready_count="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
+    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+    if [ "$ready_count" -gt "$ready_baseline" ] && grep -Fq -- "$marker" <<<"$screen"; then
+      return 0
+    fi
+    sleep 0.02
+  done
+  fixture_failure "$side attached input did not dismiss its alert and release $marker"
+}
+
+probe_alert_message_lifecycle() {
+  local side="$1"
+  local alert_window="=$INNER_SESSION:9"
+  local alert_pane="=$INNER_SESSION:9.0"
+  local zero_alert_window="=$INNER_SESSION:10"
+  local zero_alert_pane="=$INNER_SESSION:10.0"
+  local timed_marker="ATTACHED_ALERT_TIMED_OUTPUT_$side"
+  local repeated_marker="ATTACHED_ALERT_REPEATED_OUTPUT_$side"
+  local zero_marker="ATTACHED_ALERT_ZERO_OUTPUT_$side"
+  local alert_marker="Bell in window"
+  local client_name
+  local ready_baseline
+
+  client_name="$(side_command "$side" list-clients -F '#{client_name}')"
+  if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
+    fixture_failure "$side did not report exactly one alert target client"
+  fi
+  side_command "$side" new-window -d -t "$alert_window" -n alert-lifecycle ||
+    fixture_failure "$side could not create its alert lifecycle window"
+  side_command "$side" new-window -d -t "$zero_alert_window" -n alert-zero ||
+    fixture_failure "$side could not create its zero-duration alert window"
+  side_command "$side" set-option -g display-time 5000 ||
+    fixture_failure "$side could not set its alert display time"
+  side_command "$side" set-option -g visual-bell on ||
+    fixture_failure "$side could not enable its visual bell"
+  side_command "$side" set-option -g bell-action any ||
+    fixture_failure "$side could not enable its bell action"
+  side_command "$side" set-window-option -t "$alert_window" monitor-bell on ||
+    fixture_failure "$side could not monitor its alert window bell"
+  side_command "$side" set-window-option -t "$zero_alert_window" monitor-bell on ||
+    fixture_failure "$side could not monitor its zero-duration window bell"
+
+  side_command "$side" display-message -d 1500 -N -c "$client_name" \
+    -t "$INNER_PANE_TARGET" ATTACHED_ALERT_STICKY ||
+    fixture_failure "$side could not arm its sticky message"
+  sleep 0.2
+  side_command "$side" send-keys -l -t "$alert_pane" "printf '\\007'" ||
+    fixture_failure "$side could not type its positive alert trigger"
+  side_command "$side" send-keys -t "$alert_pane" Enter ||
+    fixture_failure "$side could not run its positive alert trigger"
+  wait_for_current_marker "$side" "$alert_marker"
+  side_command "$side" send-keys -l -t "$INNER_PANE_TARGET" "printf '$timed_marker\\n'" ||
+    fixture_failure "$side could not type its timed alert output"
+  side_command "$side" send-keys -t "$INNER_PANE_TARGET" Enter ||
+    fixture_failure "$side could not run its timed alert output"
+  wait_for_pane_marker "$side" "$timed_marker"
+  assert_current_marker_absent_for "$side" "$timed_marker" 36
+
+  ready_baseline="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F12 Enter
+  wait_for_alert_release "$side" "$timed_marker" "$ready_baseline"
+  wait_for_current_marker_absent "$side" "$alert_marker"
+
+  wait_for_side_output "$side" 1 "alert window bell flag" \
+    display-message -p -t "$alert_pane" '#{window_bell_flag}'
+  side_command "$side" send-keys -l -t "$alert_pane" "printf '\\007'" ||
+    fixture_failure "$side could not type its repeated alert trigger"
+  side_command "$side" send-keys -t "$alert_pane" Enter ||
+    fixture_failure "$side could not run its repeated alert trigger"
+  wait_for_current_marker "$side" "$alert_marker"
+  side_command "$side" send-keys -l -t "$INNER_PANE_TARGET" "printf '$repeated_marker\\n'" ||
+    fixture_failure "$side could not type its repeated alert output"
+  side_command "$side" send-keys -t "$INNER_PANE_TARGET" Enter ||
+    fixture_failure "$side could not run its repeated alert output"
+  wait_for_pane_marker "$side" "$repeated_marker"
+  assert_current_marker_absent_for "$side" "$repeated_marker" 36
+
+  ready_baseline="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F12 Enter
+  wait_for_alert_release "$side" "$repeated_marker" "$ready_baseline"
+  wait_for_current_marker_absent "$side" "$alert_marker"
+
+  sleep 5.2
+  side_command "$side" set-option -g display-time 0 ||
+    fixture_failure "$side could not set zero alert duration"
+  side_command "$side" send-keys -l -t "$zero_alert_pane" "printf '\\007'" ||
+    fixture_failure "$side could not type its zero-duration alert trigger"
+  side_command "$side" send-keys -t "$zero_alert_pane" Enter ||
+    fixture_failure "$side could not run its zero-duration alert trigger"
+  wait_for_current_marker "$side" "$alert_marker"
+  side_command "$side" send-keys -l -t "$INNER_PANE_TARGET" "printf '$zero_marker\\n'" ||
+    fixture_failure "$side could not type its zero-duration alert output"
+  side_command "$side" send-keys -t "$INNER_PANE_TARGET" Enter ||
+    fixture_failure "$side could not run its zero-duration alert output"
+  wait_for_pane_marker "$side" "$zero_marker"
+  assert_current_marker_absent_for "$side" "$zero_marker" 8
+
+  ready_baseline="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F12 Enter
+  wait_for_alert_release "$side" "$zero_marker" "$ready_baseline"
+  wait_for_current_marker_absent "$side" "$alert_marker"
+
+  side_command "$side" kill-window -t "$alert_window" ||
+    fixture_failure "$side could not remove its alert lifecycle window"
+  side_command "$side" kill-window -t "$zero_alert_window" ||
+    fixture_failure "$side could not remove its zero-duration alert window"
+  side_command "$side" set-option -gu display-time ||
+    fixture_failure "$side could not restore inherited display-time"
+  side_command "$side" set-option -gu visual-bell ||
+    fixture_failure "$side could not restore inherited visual-bell"
+  side_command "$side" set-option -gu bell-action ||
+    fixture_failure "$side could not restore inherited bell-action"
 }
 
 probe_command_prompt() {
@@ -1208,6 +1347,8 @@ wait_for_client_state zz root
 wait_for_client_state tmux root
 probe_side zz
 probe_side tmux
+probe_alert_message_lifecycle zz
+probe_alert_message_lifecycle tmux
 probe_command_prompt zz
 probe_command_prompt tmux
 probe_choose_tree zz

@@ -38,8 +38,26 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-26
 
-The live tracker has 89 active groups, 660 classified active items, 66 closed groups, and two known
-differentials. Protocol v81 closes `control-mode.async-command-output`. Targetless and
+The live tracker has 88 active groups, 659 classified active items, 68 closed groups, and two known
+differentials. The full Alert cohort closed without a protocol bump. Bell, Activity, and Silence
+messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
+ordinary incremental TTY freeze, and full-viewport thaw. Each eligible attached Interactive client
+appends an exact `<client> message: <text>` entry to the bounded server log, using its registered
+name or `device-<id>` fallback. Control clients receive no alert status message or alert log entry.
+`TerminalSession` emits one reliable Bell event per occurrence while the mux owns the visible flag,
+so repeated BELs from one unvisited monitored pane still notify while that flag remains set.
+The attached PTY fixture replaces a 1,500 ms sticky message with a 5,000 ms alert, proves 1.8
+seconds of freeze, repeats the same-pane Bell, drains the pin's old timer for 5.2 seconds, and proves
+zero-duration persistence and input dismissal on zz and pinned tmux. Forced structural redraw may
+show the latest parsed state during the alert. The pin's stale-timer bug remains a deliberate
+correctness divergence because zz cancels and identity-checks old timers.
+
+The 2026-08-26 canonical checkpoint covers 84 scenarios and 1,475 steps. Every ordinary row is
+clean. `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain their one
+documented GEO divergence with every other channel clean. The attached-client fixture and
+`compat/run.sh --check-summary` both pass.
+
+Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
 empty flags-1 guard; direct and sourced same-line continuation keeps separate guards. Embedded LF
 and percent-prefixed lines stay literal, a missing trailing LF is supplied, and a shell's nonzero
@@ -233,9 +251,11 @@ The first eight ease ranks have shipped at least one evidence-driven slice:
   sourced values and attach-time reseeding remain open.
 
 Focused protocol, mux, daemon, TUI, completion, strict-Clippy, formatting, and differential tests
-cover the tranche. Gate 0's mechanism is complete; the fresh canonical summary is deferred and its
-named row drift is recorded below. The attached-client fixture is part of the strict Linux CI
-run and drives real zz and pinned-tmux attaches through outer PTYs. The packaged CLI fixture clones
+cover the tranche. Gate 0's mechanism and current canonical summary are complete. The 2026-08-26
+checkpoint covers 84 scenarios and 1,475 steps; every ordinary row is clean, and the two registered
+known rows each retain exactly one documented GEO divergence with every other channel clean. The
+attached-client fixture is part of the strict Linux CI run and drives real zz and pinned-tmux
+attaches through outer PTYs. The packaged CLI fixture clones
 a verified macOS bundle through a path containing spaces and passes bare/new/attach against empty
 and existing daemons. It now also pins detached `-x`/`-y`, attached client dimensions, read-only
 input rejection with visible pane output, requested detach notices, and `attach -d` eviction notices.
@@ -247,7 +267,7 @@ The current attached fixture also runs local Control from each outer PTY. It req
 `attach-session` and `new-session -A` refusal against existing sessions, permits a fresh `-A` miss,
 and proves piped stdin does not acquire a tty identity. The daemon unit matrix covers
 `new-session -Ad`; the attached fixture does not. The complete attached differential passed for zz
-and the pinned tmux; it does not refresh the canonical summary.
+and pinned tmux. The 2026-08-26 canonical run persists that result as `PASS` below the scenario rows.
 The attached proof also exposed and closed a copy-mode ordering race where a queued yank could be
 canceled before the terminal processed it.
 
@@ -281,17 +301,14 @@ work queue. Select exact gap IDs from the generated report before starting a sli
 
 1. Revalidate `smoke/config-grammar`: the current tmux-only warning expectation is correct; the
    nested zz control client still does not emit `%config-error`.
-2. Run all 79 differential scenarios and persist the 1,296-step summary. **Complete for the last
-   canonical snapshot:** every persisted ordinary row was clean, each known row had exactly its one
-   documented GEO difference and no other difference, and the attached-client fixture passed. A
-   fresh canonical run is deferred until the current slices settle. The drift check currently names
-   `buffer-path-format`, `command-item-format`, `display-message` (27 steps), `resize-directions`
-   (16 focused steps versus 8 stored), `send-keys-repeat`,
-   `smoke/cli-chain-parse-abort`, `smoke/control-alias-prepare`, `smoke/source-file-control`
-   (8 focused steps versus 3 stored),
-   `smoke/source-file-diagnostics`, and `source-file-format`; root will replace those rows and the
-   totals from the final run. CI checks scenario paths, step counts, every stored result cell, and
-   the attached `PASS` before the run, then diffs every result column after a complete strict run.
+2. Run all 84 differential scenarios and persist the 1,475-step summary. **Complete 2026-08-26:**
+   every ordinary row is clean. `known/known-main-preset-two-panes` and
+   `known/known-spread-mixed` each retain exactly one documented GEO divergence and no other
+   difference. The attached-client fixture is `PASS`, and `compat/run.sh --check-summary` passes.
+   The summary SHA-256 is
+   `5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`. CI checks scenario paths,
+   step counts, every stored result cell, and the attached `PASS` before the run, then diffs every
+   result column after a complete strict run.
 3. Add a drift check that fails when scenario files and checked-in result rows differ. **Complete:**
    `compat/run.sh --check-summary` compares exact scenario paths, step counts, and all seven stored
    row cells against the ordinary clean tuple or the tracker's registered known tuple. It also
@@ -771,6 +788,14 @@ permanent product decision has been recorded for them.
   the exact Control recipient without changing retval. Resolved-target and background output use
   zz's native attached-viewer command-output surface. The strict 12-step pinned Control differential
   has no differences or skips.
+- 2026-08-26: The full Alert cohort closed on the existing timed-message protocol. Bell, Activity,
+  and Silence now share per-client identity, exact bounded `<client> message: <text>` logging,
+  replacement, expiry, zero-duration, input dismissal, ordinary incremental terminal freeze, and
+  full-viewport thaw with ordinary status messages. Control remains outside alert message delivery
+  and logging. The terminal publishes one reliable Bell event per occurrence while the mux owns the
+  visible flag, closing repeated pre-visit delivery. The attached PTY fixture passed the 1,500 ms
+  sticky, 5,000 ms alert, 1.8-second freeze, repeated same-pane Bell, 5.2-second stale-timer drain,
+  and zero-duration sequence on zz and pinned tmux. zz keeps identity-safe timer cancellation.
 
 # Related
 

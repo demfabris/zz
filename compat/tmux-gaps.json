@@ -4,31 +4,6 @@
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "gaps": [
     {
-      "id": "alerts.message-lifecycle",
-      "title": "Unify alert message lifecycle",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "daily"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:alert-message-lifecycle"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Alert-produced status messages use the daemon-owned timed message lifecycle with the pin's frozen terminal publication, replacement, expiry, zero-duration, and input-dismissal semantics.",
-        "A positive alert delay resets the active message's ignore-keys state so alerts remain dismissible after display-message -N."
-      ],
-      "depends_on": [],
-      "reason": "Alert notifications still publish client-timed TimedClientMessage events directly, so they do not create ActiveClientMessage records, freeze terminal publication as pinned alerts do, share daemon expiry and input dismissal, or reset the pin's sticky message-ignore-keys state."
-    },
-    {
       "id": "aliases.command-bodies",
       "title": "Support multi-command aliases",
       "decision": "adopt",
@@ -2891,6 +2866,19 @@
   ],
   "closed": [
     {
+      "id": "alerts.message-lifecycle",
+      "title": "Unify alert message lifecycle",
+      "closed_on": "2026-08-26",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-drop-in.md",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Bell, Activity, and Silence messages now use the daemon-owned ActiveClientMessage lifecycle for every eligible attached Interactive client. Each recipient owns its message identity and appends an exact `<client> message: <text>` entry to the bounded server log, where `<client>` is the registered name or `device-<id>` fallback. A positive display-time clears sticky ignore-keys, arms a cancellable deadline, freezes ordinary incremental terminal publication, and replaces the previous message; zero duration waits for input. Stale deadlines cannot clear replacements, dismissal and expiry publish an identity-specific clear, and thaw sends the latest full viewport unless another prompt or message still freezes the client. Forced structural redraw can expose the latest parsed state while an alert remains active. Control clients receive pane BEL output but no alert status message or alert log entry. The attached zz/tmux fixture replaces a 1,500 ms sticky message with a 5,000 ms alert, proves 1.8 seconds of freeze across the old deadline, repeats a BEL on the same unvisited pane while the bell flag stays set, drains the pin's stale timer for 5.2 seconds, and proves zero-duration persistence and input dismissal. No protocol change was needed. zz deliberately keeps identity-safe timer cancellation instead of reproducing the pin's stale-timer bug."
+    },
+    {
       "id": "alerts.remaining-edge-cases",
       "title": "Finish alert state edge cases",
       "closed_on": "2026-08-24",
@@ -2902,7 +2890,20 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/tmux/status-line.md"
       ],
-      "resolution": "The session_activity_flag and session_silence_flag formats now mirror the resolved target window, so list-sessions reads the active window and list-windows varies per row. Attach clears bell, activity, and silence flags only on the session's active window and releases every terminal bell latch there before producing the snapshot. Alert action gating and message labels are decided once from that active window and fan the same decision to every eligible Interactive client while the broader per-client focus model remains unchanged. Every successful monitor-silence write, including a same-value write or repeated global reset, emits MonitorSilenceChanged and resets every live window timer; a missing local -u and a rejected -o do not. Active status messages are dismissed before dispatch by a surviving bulk Text packet or explicit Paste as well as by writable key presses, while suppressed trailing text and every read-only input leave them armed. Alert-produced messages still bypass the daemon-owned lifecycle, including the pin's terminal-publication freeze, and remain open under alerts.message-lifecycle."
+      "resolution": "The session_activity_flag and session_silence_flag formats now mirror the resolved target window, so list-sessions reads the active window and list-windows varies per row. Attach clears the mux-visible bell, activity, and silence flags only on the session's active window before producing the snapshot. Alert action gating and message labels are decided once from that active window and fan the same decision to every eligible Interactive client while the broader per-client focus model remains unchanged. Every successful monitor-silence write, including a same-value write or repeated global reset, emits MonitorSilenceChanged and resets every live window timer; a missing local -u and a rejected -o do not. Active status messages are dismissed before dispatch by a surviving bulk Text packet or explicit Paste as well as by writable key presses, while suppressed trailing text and every read-only input leave them armed. At that 2026-08-24 checkpoint, alert-produced messages still bypassed the daemon-owned lifecycle, including the pin's terminal-publication freeze; the later alerts.message-lifecycle closure supersedes that residue."
+    },
+    {
+      "id": "alerts.repeated-bell-edge",
+      "title": "Deliver repeated bells before pane visit",
+      "closed_on": "2026-08-26",
+      "evidence": [
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
+      ],
+      "resolution": "TerminalSession now publishes one reliable TerminalEvent::Bell for every BEL callback instead of suppressing later callbacks behind terminal state. The mux owns the visible pane and window bell flags, so repeated Bell events and messages can arrive while those flags remain set; selection or attach clears the mux-visible state. A terminal unit writes two BEL bytes and receives two events, the live daemon integration rings the same noncurrent pane twice before a visit and receives both client Bell events, and the attached zz/tmux fixture repeats the Bell on one unvisited pane while `#{window_bell_flag}` remains 1. This matches the pinned alerts.c:196-215 behavior without a protocol change."
     },
     {
       "id": "aliases.client-preflight",

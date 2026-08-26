@@ -91,18 +91,13 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The last canonical acceptance inventory contains 79 differential scenarios and 1,296 executable
-steps against pinned tmux `d77c9dc6`, including 17 config/plugin smokes. That complete strict run on
-2026-08-25 left every ordinary row clean, with each known row at exactly its one documented GEO
-difference and every other channel clean. A fresh canonical run is deferred until the current slices
-settle. The checked-in summary is intentionally stale for `buffer-path-format`,
-`command-item-format`, `display-message` (27 steps), `resize-directions` (16 focused steps versus 8
-stored), `send-keys-repeat`, `smoke/cli-chain-parse-abort`,
-`smoke/control-alias-prepare`, `smoke/source-file-control` (12 focused steps versus 3 stored),
-`smoke/source-file-diagnostics`, and
-`source-file-format`; root will replace the totals and rows from that final run rather than hand-edit
-them. The combined summary still records the attached-client fixture separately as `PASS`, and the
-drift check is correctly failing on those named rows meanwhile.
+The current canonical acceptance inventory contains 84 differential scenarios and 1,475 executable
+steps against pinned tmux `d77c9dc6`, including 17 config/plugin smokes. The complete strict and
+attached run on 2026-08-26 left every ordinary row clean. `known/known-main-preset-two-panes` and
+`known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
+channel clean. The combined summary records the attached-client fixture as `PASS`, and
+`compat/run.sh --check-summary` passes. Its SHA-256 is
+`5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`.
 `compat/attached-client.sh` drives real inner zz/tmux attaches through pinned-tmux PTYs, covering copy
 mode, command-output navigation, choosers, prompts, prefix tables, buffers, and nested attach. Its
 96-line command-output case checks line and page movement, search, selection-to-paste-buffer, live
@@ -538,7 +533,8 @@ proven end-to-end by the restored per-window PTY smoke. Two divergences opened w
 new surfaces and are ledgered: border-style owner granularity (one colour per divider
 where the pin resolves per cell span) and the one-appearance channel bounding per-window
 copy-mode styles. The run-2 attach-clear bell asymmetry and the remaining alert state edges
-closed on 2026-08-24; alert message freeze and lifetime remain separately tracked.
+closed on 2026-08-24. The full Alert cohort closed on 2026-08-26 with daemon-owned message
+lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
 
 1. Alerts: **shipped 2026-08-21 (run 2).** The bell path generalized into the pin's
    alerts.c model: `monitor-bell` gates `raise_pane_bell`, PTY output (the coalesced
@@ -556,12 +552,25 @@ closed on 2026-08-24; alert message freeze and lifetime remain separately tracke
    and `window-status-activity-style` layers into the status label where the bell style
    does (bell wins when not `default`). Everything is inert at defaults: no timers, no
    flag writes, and the bell path unchanged with `monitor-bell on`. The 2026-08-24 follow-up
-   made every successful silence write reset all timers, made attach clear every alert kind and
-   terminal bell latch on the active window, and brought writable text/paste message dismissal
-   into the ordinary status-message path. Alert-produced messages still bypass that daemon-owned
-   lifecycle and leave terminal publication unfrozen, while the pin arms `TTY_FREEZE` through
-   `status_message_set(..., no_freeze = 0)`. Silence timing stays daemon-test-only; the 62-step `alerts` differential covers
-   flags, actions, readback, duplicate writes, and format output with timing-free triggers.
+   made every successful silence write reset all timers, made attach clear every mux-visible alert
+   kind on the active window, and brought writable text/paste message dismissal
+   into the ordinary status-message path. The 2026-08-26 follow-up moved Bell, Activity, and Silence
+   messages into that daemon-owned lifecycle. Each eligible Interactive client now owns its message
+   identity, timer, replacement, dismissal, ordinary incremental TTY freeze, and full-viewport
+   thaw. Its exact bounded log entry is `<client> message: <text>`, using the registered name or
+   `device-<id>` fallback. Positive delays clear sticky ignore-keys; zero duration waits for input;
+   stale deadlines cannot clear a replacement. Control clients receive no alert status message or
+   alert log entry. `TerminalSession` publishes one reliable Bell event per BEL callback while the
+   mux owns the visible flag, so a repeated Bell from the same unvisited pane still notifies while
+   its window flag remains set. Selection and attach clear that mux-visible state. This needed no
+   protocol change. zz keeps identity-safe timer cancellation instead of reproducing the pin's
+   stale positive timer clearing a newer zero-duration message. A forced structural redraw may
+   expose the latest parsed state during an alert; the freeze claim covers ordinary incremental TTY
+   publication. Silence timing stays daemon-test-only; the 62-step `alerts` differential covers
+   flags, actions, readback, duplicate writes, and format output with timing-free triggers. The
+   attached PTY fixture replaces a 1,500 ms sticky message with a 5,000 ms alert, proves 1.8 seconds
+   of freeze, repeats a Bell on that unvisited pane while the flag stays set, drains the pin's stale
+   timer for 5.2 seconds, and proves zero-duration persistence and input dismissal.
 2. `prefix2` and `send-prefix -2`: **shipped 2026-08-21 (run 2).** `KeyTables` carries an
    optional canonical second prefix (`set_prefix2` never touches bindings — the pin has
    no stock `send-prefix -2` binding), both `KeyEngine` arming sites accept either
@@ -775,13 +784,13 @@ deltas in tests.
    Control clients are excluded outright, matching the pin: `cmd_display_message_exec`
    routes `CLIENT_CONTROL` through `server_client_print` and never reaches
    `status_message_set`, so `%message` keeps carrying no duration and gets no clear.
-   Residues at this run were bounded: zz's alert message producers kept client-side timing
-   and did not arm the daemon freeze (the pin's `alerts.c:318` calls `status_message_set` with
-   `no_freeze` clear, which sets `TTY_FREEZE`), `display-popup` frames were not frozen, and
-   `-N` had not shipped yet. The pinned measurement established that `message_ignore_keys`
+   Residues at this run were bounded: alert message producers still used client-side timing,
+   `display-popup` frames were not frozen, and `-N` had not shipped yet. The pinned measurement established that `message_ignore_keys`
    is sticky client state and `delay == 0` skips writing it, so a `-N -d 5000` leaves a later
    plain `-d 0` message un-clearable by key. The 2026-08-25 `display-message -N` closure
-   supersedes that last residue. Ledger 122 → 120.
+   superseded that residue. The 2026-08-26 Alert closure moved all three visual alert producers onto
+   `ActiveClientMessage` and restored one reliable terminal Bell event per occurrence without a
+   protocol bump. Ledger 122 → 120.
 4. **Shipped 2026-08-22.** `choose-tree`/`choose-buffer -K -N`. The daemon fills the v71
    `ChooseTreeItem.key`/`ChooseBufferItem.key` per visible row with the pin's stock ladder —
    `0`-`9`, then `M-a`-`M-z`, then nothing from row 36 on — which the pin reaches through
@@ -1317,8 +1326,8 @@ is not a drop-in (all shipped 2026-08-16):
 - `send-keys -N` with no keys arms the client's copy-mode count prefix (stock vi digit
   bindings work; the prefix is client-scoped where tmux's is pane-mode-scoped — see the
   divergence matrix).
-- Window activation clears its panes' bells, so `next-window -a` steps instead of re-picking
-  the same window, and the terminal bell latch is released on the same transition.
+- Window activation clears its panes' mux-visible bells, so `next-window -a` steps instead of
+  re-picking the same window. The later per-occurrence terminal path needs no terminal-side clear.
 - `source-file` expands wildcard patterns for every declared path (`conf.d/*.conf` works), and
   Unix matching now follows tmux's `glob(3)` edge cases. `-` stdin is a loud refusal. `-F` expands
   paths in the resolved source target, `-n` parses without effects, `-t` selects the pane context,

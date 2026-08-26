@@ -400,10 +400,47 @@ struct WindowAlert {
     session_current: bool,
 }
 
+struct OwnedClientMessagePublication {
+    client: ClientId,
+    pane: Option<PaneId>,
+    kind: ClientMessageKind,
+    text: String,
+    duration_ms: u32,
+    message_id: u64,
+}
+
+enum DeferredClientEvent {
+    Unowned {
+        client: ClientId,
+        payload: EventPayload,
+    },
+    Owned(OwnedClientMessagePublication),
+}
+
+fn defer_unowned_client_events(
+    client: ClientId,
+    events: &mut Vec<EventPayload>,
+    deferred: &mut Vec<DeferredClientEvent>,
+) {
+    deferred.extend(
+        events
+            .drain(..)
+            .map(|payload| DeferredClientEvent::Unowned { client, payload }),
+    );
+}
+
+struct WindowAlertNotification {
+    client: ClientId,
+    events: Vec<EventPayload>,
+    message: Option<OwnedClientMessagePublication>,
+    retired: Option<ActiveClientMessage>,
+    deadline: Option<ClientMessageDeadline>,
+}
+
 fn window_alert_notifications(
     inner: &mut ServerState,
     alert: WindowAlert,
-) -> (Option<PendingHookEvent>, Vec<(ClientId, Vec<EventPayload>)>) {
+) -> (Option<PendingHookEvent>, Vec<WindowAlertNotification>) {
     let WindowAlert {
         session,
         pane,
@@ -420,48 +457,67 @@ fn window_alert_notifications(
         PendingHookEvent::pane(hook_name, pane, &snapshot.panes[&pane], &snapshot)
     });
     let duration_ms = inner.engine.display_time_for_session(session);
-    let mut notifications = if applies {
+    let clients = if applies {
         inner
             .attached
             .get(&session)
             .into_iter()
             .flatten()
             .filter(|client| {
-                inner.client_kinds.get(*client) != Some(&ClientKind::Control)
+                inner.client_kinds.get(*client) == Some(&ClientKind::Interactive)
                     && inner.subscribers.contains_key(*client)
             })
-            .map(|client| {
-                let mut events = Vec::with_capacity(2);
-                if visual.rings() {
-                    events.push(EventPayload::Bell { pane });
-                }
-                if visual.shows_message() {
-                    let text = if session_current {
-                        format!("{label} in current window")
-                    } else {
-                        format!("{label} in window {window_index}")
-                    };
-                    events.push(EventPayload::TimedClientMessage {
-                        pane: Some(pane),
-                        kind: ClientMessageKind::Info,
-                        text,
-                        duration_ms,
-                        message_id: 0,
-                    });
-                }
-                (*client, events)
-            })
+            .copied()
             .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
-    for (_, events) in &mut notifications {
-        for event in events {
-            if let EventPayload::TimedClientMessage { message_id, .. } = event {
-                *message_id = next_timed_message_id(inner);
+    let notifications = clients
+        .into_iter()
+        .map(|client| {
+            let mut events = Vec::with_capacity(2);
+            if visual.rings() {
+                events.push(EventPayload::Bell { pane });
             }
-        }
-    }
+            let (message, retired, deadline) = if visual.shows_message() {
+                let text = if session_current {
+                    format!("{label} in current window")
+                } else {
+                    format!("{label} in window {window_index}")
+                };
+                let message_id = next_timed_message_id(inner);
+                let client_name = inner
+                    .client_names
+                    .get(&client)
+                    .cloned()
+                    .unwrap_or_else(|| format!("device-{}", client.0));
+                push_server_message(inner, format!("{client_name} message: {text}"));
+                if duration_ms != 0 {
+                    inner.message_ignore_keys.remove(&client);
+                }
+                let (retired, deadline) =
+                    arm_client_message(inner, client, message_id, duration_ms, true);
+                let message = OwnedClientMessagePublication {
+                    client,
+                    pane: Some(pane),
+                    kind: ClientMessageKind::Info,
+                    text,
+                    duration_ms,
+                    message_id,
+                };
+                (Some(message), retired, deadline)
+            } else {
+                (None, None, None)
+            };
+            WindowAlertNotification {
+                client,
+                events,
+                message,
+                retired,
+                deadline,
+            }
+        })
+        .collect();
     (hook, notifications)
 }
 
@@ -4907,6 +4963,7 @@ impl Shared {
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
         let mut direct_events = Vec::new();
+        let mut deferred_direct_events = Vec::new();
         let mut targeted_events = Vec::new();
         let mut source_files = Vec::new();
         let mut removed_panes = Vec::new();
@@ -4918,7 +4975,6 @@ impl Shared {
         let mut retired_popups = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
         let mut unfocused_copy_mode_exits = Vec::new();
-        let mut cleared_bells = Vec::new();
         let mut pipes_to_close = Vec::new();
         let mut pipe_taps_to_rearm = Vec::new();
         let mut display_panes_deadline = None;
@@ -5096,9 +5152,6 @@ impl Shared {
             for pane in belled_panes_before {
                 if inner.engine.state.pane(pane).is_none_or(|pane| !pane.bell) {
                     snapshot_changed = true;
-                    if let Some(terminal) = inner.terminals.get(&pane) {
-                        cleared_bells.push(Arc::clone(terminal));
-                    }
                 }
             }
             let changed_windows = inner
@@ -6021,18 +6074,14 @@ impl Shared {
                             });
                         push_server_message(&mut inner, text.clone());
                         let message_id = next_timed_message_id(&mut inner);
-                        let event = EventPayload::TimedClientMessage {
+                        let publication = OwnedClientMessagePublication {
+                            client: message_client,
                             pane: *pane,
                             kind: ClientMessageKind::Info,
                             text: text.clone(),
                             duration_ms,
                             message_id,
                         };
-                        if message_client == client {
-                            direct_events.push(event);
-                        } else {
-                            targeted_events.push((message_client, event));
-                        }
                         if inner.client_kinds.get(&message_client) == Some(&ClientKind::Interactive)
                         {
                             if duration_ms != 0 {
@@ -6053,6 +6102,33 @@ impl Shared {
                                 client_message_retires.push((message_client, previous));
                             }
                             client_message_schedule = schedule;
+                            let event = DeferredClientEvent::Owned(publication);
+                            if message_client == client {
+                                defer_unowned_client_events(
+                                    client,
+                                    &mut direct_events,
+                                    &mut deferred_direct_events,
+                                );
+                                deferred_direct_events.push(event);
+                            } else {
+                                targeted_events.push(event);
+                            }
+                        } else {
+                            let event = EventPayload::TimedClientMessage {
+                                pane: publication.pane,
+                                kind: publication.kind,
+                                text: publication.text,
+                                duration_ms: publication.duration_ms,
+                                message_id: publication.message_id,
+                            };
+                            if message_client == client {
+                                direct_events.push(event);
+                            } else {
+                                targeted_events.push(DeferredClientEvent::Unowned {
+                                    client: message_client,
+                                    payload: event,
+                                });
+                            }
                         }
                     }
                     MuxEffect::PrintOrMessage {
@@ -6064,13 +6140,14 @@ impl Shared {
                         if kind == ClientKind::Interactive {
                             push_server_message(&mut inner, text.clone());
                             let message_id = next_timed_message_id(&mut inner);
-                            direct_events.push(EventPayload::TimedClientMessage {
+                            let publication = OwnedClientMessagePublication {
+                                client,
                                 pane: *pane,
                                 kind: ClientMessageKind::Info,
                                 text: text.clone(),
                                 duration_ms: *duration_ms,
                                 message_id,
-                            });
+                            };
                             if *duration_ms != 0 {
                                 inner.message_ignore_keys.remove(&client);
                             }
@@ -6085,6 +6162,12 @@ impl Shared {
                                 client_message_retires.push((client, previous));
                             }
                             client_message_schedule = schedule;
+                            defer_unowned_client_events(
+                                client,
+                                &mut direct_events,
+                                &mut deferred_direct_events,
+                            );
+                            deferred_direct_events.push(DeferredClientEvent::Owned(publication));
                         } else {
                             append_inserted_output(&mut execution.output, text);
                         }
@@ -6432,9 +6515,6 @@ impl Shared {
                 self.delivered_wrap_search_commands.lock().push(enabled);
             }
         }
-        for terminal in cleared_bells {
-            terminal.clear_bell();
-        }
         for (client, terminal) in unfocused_copy_mode_exits {
             terminal.view_action(
                 TerminalViewId(client.0),
@@ -6502,14 +6582,15 @@ impl Shared {
             };
             self.publish_for_pane(pane, &event);
         }
-        for event in direct_events {
-            self.publish_to_client(client, event);
+        defer_unowned_client_events(client, &mut direct_events, &mut deferred_direct_events);
+        for event in deferred_direct_events {
+            self.publish_deferred_client_event(event);
         }
-        for (target, event) in targeted_events {
-            self.publish_to_client(target, event);
+        for event in targeted_events {
+            self.publish_deferred_client_event(event);
         }
         for (target, retired) in client_message_retires {
-            self.retire_client_message(target, retired, false);
+            self.retire_client_message(target, retired, true);
         }
         if let Some(retired) = prompt_cleared_message {
             self.retire_client_message(client, retired, true);
@@ -10778,9 +10859,6 @@ impl Shared {
                 .collect::<Vec<_>>();
             for pane in panes {
                 inner.engine.state.set_pane_bell(pane, false);
-                if let Some(terminal) = inner.terminals.get(&pane) {
-                    terminal.clear_bell();
-                }
             }
             inner
                 .engine
@@ -16130,6 +16208,49 @@ impl Shared {
         }
     }
 
+    fn publish_owned_client_message(&self, publication: OwnedClientMessagePublication) {
+        let OwnedClientMessagePublication {
+            client,
+            pane,
+            kind,
+            text,
+            duration_ms,
+            message_id,
+        } = publication;
+        let inner = self.inner.lock();
+        if inner
+            .client_messages
+            .get(&client)
+            .is_none_or(|message| message.token != message_id)
+        {
+            return;
+        }
+        let Some(subscriber) = inner.subscribers.get(&client) else {
+            return;
+        };
+        Self::send_event(
+            subscriber,
+            EventPayload::TimedClientMessage {
+                pane,
+                kind,
+                text,
+                duration_ms,
+                message_id,
+            },
+        );
+    }
+
+    fn publish_deferred_client_event(&self, event: DeferredClientEvent) {
+        match event {
+            DeferredClientEvent::Unowned { client, payload } => {
+                self.publish_to_client(client, payload);
+            }
+            DeferredClientEvent::Owned(publication) => {
+                self.publish_owned_client_message(publication);
+            }
+        }
+    }
+
     fn control_client_is_connected(&self, client: ClientId) -> bool {
         let inner = self.inner.lock();
         inner.client_kinds.get(&client) == Some(&ClientKind::Control)
@@ -16753,8 +16874,30 @@ impl Shared {
         );
     }
 
+    fn publish_window_alert_notifications(
+        self: &Arc<Self>,
+        notifications: Vec<WindowAlertNotification>,
+    ) {
+        for notification in notifications {
+            for event in notification.events {
+                self.publish_to_client(notification.client, event);
+            }
+            if let Some(message) = notification.message {
+                self.publish_owned_client_message(message);
+            }
+            if let Some(retired) = notification.retired {
+                self.retire_client_message(notification.client, retired, true);
+            }
+            if let Some(deadline) = notification.deadline {
+                let _ = self
+                    .client_message_deadline_tx
+                    .send(ClientMessageDeadlineCommand::Schedule(deadline));
+            }
+        }
+    }
+
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
-        let (snapshot_changed, clear_terminal, hook, notifications) = {
+        let (snapshot_changed, hook, notifications) = {
             let mut inner = self.inner.lock();
             let Some(window) = inner.engine.state.window_for_pane(pane) else {
                 return;
@@ -16776,9 +16919,6 @@ impl Shared {
                 } else {
                     inner.engine.state.set_pane_bell(pane, true)
                 };
-                let clear_terminal = suppressed
-                    .then(|| inner.terminals.get(&pane).cloned())
-                    .flatten();
                 let action = inner.engine.bell_action_for_session(session);
                 let visual = inner.engine.visual_bell_for_session(session);
                 let (hook, notifications) = window_alert_notifications(
@@ -16794,23 +16934,15 @@ impl Shared {
                         session_current: current,
                     },
                 );
-                (snapshot_changed, clear_terminal, hook, notifications)
+                (snapshot_changed, hook, notifications)
             } else {
-                let clear_terminal = inner.terminals.get(&pane).cloned();
-                (false, clear_terminal, None, Vec::new())
+                (false, None, Vec::new())
             }
         };
         if snapshot_changed {
             self.publish_snapshot();
         }
-        for (client, events) in notifications {
-            for event in events {
-                self.publish_to_client(client, event);
-            }
-        }
-        if let Some(terminal) = clear_terminal {
-            terminal.clear_bell();
-        }
+        self.publish_window_alert_notifications(notifications);
         if let Some(hook) = hook {
             self.run_event_hooks(vec![hook]);
         }
@@ -16864,11 +16996,7 @@ impl Shared {
         if snapshot_changed {
             self.publish_snapshot();
         }
-        for (client, events) in notifications {
-            for event in events {
-                self.publish_to_client(client, event);
-            }
-        }
+        self.publish_window_alert_notifications(notifications);
         if let Some(hook) = hook {
             self.run_event_hooks(vec![hook]);
         }
@@ -16877,8 +17005,8 @@ impl Shared {
     /// The pin's `status_message_clear`: drop the record, cancel its timer, and
     /// when the client was frozen publish one full latest viewport before
     /// patches resume — `CLIENT_ALLREDRAWFLAGS`, "was frozen and may have
-    /// changed". `notify` carries the wire clear; a message that is being
-    /// replaced does not get one because the replacement already retires it.
+    /// changed". `notify` controls whether the wire also receives an
+    /// identity-specific clear.
     fn retire_client_message(
         self: &Arc<Self>,
         client: ClientId,
@@ -16909,6 +17037,9 @@ impl Shared {
     fn resume_client_terminals(self: &Arc<Self>, client: ClientId) {
         let (outbound, panes) = {
             let inner = self.inner.lock();
+            if client_terminal_publication_frozen(&inner, client) {
+                return;
+            }
             let Some(outbound) = inner.subscribers.get(&client).cloned() else {
                 return;
             };
@@ -17024,11 +17155,7 @@ impl Shared {
         if snapshot_changed {
             self.publish_snapshot();
         }
-        for (client, events) in notifications {
-            for event in events {
-                self.publish_to_client(client, event);
-            }
-        }
+        self.publish_window_alert_notifications(notifications);
         if let Some(hook) = hook {
             self.run_event_hooks(vec![hook]);
         }
@@ -17082,18 +17209,7 @@ impl Shared {
     }
 
     fn clear_pane_bell(&self, pane: PaneId) -> bool {
-        let (cleared, terminal) = {
-            let mut inner = self.inner.lock();
-            let cleared = inner.engine.state.set_pane_bell(pane, false);
-            let terminal = cleared
-                .then(|| inner.terminals.get(&pane).cloned())
-                .flatten();
-            (cleared, terminal)
-        };
-        if let Some(terminal) = terminal {
-            terminal.clear_bell();
-        }
-        cleared
+        self.inner.lock().engine.state.set_pane_bell(pane, false)
     }
 
     fn store_copy_buffer(self: &Arc<Self>, data: String, action: PasteBufferAction) {
@@ -42809,6 +42925,170 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn stale_owned_publication_cannot_outlive_the_authoritative_message() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "owned-race", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        take_reliable_messages(&mailbox);
+
+        let (first, second) = {
+            let mut inner = shared.inner.lock();
+            let first_id = next_timed_message_id(&mut inner);
+            arm_client_message(&mut inner, client, first_id, 0, true);
+            let first = OwnedClientMessagePublication {
+                client,
+                pane: Some(pane),
+                kind: ClientMessageKind::Info,
+                text: "first".to_owned(),
+                duration_ms: 0,
+                message_id: first_id,
+            };
+            let second_id = next_timed_message_id(&mut inner);
+            arm_client_message(&mut inner, client, second_id, 0, true);
+            let second = OwnedClientMessagePublication {
+                client,
+                pane: Some(pane),
+                kind: ClientMessageKind::Info,
+                text: "second".to_owned(),
+                duration_ms: 0,
+                message_id: second_id,
+            };
+            (first, second)
+        };
+        let second_id = second.message_id;
+        shared.publish_owned_client_message(second);
+        shared.publish_owned_client_message(first);
+        let visible = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::TimedClientMessage {
+                            text, message_id, ..
+                        },
+                    ..
+                }) => Some((text, message_id)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(visible, [("second".to_owned(), second_id)]);
+        assert_eq!(armed_client_message(&shared, client).token, second_id);
+
+        shared.dismiss_client_message(client);
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            [second_id]
+        );
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+
+        shared.inner.lock().read_only_clients.insert(client);
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[CommandInvocation::new("rename-session", ["blocked"])],
+                false,
+            )
+            .expect("reject read-only command");
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::TimedClientMessage {
+                            kind: ClientMessageKind::Error,
+                            text,
+                            ..
+                        },
+                        ..
+                    }) if text == "client is read-only"
+                ))
+        );
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+    }
+
+    #[test]
+    fn mixed_command_alert_chain_clears_every_predecessor_identity() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "predecessor-chain", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for arguments in [
+            ["-g", "display-time", "0"],
+            ["-g", "bell-action", "any"],
+            ["-g", "visual-bell", "on"],
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", arguments),
+                )
+                .expect("configure alert");
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "0", "old"]),
+            )
+            .expect("publish old message");
+        let old = armed_client_message(&shared, client);
+        take_reliable_messages(&mailbox);
+
+        let (unpublished, predecessor) = {
+            let mut inner = shared.inner.lock();
+            let message_id = next_timed_message_id(&mut inner);
+            let (predecessor, deadline) =
+                arm_client_message(&mut inner, client, message_id, 0, true);
+            assert!(deadline.is_none());
+            let unpublished = OwnedClientMessagePublication {
+                client,
+                pane: Some(pane),
+                kind: ClientMessageKind::Info,
+                text: "unpublished".to_owned(),
+                duration_ms: 0,
+                message_id,
+            };
+            (unpublished, predecessor.expect("old predecessor"))
+        };
+        let unpublished_id = unpublished.message_id;
+        assert_eq!(predecessor, old);
+
+        shared.raise_pane_bell(pane);
+        let current = armed_client_message(&shared, client);
+        shared.publish_owned_client_message(unpublished);
+        shared.retire_client_message(client, predecessor, true);
+        assert_eq!(
+            message_lifecycle_events(&take_reliable_messages(&mailbox)),
+            [
+                (true, current.token),
+                (false, unpublished_id),
+                (false, old.token)
+            ]
+        );
+        assert_eq!(armed_client_message(&shared, client), current);
+
+        shared.dismiss_client_message(client);
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            [current.token]
+        );
+    }
+
     /// The pin re-arms one `c->message_timer` per client, so a replaced
     /// message's timer is deleted outright. zz cannot delete across a channel,
     /// so identity has to do the same job: the stale deadline must be inert.
@@ -42839,7 +43119,10 @@ mod tests {
             .expect("second message");
         let second = armed_client_message(&shared, client);
         assert_ne!(first.token, second.token);
-        take_reliable_messages(&mailbox);
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            [first.token]
+        );
 
         let stale = ClientMessageDeadline {
             client,
@@ -66481,6 +66764,45 @@ bind - split-window -v -c "#{pane_current_path}"
             .collect()
     }
 
+    fn timed_message_events(
+        messages: &[ProtocolMessage],
+    ) -> Vec<(Option<PaneId>, String, u32, u64)> {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::TimedClientMessage {
+                            pane,
+                            kind: ClientMessageKind::Info,
+                            text,
+                            duration_ms,
+                            message_id,
+                        },
+                    ..
+                }) => Some((*pane, text.clone(), *duration_ms, *message_id)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn message_lifecycle_events(messages: &[ProtocolMessage]) -> Vec<(bool, u64)> {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TimedClientMessage { message_id, .. },
+                    ..
+                }) => Some((true, *message_id)),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::TimedClientMessageCleared { message_id },
+                    ..
+                }) => Some((false, *message_id)),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[cfg(unix)]
     fn ring_terminal_and_wait_for_bell(
         shared: &Arc<Shared>,
@@ -66690,6 +67012,379 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(
             client_focused_window_for_attachment(&shared.inner.lock(), first_client),
             context.window
+        );
+    }
+
+    #[test]
+    fn alert_messages_fan_out_with_owned_lifecycle_and_bounded_log() {
+        let shared = Arc::new(Shared::new(1));
+        let first_mailbox = OutboundMailbox::new();
+        let (first_client, mut context, first, second) = belled_session(&shared, &first_mailbox);
+        let session = context.session.expect("session");
+        let second_mailbox = OutboundMailbox::new();
+        let control_mailbox = OutboundMailbox::new();
+        let (second_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("second-alert".to_owned()),
+            None,
+            Arc::clone(&second_mailbox),
+        );
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control-alert".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared
+            .attach(second_client, session)
+            .expect("attach second client");
+        shared
+            .attach(control, session)
+            .expect("attach control client");
+
+        for arguments in [
+            ["-g", "display-time", "5000"],
+            ["-g", "bell-action", "any"],
+            ["-g", "visual-bell", "on"],
+            ["-s", "message-limit", "2"],
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", arguments),
+                )
+                .expect("configure alert lifecycle");
+        }
+        for (client, text) in [(first_client, "first"), (second_client, "second")] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("display-message", ["-N", "-d", "5000", text]),
+                )
+                .expect("seed sticky message");
+        }
+        let first_old = armed_client_message(&shared, first_client);
+        let second_old = armed_client_message(&shared, second_client);
+        {
+            let mut inner = shared.inner.lock();
+            assert!(inner.message_ignore_keys.contains(&first_client));
+            assert!(inner.message_ignore_keys.contains(&second_client));
+            inner.message_log.clear();
+            push_server_message(&mut inner, "evicted".to_owned());
+        }
+        let message_number = shared.inner.lock().next_message_number;
+        take_reliable_messages(&first_mailbox);
+        take_reliable_messages(&second_mailbox);
+        take_reliable_messages(&control_mailbox);
+        drain_terminal_lane(&first_mailbox);
+        drain_terminal_lane(&second_mailbox);
+
+        shared.raise_pane_bell(second);
+
+        let first_messages = take_reliable_messages(&first_mailbox);
+        let second_messages = take_reliable_messages(&second_mailbox);
+        let control_messages = take_reliable_messages(&control_mailbox);
+        let first_timed = timed_message_events(&first_messages);
+        let second_timed = timed_message_events(&second_messages);
+        assert_eq!(first_timed.len(), 1);
+        assert_eq!(second_timed.len(), 1);
+        let first_record = armed_client_message(&shared, first_client);
+        let second_record = armed_client_message(&shared, second_client);
+        assert_eq!(first_timed[0].3, first_record.token);
+        assert_eq!(second_timed[0].3, second_record.token);
+        assert_ne!(first_record.token, second_record.token);
+        assert!(first_record.freeze && first_record.deadline.is_some());
+        assert!(second_record.freeze && second_record.deadline.is_some());
+        assert_eq!(
+            message_lifecycle_events(&first_messages),
+            vec![(true, first_record.token), (false, first_old.token)]
+        );
+        assert_eq!(
+            message_lifecycle_events(&second_messages),
+            vec![(true, second_record.token), (false, second_old.token)]
+        );
+        assert!(timed_message_events(&control_messages).is_empty());
+        assert!(cleared_message_ids(&control_messages).is_empty());
+        {
+            let inner = shared.inner.lock();
+            assert!(!inner.client_messages.contains_key(&control));
+            assert!(!inner.message_ignore_keys.contains(&first_client));
+            assert!(!inner.message_ignore_keys.contains(&second_client));
+            assert_eq!(inner.next_message_number, message_number + 2);
+            assert_eq!(
+                inner
+                    .message_log
+                    .iter()
+                    .map(|message| message.text.as_str())
+                    .collect::<Vec<_>>(),
+                [
+                    format!("device-{} message: Bell in window 1", first_client.0),
+                    "second-alert message: Bell in window 1".to_owned(),
+                ]
+            );
+        }
+        assert!(first_mailbox.state.lock().terminals.is_empty());
+        assert!(second_mailbox.state.lock().terminals.is_empty());
+
+        let stale = ClientMessageDeadline {
+            client: first_client,
+            token: first_old.token,
+            deadline: first_old.deadline.expect("old deadline"),
+        };
+        shared.expire_client_message(stale, stale.deadline);
+        assert_eq!(armed_client_message(&shared, first_client), first_record);
+        assert!(cleared_message_ids(&take_reliable_messages(&first_mailbox)).is_empty());
+        assert!(first_mailbox.state.lock().terminals.is_empty());
+
+        let live = ClientMessageDeadline {
+            client: first_client,
+            token: first_record.token,
+            deadline: first_record.deadline.expect("live deadline"),
+        };
+        shared.expire_client_message(live, live.deadline);
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&first_mailbox)),
+            vec![first_record.token]
+        );
+        assert_eq!(
+            first_mailbox
+                .state
+                .lock()
+                .terminals
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [first]
+        );
+    }
+
+    #[test]
+    fn zero_duration_alert_replacement_waits_for_input_past_the_old_deadline() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "zero-alert", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for arguments in [
+            ["-g", "display-time", "0"],
+            ["-g", "bell-action", "any"],
+            ["-g", "visual-bell", "on"],
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", arguments),
+                )
+                .expect("configure zero-duration alert");
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-d", "5000", "old"]),
+            )
+            .expect("seed positive message");
+        let old = armed_client_message(&shared, client);
+        take_reliable_messages(&mailbox);
+
+        shared.raise_pane_bell(pane);
+        let messages = take_reliable_messages(&mailbox);
+        let current = armed_client_message(&shared, client);
+        assert_eq!(current.deadline, None);
+        assert!(current.freeze);
+        assert_eq!(
+            message_lifecycle_events(&messages),
+            vec![(true, current.token), (false, old.token)]
+        );
+
+        let stale = ClientMessageDeadline {
+            client,
+            token: old.token,
+            deadline: old.deadline.expect("old deadline"),
+        };
+        shared.expire_client_message(stale, stale.deadline);
+        assert_eq!(armed_client_message(&shared, client), current);
+        assert!(cleared_message_ids(&take_reliable_messages(&mailbox)).is_empty());
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane,
+                    input: chooser_key_press("q"),
+                    text_follows: false,
+                },
+            )
+            .expect("dismiss zero-duration alert");
+        assert!(!shared.inner.lock().client_messages.contains_key(&client));
+        assert_eq!(
+            cleared_message_ids(&take_reliable_messages(&mailbox)),
+            vec![current.token]
+        );
+    }
+
+    #[test]
+    fn alert_expiry_does_not_resume_while_a_prompt_still_freezes() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "alert-prompt", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for arguments in [
+            ["-g", "display-time", "5000"],
+            ["-g", "bell-action", "any"],
+            ["-g", "visual-bell", "on"],
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", arguments),
+                )
+                .expect("configure alert");
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-p", "hold"]),
+            )
+            .expect("open freezing prompt");
+        assert!(prompt_state(&shared, client).is_some());
+        take_reliable_messages(&mailbox);
+        drain_terminal_lane(&mailbox);
+
+        shared.raise_pane_bell(pane);
+        let armed = armed_client_message(&shared, client);
+        take_reliable_messages(&mailbox);
+        drain_terminal_lane(&mailbox);
+        let deadline = ClientMessageDeadline {
+            client,
+            token: armed.token,
+            deadline: armed.deadline.expect("alert deadline"),
+        };
+        shared.expire_client_message(deadline, deadline.deadline);
+        assert!(prompt_state(&shared, client).is_some());
+        assert!(client_terminal_publication_frozen(
+            &shared.inner.lock(),
+            client
+        ));
+        assert!(mailbox.state.lock().terminals.is_empty());
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::CommandPrompt {
+                    action: CommandPromptAction::Close,
+                },
+            )
+            .expect("close prompt");
+        assert!(mailbox.state.lock().terminals.contains_key(&pane));
+    }
+
+    #[test]
+    fn bell_activity_and_silence_messages_share_the_client_lifecycle() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, mut context, _first, second) = belled_session(&shared, &mailbox);
+        let second_window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(second)
+            .expect("second window");
+        let second_index = shared.inner.lock().engine.state.windows[&second_window].index;
+        for (command, arguments) in [
+            ("set-option", ["-g", "display-time", "5000"]),
+            ("set-option", ["-g", "bell-action", "any"]),
+            ("set-option", ["-g", "visual-bell", "on"]),
+            ("set-window-option", ["-g", "monitor-activity", "on"]),
+            ("set-option", ["-g", "activity-action", "any"]),
+            ("set-option", ["-g", "visual-activity", "on"]),
+            ("set-window-option", ["-g", "monitor-silence", "1"]),
+            ("set-option", ["-g", "silence-action", "any"]),
+            ("set-option", ["-g", "visual-silence", "on"]),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(command, arguments),
+                )
+                .expect("configure alert producer");
+        }
+        shared.inner.lock().message_log.clear();
+        take_reliable_messages(&mailbox);
+
+        shared.raise_pane_bell(second);
+        let bell = timed_message_events(&take_reliable_messages(&mailbox));
+        assert_eq!(bell.len(), 1);
+        assert!(bell[0].1.starts_with("Bell in "));
+        let bell_record = armed_client_message(&shared, client);
+        assert_eq!(bell[0].3, bell_record.token);
+
+        shared.raise_window_activity(second_window, second);
+        let activity_messages = take_reliable_messages(&mailbox);
+        let activity = timed_message_events(&activity_messages);
+        assert_eq!(activity.len(), 1);
+        assert!(activity[0].1.starts_with("Activity in "));
+        let activity_record = armed_client_message(&shared, client);
+        assert_eq!(activity[0].3, activity_record.token);
+        assert_eq!(
+            message_lifecycle_events(&activity_messages),
+            vec![(true, activity_record.token), (false, bell_record.token)]
+        );
+
+        let silence_deadline = shared.inner.lock().silence_deadlines[&second_window];
+        shared.expire_window_silence(silence_deadline, silence_deadline.deadline);
+        let silence_messages = take_reliable_messages(&mailbox);
+        let silence = timed_message_events(&silence_messages);
+        assert_eq!(silence.len(), 1);
+        assert!(silence[0].1.starts_with("Silence in "));
+        let silence_record = armed_client_message(&shared, client);
+        assert_eq!(silence[0].3, silence_record.token);
+        assert_eq!(
+            message_lifecycle_events(&silence_messages),
+            vec![(true, silence_record.token), (false, activity_record.token)]
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .message_log
+                .iter()
+                .map(|message| message.text.clone())
+                .collect::<Vec<_>>(),
+            [
+                format!("device-{} message: Bell in window {second_index}", client.0),
+                format!(
+                    "device-{} message: Activity in window {second_index}",
+                    client.0
+                ),
+                format!(
+                    "device-{} message: Silence in window {second_index}",
+                    client.0
+                ),
+            ]
         );
     }
 
@@ -67013,7 +67708,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
-    fn attaching_clears_every_current_window_alert_and_the_terminal_bell_latch() {
+    fn attaching_clears_current_window_alerts_without_suppressing_later_bells() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (client, context, first, second) = belled_session(&shared, &mailbox);
@@ -67029,6 +67724,7 @@ bind - split-window -v -c "#{pane_current_path}"
             (first_window, window, Arc::clone(&inner.terminals[&second]))
         };
 
+        ring_terminal_and_wait_for_bell(&shared, &mailbox, second, &terminal, true);
         ring_terminal_and_wait_for_bell(&shared, &mailbox, second, &terminal, true);
         {
             let mut inner = shared.inner.lock();
@@ -67081,7 +67777,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
-    fn activating_a_belled_window_releases_the_terminal_bell_latch() {
+    fn activating_a_belled_window_allows_later_bells() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (client, _) =
@@ -67158,7 +67854,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
-    fn kill_session_dash_c_releases_the_terminal_bell_latch() {
+    fn kill_session_dash_c_allows_later_bells() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
         let (client, _) =

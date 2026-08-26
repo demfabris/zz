@@ -2013,6 +2013,7 @@ mod daemon_autostart {
                     .windows(needle.len())
                     .any(|window| window == *needle)
             }) {
+                drain_settled_output(&mut master, &mut captured);
                 break true;
             }
             if Instant::now() >= deadline {
@@ -2028,6 +2029,21 @@ mod daemon_autostart {
         let _ = child.wait();
         drop(master);
         (rendered, captured, early_status)
+    }
+
+    fn drain_settled_output(master: &mut File, captured: &mut Vec<u8>) {
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut quiet_since = Instant::now();
+        while Instant::now() < deadline && quiet_since.elapsed() < Duration::from_millis(150) {
+            let mut buffer = [0_u8; 4096];
+            match master.read(&mut buffer) {
+                Ok(count) if count > 0 => {
+                    captured.extend_from_slice(&buffer[..count]);
+                    quiet_since = Instant::now();
+                }
+                _ => thread::sleep(Duration::from_millis(5)),
+            }
+        }
     }
 
     fn visible_text_after(captured: &[u8], cursor: &[u8]) -> Vec<String> {
@@ -2701,7 +2717,7 @@ mod daemon_autostart {
         assert_eq!(created.status.code(), Some(0));
         for command in ["attach", "attach-session"] {
             let output = fixture.run(&[command, "-t", "bogus"]);
-            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(output.status.code(), Some(1));
             assert!(output.stdout.is_empty());
             assert_eq!(output.stderr, b"can't find session: bogus\n");
         }
@@ -3393,7 +3409,9 @@ mod daemon_autostart {
         fn assert_attached_startup(outside: &[String], name: &str) {
             let settled = outside
                 .iter()
-                .filter(|line| !line.starts_with("%window-renamed @0 "))
+                .filter(|line| {
+                    !line.starts_with("%window-renamed @0 ") && !line.starts_with("%output %0 ")
+                })
                 .map(String::as_str)
                 .collect::<Vec<_>>();
             assert_eq!(

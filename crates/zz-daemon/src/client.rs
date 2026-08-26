@@ -1218,8 +1218,9 @@ mod tests {
     use zz_protocol::{ClientHello, ClientKind, MAX_CLIENT_WORKING_DIRECTORY_BYTES};
 
     use super::{
-        CallerTtyScope, EndpointFactsScope, client_working_directory, terminal_facts_capabilities,
-        startup_config_owner_capability, terminal_facts_capabilities_with,
+        CallerTtyScope, EndpointFactsScope, client_working_directory,
+        startup_config_owner_capability, terminal_facts_capabilities,
+        terminal_facts_capabilities_with,
     };
 
     #[test]

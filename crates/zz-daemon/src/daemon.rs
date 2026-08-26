@@ -41043,10 +41043,9 @@ mod tests {
 
         assert!(preview.len() <= MAX_STARTUP_CONFIG_PREVIEW_BYTES);
         assert!(preview.starts_with("BEGIN"));
-        assert!(
-            preview
-                .ends_with("\n... startup diagnostics truncated; restart in Control mode for full output")
-        );
+        assert!(preview.ends_with(
+            "\n... startup diagnostics truncated; restart in Control mode for full output"
+        ));
         assert!(!preview.contains("END"));
         assert!(
             preview

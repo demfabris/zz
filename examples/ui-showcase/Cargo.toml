@@ -43,8 +43,8 @@ too_many_lines = "allow"
 # story can show a patched behavior (the squircle corner shape) instead of
 # faking it. Keep this rev in step with the desktop workspace's patch section.
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/demfabris/zed", rev = "d7d35aee68dfc50911bf90a29cf60d45db14261d", version = "=0.2.2" }
-gpui_platform = { git = "https://github.com/demfabris/zed", rev = "d7d35aee68dfc50911bf90a29cf60d45db14261d" }
+gpui = { git = "https://github.com/demfabris/zed", rev = "3263264d6455a8f282268697377199864a81f7a4", version = "=0.2.2" }
+gpui_platform = { git = "https://github.com/demfabris/zed", rev = "3263264d6455a8f282268697377199864a81f7a4" }
 
 [profile.dev]
 debug = 1

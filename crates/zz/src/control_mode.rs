@@ -2534,10 +2534,7 @@ mod tests {
 
         assert_eq!(
             handle_protocol(
-                event(
-                    1,
-                    vec!["first\ncontinued".to_owned(), "second".to_owned()],
-                ),
+                event(1, vec!["first\ncontinued".to_owned(), "second".to_owned()],),
                 &mut state,
                 &mut writer,
             )

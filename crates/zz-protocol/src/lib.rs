@@ -50,7 +50,7 @@ pub use message::{
     agent_update_batch_bytes, paste_upload_extension_is_valid, split_command_words,
 };
 pub use message::{
-    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
+    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
 };
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,

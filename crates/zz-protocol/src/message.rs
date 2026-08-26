@@ -2040,9 +2040,9 @@ where
                 let Some(cause) = sequence.next_element::<BoundedStartupConfigCause>()? else {
                     return Ok(causes);
                 };
-                total_bytes = total_bytes.checked_add(cause.0.len()).ok_or_else(|| {
-                    A::Error::invalid_length(usize::MAX, &self)
-                })?;
+                total_bytes = total_bytes
+                    .checked_add(cause.0.len())
+                    .ok_or_else(|| A::Error::invalid_length(usize::MAX, &self))?;
                 if total_bytes > MAX_STARTUP_CONFIG_CAUSES_BYTES {
                     return Err(A::Error::invalid_length(total_bytes, &self));
                 }
@@ -3335,8 +3335,7 @@ mod tests {
         let bytes = postcard::to_stdvec(&event).expect("startup config causes encode");
         assert_eq!(bytes[1], 49);
         assert_eq!(
-            postcard::from_bytes::<super::Event>(&bytes)
-                .expect("startup config causes decode"),
+            postcard::from_bytes::<super::Event>(&bytes).expect("startup config causes decode"),
             event
         );
     }

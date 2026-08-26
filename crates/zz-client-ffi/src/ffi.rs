@@ -663,7 +663,7 @@ fn interactive_prompts(
             message: ZzBytes::new(prompt.text()),
             echo: prompt.echo(),
         };
-        let mut response = [0_i8; 4096];
+        let mut response: [c_char; 4096] = [0; 4096];
         let reply = unsafe {
             callback(
                 context as *mut c_void,
@@ -683,7 +683,7 @@ fn interactive_prompts(
                     .unwrap_or(response.len());
                 let bytes = response[..length]
                     .iter()
-                    .map(|byte| *byte as u8)
+                    .map(|byte| byte.to_ne_bytes()[0])
                     .collect::<Vec<_>>();
                 String::from_utf8(bytes).map_or(AskpassReply::Cancel, AskpassReply::answer)
             }
@@ -1748,10 +1748,13 @@ mod tests {
 
     fn decode(viewport: &TerminalViewport, capacity: usize) -> Vec<u8> {
         let viewport = ZzViewport(viewport.clone());
-        let mut output = vec![0_i8; capacity];
+        let mut output: Vec<c_char> = vec![0; capacity];
         let length =
             unsafe { zz_viewport_row_text(&viewport, 0, output.as_mut_ptr(), output.len()) };
-        output[..length].iter().map(|byte| *byte as u8).collect()
+        output[..length]
+            .iter()
+            .map(|byte| byte.to_ne_bytes()[0])
+            .collect()
     }
 
     #[test]

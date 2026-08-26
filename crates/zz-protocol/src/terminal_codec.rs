@@ -12,7 +12,7 @@ use zz_terminal::{
 
 use crate::message::{
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES,
-    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
+    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
 };
 use crate::{
     AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
@@ -2277,7 +2277,9 @@ mod tests {
         rejected(vec!["x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES + 1)]);
         rejected(vec![
             "x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES);
-            MAX_STARTUP_CONFIG_CAUSES_BYTES / MAX_STARTUP_CONFIG_CAUSE_BYTES + 1
+            MAX_STARTUP_CONFIG_CAUSES_BYTES
+                / MAX_STARTUP_CONFIG_CAUSE_BYTES
+                + 1
         ]);
 
         let count_boundary = message(vec![String::new(); MAX_STARTUP_CONFIG_CAUSES]);
@@ -2289,9 +2291,11 @@ mod tests {
 
         let aggregate_boundary = message(vec![
             "x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES);
-            MAX_STARTUP_CONFIG_CAUSES_BYTES / MAX_STARTUP_CONFIG_CAUSE_BYTES
+            MAX_STARTUP_CONFIG_CAUSES_BYTES
+                / MAX_STARTUP_CONFIG_CAUSE_BYTES
         ]);
-        let frame = encode_protocol_message(&aggregate_boundary).expect("encode aggregate boundary");
+        let frame =
+            encode_protocol_message(&aggregate_boundary).expect("encode aggregate boundary");
         assert_eq!(
             decode_protocol_frame(&frame).expect("decode aggregate boundary"),
             aggregate_boundary

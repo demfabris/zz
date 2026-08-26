@@ -179,7 +179,12 @@ fn drive<W: Write>(
     loop {
         let event = pending_stdin.pop_front().map_or_else(
             || receiver.recv().unwrap_or(MainEvent::Disconnected),
-            MainEvent::Stdin,
+            |stdin| {
+                if let Some(pending_return) = state.pending_return.as_mut() {
+                    pending_return.consume_preceding_input();
+                }
+                MainEvent::Stdin(stdin)
+            },
         );
         match event {
             MainEvent::Stdin(StdinEvent::Line(line)) => match parse_line(&line) {
@@ -188,6 +193,7 @@ fn drive<W: Write>(
                         client.as_ref(),
                         PendingReturn::Blank {
                             code: state.return_code,
+                            preceding_input: 0,
                         },
                         output,
                         &mut state,
@@ -245,7 +251,7 @@ fn drive<W: Write>(
                         .commands
                         .first()
                         .is_some_and(prepared_command_is_detach);
-                    if !first_is_detach {
+                    if !first_is_detach && state.pending_return.is_none() {
                         state.pending_return = prepared.pending_return.take();
                     }
                     for (index, command) in prepared.commands.into_iter().enumerate() {
@@ -280,21 +286,26 @@ fn drive<W: Write>(
                                 _ => result.exit_code,
                             });
                         }
-                        if let Some(pending_return) = state.pending_return.take() {
-                            return finish_control_return(
-                                client.as_ref(),
-                                pending_return,
-                                output,
-                                &mut state,
-                                &events,
-                                &mut stdin_started,
-                                &receiver,
-                                &mut pending_stdin,
-                            );
-                        }
                         if result.abort_line {
                             break;
                         }
+                    }
+                    if state
+                        .pending_return
+                        .as_ref()
+                        .is_some_and(|pending_return| !pending_return.has_preceding_input())
+                        && let Some(pending_return) = state.pending_return.take()
+                    {
+                        return finish_control_return(
+                            client.as_ref(),
+                            pending_return,
+                            output,
+                            &mut state,
+                            &events,
+                            &mut stdin_started,
+                            &receiver,
+                            &mut pending_stdin,
+                        );
                     }
                 }
             },
@@ -303,6 +314,7 @@ fn drive<W: Write>(
                     client.as_ref(),
                     PendingReturn::Eof {
                         code: state.return_code,
+                        preceding_input: 0,
                     },
                     output,
                     &mut state,
@@ -315,7 +327,10 @@ fn drive<W: Write>(
             MainEvent::Stdin(StdinEvent::Error(error)) => {
                 return finish_control_return(
                     client.as_ref(),
-                    PendingReturn::InputError { message: error },
+                    PendingReturn::InputError {
+                        message: error,
+                        preceding_input: 0,
+                    },
                     output,
                     &mut state,
                     &events,
@@ -1007,7 +1022,7 @@ fn capture_pending_return(
     pending_return: &mut Option<PendingReturn>,
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) {
-    match PendingReturn::from_stdin(stdin, return_code) {
+    match PendingReturn::from_stdin(stdin, return_code, pending_stdin.len()) {
         Ok(return_event) => {
             if pending_return.is_none() {
                 *pending_return = Some(return_event);
@@ -1043,7 +1058,7 @@ fn finish_control_return<W: Write>(
     let (input_closed, input_error) = match pending_return {
         PendingReturn::Blank { .. } => (false, None),
         PendingReturn::Eof { .. } => (true, None),
-        PendingReturn::InputError { message } => (true, Some(message)),
+        PendingReturn::InputError { message, .. } => (true, Some(message)),
     };
     if let Some(error) = input_error.as_deref() {
         eprintln!("zz: {error}");
@@ -1566,25 +1581,75 @@ enum StdinEvent {
 }
 
 enum PendingReturn {
-    Blank { code: u8 },
-    Eof { code: u8 },
-    InputError { message: String },
+    Blank {
+        code: u8,
+        preceding_input: usize,
+    },
+    Eof {
+        code: u8,
+        preceding_input: usize,
+    },
+    InputError {
+        message: String,
+        preceding_input: usize,
+    },
 }
 
 impl PendingReturn {
-    fn from_stdin(stdin: StdinEvent, return_code: u8) -> Result<Self, StdinEvent> {
+    fn from_stdin(
+        stdin: StdinEvent,
+        return_code: u8,
+        preceding_input: usize,
+    ) -> Result<Self, StdinEvent> {
         match stdin {
-            StdinEvent::Line(line) if line.is_empty() => Ok(Self::Blank { code: return_code }),
-            StdinEvent::Eof => Ok(Self::Eof { code: return_code }),
-            StdinEvent::Error(message) => Ok(Self::InputError { message }),
+            StdinEvent::Line(line) if line.is_empty() => Ok(Self::Blank {
+                code: return_code,
+                preceding_input,
+            }),
+            StdinEvent::Eof => Ok(Self::Eof {
+                code: return_code,
+                preceding_input: 0,
+            }),
+            StdinEvent::Error(message) => Ok(Self::InputError {
+                message,
+                preceding_input: 0,
+            }),
             stdin @ StdinEvent::Line(_) => Err(stdin),
         }
     }
 
     fn code(&self) -> u8 {
         match self {
-            Self::Blank { code } | Self::Eof { code } => *code,
+            Self::Blank { code, .. } | Self::Eof { code, .. } => *code,
             Self::InputError { .. } => 1,
+        }
+    }
+
+    fn has_preceding_input(&self) -> bool {
+        match self {
+            Self::Blank {
+                preceding_input, ..
+            }
+            | Self::Eof {
+                preceding_input, ..
+            }
+            | Self::InputError {
+                preceding_input, ..
+            } => *preceding_input != 0,
+        }
+    }
+
+    fn consume_preceding_input(&mut self) {
+        match self {
+            Self::Blank {
+                preceding_input, ..
+            }
+            | Self::Eof {
+                preceding_input, ..
+            }
+            | Self::InputError {
+                preceding_input, ..
+            } => *preceding_input = preceding_input.saturating_sub(1),
         }
     }
 }
@@ -2096,17 +2161,46 @@ mod tests {
     }
 
     #[test]
+    fn pending_return_waits_for_input_observed_before_it() {
+        let mut pending_return = None;
+        let mut pending_stdin = VecDeque::new();
+        capture_pending_return(
+            StdinEvent::Line("display-message -p queued".to_owned()),
+            0,
+            &mut pending_return,
+            &mut pending_stdin,
+        );
+        capture_pending_return(
+            StdinEvent::Line(String::new()),
+            0,
+            &mut pending_return,
+            &mut pending_stdin,
+        );
+
+        let pending_return = pending_return.as_mut().expect("pending return");
+        assert!(pending_return.has_preceding_input());
+        pending_return.consume_preceding_input();
+        assert!(!pending_return.has_preceding_input());
+    }
+
+    #[test]
     fn authoritative_caller_detach_discards_return_observed_while_it_waits() {
         let mut state = ControlState {
             return_code: 1,
             ..ControlState::default()
         };
-        let mut deferred_return = Some(PendingReturn::Eof { code: 1 });
+        let mut deferred_return = Some(PendingReturn::Eof {
+            code: 1,
+            preceding_input: 0,
+        });
         settle_deferred_return(true, &mut deferred_return, &mut state);
         assert!(deferred_return.is_none());
         assert!(state.pending_return.is_none());
 
-        deferred_return = Some(PendingReturn::Eof { code: 1 });
+        deferred_return = Some(PendingReturn::Eof {
+            code: 1,
+            preceding_input: 0,
+        });
         settle_deferred_return(false, &mut deferred_return, &mut state);
         assert!(deferred_return.is_none());
         assert_eq!(

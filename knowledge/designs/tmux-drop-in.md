@@ -109,8 +109,10 @@ mode, command-output navigation, choosers, prompts, prefix tables, buffers, and 
 bindings, and both mode-key tables as local terminal semantics. The Cargo launcher and a verified
 built-bundle smoke both pass the six bare/new/attach × empty/existing cases through a spaced path.
 Gate 0 provides durable evidence for the surfaces it exercises. The live tracker still records CLI
-and TUI gaps, including ordinary TUI pane copy-search editing, typed Control diagnostics, and
-asynchronous Control output. Protocol v80 now closes startup config cause delivery. The
+and TUI gaps, including ordinary TUI pane copy-search editing and typed Control diagnostics.
+Protocol v80 closes startup config cause delivery. Protocol v81 closes targetless and invalid-target
+foreground Control shell-output placement; resolved targets and ordinary background jobs keep zz's
+native per-Interactive command-output view. The
 command-output fixture makes no mouse,
 OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still needs separate
 visual smoke evidence.
@@ -904,7 +906,9 @@ The later protocol v77 closures give immediate hooks and shell-evaluated `if-she
 flags-1 path. Foreground `run-shell -C` stays in this closure, while ordinary `run-shell -b` output
 remains under `control-mode.async-command-output`. Source-read placement and completion numbering plus
 hard-disconnect queue cancellation remained under their active Control groups at this checkpoint.
-Protocol v78 later closed the source-read placement and numbering portion.
+Protocol v78 later closed the source-read placement and numbering portion; protocol v81 later closed
+ordinary foreground Control shell-output placement and moved `run-shell -b` into zz's native
+per-Interactive command-output view.
 The focused inserted-list matrix and cross-thread capture tests pass. Focused `source_file` tests
 pass 6 of 6 and replayed tests pass 5 of 5. A fresh debug build, strict daemon clippy, formatting,
 shell syntax, and diff checks pass. The strict nine-step `smoke/source-file-control` and 12-step
@@ -920,10 +924,10 @@ match pinned tmux. The strict focused scenario now has ten clean steps with no s
 `if-shell -b` and `run-shell -bC` frames remained open at that checkpoint. The later background
 closure framed them, and protocol v78 later closed matched hook-source read placement and completion
 numbering.
-The asynchronous
-`run-shell` exit text itself is excluded from the slice because zz still emits it inside the completed
-response where tmux prints it unframed after `%end`; `control-mode.async-command-output` tracks that
-gap, and the scenario header names the exclusion. Its sixth step runs a second control client over
+At that checkpoint, the asynchronous `run-shell` exit text was excluded because zz emitted it inside
+the completed response where tmux printed it unframed after `%end`. Protocol v81 later closed
+`control-mode.async-command-output`: direct and sourced foreground shell output now follows its empty
+flags-1 guard as raw text for the exact Control recipient. Its sixth step runs a second control client over
 a 50-level chain so invocation 51 is loud. That step deliberately compares wording count,
 outer-line continuation, reached depth, containing-file continuation, the leaf that never loads,
 and the detached client's status instead of frame boundaries, because a 50-file chain would
@@ -1386,6 +1390,7 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 | `source-file -F` | format-expanded paths | **shipped 2026-08-22** |
 | `source-file -n`/`-t`/`-v` | parse-only replay, pane-targeted context, and ordered verbose diagnostics | **shipped 2026-08-25** |
 | Startup configuration causes | v80 retained Control delivery, attached Interactive preview, completion-line locations, and seven-case pinned differential | **shipped 2026-08-26** |
+| Foreground Control shell output | v81 raw exact-recipient delivery after direct and sourced guards, with native attached-viewer output for resolved targets and background jobs | **shipped 2026-08-26** |
 
 `switch-client` shipped as protocol v70 on 2026-08-20. A pane script can retarget the
 Interactive client selected from its retained `ClientHello.origin`; the daemon reuses its

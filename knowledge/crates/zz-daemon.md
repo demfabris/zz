@@ -542,8 +542,17 @@ continues.
 
 Shell-evaluated `if-shell -b` and `run-shell -bC` now publish asynchronous flags-0 callback frames.
 Hard disconnect after an immediate hook or source queue has started remains under
-`control-mode.disconnect-cancels-command-queue`; ordinary `run-shell -b` output remains under
-`control-mode.async-command-output`. Protocol v78 appends
+`control-mode.disconnect-cancels-command-queue`.
+
+Protocol v81 appends `ControlCommandOutput` at event tag 50. `route_shell_job_output` opens the
+native command-output actor for every Interactive viewer attached to a live resolved `-t` pane.
+Ordinary `run-shell -b` uses the most recent pane and the same actor. Neither route publishes raw
+Control text. A targetless or invalid-target foreground Control job publishes captured output and
+its exit diagnostic to the route's retained `control_target`; a peer Control client receives no
+copy. Direct and parser-sourced jobs publish that event only after their empty successful command
+guard. Foreground `run-shell -C` keeps its synchronous inserted-command response path.
+
+Protocol v78 appends
 `EventPayload::ControlSourceFile { event }` at tag 48. For a matched parser or hook-source OS or path
 read failure, the daemon publishes `ReadError` after the source guard instead of a standalone client
 message. It publishes one `Complete` after every depth-admitted invocation's descendants. The event

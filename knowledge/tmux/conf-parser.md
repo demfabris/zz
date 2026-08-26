@@ -126,8 +126,9 @@ none.
 Shell-evaluated `if-shell -b` and `run-shell -bC` run later with flags 0, retain the exact originating
 Control recipient through callback entry, and cancel before any callback work when that origin is
 gone. Hard disconnect after an immediate hook or source queue has already started stays under
-`control-mode.disconnect-cancels-command-queue`. Ordinary `run-shell -b` output remains under
-`control-mode.async-command-output`.
+`control-mode.disconnect-cancels-command-queue`. Protocol v81 supersedes the earlier
+`control-mode.async-command-output` boundary: ordinary `run-shell -b` now opens zz's native
+per-Interactive command-output view for attached viewers of the selected recent pane.
 
 The Control writer defers flags-1 guards FIFO until the direct outer frame closes. The loader
 preflights every declared path for one source command before recursion. A focused regression and

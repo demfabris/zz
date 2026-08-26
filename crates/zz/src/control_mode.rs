@@ -738,6 +738,9 @@ fn handle_protocol<W: Write>(
                 }
                 output.control_source_file(event)?;
             }
+            EventPayload::ControlCommandOutput { output: text } => {
+                output.control_command_output(&text)?;
+            }
             EventPayload::StartupConfigCauses { causes } => {
                 output.startup_config_causes(&causes)?;
             }
@@ -1223,6 +1226,7 @@ enum DeferredOutput {
         flags: u8,
     },
     ControlSourceFile(ControlSourceFileEvent),
+    ControlCommandOutput(String),
 }
 
 struct ControlWriter<W: Write> {
@@ -1296,6 +1300,7 @@ impl<W: Write> ControlWriter<W> {
                 DeferredOutput::ControlSourceFile(event) => {
                     self.write_control_source_file(event)?;
                 }
+                DeferredOutput::ControlCommandOutput(output) => self.payload(&output)?,
             }
         }
         Ok(())
@@ -1376,6 +1381,16 @@ impl<W: Write> ControlWriter<W> {
                 Ok(())
             }
         }
+    }
+
+    fn control_command_output(&mut self, output: &str) -> io::Result<()> {
+        if self.block_open {
+            self.deferred
+                .push_back(DeferredOutput::ControlCommandOutput(output.to_owned()));
+            return Ok(());
+        }
+        self.payload(output)?;
+        self.output.flush()
     }
 
     fn begin(&mut self, flags: u8) -> io::Result<Frame> {
@@ -2360,6 +2375,55 @@ mod tests {
         assert_eq!(
             writer.output,
             b"%sessions-changed\n%begin 21 1 1\nbody\n%end 21 1 1\n%window-add @3\n%window-renamed @3 shell\n%session-renamed $1 dev\n"
+        );
+    }
+
+    #[test]
+    fn control_command_output_follows_the_guard_raw_and_command_mode_stays_inside() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let mut state = ControlState::default();
+        let shell = writer.begin_at(21, 1).unwrap();
+        writer.notify(b"%window-renamed @3 shell").unwrap();
+        handle_protocol(
+            ProtocolMessage::Event(zz_protocol::Event {
+                sequence: 1,
+                payload: EventPayload::ControlCommandOutput {
+                    output: "child output\n%begin-fake\n%exit\n'exit 3' returned 3\npartial"
+                        .to_owned(),
+                },
+            }),
+            &mut state,
+            &mut writer,
+        )
+        .unwrap();
+        writer
+            .response(
+                &shell,
+                CommandResponse::Success {
+                    request_id: 5,
+                    output: String::new(),
+                    exit_code: 3,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+        let command_mode = writer.begin_at(22, 1).unwrap();
+        writer
+            .response(
+                &command_mode,
+                CommandResponse::Success {
+                    request_id: 6,
+                    output: "command mode".to_owned(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 21 1 1\n%end 21 1 1\n%window-renamed @3 shell\n\
+              child output\n%begin-fake\n%exit\n'exit 3' returned 3\npartial\n\
+              %begin 22 2 1\ncommand mode\n%end 22 2 1\n"
         );
     }
 

@@ -156,7 +156,7 @@ terminal; piped Control stdin contributes none.
 | `start-server` | `start` | Ensure the daemon is running, then return success with no output. The CLI's normal connection path starts a missing daemon before the no-op reaches the engine. |
 | `kill-server` | . | Stop the daemon (`KillServer` effect). |
 
-## Control source and hook framing in protocols v77, v78, and v80
+## Control source, hook, and shell-output framing in protocols v77, v78, v80, and v81
 
 The `source-file` row above preserves the v76 parser-replay checkpoint. Protocol v77 renames its
 tail-tag-47 event in place to `ControlCommandGuard { output, error, sticky_failure, flags }` and closes
@@ -184,6 +184,16 @@ vector once; an attached Interactive winner opens a PTY-free `configuration erro
 ordered, UTF-8-safe 64 KiB preview that replaces every Unicode control except LF and TAB. Its
 truncation notice points to Control mode because exact Interactive recovery of the retained 1 MiB
 vector is not promised.
+
+Protocol v81 appends `ControlCommandOutput` at tail tag 50 and supersedes the open
+`control-mode.async-command-output` pointer in the historical `source-file` row above. A targetless
+or invalid-target foreground `run-shell` publishes raw output and its exit diagnostic to the exact
+originating Control client after the command's empty flags-1 guard closes. Direct input continues in
+its next guard; sourced same-line siblings receive their own later guard. Embedded LF and
+percent-prefixed lines stay literal, the writer supplies a missing trailing LF, and this event does
+not change Control retval. Foreground `run-shell -C` retains synchronous framed output. A live
+resolved `-t` and ordinary `run-shell -b` open zz's native per-Interactive command-output view for
+attached pane viewers, with no raw Control text or `%pane-mode-changed` notification.
 
 ## TUI command-output navigation in protocol v79
 

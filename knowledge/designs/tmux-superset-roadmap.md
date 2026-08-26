@@ -38,8 +38,16 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-26
 
-The live tracker has 90 active groups, 659 classified active items, 65 closed groups, and two known
-differentials. Protocol v80 closes `config.startup-diagnostic-delivery`. Startup parses all roots
+The live tracker has 89 active groups, 660 classified active items, 66 closed groups, and two known
+differentials. Protocol v81 closes `control-mode.async-command-output`. Targetless and
+invalid-target foreground shell output reaches the exact originating Control client raw after its
+empty flags-1 guard; direct and sourced same-line continuation keeps separate guards. Embedded LF
+and percent-prefixed lines stay literal, a missing trailing LF is supplied, and a shell's nonzero
+status does not change Control retval. Foreground `run-shell -C` remains synchronous. Resolved `-t`
+and ordinary `run-shell -b` open zz's native per-Interactive command-output view for attached pane
+viewers without raw Control text or `%pane-mode-changed`, preserving deliberate GUI ownership.
+
+Protocol v80 closed `config.startup-diagnostic-delivery`. Startup parses all roots
 before replay, retains normalized root and nested read failures, parser diagnostics, unsupported and
 runtime failures, and successful `display-message -p` output, and discards list-style output. Root
 causes precede replay causes; replay stays root-ordered and nested depth-first. Successful physical
@@ -517,8 +525,9 @@ summary. An unknown child command produces successful parent and source guards, 
 without its own guard, matching the pin. The closure reuses protocol v76. The later protocol v77
 closures give immediate hook commands and shell-evaluated `if-shell -b` or `run-shell -bC` callbacks
 flags 0. Protocol v78 later closed source-read placement and completion numbering.
-Hard-disconnect queue cancellation remains under its active Control group; ordinary `run-shell -b` output remains under
-`control-mode.async-command-output`.
+Hard-disconnect queue cancellation remains under its active Control group. Protocol v81 later closed
+foreground Control shell-output placement; ordinary `run-shell -b` now uses zz's native
+per-Interactive command-output view.
 The nesting limit is closed for guard
 placement, depth wording, count, and
 later-line continuation: both sides run 50 concurrent source invocations counting the initial
@@ -757,6 +766,11 @@ permanent product decision has been recorded for them.
   receive an ordered, control-sanitized 64 KiB preview rather than exact recovery of the retained
   1 MiB vector. Startup parsing, ordering, completion-line locations, one-shot admission, and
   restart behavior pass the checksum-attested seven-case pinned probe.
+- 2026-08-26: Protocol v81 appended `ControlCommandOutput` at event tail tag 50. Targetless and
+  invalid-target foreground shell output now follows its direct or sourced guard as raw text for
+  the exact Control recipient without changing retval. Resolved-target and background output use
+  zz's native attached-viewer command-output surface. The strict 12-step pinned Control differential
+  has no differences or skips.
 
 # Related
 

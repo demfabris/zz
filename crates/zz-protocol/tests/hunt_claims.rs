@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_eighty() {
-    assert_eq!(PROTOCOL_VERSION, 80);
+fn protocol_version_on_this_commit_is_eighty_one() {
+    assert_eq!(PROTOCOL_VERSION, 81);
 }
 
 #[test]
@@ -182,6 +182,18 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         postcard::from_bytes::<Event>(&bytes).expect("decode startup config causes"),
         startup_causes
     );
+    let command_output = Event {
+        sequence: 0,
+        payload: EventPayload::ControlCommandOutput {
+            output: "child output\n'exit 3' returned 3".to_owned(),
+        },
+    };
+    let bytes = postcard::to_stdvec(&command_output).expect("encode control command output");
+    assert_eq!(bytes[1], 50);
+    assert_eq!(
+        postcard::from_bytes::<Event>(&bytes).expect("decode control command output"),
+        command_output
+    );
 
     let window = WindowSnapshot {
         id: WindowId(1),
@@ -249,7 +261,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00,
+            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x51, 0x00, 0x00, 0x51, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00,
         ]
     );

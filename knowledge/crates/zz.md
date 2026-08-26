@@ -132,6 +132,13 @@ read error. Existing daemon preflight guarantees root
 missing-path guard, then middle missing-path guard, then leaf output guard in a three-level replay,
 each exactly once.
 
+Protocol v81 adds `ControlCommandOutput` at tail tag 50. `handle_protocol` sends it to
+`ControlWriter::control_command_output` without changing `ControlState::return_code`. If a direct
+frame remains open, the writer queues the payload and flushes it after `%end`; sourced foreground
+shell output follows that source command's empty flags-1 guard before the next sourced sibling.
+`payload` preserves embedded LF and percent-prefixed lines and adds one final LF when absent.
+Foreground `run-shell -C` output remains inside its ordinary command frame.
+
 `ControlState::return_code` now follows the pin's long-lived retval contract. Direct runtime errors,
 sourced runtime errors, nonruntime source failures returned through `source-file`, and v78
 source-read failures set it to 1. Non-UTF-8 config content remains under

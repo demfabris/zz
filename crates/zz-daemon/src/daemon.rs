@@ -7924,6 +7924,10 @@ impl Shared {
         let route = RunShellRoute {
             client,
             kind,
+            control_target: command_context
+                .control_command_target()
+                .map(|(client, _)| client)
+                .or_else(|| (kind == ClientKind::Control).then_some(client)),
             foreground: !parsed.background,
             target_requested: parsed.target.is_some(),
             target,
@@ -8423,7 +8427,7 @@ impl Shared {
         result: &ShellJobResult,
     ) -> Result<Execution, DaemonError> {
         let (output, exit_code) = shell_job_output(command, result);
-        let output = self.route_run_shell_output(route, command.to_owned(), &output);
+        let output = self.route_shell_job_output(route, command.to_owned(), &output);
         if route.foreground
             && matches!(route.kind, ClientKind::Command | ClientKind::Control)
             && route.client != ClientId(u64::MAX)
@@ -8453,6 +8457,52 @@ impl Shared {
                 exit_code: result.exit_code,
             },
         )
+    }
+
+    fn route_shell_job_output(
+        self: &Arc<Self>,
+        route: RunShellRoute,
+        title: String,
+        output: &str,
+    ) -> String {
+        if output.is_empty() {
+            return String::new();
+        }
+        if let Some(target) = route.target
+            && self
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(target)
+                .is_some_and(|pane| !pane.dead)
+        {
+            self.open_command_output_for_pane(target, &title, output);
+            return String::new();
+        }
+        if route.foreground {
+            if let Some(control_target) = route.control_target {
+                self.publish_to_client(
+                    control_target,
+                    EventPayload::ControlCommandOutput {
+                        output: output.to_owned(),
+                    },
+                );
+                return String::new();
+            }
+            return self.route_run_shell_output(route, title, output);
+        }
+        let pane = self
+            .inner
+            .lock()
+            .engine
+            .state
+            .most_recent_context()
+            .map(|(_, _, pane)| pane);
+        if let Some(pane) = pane {
+            self.open_command_output_for_pane(pane, &title, output);
+        }
+        String::new()
     }
 
     fn route_run_shell_output(
@@ -16060,6 +16110,7 @@ impl Shared {
             &payload,
             EventPayload::ControlCommandGuard { .. }
                 | EventPayload::ControlSourceFile { .. }
+                | EventPayload::ControlCommandOutput { .. }
                 | EventPayload::ClientMessage { .. }
         ) {
             let capture_key = (client, thread::current().id());
@@ -24732,6 +24783,7 @@ struct InsertedCommandResult {
 struct RunShellRoute {
     client: ClientId,
     kind: ClientKind,
+    control_target: Option<ClientId>,
     foreground: bool,
     target_requested: bool,
     target: Option<PaneId>,
@@ -40226,6 +40278,88 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn sourced_foreground_shell_output_follows_its_empty_guard() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("run-shell.conf");
+        fs::write(
+            &source,
+            "run-shell 'printf CHILD; exit 3' ; display-message -p SAME\n",
+        )
+        .expect("source fixture");
+
+        let shared = Arc::new(Shared::new(77));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut command_context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "source-run-shell"]),
+            )
+            .expect("source run-shell session");
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let mut control_context = ExecutionContext::default();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-t", "source-run-shell"]),
+            )
+            .expect("attach source run-shell client");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let timeline = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlCommandGuard {
+                            output,
+                            error,
+                            flags,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("guard:{flags}:{error}:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandOutput { output },
+                    ..
+                }) => Some(format!("raw:{output}")),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            timeline,
+            [
+                "guard:1:false:".to_owned(),
+                "raw:CHILD\n'printf CHILD; exit 3' returned 3".to_owned(),
+                "guard:1:false:SAME".to_owned(),
+            ]
+        );
+    }
+
     #[test]
     fn control_source_read_events_preserve_tree_order_and_completion_cardinality() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -47139,6 +47273,14 @@ mod tests {
         shared
             .attach(control, session)
             .expect("attach control client");
+        let peer_mailbox = OutboundMailbox::new();
+        let (peer, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&peer_mailbox));
+        shared
+            .attach(peer, session)
+            .expect("attach peer control client");
+        take_reliable_messages(&control_mailbox);
+        take_reliable_messages(&peer_mailbox);
 
         let output = shared
             .execute(
@@ -47180,6 +47322,7 @@ mod tests {
             .expect("missing target falls back to command output");
         assert_eq!(output.output, "fallback");
 
+        shared.inner.lock().command_outputs.remove(&interactive);
         let output = shared
             .execute(
                 control,
@@ -47188,8 +47331,66 @@ mod tests {
                 &CommandInvocation::new("run-shell", ["-t", &target.to_string(), "printf control"]),
             )
             .expect("control shell output");
-        assert_eq!(output.output, "control");
+        assert!(output.output.is_empty());
+        assert_eq!(
+            shared.inner.lock().command_outputs[&interactive].pane,
+            target
+        );
         assert!(!shared.inner.lock().command_outputs.contains_key(&control));
+        assert!(control_command_outputs(take_reliable_messages(&control_mailbox)).is_empty());
+        assert!(control_command_outputs(take_reliable_messages(&peer_mailbox)).is_empty());
+
+        shared.inner.lock().command_outputs.remove(&interactive);
+        let output = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context.clone(),
+                &CommandInvocation::new("run-shell", ["printf control-raw"]),
+            )
+            .expect("targetless control shell output");
+        assert!(output.output.is_empty());
+        assert_eq!(
+            control_command_outputs(take_reliable_messages(&control_mailbox)),
+            ["control-raw"]
+        );
+        assert!(control_command_outputs(take_reliable_messages(&peer_mailbox)).is_empty());
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .command_outputs
+                .contains_key(&interactive)
+        );
+
+        let output = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context.clone(),
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-C", "display-message -p CONTROL_COMMAND_MODE"],
+                ),
+            )
+            .expect("control command-mode output stays synchronous");
+        assert_eq!(output.output, "CONTROL_COMMAND_MODE");
+        assert!(control_command_outputs(take_reliable_messages(&control_mailbox)).is_empty());
+
+        let output = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context.clone(),
+                &CommandInvocation::new("run-shell", ["-t", "%999999", "printf invalid-target"]),
+            )
+            .expect("invalid target falls back to control output");
+        assert!(output.output.is_empty());
+        assert_eq!(
+            control_command_outputs(take_reliable_messages(&control_mailbox)),
+            ["invalid-target"]
+        );
+        assert!(control_command_outputs(take_reliable_messages(&peer_mailbox)).is_empty());
 
         let mut control_context = context.clone();
         let response = shared.execute_command_request(
@@ -47207,10 +47408,40 @@ mod tests {
                     ref output,
                     exit_code: 4,
                     ..
-                } if output == "'exit 4' returned 4"
+                } if output.is_empty()
             ),
             "{response:?}"
         );
+        assert_eq!(
+            control_command_outputs(take_reliable_messages(&control_mailbox)),
+            ["'exit 4' returned 4"]
+        );
+        assert!(control_command_outputs(take_reliable_messages(&peer_mailbox)).is_empty());
+
+        let response = shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            72,
+            &CommandInvocation::new("run-shell", ["kill -TERM $$"]),
+        );
+        assert!(
+            matches!(
+                response,
+                CommandResponse::Success {
+                    request_id: 72,
+                    ref output,
+                    exit_code: 143,
+                    ..
+                } if output.is_empty()
+            ),
+            "{response:?}"
+        );
+        assert_eq!(
+            control_command_outputs(take_reliable_messages(&control_mailbox)),
+            ["'kill -TERM $$' terminated by signal 15"]
+        );
+        assert!(control_command_outputs(take_reliable_messages(&peer_mailbox)).is_empty());
         assert!(!shared.inner.lock().command_outputs.contains_key(&control));
 
         let output = shared
@@ -47257,21 +47488,41 @@ mod tests {
         }
         assert_eq!(shared.inner.lock().active_shell_jobs, 0);
 
+        shared.inner.lock().command_outputs.remove(&interactive);
         let output = shared
             .execute(
                 control,
                 ClientKind::Control,
                 &mut context,
-                &CommandInvocation::new("run-shell", ["-b", "printf control-background"]),
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-b", "sleep 0.05; printf control-background"],
+                ),
             )
             .expect("control background shell job");
         assert!(output.output.is_empty());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared
+            .inner
+            .lock()
+            .command_outputs
+            .contains_key(&interactive)
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            shared.inner.lock().command_outputs[&interactive].pane,
+            target
+        );
         let deadline = Instant::now() + Duration::from_secs(2);
         while shared.inner.lock().active_shell_jobs != 0 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(shared.inner.lock().active_shell_jobs, 0);
         assert!(!shared.inner.lock().command_outputs.contains_key(&control));
+        assert!(control_command_outputs(take_reliable_messages(&control_mailbox)).is_empty());
+        assert!(control_command_outputs(take_reliable_messages(&peer_mailbox)).is_empty());
 
         let wait_for_error =
             |mailbox: &OutboundMailbox| {
@@ -68729,6 +68980,19 @@ bind - split-window -v -c "#{pane_current_path}"
                         },
                     ..
                 }) => Some((output, error, sticky_failure, flags)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn control_command_outputs(messages: Vec<ProtocolMessage>) -> Vec<String> {
+        messages
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandOutput { output },
+                    ..
+                }) => Some(output),
                 _ => None,
             })
             .collect()

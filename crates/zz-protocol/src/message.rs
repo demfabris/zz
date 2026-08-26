@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 80;
+pub const PROTOCOL_VERSION: u16 = 81;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -2285,6 +2285,9 @@ pub enum EventPayload {
         #[serde(deserialize_with = "deserialize_startup_config_causes")]
         causes: Vec<String>,
     },
+    ControlCommandOutput {
+        output: String,
+    },
 }
 
 impl EventPayload {
@@ -3339,6 +3342,22 @@ mod tests {
     }
 
     #[test]
+    fn control_command_output_holds_wire_tag_fifty() {
+        let event = super::Event {
+            sequence: 10,
+            payload: super::EventPayload::ControlCommandOutput {
+                output: "child output\n'exit 3' returned 3".to_owned(),
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("control command output encodes");
+        assert_eq!(bytes[1], 50);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes).expect("control command output decodes"),
+            event
+        );
+    }
+
+    #[test]
     fn client_terminal_size_input_holds_wire_tag_seventeen() {
         assert_eq!(super::CLIENT_NESTED_CAPABILITY, "client-nested-v1");
         assert_eq!(super::CLIENT_TTY_CAPABILITY_PREFIX, "client-tty-v1:");
@@ -3453,7 +3472,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 80);
+        assert_eq!(super::PROTOCOL_VERSION, 81);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

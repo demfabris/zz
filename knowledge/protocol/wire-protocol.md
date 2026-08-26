@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v80)
+title: zz wire protocol (v81)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 80`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 81`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (79) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (81) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -191,8 +191,9 @@ offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDicti
 (`total_bytes` ≤ `MAX_KITTY_IMAGE_BYTES`, 16 MiB),
 `KittyImageChunk { pane, image_id, generation, bytes }`
 (each chunk ≤ `MAX_KITTY_IMAGE_CHUNK_BYTES`, 1 MiB), and
-`KittyImagesRemoved { pane, image_ids }`, and
-`StartupConfigCauses { causes: Vec<String> }`.
+`KittyImagesRemoved { pane, image_ids }`,
+`StartupConfigCauses { causes: Vec<String> }`, and
+`ControlCommandOutput { output: String }`.
 
 The agent lane added at v53 carries four more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
 carries one coalesced batch of JSON agent stream items numbered by the pane's fanout lane
@@ -344,6 +345,15 @@ with an ordered, UTF-8-safe 64 KiB preview, replacing every Unicode control exce
 truncated preview ends with `... startup diagnostics truncated; restart in Control mode for full
 output`. Exact Interactive recovery of the full retained 1 MiB vector is intentionally not part of
 the protocol. `zz-client::ClientCore` accepts and ignores the Control-only event.
+
+v81 appends `EventPayload::ControlCommandOutput { output }` at tail tag 50. The daemon sends this
+Control-only event to the exact originating client for targetless or invalid-target foreground
+`run-shell` output. The Control writer waits for the open direct or sourced flags-1 guard to close,
+then writes the payload raw. Embedded LF and percent-prefixed lines remain literal; a payload without
+a trailing LF gains one. The event does not update Control retval, so a fresh client still exits 0
+after a shell returns nonzero. Foreground `run-shell -C` keeps its existing synchronous framed output.
+A resolved `-t` and ordinary `run-shell -b` use the native Interactive command-output actor instead
+of this event.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and
 `CommandOutput { output_id, viewport: Some(..), .. }` are
@@ -523,9 +533,11 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 80`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 81`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v81 appends `EventPayload::ControlCommandOutput` at tail tag 50. The exact originating Control
+  client receives raw foreground shell output after its command guard, without a retval change.
 - v80 appends `EventPayload::StartupConfigCauses` at tail tag 49. Both decode-time and ordinary
   control-message validation enforce 1,024 entries, 64 KiB per entry, and 1 MiB total.
 - v79 adds `output_id: u64` to existing `EventPayload::CommandOutput` tag 11. Real output actors use

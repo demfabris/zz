@@ -169,7 +169,13 @@ flags-0 read-error placement and hidden numbering. The source-read check covers 
 read failures before replay, one completion after descendants, raw unframed diagnostics, retained
 status, and later-line continuation. Its status coverage includes actual self-detach, nonself and
 no-victim detach, alias targeting, sticky background failures, and `%end` before `%exit`; a manual
-`detach-client -a` probe also matches the pin. `resize-directions`
+`detach-client -a` probe also matches the pin. Protocol v81 extends the same 12-check row with direct
+and sourced foreground `run-shell` output after an empty flags-1 guard, exact-recipient raw delivery,
+same-line continuation, and unchanged Control retval. The row also requires resolved `-t` and
+ordinary `run-shell -b` output to stay off raw Control. It excludes pane-view notifications because
+tmux enters a shared pane view while zz opens its native per-Interactive command-output view and
+emits no `%pane-mode-changed`. The pinned foreground-disconnect server crash is an intentional
+non-parity and stays outside the scenario. `resize-directions`
 contributes 16 checks for bare direction flags with
 the default amount 1, attached amounts such as `-L2`, separated amounts such as `-L 2`, and the
 existing absolute resize forms. `formats-values` also proves explicit

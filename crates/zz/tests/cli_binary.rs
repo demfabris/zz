@@ -3842,13 +3842,6 @@ mod daemon_autostart {
         fn control_parse_and_generic_nonzero_results_do_not_set_retval() {
             let cases: &[(&str, &[u8], i32, &[&str], bool)] = &[
                 (
-                    "run-return-status",
-                    b"run-shell 'exit 3'\n\n",
-                    0,
-                    &["'exit 3' returned 3"],
-                    false,
-                ),
-                (
                     "parse-return-status",
                     b"wibble\n\n",
                     0,
@@ -3887,6 +3880,141 @@ mod daemon_autostart {
                 assert_block(&stream.blocks[1], 2, 1, expected_payload, *expected_error);
                 assert_attached_startup(&stream.outside, session);
             }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn control_foreground_run_shell_closes_before_raw_output_and_continues() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let marker_path = fixture._directory.path().join("run-shell-order-complete");
+            let output = run_control_until_return(
+                &fixture,
+                &[
+                    "-C",
+                    "new-session",
+                    "-s",
+                    "run-shell-order",
+                    "exec /bin/cat",
+                ],
+                "run-shell 'printf foreground; exit 3' ; display-message -p AFTER_FOREGROUND\n\
+                 run-shell 'kill -TERM $$'\n",
+                &marker_path,
+                "foreground run-shell completion",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let text = String::from_utf8(output.stdout.clone()).expect("UTF-8 control output");
+            let lines = text.lines().collect::<Vec<_>>();
+            let index = |expected: &str| {
+                lines
+                    .iter()
+                    .position(|line| *line == expected)
+                    .unwrap_or_else(|| panic!("missing {expected:?}: {text}"))
+            };
+            let frame = |marker_name: &str, number: u64| {
+                lines
+                    .iter()
+                    .position(|line| {
+                        marker(line, marker_name)
+                            .is_some_and(|(_, candidate, _)| candidate == number)
+                    })
+                    .unwrap_or_else(|| panic!("missing {marker_name} for {number}: {text}"))
+            };
+            assert!(frame("%end", 2) < index("foreground"));
+            assert!(index("foreground") < index("'printf foreground; exit 3' returned 3"));
+            assert!(index("'printf foreground; exit 3' returned 3") < frame("%begin", 3));
+            assert!(frame("%end", 4) < index("'kill -TERM $$' terminated by signal 15"));
+
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 5, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &["AFTER_FOREGROUND"], false);
+            assert_block(&stream.blocks[3], 4, 1, &[], false);
+            assert_block(&stream.blocks[4], 5, 1, &[], false);
+            assert!(stream.outside.iter().any(|line| line == "foreground"));
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == "'printf foreground; exit 3' returned 3")
+            );
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == "'kill -TERM $$' terminated by signal 15")
+            );
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn control_sourced_run_shell_closes_before_raw_output_and_same_line_continues() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("sourced run-shell");
+            std::fs::create_dir(&directory).expect("create sourced run-shell directory");
+            let source = write_source(
+                &directory,
+                "run-shell.conf",
+                "run-shell 'printf CHILD; exit 3' ; display-message -p SAME\n",
+            );
+            let marker_path = directory.join("complete");
+            let output = run_control_until_return(
+                &fixture,
+                &[
+                    "-C",
+                    "new-session",
+                    "-s",
+                    "sourced-run-shell",
+                    "exec /bin/cat",
+                ],
+                &format!("source-file '{source}'\n"),
+                &marker_path,
+                "sourced run-shell completion",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let text = String::from_utf8(output.stdout.clone()).expect("UTF-8 control output");
+            let lines = text.lines().collect::<Vec<_>>();
+            let child = lines
+                .iter()
+                .position(|line| *line == "CHILD")
+                .unwrap_or_else(|| panic!("missing raw child output: {text}"));
+            assert_eq!(lines[child + 1], "'printf CHILD; exit 3' returned 3");
+            let end = marker(lines[child - 1], "%end").expect("guard before raw child output");
+            assert_eq!(end.2, 1);
+            let begin = marker(lines[child + 2], "%begin").expect("guard after raw diagnostic");
+            assert_eq!(begin.2, 1);
+
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            let shell = stream
+                .blocks
+                .iter()
+                .find(|block| block.number == end.1)
+                .expect("sourced run-shell guard");
+            assert!(shell.payload.is_empty());
+            assert!(!shell.error);
+            let same = stream
+                .blocks
+                .iter()
+                .find(|block| block.number == begin.1)
+                .expect("same-line continuation guard");
+            assert_eq!(same.payload, ["SAME"]);
+            assert!(!same.error);
+            assert!(stream.outside.iter().any(|line| line == "CHILD"));
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == "'printf CHILD; exit 3' returned 3")
+            );
         }
 
         #[test]
@@ -4518,13 +4646,26 @@ mod daemon_autostart {
                         hidden,
                         "{label}: {stream:?}"
                     );
-                    assert!(
-                        stream.blocks.iter().any(|block| {
-                            block.error == row.error
-                                && block.payload.iter().any(|line| line == row.payload)
-                        }),
-                        "{label}: {stream:?}"
-                    );
+                    if row.name == "generic-nonzero" {
+                        assert!(
+                            stream.outside.iter().any(|line| line == row.payload),
+                            "{label}: {stream:?}"
+                        );
+                        assert!(
+                            stream.blocks.iter().any(|block| {
+                                block.flags == 1 && !block.error && block.payload.is_empty()
+                            }),
+                            "{label}: {stream:?}"
+                        );
+                    } else {
+                        assert!(
+                            stream.blocks.iter().any(|block| {
+                                block.error == row.error
+                                    && block.payload.iter().any(|line| line == row.payload)
+                            }),
+                            "{label}: {stream:?}"
+                        );
+                    }
                     assert_eq!(
                         stream.outside.last().map(String::as_str),
                         Some("%exit"),
@@ -5200,6 +5341,7 @@ mod daemon_autostart {
             assert_block(&stream.blocks[3], 4, 1, &[], false);
             assert_block(&stream.blocks[4], 5, 1, &["MALFORMED_LATER"], false);
             assert_block(&stream.blocks[5], 6, 1, &["MALFORMED_DONE"], false);
+            assert!(!stream.outside.iter().any(|line| line == "ordinary"));
             assert!(
                 stream
                     .outside

@@ -76,6 +76,8 @@ printf '%s\n' \
 background_dir="$control_dir/background"
 mkdir -p "$background_dir"
 printf '%s\n' 'display-message -p BACKGROUND_CHILD' >"$background_dir/child.conf"
+printf '%s\n' "run-shell 'printf SOURCED_RUN_RAW; exit 6'" \
+    >"$control_dir/async-output.conf"
 depth_dir="$control_dir/depth"
 mkdir -p "$depth_dir"
 printf '%s\n' 'set-option -g @leaf yes' >"$depth_dir/leaf.conf"
@@ -311,11 +313,11 @@ control_client() {
     if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
         env -u TMUX -u TMUX_PANE \
             "$ZZ_SMOKE_ZZ_BIN" --socket "$probe_socket" \
-            -C attach-session -t w
+            -C attach-session -t =w
     else
         env -u TMUX -u TMUX_PANE \
             "$ZZ_SMOKE_TMUX_BIN" -L "$probe_label" \
-            -C attach-session -t w
+            -C attach-session -t =w
     fi
 }
 
@@ -352,7 +354,14 @@ printf "source-file '%s' ; display-message -p NESTED_CONT\n" \
     "$control_dir/nested.conf" >&3
 printf "source-file '%s' ; display-message -p INVALID_CONT\n" \
     "$control_dir/invalid.conf" >&3
-printf '%s\n' 'run-shell "exit 3" ; display-message -p RUN_CONT' >&3
+printf '%s\n' "run-shell 'exit 3' ; display-message -p RUN_CONT" >&3
+printf '%s\n' \
+    'run-shell -b "printf BACKGROUND_RUN_HIDDEN; exit 4" ; display-message -p BACKGROUND_RUN_CONT' >&3
+printf '%s\n' 'run-shell "sleep 0.3"' >&3
+printf '%s\n' \
+    'run-shell -t =w:0.0 "printf TARGETED_RUN_HIDDEN; exit 5" ; display-message -p TARGETED_RUN_CONT' >&3
+printf "source-file '%s' ; display-message -p SOURCED_RUN_CONT\n" \
+    "$control_dir/async-output.conf" >&3
 printf '%s\n' 'display-message -p CONTROL_DONE' >&3
 
 attempt=0
@@ -392,24 +401,21 @@ transcript="$(
             if (!started && $4 != 1) next
             active = 1
             started = 1
-            print "%begin"
+            print "%begin-" $4
             next
         }
         /^%end [0-9]+ [0-9]+ [0-9]+$/ {
-            if (active || started) print "%end"
+            if (active || started) print "%end-" $4
             active = 0
             next
         }
         /^%error [0-9]+ [0-9]+ [0-9]+$/ {
-            if (active || started) print "%error"
+            if (active || started) print "%error-" $4
             active = 0
             next
         }
         /^%config-error / {
             print
-            next
-        }
-        /^'\''exit 3'\'' returned 3$/ {
             next
         }
         /^%exit$/ {

@@ -1,8 +1,8 @@
 corpus: none
 # One attached Control transcript pins direct, partial, nested, parser, and
-# generic nonzero chain behavior without discarding frame boundaries.
-# The control-mode.async-command-output payload is filtered as a tracked gap.
-# Volatile server notifications are excluded; command frames and unframed payload remain.
+# generic nonzero chain behavior without discarding frame boundaries. Pane-view
+# notifications and ambiguous control-prefixed raw lines are excluded; command
+# frames, flags, and ordinary unframed payload remain strict.
 stage: fixtures/source-file-control.sh ~/source-file-control.sh
 run-shell 'sh ~/source-file-control.sh'
 out: show-environment -g SOURCE_FILE_CONTROL

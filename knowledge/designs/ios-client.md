@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Native iPhone client
-description: Native SwiftUI and UIKit iPhone client over zz-client-ffi, with a Safari-style session rail, pane-card overview, fullscreen terminal, and local-daemon simulator workflow.
-status: Native phone slice, terminal lifecycle hardening, simulator tests, and local-daemon workflow implemented 2026-08-15; remote transport and a separate iPad client remain future work
+description: Native SwiftUI and UIKit iPhone client over zz-client-ffi, with resilient SSH attach, Agent supervision, a session rail, pane-card overview, fullscreen terminal, and mobile-native input.
+status: Native phone slice, resilient one-host SSH attach, Agent attention and approvals, mobile terminal input, local notifications, deep links, App Shortcuts, and simulator tests implemented through 2026-08-26; a separate iPad client and native Browser and Editor panes remain future work
 tags:
 - ios
 - iphone
@@ -10,7 +10,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -30,13 +30,49 @@ as a separate client.
 
 # Experience
 
+## Host connection
+
+The physical-device path stores one normalized `ssh://user@host` endpoint in `UserDefaults`. It
+reconnects to that host with the app's own Ed25519 identity, whose private half lives in the iOS
+Keychain. The setup screen exposes the OpenSSH public key for copying into the host's
+`~/.ssh/authorized_keys`. A password can authenticate one connection, but it remains in memory for
+that attempt only and is never persisted.
+
+iOS uses the daemon client's in-process `russh` transport instead of spawning an `ssh` executable.
+An unknown or changed server key pauses connection and shows the offered fingerprint. The user can
+reject it, trust it for one connection, or save it. Replacing a changed key removes every saved key
+for that host using the offered algorithm before writing the new key under the known-hosts lock.
+Authentication tries the app identity first, then drives the server's keyboard-interactive prompt
+batches and password method. Password, passphrase, verification-code, and other OTP prompts keep the
+server's own wording and echo policy. Cancelling any prompt stops that connection attempt.
+
+After authentication, the client probes the remote socket, starts the remote daemon when necessary,
+then carries the normal zz protocol through `zz proxy`. The host must already have a compatible `zz`
+in its login-shell `PATH`. SSH establishment runs away from the main actor, so the native connection
+screen remains responsive during DNS, authentication, and startup.
+
+An established connection that drops retains the immutable terminal frames and selected session and
+pane while a quiet reconnect banner counts through a capped 1, 2, 4, 8, 16-second retry ladder.
+Network restoration starts the next attempt immediately. Authentication, rejected host keys,
+configuration errors, and protocol incompatibility stop automatic retries and return to setup;
+transport, probe, forwarding, and daemon-start failures retry. A successful reconnect creates a fresh
+client core, reattaches the remembered session, restores the last keyboard-hidden terminal geometry,
+and selects the exact remembered pane, including a pane in a formerly inactive window.
+
+This slice deliberately selects one host at a time. It does not reproduce the desktop fleet chooser
+or aggregate sessions from several daemons. `ZZ_SOCKET` remains the simulator override and bypasses
+saved-host setup for the local development loop.
+
 ## Pane overview
 
 - The selected session's active window is the only window represented.
 - Its panes appear as a two-column card grid; desktop split ratios do not constrain the phone.
 - Terminal cards contain live frame previews drawn with a smaller font over the terminal's stable
   fullscreen grid.
-- Browser, Agent, Editor, and picker panes open fullscreen as explicit placeholders.
+- Agent cards show structured status and approval attention. Browser, Editor, and picker panes remain
+  explicit placeholders.
+- A compact attention strip orders blocked, failed, unseen-complete, and working Agents and opens the
+  exact pane when tapped.
 - Closing a pane requires native destructive confirmation because it stops the pane's process.
 - Each card is an accessible button with a separate 44-point close target whose visible control stays
   compact.
@@ -53,9 +89,16 @@ capsules move, fade, and scale with a horizontal drag before the adjacent pane o
 fullscreen resigns first responder so the software keyboard disappears with it.
 
 The center control has a second mode instead of installing a UIKit keyboard accessory. Its keyboard
-button replaces the pane selector with a horizontally scrollable row containing Escape, Tab, sticky
-Control and Alt, four arrows, and Prefix while the two circular controls stay in place. Hardware keys
-use the same raw-key FFI path. Text input remains Unicode and IME aware through `UIKeyInput`.
+button replaces the pane selector with a horizontally scrollable row containing Escape, Tab, Shift,
+Control, Alt, four arrows, Prefix, Copy, and Compose while the two circular controls stay in place.
+Shift, Control, and Alt are one-shot after one tap, lock after a double tap, and clear when a locked
+button is tapped again. Compose opens a native multiline editor, preserving IME, paste, and dictation
+before sending the text as one terminal input. Hardware key press, repeat, and release events use the
+same raw-key FFI path. Direct text input remains Unicode and IME aware through `UIKeyInput`.
+
+A long press followed by a drag sends semantic selection press, drag, and release actions to the
+terminal engine. Copy asks the daemon for the selected text and writes the resulting typed clipboard
+event to `UIPasteboard`; Swift never rebuilds selection text from rendered cells.
 
 The store owns one explicit input target: no pane or one terminal pane. A focus request advances an
 activation token, and UIKit reconciles first-responder state on the next main-actor turn only while
@@ -72,6 +115,28 @@ retained viewports alive.
 A two-finger pinch changes the current pane's terminal font in one-point steps from 9 through 23
 points. Each crossed step emits selection haptics and reports the resulting cell geometry to the
 daemon; the chosen step remains local to that pane for the lifetime of the client connection.
+
+## Agent supervision
+
+The phone consumes the daemon's retained `AgentPaneWire` state through typed FFI accessors. It does
+not subscribe to or retain the heavy transcript stream. An Agent pane shows connection phase, title,
+queued prompts, failure text, git branch and change totals, and the current permission request. Each
+permission option is parsed once in Rust and rendered as a native approval or rejection action;
+responses and turn cancellation travel through the daemon-owned Agent commands.
+
+`ClientCore` derives attention edges while reducing Agent state. A transition into a permission
+request, working to idle, or first failure becomes a lossless event flag, so a fast transition cannot
+disappear between two Swift snapshots. Hidden completion remains in the attention strip until the
+pane opens.
+
+Blocked, complete, and failed edges can schedule local notifications with a stable pane identity.
+Tapping one routes through the session and pane IDs to the exact Agent. These are local notifications
+created while iOS is still receiving the live event stream; zz does not provide push delivery or a
+background Agent inbox, so a suspended or terminated app cannot announce later daemon events.
+
+The app registers `zz://pane?session=<id>&pane=<id>`, `zz://open?...`, and `zz://attention` routes.
+App Shortcuts expose Open zz, Reconnect zz, and Agent Attention. Unknown routes are rejected, and
+notification, URL, and Shortcut navigation all converge on the same exact-attachment path.
 
 ## Session rail
 
@@ -100,13 +165,16 @@ flowchart LR
     UIKit --> FFI
     FFI --> Core["zz-client ClientCore"]
     Core --> Transport["zz-daemon InteractiveClient"]
-    Transport --> Daemon["persistent zz daemon"]
+    Transport --> Local["local ZZ_SOCKET"]
+    Transport --> SSH["in-process iOS SSH"]
+    Local --> Daemon["persistent zz daemon"]
+    SSH --> Daemon
 ```
 
 Swift does not parse mux commands, apply terminal patches, resolve pane keys, or own transport
 threads. `zz-client-ffi` owns the connection and reduced snapshots. The application polls the FFI's
-wake descriptor with `DispatchSourceRead`, drains typed events, then publishes immutable Swift model
-objects on the main actor.
+wake descriptor with `DispatchSourceRead`, drains typed terminal, Agent, clipboard, and disconnect
+events, then publishes immutable Swift model objects on the main actor.
 
 `zz_mux_snapshot` is caller-owned and exposes sessions plus the panes in each session's active
 window. `zz_viewport` is caller-owned and keeps immutable cell, style, grapheme, color, cursor, and
@@ -123,7 +191,8 @@ invalidate only changed terminal bands.
 - wide cells and spacer suppression;
 - cursor visibility, shape, color, width, and blinking;
 - generation-based updates and row damage;
-- touch scrolling and resize reporting in terminal cells.
+- touch scrolling and resize reporting in terminal cells;
+- daemon-owned semantic selection and clipboard extraction.
 
 The client does not run a second VT parser and does not reconstruct styled rows from plain text.
 Preview terminal views disable UIKit hit testing and never report a resize, so touches reach the
@@ -147,9 +216,10 @@ sessions never inherit the docked keyboard's height.
 
 # Build and run
 
-`XcodeGen` generates `clients/ios/ZZMobile.xcodeproj` from `project.yml`. The project is intentionally
-generated and ignored. Its pre-build phase cross-compiles `zz-client-ffi` as an arm64 static library
-for the selected Apple SDK and links it into Swift through `ZZ-Bridging-Header.h`.
+`XcodeGen` generates `clients/ios/ZZMobile.xcodeproj` and `Support/Info.plist` from `project.yml`.
+The project is intentionally generated and ignored. Its pre-build phase cross-compiles
+`zz-client-ffi` as an arm64 static library for the selected Apple SDK and links it into Swift through
+`ZZ-Bridging-Header.h`.
 
 ```sh
 just ios-build
@@ -159,35 +229,46 @@ just ios-device <device-name>
 ```
 
 `just ios` builds, boots an available iPhone simulator, installs `dev.zz.ios`, injects `ZZ_SOCKET`,
-and launches it. The first milestone is the simulator attached to a daemon on the same Mac. The
-device recipe proves signing, installation, and launch; a device-reachable remote transport is not
-yet implemented. `just ios-test` runs the hosted Swift policy suite on an available iPhone simulator;
-CI uses the same path.
+and launches it against a daemon on the same Mac. `just ios-device` signs, installs, and launches the
+app on a phone; the app then asks for one SSH host and can copy its generated public key or use a
+one-shot password. `just ios-test` runs the hosted Swift policy suite on an available iPhone
+simulator; CI uses the same path.
 
 # Boundaries and next work
 
-- Add phone-to-host transport and host selection before treating physical-device attach as usable.
+- Decide whether the one-host phone model needs a small host history without importing the desktop
+  fleet UI.
 - Design the iPad client as its own target instead of adding size-class branches here.
-- Decide native representations for Browser, Agent, Editor, and picker panes.
+- Decide native representations for Browser, Editor, and picker panes, and whether Agent panes need
+  more than the current supervision summary.
+- Add a push-capable background Agent inbox only if the product needs notifications while the app is
+  suspended or terminated; the current local-notification path deliberately makes no such claim.
 - Add one daemon-backed UI automation smoke for software-keyboard frame behavior once the fixture can
   launch deterministically in Xcode's test host.
 
-The C ABI smoke test creates and attaches a session, creates a second terminal pane, renders styled
-content, types through the raw-key path, kills the attached session, reattaches a survivor and
-recovers its viewport, then frees and reconnects against a real daemon.
-The Swift suite covers live and keyboard-sized grid calculation, stable reconnect selection,
-deduplicated layout updates, exclusive input ownership, and quantized zoom steps.
+The C ABI smoke test checks typed endpoint failure, creates and attaches a session, creates a second
+terminal pane, renders styled content, types through the raw-key path, exercises semantic selection,
+clipboard, and Agent symbols, kills the attached session, reattaches a survivor and recovers its
+viewport, then frees and reconnects against a real daemon. Rust unit tests cover Agent attention
+edges and SSH prompt and failure classification.
+
+The Swift suite covers host endpoint normalization, live and keyboard-sized grid calculation, stable
+reconnect selection, bounded backoff, deduplicated layout updates, exclusive input ownership,
+modifier locking, known deep-link routes, and quantized zoom steps.
 
 # Key files
 
 | File | Role |
 | --- | --- |
-| `clients/ios/project.yml` | Native iPhone target, bundle settings, and Rust pre-build phase. |
-| `clients/ios/Sources/ContentView.swift` | Session rail, pane grid, placeholders, and fullscreen shell. |
-| `clients/ios/Sources/Models.swift` | Input ownership and live/stable terminal geometry policies. |
-| `clients/ios/Sources/ZZStore.swift` | FFI connection, event drain, snapshots, actions, and published models. |
-| `clients/ios/Sources/TerminalSurface.swift` | UIKit terminal drawing and keyboard input. |
+| `clients/ios/project.yml` | Native iPhone target, URL scheme, bundle settings, and Rust pre-build phase. |
+| `clients/ios/Sources/ContentView.swift` | Host setup, reconnect state, Agent supervision, session rail, pane grid, and fullscreen shell. |
+| `clients/ios/Sources/Models.swift` | Host, reconnect, SSH prompt, Agent, modifier, deep-link, input, and terminal geometry policies. |
+| `clients/ios/Sources/ZZStore.swift` | Connection recovery, event drain, exact routing, snapshots, actions, and published models. |
+| `clients/ios/Sources/TerminalSurface.swift` | UIKit terminal drawing, selection, and keyboard input. |
 | `clients/ios/Sources/TerminalFrame.swift` | Caller-owned viewport planes exposed to the renderer. |
+| `clients/ios/Sources/SSHPromptBroker.swift` | Synchronous C callback bridge to native trust and secret prompts. |
+| `clients/ios/Sources/AgentNotifications.swift` | Local Agent attention notifications and exact-pane routing. |
+| `clients/ios/Sources/AppIntents.swift` | Open, reconnect, and Agent-attention App Shortcuts. |
 | `clients/ios/Tests/Unit/TerminalInteractionTests.swift` | Simulator policy regressions. |
 | `crates/zz-client-ffi/include/zz-client.h` | Stable C boundary consumed by Swift. |
 | `scripts/ios-sim.sh` | Simulator build, install, socket injection, and launch. |

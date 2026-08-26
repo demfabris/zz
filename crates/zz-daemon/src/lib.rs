@@ -13,6 +13,7 @@ use zz_protocol::{ProtocolError, ServerError};
 
 const STARTUP_REENTRY_CAPABILITY_PREFIX: &str = "zz-startup-reentry=";
 const STARTUP_REENTRY_ENVIRONMENT_VARIABLE: &str = "ZZ_STARTUP_REENTRY";
+#[cfg(feature = "daemon")]
 const TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE: &str = "ZZ_TMUX_EXECUTABLE";
 
 // iOS uses the in-process russh tunnel, leaving the spawned-ssh and askpass halves unreachable.
@@ -64,6 +65,8 @@ pub use lifecycle::{
     terminate_incompatible_daemon,
 };
 pub use paths::{default_mux_config, mux_config_candidates, mux_config_write_path};
+#[cfg(target_os = "ios")]
+pub use russh_client::ios_ssh_public_key;
 pub use transport::default_socket_path;
 
 /// Every failure a client can see from the daemon, whether it hosts one or only talks to one.

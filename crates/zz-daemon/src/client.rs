@@ -418,6 +418,20 @@ impl InteractiveClient {
         )
     }
 
+    pub fn connect_terminal_surface_endpoint_with_prompts(
+        endpoint: &Endpoint,
+        color_scheme: TerminalColorScheme,
+        prompts: Option<crate::askpass::SshPrompts>,
+    ) -> Result<Self, DaemonError> {
+        Self::connect_endpoint_with_prompts_and_terminal(
+            endpoint,
+            color_scheme,
+            prompts,
+            true,
+            true,
+        )
+    }
+
     fn connect_endpoint_with_prompts_and_terminal(
         endpoint: &Endpoint,
         color_scheme: TerminalColorScheme,

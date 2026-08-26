@@ -3,18 +3,24 @@
 use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, mpsc as std_mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc as std_mpsc,
+    },
     thread,
     time::Duration,
 };
 
 use parking_lot::Mutex;
 use russh::{
-    ChannelMsg, Disconnect,
-    client::{self, AuthResult},
+    ChannelMsg, Disconnect, MethodKind,
+    client::{self, AuthResult, KeyboardInteractiveAuthResponse},
     keys::{
-        Algorithm, PrivateKey, PrivateKeyWithHashAlg, PublicKey, check_known_hosts_path,
-        decode_secret_key, known_hosts::learn_known_hosts_path,
+        Algorithm, Error as KeyError, HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey,
+        check_known_hosts_path, decode_secret_key,
+        known_hosts::{known_host_keys_path, learn_known_hosts_path},
+        ssh_key::LineEnding,
     },
 };
 use tokio::{
@@ -34,9 +40,12 @@ use crate::{
     transport::TransportStream,
 };
 
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_mins(1);
 const OUTBOUND_QUEUE: usize = 64;
 const READ_CHUNK: usize = 32 * 1024;
+static SSH_IDENTITY_LOCK: Mutex<()> = Mutex::new(());
+static SSH_KNOWN_HOSTS_LOCK: Mutex<()> = Mutex::new(());
+static SSH_KNOWN_HOSTS_TEMP: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) struct RusshStream {
     to_remote: tokio_mpsc::Sender<Vec<u8>>,
@@ -154,7 +163,7 @@ impl RusshForward {
                 reason: format!("failed to spawn the ssh thread: {error}"),
             })?;
 
-        match ready_rx.recv_timeout(HANDSHAKE_TIMEOUT) {
+        match ready_rx.recv() {
             Ok(Ok(())) => Ok((
                 Self {
                     shutdown: Mutex::new(Some(shutdown_tx)),
@@ -170,7 +179,7 @@ impl RusshForward {
                 drop(shutdown_tx);
                 Err(EndpointError::SshFailed {
                     target,
-                    reason: "timed out establishing the ssh tunnel".to_owned(),
+                    reason: "the ssh connection worker stopped before it was ready".to_owned(),
                 })
             }
         }
@@ -279,19 +288,27 @@ async fn establish(
     let user = endpoint
         .user
         .clone()
-        .or_else(|| std::env::var("USER").ok())
         .ok_or_else(|| ssh_failed("ssh endpoints need an explicit user on iOS".to_owned()))?;
 
     let directory = ssh_directory().map_err(|error| ssh_failed(error.to_string()))?;
     let config = Arc::new(client::Config::default());
+    let host_key_failure = Arc::new(Mutex::new(None));
     let handler = TofuHandler {
         host: host.clone(),
         port,
         known_hosts: directory.join("known_hosts"),
+        prompts: prompts.clone(),
+        failure: Arc::clone(&host_key_failure),
     };
-    let mut session = client::connect(config, (host.as_str(), port), handler)
-        .await
-        .map_err(|error| ssh_failed(format!("connecting: {error}")))?;
+    let mut session = match client::connect(config, (host.as_str(), port), handler).await {
+        Ok(session) => session,
+        Err(error) => {
+            if host_key_failure.lock().is_some() {
+                return Err(EndpointError::HostKeyRejected { target });
+            }
+            return Err(ssh_failed(format!("connecting: {error}")));
+        }
+    };
 
     authenticate(&mut session, &user, &host, &directory, prompts, &ssh_failed).await?;
 
@@ -336,36 +353,122 @@ async fn authenticate(
         .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), None))
         .await
         .map_err(|error| ssh_failed(format!("public-key auth: {error}")))?;
-    if matches!(attempt, AuthResult::Success) {
+    let AuthResult::Failure {
+        mut remaining_methods,
+        ..
+    } = attempt
+    else {
         return Ok(());
-    }
+    };
 
     let Some(prompts) = prompts else {
-        return Err(ssh_failed(format!(
-            "the host rejected the zz identity; install {} in authorized_keys or retry from a \
-             window that can prompt for a password",
-            key_path.with_extension("pub").display(),
-        )));
+        return Err(EndpointError::AuthenticationFailed {
+            target: format!("ssh://{user}@{host}"),
+            reason: "the host rejected the zz identity; install the app's public key in authorized_keys or retry with a password".to_owned(),
+        });
     };
-    // Three tries mirrors OpenSSH before it gives up on a method.
+
     for _ in 0..3 {
-        let prompt = AskpassPrompt::new(AskpassMode::Answer, format!("{user}@{host}'s password: "));
-        match prompts.respond(&prompt) {
-            AskpassReply::Answer(password) => {
-                let attempt = session
-                    .authenticate_password(user, password.as_str())
-                    .await
-                    .map_err(|error| ssh_failed(format!("password auth: {error}")))?;
-                if matches!(attempt, AuthResult::Success) {
-                    return Ok(());
+        if !remaining_methods.contains(&MethodKind::KeyboardInteractive) {
+            break;
+        }
+        match authenticate_keyboard_interactive(session, user, host, &prompts, ssh_failed).await? {
+            None => return Ok(()),
+            Some(next) => remaining_methods = next,
+        }
+    }
+
+    if remaining_methods.contains(&MethodKind::Password) {
+        for _ in 0..3 {
+            let prompt =
+                AskpassPrompt::new(AskpassMode::Answer, format!("{user}@{host}'s password: "));
+            match prompts.respond(&prompt) {
+                AskpassReply::Answer(password) => {
+                    let attempt = session
+                        .authenticate_password(user, password.as_str())
+                        .await
+                        .map_err(|error| ssh_failed(format!("password auth: {error}")))?;
+                    match attempt {
+                        AuthResult::Success => return Ok(()),
+                        AuthResult::Failure {
+                            remaining_methods, ..
+                        } if !remaining_methods.contains(&MethodKind::Password) => break,
+                        AuthResult::Failure { .. } => {}
+                    }
                 }
-            }
-            AskpassReply::Cancel => {
-                return Err(ssh_failed("password prompt cancelled".to_owned()));
+                AskpassReply::Cancel => {
+                    return Err(EndpointError::AuthenticationFailed {
+                        target: format!("ssh://{user}@{host}"),
+                        reason: "password prompt cancelled".to_owned(),
+                    });
+                }
             }
         }
     }
-    Err(ssh_failed("authentication failed".to_owned()))
+    Err(EndpointError::AuthenticationFailed {
+        target: format!("ssh://{user}@{host}"),
+        reason: "the server rejected the available authentication methods".to_owned(),
+    })
+}
+
+async fn authenticate_keyboard_interactive(
+    session: &mut SshSession,
+    user: &str,
+    host: &str,
+    prompts: &SshPrompts,
+    ssh_failed: &impl Fn(String) -> EndpointError,
+) -> Result<Option<russh::MethodSet>, EndpointError> {
+    let mut response = session
+        .authenticate_keyboard_interactive_start(user, None::<String>)
+        .await
+        .map_err(|error| ssh_failed(format!("keyboard-interactive auth: {error}")))?;
+    loop {
+        match response {
+            KeyboardInteractiveAuthResponse::Success => return Ok(None),
+            KeyboardInteractiveAuthResponse::Failure {
+                remaining_methods, ..
+            } => return Ok(Some(remaining_methods)),
+            KeyboardInteractiveAuthResponse::InfoRequest {
+                name,
+                instructions,
+                prompts: questions,
+            } => {
+                let mut answers = Vec::with_capacity(questions.len());
+                for (index, question) in questions.into_iter().enumerate() {
+                    let context = if index == 0 {
+                        [
+                            name.as_str(),
+                            instructions.as_str(),
+                            question.prompt.as_str(),
+                        ]
+                        .into_iter()
+                        .filter(|part| !part.trim().is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                    } else {
+                        question.prompt
+                    };
+                    let prompt =
+                        AskpassPrompt::new(AskpassMode::Answer, context).with_echo(question.echo);
+                    match prompts.respond(&prompt) {
+                        AskpassReply::Answer(answer) => answers.push(answer.to_string()),
+                        AskpassReply::Cancel => {
+                            return Err(EndpointError::AuthenticationFailed {
+                                target: format!("ssh://{user}@{host}"),
+                                reason: "interactive authentication was cancelled".to_owned(),
+                            });
+                        }
+                    }
+                }
+                response = session
+                    .authenticate_keyboard_interactive_respond(answers)
+                    .await
+                    .map_err(|error| {
+                        ssh_failed(format!("keyboard-interactive response: {error}"))
+                    })?;
+            }
+        }
+    }
 }
 
 async fn probe_remote_socket(
@@ -483,6 +586,8 @@ struct TofuHandler {
     host: String,
     port: u16,
     known_hosts: PathBuf,
+    prompts: Option<SshPrompts>,
+    failure: Arc<Mutex<Option<String>>>,
 }
 
 impl client::Handler for TofuHandler {
@@ -494,63 +599,159 @@ impl client::Handler for TofuHandler {
     ) -> Result<bool, Self::Error> {
         match check_known_hosts_path(&self.host, self.port, server_public_key, &self.known_hosts) {
             Ok(true) => Ok(true),
-            Ok(false) => {
-                if let Err(error) = learn_known_hosts_path(
-                    &self.host,
-                    self.port,
-                    server_public_key,
-                    &self.known_hosts,
-                ) {
-                    log::error!(
-                        target: "zz_daemon::russh",
-                        "failed to record the host key for {}:{}: {error}",
-                        self.host,
-                        self.port,
-                    );
-                    return Ok(false);
-                }
-                log::warn!(
-                    target: "zz_daemon::russh",
-                    "trusted {}:{} on first use ({})",
-                    self.host,
-                    self.port,
-                    server_public_key.fingerprint(Default::default()),
-                );
-                Ok(true)
+            Ok(false) => Ok(self.confirm_host_key(server_public_key, None)),
+            Err(KeyError::KeyChanged { line }) => {
+                Ok(self.confirm_host_key(server_public_key, Some(line)))
             }
-            Err(error) => {
-                log::error!(
-                    target: "zz_daemon::russh",
-                    "HOST KEY MISMATCH for {}:{} — refusing to connect ({error}); \
-                     if the host was reinstalled, remove its line from {}",
-                    self.host,
-                    self.port,
-                    self.known_hosts.display(),
-                );
-                Ok(false)
-            }
+            Err(error) => Ok(self.reject(format!("could not read known hosts: {error}"))),
         }
     }
 }
 
-fn ssh_directory() -> io::Result<PathBuf> {
-    let directory = match std::env::var_os("ZZ_IOS_SSH_DIR") {
-        Some(directory) => PathBuf::from(directory),
-        None => {
-            let home = std::env::var_os("HOME")
-                .ok_or_else(|| io::Error::other("HOME is unset; cannot store ssh state"))?;
-            PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("zz")
-                .join("ssh")
+impl TofuHandler {
+    fn confirm_host_key(&mut self, key: &PublicKey, changed_line: Option<usize>) -> bool {
+        let fingerprint = key.fingerprint(HashAlg::default());
+        let warning = if changed_line.is_some() {
+            "WARNING: the saved SSH host key has changed."
+        } else {
+            "The authenticity of host has not been established."
+        };
+        let previous = changed_line
+            .and_then(|_| known_host_keys_path(&self.host, self.port, &self.known_hosts).ok())
+            .map(|keys| {
+                keys.into_iter()
+                    .filter_map(|(_, recorded)| {
+                        (recorded.algorithm() == key.algorithm()).then(|| {
+                            format!(
+                                "Saved fingerprint: {}",
+                                recorded.fingerprint(HashAlg::default())
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("\n{value}"))
+            .unwrap_or_default();
+        let prompt = AskpassPrompt::new(
+            AskpassMode::Answer,
+            format!(
+                "{warning}\n\n{}:{}\n{} key fingerprint: {fingerprint}{previous}\n\nTrust this host? (yes/no/[fingerprint])",
+                self.host,
+                self.port,
+                key.algorithm(),
+            ),
+        );
+        let Some(prompts) = self.prompts.as_ref() else {
+            return self.reject("host trust requires confirmation".to_owned());
+        };
+        match prompts.respond(&prompt) {
+            AskpassReply::Answer(answer) if answer.as_str() == "once" => true,
+            AskpassReply::Answer(answer) if matches!(answer.as_str(), "save" | "yes" | "y") => {
+                match save_host_key(&self.host, self.port, key, &self.known_hosts, changed_line) {
+                    Ok(()) => true,
+                    Err(error) => self.reject(format!("could not save the host key: {error}")),
+                }
+            }
+            AskpassReply::Answer(_) | AskpassReply::Cancel => {
+                self.reject("host key was rejected".to_owned())
+            }
         }
+    }
+
+    fn reject(&self, reason: String) -> bool {
+        *self.failure.lock() = Some(reason);
+        false
+    }
+}
+
+fn save_host_key(
+    host: &str,
+    port: u16,
+    key: &PublicKey,
+    path: &Path,
+    changed_line: Option<usize>,
+) -> io::Result<()> {
+    let _known_hosts = SSH_KNOWN_HOSTS_LOCK.lock();
+    if changed_line.is_some() {
+        let changed_lines = known_host_keys_path(host, port, path)
+            .map_err(|error| io::Error::other(error.to_string()))?
+            .into_iter()
+            .filter_map(|(line, recorded)| {
+                (recorded.algorithm() == key.algorithm()).then_some(line)
+            })
+            .collect::<std::collections::HashSet<_>>();
+        let current = std::fs::read_to_string(path)?;
+        let mut kept = current
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| (!changed_lines.contains(&(index + 1))).then_some(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !kept.is_empty() {
+            kept.push('\n');
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("known_hosts");
+        let temporary = path.with_file_name(format!(
+            ".{name}.{}.{}.tmp",
+            std::process::id(),
+            SSH_KNOWN_HOSTS_TEMP.fetch_add(1, Ordering::Relaxed),
+        ));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        file.write_all(kept.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path).inspect_err(|_| {
+            let _ = std::fs::remove_file(&temporary);
+        })?;
+    }
+    learn_known_hosts_path(host, port, key, path)
+        .map_err(|error| io::Error::other(error.to_string()))
+}
+
+fn ssh_directory() -> io::Result<PathBuf> {
+    let directory = if let Some(directory) = std::env::var_os("ZZ_IOS_SSH_DIR") {
+        PathBuf::from(directory)
+    } else {
+        let home = std::env::var_os("HOME")
+            .ok_or_else(|| io::Error::other("HOME is unset; cannot store ssh state"))?;
+        PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("zz")
+            .join("ssh")
     };
     std::fs::create_dir_all(&directory)?;
     Ok(directory)
 }
 
+pub fn ios_ssh_public_key() -> io::Result<String> {
+    let directory = ssh_directory()?;
+    let key = load_or_generate_key(&directory.join("id_ed25519"))?;
+    let public = key
+        .public_key()
+        .to_openssh()
+        .map_err(|error| io::Error::other(format!("encoding the public half: {error}")))?;
+    Ok(format!("{public} zz-iphone"))
+}
+
 fn load_or_generate_key(path: &Path) -> io::Result<PrivateKey> {
+    let _identity = SSH_IDENTITY_LOCK.lock();
+    load_or_generate_key_locked(path)
+}
+
+fn load_or_generate_key_locked(path: &Path) -> io::Result<PrivateKey> {
     let stored = match ios_keychain::load_identity() {
         Ok(stored) => stored,
         Err(KeychainError::Unavailable) => {
@@ -649,7 +850,7 @@ fn generate_identity() -> io::Result<(PrivateKey, Zeroizing<String>)> {
     let key = PrivateKey::random(&mut rand_core::OsRng, Algorithm::Ed25519)
         .map_err(|error| io::Error::other(format!("generating the zz identity: {error}")))?;
     let encoded = key
-        .to_openssh(Default::default())
+        .to_openssh(LineEnding::default())
         .map_err(|error| io::Error::other(format!("encoding the zz identity: {error}")))?;
     Ok((key, encoded))
 }

@@ -10736,6 +10736,8 @@ name = "zz-client-ffi"
 version = "0.2.0-beta.2"
 dependencies = [
  "rustix 1.1.4",
+ "serde_json",
+ "zeroize",
  "zz-client",
  "zz-daemon",
  "zz-protocol",

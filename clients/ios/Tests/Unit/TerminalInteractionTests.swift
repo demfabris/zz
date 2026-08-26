@@ -2,6 +2,17 @@ import XCTest
 @testable import ZZ
 
 final class TerminalInteractionTests: XCTestCase {
+    func testHostEndpointAcceptsShortAndExplicitSSHAddresses() {
+        XCTAssertEqual(ZZHostEndpoint.normalized("fab@mini"), "ssh://fab@mini")
+        XCTAssertEqual(
+            ZZHostEndpoint.normalized("  ssh://fab@mini:2222  "),
+            "ssh://fab@mini:2222"
+        )
+        XCTAssertNil(ZZHostEndpoint.normalized("mini"))
+        XCTAssertNil(ZZHostEndpoint.normalized("https://fab@mini"))
+        XCTAssertNil(ZZHostEndpoint.normalized("   "))
+    }
+
     func testLiveBoundsDriveGridAndRestoreExactly() throws {
         let cell = CGSize(width: 10, height: 17)
         let full = try XCTUnwrap(TerminalLayout(bounds: CGSize(width: 390, height: 714), cell: cell))
@@ -65,5 +76,45 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(TerminalFontZoom.crossedSteps(from: 0, to: 3), [1, 2, 3])
         XCTAssertEqual(TerminalFontZoom.crossedSteps(from: 3, to: 0), [2, 1, 0])
         XCTAssertEqual(TerminalFontZoom.crossedSteps(from: 3, to: 3), [])
+    }
+
+    func testReconnectBackoffCapsAtSixteenSeconds() {
+        XCTAssertEqual(
+            (1...7).map { ZZReconnectPolicy.delay(for: $0) },
+            [1, 2, 4, 8, 16, 16, 16]
+        )
+    }
+
+    func testModifierTapIsOneShotAndDoubleTapLocks() {
+        let control: UInt8 = 1 << 1
+        var state = TerminalModifierLatchState()
+
+        state.tap(control, at: 1)
+        XCTAssertTrue(state.contains(control))
+        XCTAssertFalse(state.isLocked(control))
+        state.consumeOneShot()
+        XCTAssertFalse(state.contains(control))
+
+        state.tap(control, at: 2)
+        state.tap(control, at: 2.2)
+        XCTAssertTrue(state.isLocked(control))
+        state.consumeOneShot()
+        XCTAssertTrue(state.contains(control))
+        state.tap(control, at: 3)
+        XCTAssertFalse(state.contains(control))
+    }
+
+    func testDeepLinksAcceptOnlyKnownRoutes() throws {
+        let paneURL = try XCTUnwrap(URL(string: "zz://pane?session=7&pane=11"))
+        XCTAssertEqual(
+            ZZNavigationTarget(url: paneURL),
+            ZZNavigationTarget(session: 7, pane: 11)
+        )
+
+        let attentionURL = try XCTUnwrap(URL(string: "zz://attention"))
+        XCTAssertEqual(ZZNavigationTarget(url: attentionURL)?.attention, true)
+
+        let unknownURL = try XCTUnwrap(URL(string: "zz://delete?session=7&pane=11"))
+        XCTAssertNil(ZZNavigationTarget(url: unknownURL))
     }
 }

@@ -13,6 +13,20 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "26.0"
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.zz.ios
+            CFBundleURLSchemes:
+              - zz
+        CFBundleDisplayName: zz
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSLocalNetworkUsageDescription: zz connects to your computer on the local network.
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     sources:
       - Sources
     settings:
@@ -23,12 +37,7 @@ targets:
         ARCHS: arm64
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Y4JYPG9TS8
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: zz
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
-        INFOPLIST_KEY_NSLocalNetworkUsageDescription: zz connects to your computer on the local network.
-        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        GENERATE_INFOPLIST_FILE: NO
         SWIFT_OBJC_BRIDGING_HEADER: Support/ZZ-Bridging-Header.h
         HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/../../crates/zz-client-ffi/include
         LIBRARY_SEARCH_PATHS: $(inherited) $(BUILT_PRODUCTS_DIR)

@@ -3783,7 +3783,7 @@ impl MuxClient {
                 first_seq,
                 items,
             } => self.apply_agent_updates(pane, first_seq, items),
-            CoreEvent::AgentStateChanged { pane } => {
+            CoreEvent::AgentStateChanged { pane, .. } => {
                 #[cfg(feature = "agent-pane")]
                 if let Some(state) = self.core.agent_state(pane).cloned() {
                     self.agent_events.states.push((pane, state));

@@ -114,9 +114,20 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: smoke <socket>\n");
         return 2;
     }
-    zz_client *client = zz_client_connect(argv[1]);
+    char connect_error[512];
+    zz_connect_failure connect_failure = ZZ_CONNECT_FAILURE_NONE;
+    zz_client *invalid = zz_client_connect_endpoint_interactive(
+        "", NULL, NULL, &connect_failure, connect_error, sizeof connect_error);
+    if (invalid != NULL || connect_error[0] == '\0' ||
+        connect_failure != ZZ_CONNECT_FAILURE_CONFIGURATION) {
+        fprintf(stderr,
+                "smoke: invalid endpoint did not report a configuration error\n");
+        return 1;
+    }
+    zz_client *client = zz_client_connect_endpoint(
+        argv[1], NULL, connect_error, sizeof connect_error);
     if (client == NULL) {
-        fprintf(stderr, "smoke: connect failed\n");
+        fprintf(stderr, "smoke: connect failed: %s\n", connect_error);
         return 1;
     }
     struct pollfd initial_wake = {
@@ -204,6 +215,24 @@ int main(int argc, char **argv) {
     if (!viewport_complete) {
         fprintf(stderr, "smoke: graphical viewport contract is incomplete\n");
         return 1;
+    }
+    if (!zz_client_terminal_selection(client, pane, 0, 0, 0, 1, false) ||
+        !zz_client_terminal_selection(client, pane, 1, 1, 0, 1, false) ||
+        !zz_client_terminal_selection(client, pane, 2, 1, 0, 1, false) ||
+        !zz_client_copy_selection(client, pane, 1)) {
+        fprintf(stderr, "smoke: terminal selection contract failed\n");
+        return 1;
+    }
+    zz_agent_state *agent = zz_client_agent_state_acquire(client, pane);
+    if (agent != NULL) {
+        (void)zz_agent_state_phase(agent);
+        (void)zz_agent_attention_status(agent);
+        zz_agent_state_release(agent);
+    }
+    zz_clipboard *clipboard = zz_client_clipboard_next(client);
+    if (clipboard != NULL) {
+        (void)zz_clipboard_text(clipboard);
+        zz_clipboard_release(clipboard);
     }
 
     if (!zz_client_send_text(client, pane, TYPED)) {

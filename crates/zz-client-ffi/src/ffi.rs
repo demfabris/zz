@@ -2,25 +2,35 @@
 
 use std::{
     collections::VecDeque,
-    ffi::{CStr, c_char, c_int},
+    ffi::{CStr, c_char, c_int, c_void},
     os::{fd::AsRawFd, unix::net::UnixStream},
     path::Path,
     sync::{Arc, Mutex, PoisonError},
     thread,
 };
 
-use zz_client::{ClientCore, CoreEvent, Outbound, ViewportDamage};
-use zz_daemon::InteractiveClient;
+#[cfg(target_os = "ios")]
+use zeroize::{Zeroize, Zeroizing};
+use zz_client::{
+    AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, Outbound, ViewportDamage,
+    agent_attention_status,
+};
+#[cfg(target_os = "ios")]
+use zz_daemon::{AskpassPromptKind, AskpassReply, SshPrompts};
+use zz_daemon::{DaemonError, Endpoint, EndpointError, InteractiveClient};
 use zz_protocol::{
-    CommandInvocation, InputMessage, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot,
-    ProtocolMessage, SessionId, SessionSnapshot, WindowSnapshot,
+    AgentConnectionPhase, AgentPaneWire, CommandInvocation, InputMessage, MuxSnapshot, PaneId,
+    PaneKindSnapshot, PaneSnapshot, ProtocolMessage, SessionId, SessionSnapshot, WindowSnapshot,
 };
 use zz_terminal::{
-    CellWidth, CursorStyle, Glyph, KeyAction, KeyCode, KeyInput, Modifiers, PackedStyle,
-    TerminalViewAction, TerminalViewport,
+    CellWidth, ClipboardTarget, CursorStyle, Glyph, KeyAction, KeyCode, KeyInput, Modifiers,
+    PackedStyle, PointerCellEvent, TerminalColorScheme, TerminalViewAction, TerminalViewport,
 };
 
 const EVENT_DAMAGE_ALL: u32 = 1;
+const EVENT_AGENT_REQUEST: u32 = 1 << 1;
+const EVENT_AGENT_DONE: u32 = 1 << 2;
+const EVENT_AGENT_FAILED: u32 = 1 << 3;
 
 /// Event kinds mirrored in `include/zz-client.h`; values are ABI.
 #[repr(u32)]
@@ -37,11 +47,13 @@ pub enum ZzEventKind {
     Other = 8,
     AppearanceChanged = 9,
     Disconnected = 10,
+    AgentStateChanged = 11,
+    Clipboard = 12,
 }
 
 /// One drained event; `pane` is zero when the kind carries no pane.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ZzEvent {
     pub kind: ZzEventKind,
     pub flags: u32,
@@ -60,6 +72,85 @@ pub enum ZzPaneKind {
     Agent = 3,
     Editor = 4,
 }
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZzAgentPhase {
+    #[default]
+    Starting = 0,
+    Ready = 1,
+    Running = 2,
+    AwaitingPermission = 3,
+    Failed = 4,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZzAgentAttention {
+    #[default]
+    Idle = 0,
+    Working = 1,
+    NeedsInput = 2,
+    Failed = 3,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZzAgentPermissionKind {
+    #[default]
+    Unknown = 0,
+    AllowOnce = 1,
+    AllowAlways = 2,
+    RejectOnce = 3,
+    RejectAlways = 4,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZzConnectFailure {
+    #[default]
+    None = 0,
+    Retryable = 1,
+    Authentication = 2,
+    HostKey = 3,
+    Configuration = 4,
+    Incompatible = 5,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZzSshPromptKind {
+    #[default]
+    Secret = 0,
+    HostKey = 1,
+    Confirmation = 2,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ZzSshPromptReply {
+    #[default]
+    Cancel = 0,
+    Answer = 1,
+    TrustOnce = 2,
+    TrustAndSave = 3,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ZzSshPrompt {
+    pub kind: ZzSshPromptKind,
+    pub title: ZzBytes,
+    pub message: ZzBytes,
+    pub echo: bool,
+}
+
+pub type ZzSshPromptCallback = unsafe extern "C" fn(
+    context: *mut c_void,
+    prompt: *const ZzSshPrompt,
+    response: *mut c_char,
+    response_capacity: usize,
+) -> ZzSshPromptReply;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -100,6 +191,7 @@ pub struct ZzClient {
     client: Arc<InteractiveClient>,
     core: Arc<Mutex<ClientCore>>,
     events: Arc<Mutex<VecDeque<ZzEvent>>>,
+    clipboards: Arc<Mutex<VecDeque<ZzClipboard>>>,
     wake_read: UnixStream,
     reader: Option<thread::JoinHandle<()>>,
 }
@@ -107,6 +199,28 @@ pub struct ZzClient {
 pub struct ZzMuxSnapshot {
     snapshot: Arc<MuxSnapshot>,
     attached: Option<SessionId>,
+}
+
+pub struct ZzAgentState {
+    wire: AgentPaneWire,
+    permission: Option<ZzAgentPermission>,
+}
+
+struct ZzAgentPermission {
+    title: String,
+    options: Vec<ZzAgentPermissionOption>,
+}
+
+struct ZzAgentPermissionOption {
+    id: String,
+    name: String,
+    kind: ZzAgentPermissionKind,
+}
+
+pub struct ZzClipboard {
+    pane: u64,
+    request_id: u64,
+    text: String,
 }
 
 /// A caller-owned viewport snapshot; cheap to acquire (shared immutable
@@ -152,6 +266,54 @@ fn pane_kind(kind: &PaneKindSnapshot) -> ZzPaneKind {
     }
 }
 
+fn agent_state(wire: AgentPaneWire) -> ZzAgentState {
+    let permission = wire
+        .pending_permission
+        .as_ref()
+        .and_then(|permission| serde_json::from_str::<serde_json::Value>(&permission.payload).ok())
+        .and_then(|payload| {
+            let tool_call = payload.get("toolCall")?;
+            let title = tool_call
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| {
+                    tool_call
+                        .get("toolCallId")
+                        .and_then(serde_json::Value::as_str)
+                })
+                .unwrap_or("Tool approval")
+                .to_owned();
+            let options = payload
+                .get("options")?
+                .as_array()?
+                .iter()
+                .take(32)
+                .filter_map(|option| {
+                    let id = option.get("optionId")?.as_str()?.to_owned();
+                    let name = option
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or(&id)
+                        .to_owned();
+                    let kind = match option
+                        .get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                    {
+                        "allow_once" => ZzAgentPermissionKind::AllowOnce,
+                        "allow_always" => ZzAgentPermissionKind::AllowAlways,
+                        "reject_once" => ZzAgentPermissionKind::RejectOnce,
+                        "reject_always" => ZzAgentPermissionKind::RejectAlways,
+                        _ => ZzAgentPermissionKind::Unknown,
+                    };
+                    Some(ZzAgentPermissionOption { id, name, kind })
+                })
+                .collect();
+            Some(ZzAgentPermission { title, options })
+        });
+    ZzAgentState { wire, permission }
+}
+
 fn key_code(code: u32, codepoint: u32, function: u8) -> Option<KeyCode> {
     Some(match code {
         0 => KeyCode::Character(char::from_u32(codepoint)?),
@@ -184,7 +346,11 @@ fn key_action(action: u32) -> Option<KeyAction> {
     }
 }
 
-fn queue_event(events: &Mutex<VecDeque<ZzEvent>>, event: &CoreEvent) {
+fn queue_event(
+    events: &Mutex<VecDeque<ZzEvent>>,
+    clipboards: &Mutex<VecDeque<ZzClipboard>>,
+    event: &CoreEvent,
+) {
     let (kind, flags, pane, row_start, row_end) = match event {
         CoreEvent::HelloReceived => (ZzEventKind::Hello, 0, 0, 0, 0),
         CoreEvent::Attached { .. } => (ZzEventKind::Attached, 0, 0, 0, 0),
@@ -210,6 +376,28 @@ fn queue_event(events: &Mutex<VecDeque<ZzEvent>>, event: &CoreEvent) {
         CoreEvent::AppearanceChanged => (ZzEventKind::AppearanceChanged, 0, 0, 0, 0),
         CoreEvent::Detached { .. } => (ZzEventKind::Detached, 0, 0, 0, 0),
         CoreEvent::ServerStopping => (ZzEventKind::ServerStopping, 0, 0, 0, 0),
+        CoreEvent::AgentStateChanged { pane, attention } => {
+            let flags = match attention {
+                Some(AgentAttentionEdge::Request) => EVENT_AGENT_REQUEST,
+                Some(AgentAttentionEdge::Done) => EVENT_AGENT_DONE,
+                Some(AgentAttentionEdge::Failed) => EVENT_AGENT_FAILED,
+                None => 0,
+            };
+            (ZzEventKind::AgentStateChanged, flags, pane.0, 0, 0)
+        }
+        CoreEvent::Clipboard {
+            pane,
+            request_id,
+            text,
+            ..
+        } => {
+            lock(clipboards).push_back(ZzClipboard {
+                pane: pane.0,
+                request_id: *request_id,
+                text: text.clone(),
+            });
+            (ZzEventKind::Clipboard, 0, pane.0, 0, 0)
+        }
         _ => (ZzEventKind::Other, 0, 0, 0, 0),
     };
     lock(events).push_back(ZzEvent {
@@ -241,11 +429,13 @@ fn spawn_reader(
     client: &Arc<InteractiveClient>,
     core: &Arc<Mutex<ClientCore>>,
     events: &Arc<Mutex<VecDeque<ZzEvent>>>,
+    clipboards: &Arc<Mutex<VecDeque<ZzClipboard>>>,
     wake_write: UnixStream,
 ) -> std::io::Result<thread::JoinHandle<()>> {
     let client = Arc::clone(client);
     let core = Arc::clone(core);
     let events = Arc::clone(events);
+    let clipboards = Arc::clone(clipboards);
     thread::Builder::new()
         .name("zz-client-ffi-reader".to_owned())
         .spawn(move || {
@@ -261,7 +451,7 @@ fn spawn_reader(
                 }
                 let mut queued = false;
                 while let Some(event) = guard.poll_event() {
-                    queue_event(&events, &event);
+                    queue_event(&events, &clipboards, &event);
                     queued = true;
                 }
                 drop(guard);
@@ -289,6 +479,228 @@ impl Drop for ZzClient {
     }
 }
 
+fn start_client(client: InteractiveClient) -> Result<*mut ZzClient, String> {
+    let (wake_read, wake_write) = UnixStream::pair().map_err(|error| error.to_string())?;
+    wake_read
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    wake_write
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let client = Arc::new(client);
+    let core = Arc::new(Mutex::new(ClientCore::new()));
+    lock(&core).handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
+    let events = Arc::new(Mutex::new(VecDeque::new()));
+    let clipboards = Arc::new(Mutex::new(VecDeque::new()));
+    let mut queued = false;
+    {
+        let mut guard = lock(&core);
+        while let Some(event) = guard.poll_event() {
+            queue_event(&events, &clipboards, &event);
+            queued = true;
+        }
+    }
+    if queued {
+        wake_event_fd(&wake_write).map_err(|error| error.to_string())?;
+    }
+    let reader = spawn_reader(&client, &core, &events, &clipboards, wake_write)
+        .map_err(|error| error.to_string())?;
+    Ok(Box::into_raw(Box::new(ZzClient {
+        client,
+        core,
+        events,
+        clipboards,
+        wake_read,
+        reader: Some(reader),
+    })))
+}
+
+unsafe fn write_c_string(value: &str, buffer: *mut c_char, capacity: usize) -> usize {
+    if buffer.is_null() || capacity == 0 {
+        return value.len();
+    }
+    let mut written = value.len().min(capacity - 1);
+    while !value.is_char_boundary(written) {
+        written -= 1;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(value.as_ptr(), buffer.cast::<u8>(), written);
+        *buffer.add(written) = 0;
+    }
+    value.len()
+}
+
+struct ConnectFailure {
+    kind: ZzConnectFailure,
+    message: String,
+}
+
+impl ConnectFailure {
+    fn configuration(message: impl Into<String>) -> Self {
+        Self {
+            kind: ZzConnectFailure::Configuration,
+            message: message.into(),
+        }
+    }
+}
+
+fn classify_connect_error(error: &DaemonError) -> ZzConnectFailure {
+    if matches!(error, DaemonError::IncompatibleDaemon { .. }) {
+        return ZzConnectFailure::Incompatible;
+    }
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if let Some(endpoint) = current.downcast_ref::<EndpointError>() {
+            return match endpoint {
+                EndpointError::HostKeyRejected { .. } => ZzConnectFailure::HostKey,
+                EndpointError::AuthenticationFailed { .. } => ZzConnectFailure::Authentication,
+                EndpointError::UriParse { .. }
+                | EndpointError::RemoteBinaryMissing { .. }
+                | EndpointError::InvalidRemoteSocket(_)
+                | EndpointError::UnsupportedPlatform => ZzConnectFailure::Configuration,
+                EndpointError::RemoteProtocolMismatch { .. }
+                | EndpointError::RemoteProtocolUnknown { .. } => ZzConnectFailure::Incompatible,
+                EndpointError::SshSpawn { .. }
+                | EndpointError::ProbeFailure { .. }
+                | EndpointError::SshFailed { .. }
+                | EndpointError::RemoteDaemonUnavailable { .. }
+                | EndpointError::ForwardExited { .. }
+                | EndpointError::ForwardTimeout { .. }
+                | EndpointError::ForwardIo { .. } => ZzConnectFailure::Retryable,
+            };
+        }
+        if matches!(
+            current.downcast_ref::<zz_protocol::ProtocolError>(),
+            Some(zz_protocol::ProtocolError::VersionMismatch { .. })
+        ) {
+            return ZzConnectFailure::Incompatible;
+        }
+        source = current.source();
+    }
+    ZzConnectFailure::Retryable
+}
+
+fn connect_endpoint(
+    endpoint: &str,
+    prompts: Option<zz_daemon::SshPrompts>,
+) -> Result<*mut ZzClient, ConnectFailure> {
+    let endpoint = Endpoint::parse(endpoint)
+        .map_err(|error| ConnectFailure::configuration(error.to_string()))?;
+    let client = InteractiveClient::connect_terminal_surface_endpoint_with_prompts(
+        &endpoint,
+        TerminalColorScheme::Dark,
+        prompts,
+    )
+    .map_err(|error| ConnectFailure {
+        kind: classify_connect_error(&error),
+        message: error.to_string(),
+    })?;
+    start_client(client).map_err(|message| ConnectFailure {
+        kind: ZzConnectFailure::Retryable,
+        message,
+    })
+}
+
+#[cfg(target_os = "ios")]
+unsafe fn password_prompts(password: *const c_char) -> Result<Option<SshPrompts>, &'static str> {
+    let password = if password.is_null() {
+        None
+    } else {
+        let password = unsafe { CStr::from_ptr(password) }
+            .to_str()
+            .map_err(|_| "Password must be valid UTF-8.")?;
+        Some(Zeroizing::new(password.to_owned()))
+    };
+    Ok(Some(SshPrompts::new(
+        Path::new("").to_owned(),
+        move |prompt| match prompt.kind() {
+            AskpassPromptKind::HostKey => AskpassReply::answer("save"),
+            AskpassPromptKind::Secret | AskpassPromptKind::AgentConfirm => {
+                password.as_ref().map_or(AskpassReply::Cancel, |password| {
+                    AskpassReply::answer(password.as_str())
+                })
+            }
+        },
+    )))
+}
+
+#[cfg(not(target_os = "ios"))]
+unsafe fn password_prompts(
+    password: *const c_char,
+) -> Result<Option<zz_daemon::SshPrompts>, &'static str> {
+    if password.is_null() {
+        Ok(None)
+    } else {
+        Err("Password authentication through this API is supported only on iOS.")
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn interactive_prompts(
+    callback: Option<ZzSshPromptCallback>,
+    context: *mut c_void,
+) -> Option<SshPrompts> {
+    let callback = callback?;
+    let context = context as usize;
+    Some(SshPrompts::new(Path::new("").to_owned(), move |prompt| {
+        let (kind, title) = match prompt.kind() {
+            AskpassPromptKind::Secret => (
+                ZzSshPromptKind::Secret,
+                if prompt.echo() {
+                    "SSH challenge"
+                } else {
+                    "SSH authentication"
+                },
+            ),
+            AskpassPromptKind::HostKey => (ZzSshPromptKind::HostKey, "Verify SSH host"),
+            AskpassPromptKind::AgentConfirm => {
+                (ZzSshPromptKind::Confirmation, "Confirm SSH request")
+            }
+        };
+        let value = ZzSshPrompt {
+            kind,
+            title: ZzBytes::new(title),
+            message: ZzBytes::new(prompt.text()),
+            echo: prompt.echo(),
+        };
+        let mut response = [0_i8; 4096];
+        let reply = unsafe {
+            callback(
+                context as *mut c_void,
+                &value,
+                response.as_mut_ptr(),
+                response.len(),
+            )
+        };
+        let answer = match reply {
+            ZzSshPromptReply::Cancel => AskpassReply::Cancel,
+            ZzSshPromptReply::TrustOnce => AskpassReply::answer("once"),
+            ZzSshPromptReply::TrustAndSave => AskpassReply::answer("save"),
+            ZzSshPromptReply::Answer => {
+                let length = response
+                    .iter()
+                    .position(|byte| *byte == 0)
+                    .unwrap_or(response.len());
+                let bytes = response[..length]
+                    .iter()
+                    .map(|byte| *byte as u8)
+                    .collect::<Vec<_>>();
+                String::from_utf8(bytes).map_or(AskpassReply::Cancel, AskpassReply::answer)
+            }
+        };
+        response.zeroize();
+        answer
+    }))
+}
+
+#[cfg(not(target_os = "ios"))]
+fn interactive_prompts(
+    _callback: Option<ZzSshPromptCallback>,
+    _context: *mut c_void,
+) -> Option<zz_daemon::SshPrompts> {
+    None
+}
+
 /// Connect to a zz daemon socket and start the reader thread.
 ///
 /// # Safety
@@ -307,37 +719,91 @@ pub unsafe extern "C" fn zz_client_connect(socket_path: *const c_char) -> *mut Z
     let Ok(client) = InteractiveClient::connect(Path::new(path)) else {
         return std::ptr::null_mut();
     };
-    let Ok((wake_read, wake_write)) = UnixStream::pair() else {
-        return std::ptr::null_mut();
-    };
-    if wake_read.set_nonblocking(true).is_err() || wake_write.set_nonblocking(true).is_err() {
-        return std::ptr::null_mut();
+    start_client(client).unwrap_or(std::ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_connect_endpoint(
+    endpoint: *const c_char,
+    password: *const c_char,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> *mut ZzClient {
+    unsafe {
+        write_c_string("", error, error_capacity);
     }
-    let client = Arc::new(client);
-    let core = Arc::new(Mutex::new(ClientCore::new()));
-    lock(&core).handle_message(ProtocolMessage::ServerHello(client.server_hello().clone()));
-    let events = Arc::new(Mutex::new(VecDeque::new()));
-    let mut queued = false;
-    {
-        let mut guard = lock(&core);
-        while let Some(event) = guard.poll_event() {
-            queue_event(&events, &event);
-            queued = true;
+    let result = (|| {
+        if endpoint.is_null() {
+            return Err("Endpoint is required.".to_owned());
+        }
+        let endpoint = unsafe { CStr::from_ptr(endpoint) }
+            .to_str()
+            .map_err(|_| "Endpoint must be valid UTF-8.".to_owned())?;
+        let prompts = unsafe { password_prompts(password) }.map_err(str::to_owned)?;
+        connect_endpoint(endpoint, prompts).map_err(|error| error.message)
+    })();
+    match result {
+        Ok(client) => client,
+        Err(message) => {
+            unsafe {
+                write_c_string(&message, error, error_capacity);
+            }
+            std::ptr::null_mut()
         }
     }
-    if queued && wake_event_fd(&wake_write).is_err() {
-        return std::ptr::null_mut();
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_connect_endpoint_interactive(
+    endpoint: *const c_char,
+    callback: Option<ZzSshPromptCallback>,
+    context: *mut c_void,
+    failure: *mut ZzConnectFailure,
+    error: *mut c_char,
+    error_capacity: usize,
+) -> *mut ZzClient {
+    unsafe {
+        write_c_string("", error, error_capacity);
+        if let Some(failure) = failure.as_mut() {
+            *failure = ZzConnectFailure::None;
+        }
     }
-    let Ok(reader) = spawn_reader(&client, &core, &events, wake_write) else {
-        return std::ptr::null_mut();
-    };
-    Box::into_raw(Box::new(ZzClient {
-        client,
-        core,
-        events,
-        wake_read,
-        reader: Some(reader),
-    }))
+    let result = (|| {
+        if endpoint.is_null() {
+            return Err(ConnectFailure::configuration("Endpoint is required."));
+        }
+        let endpoint = unsafe { CStr::from_ptr(endpoint) }
+            .to_str()
+            .map_err(|_| ConnectFailure::configuration("Endpoint must be valid UTF-8."))?;
+        connect_endpoint(endpoint, interactive_prompts(callback, context))
+    })();
+    match result {
+        Ok(client) => client,
+        Err(connect_error) => {
+            unsafe {
+                if let Some(failure) = failure.as_mut() {
+                    *failure = connect_error.kind;
+                }
+                write_c_string(&connect_error.message, error, error_capacity);
+            }
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_ssh_public_key(buffer: *mut c_char, capacity: usize) -> usize {
+    #[cfg(target_os = "ios")]
+    {
+        match zz_daemon::ios_ssh_public_key() {
+            Ok(public_key) => unsafe { write_c_string(&public_key, buffer, capacity) },
+            Err(_) => unsafe { write_c_string("", buffer, capacity) },
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    unsafe {
+        write_c_string("", buffer, capacity)
+    }
 }
 
 /// Release a handle returned by [`zz_client_connect`].
@@ -535,6 +1001,61 @@ pub unsafe extern "C" fn zz_client_scroll_lines(
         .send_input(InputMessage::TerminalView {
             pane: PaneId(pane),
             action: TerminalViewAction::ScrollLines(lines),
+        })
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_terminal_selection(
+    client: *mut ZzClient,
+    pane: u64,
+    phase: u32,
+    column: u16,
+    row: u16,
+    click_count: u8,
+    rectangle: bool,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    let pointer = PointerCellEvent {
+        column,
+        row,
+        click_count,
+        rectangle,
+    };
+    let action = match phase {
+        0 => TerminalViewAction::SelectionPress(pointer),
+        1 => TerminalViewAction::SelectionDrag(pointer),
+        2 => TerminalViewAction::SelectionRelease(pointer),
+        _ => return false,
+    };
+    client
+        .client
+        .send_input(InputMessage::TerminalView {
+            pane: PaneId(pane),
+            action,
+        })
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_copy_selection(
+    client: *mut ZzClient,
+    pane: u64,
+    request_id: u64,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client
+        .client
+        .send_input(InputMessage::TerminalView {
+            pane: PaneId(pane),
+            action: TerminalViewAction::CopySelection {
+                request_id,
+                target: ClipboardTarget::Clipboard,
+            },
         })
         .is_ok()
 }
@@ -744,6 +1265,226 @@ pub unsafe extern "C" fn zz_client_terminal_panes(
     total
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_state_acquire(
+    client: *const ZzClient,
+    pane: u64,
+) -> *mut ZzAgentState {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    lock(&client.core)
+        .agent_state(PaneId(pane))
+        .cloned()
+        .map_or(std::ptr::null_mut(), |state| {
+            Box::into_raw(Box::new(agent_state(state)))
+        })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_state_release(state: *mut ZzAgentState) {
+    if !state.is_null() {
+        drop(unsafe { Box::from_raw(state) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_state_phase(state: *const ZzAgentState) -> ZzAgentPhase {
+    let Some(state) = (unsafe { state.as_ref() }) else {
+        return ZzAgentPhase::Starting;
+    };
+    match &state.wire.phase {
+        AgentConnectionPhase::Starting => ZzAgentPhase::Starting,
+        AgentConnectionPhase::Ready => ZzAgentPhase::Ready,
+        AgentConnectionPhase::Running => ZzAgentPhase::Running,
+        AgentConnectionPhase::AwaitingPermission => ZzAgentPhase::AwaitingPermission,
+        AgentConnectionPhase::Failed { .. } => ZzAgentPhase::Failed,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_attention_status(state: *const ZzAgentState) -> ZzAgentAttention {
+    let Some(state) = (unsafe { state.as_ref() }) else {
+        return ZzAgentAttention::Idle;
+    };
+    match agent_attention_status(&state.wire) {
+        AgentAttentionStatus::Idle => ZzAgentAttention::Idle,
+        AgentAttentionStatus::Working => ZzAgentAttention::Working,
+        AgentAttentionStatus::NeedsInput => ZzAgentAttention::NeedsInput,
+        AgentAttentionStatus::Failed => ZzAgentAttention::Failed,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_queued_prompts(state: *const ZzAgentState) -> u32 {
+    unsafe { state.as_ref() }.map_or(0, |state| state.wire.queued_prompts)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_session_id(state: *const ZzAgentState) -> ZzBytes {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.session_id.as_deref())
+        .map_or(ZzBytes::EMPTY, ZzBytes::new)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_title(state: *const ZzAgentState) -> ZzBytes {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.title.as_deref())
+        .map_or(ZzBytes::EMPTY, ZzBytes::new)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_error(state: *const ZzAgentState) -> ZzBytes {
+    let Some(state) = (unsafe { state.as_ref() }) else {
+        return ZzBytes::EMPTY;
+    };
+    state
+        .wire
+        .error
+        .as_deref()
+        .or(match &state.wire.phase {
+            AgentConnectionPhase::Failed { message } => Some(message.as_str()),
+            _ => None,
+        })
+        .map_or(ZzBytes::EMPTY, ZzBytes::new)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_has_permission(state: *const ZzAgentState) -> bool {
+    unsafe { state.as_ref() }.is_some_and(|state| state.wire.pending_permission.is_some())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_permission_request_id(state: *const ZzAgentState) -> u64 {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.pending_permission.as_ref())
+        .map_or(0, |permission| permission.request_id)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_permission_payload(state: *const ZzAgentState) -> ZzBytes {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.pending_permission.as_ref())
+        .map_or(ZzBytes::EMPTY, |permission| {
+            ZzBytes::new(&permission.payload)
+        })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_permission_title(state: *const ZzAgentState) -> ZzBytes {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.permission.as_ref())
+        .map_or(ZzBytes::EMPTY, |permission| ZzBytes::new(&permission.title))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_permission_option_count(state: *const ZzAgentState) -> usize {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.permission.as_ref())
+        .map_or(0, |permission| permission.options.len())
+}
+
+fn permission_option(state: &ZzAgentState, option: usize) -> Option<&ZzAgentPermissionOption> {
+    state.permission.as_ref()?.options.get(option)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_permission_option_id(
+    state: *const ZzAgentState,
+    option: usize,
+) -> ZzBytes {
+    unsafe { state.as_ref() }
+        .and_then(|state| permission_option(state, option))
+        .map_or(ZzBytes::EMPTY, |option| ZzBytes::new(&option.id))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_permission_option_name(
+    state: *const ZzAgentState,
+    option: usize,
+) -> ZzBytes {
+    unsafe { state.as_ref() }
+        .and_then(|state| permission_option(state, option))
+        .map_or(ZzBytes::EMPTY, |option| ZzBytes::new(&option.name))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_permission_option_kind(
+    state: *const ZzAgentState,
+    option: usize,
+) -> ZzAgentPermissionKind {
+    unsafe { state.as_ref() }
+        .and_then(|state| permission_option(state, option))
+        .map_or(ZzAgentPermissionKind::Unknown, |option| option.kind)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_has_git(state: *const ZzAgentState) -> bool {
+    unsafe { state.as_ref() }.is_some_and(|state| state.wire.git.is_some())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_git_branch(state: *const ZzAgentState) -> ZzBytes {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.git.as_ref())
+        .and_then(|git| git.branch.as_deref())
+        .map_or(ZzBytes::EMPTY, ZzBytes::new)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_git_changed_files(state: *const ZzAgentState) -> u32 {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.git.as_ref())
+        .map_or(0, |git| git.changed_files)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_git_additions(state: *const ZzAgentState) -> u32 {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.git.as_ref())
+        .map_or(0, |git| git.additions)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_agent_git_deletions(state: *const ZzAgentState) -> u32 {
+    unsafe { state.as_ref() }
+        .and_then(|state| state.wire.git.as_ref())
+        .map_or(0, |git| git.deletions)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_respond_permission(
+    client: *mut ZzClient,
+    pane: u64,
+    request_id: u64,
+    option_id: *const c_char,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    let option_id = if option_id.is_null() {
+        None
+    } else {
+        let Ok(option_id) = unsafe { CStr::from_ptr(option_id) }.to_str() else {
+            return false;
+        };
+        Some(option_id.to_owned())
+    };
+    client
+        .client
+        .agent_respond_permission(PaneId(pane), request_id, option_id)
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_cancel(client: *mut ZzClient, pane: u64) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client.client.agent_cancel(PaneId(pane)).is_ok()
+}
+
 /// Pop the next queued event into `out`; false when the queue is empty.
 ///
 /// # Safety
@@ -761,6 +1502,40 @@ pub unsafe extern "C" fn zz_client_next_event(client: *mut ZzClient, out: *mut Z
     };
     unsafe { out.write(event) };
     true
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_clipboard_next(client: *mut ZzClient) -> *mut ZzClipboard {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    lock(&client.clipboards)
+        .pop_front()
+        .map_or(std::ptr::null_mut(), |clipboard| {
+            Box::into_raw(Box::new(clipboard))
+        })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_clipboard_release(clipboard: *mut ZzClipboard) {
+    if !clipboard.is_null() {
+        drop(unsafe { Box::from_raw(clipboard) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_clipboard_pane(clipboard: *const ZzClipboard) -> u64 {
+    unsafe { clipboard.as_ref() }.map_or(0, |clipboard| clipboard.pane)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_clipboard_request_id(clipboard: *const ZzClipboard) -> u64 {
+    unsafe { clipboard.as_ref() }.map_or(0, |clipboard| clipboard.request_id)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_clipboard_text(clipboard: *const ZzClipboard) -> ZzBytes {
+    unsafe { clipboard.as_ref() }.map_or(ZzBytes::EMPTY, |clipboard| ZzBytes::new(&clipboard.text))
 }
 
 /// Acquire the retained viewport for a pane, or null when none is held. The
@@ -1009,5 +1784,73 @@ mod tests {
 
         assert!(decode(&viewport, 3).is_empty());
         assert_eq!(String::from_utf8(decode(&viewport, 4)).unwrap(), "界");
+    }
+
+    #[test]
+    fn agent_permission_payload_becomes_typed_c_state() {
+        let state = agent_state(AgentPaneWire {
+            phase: AgentConnectionPhase::AwaitingPermission,
+            pending_permission: Some(zz_protocol::AgentPermissionWire {
+                request_id: 41,
+                payload: serde_json::json!({
+                    "toolCall": {
+                        "toolCallId": "tool-1",
+                        "title": "Run cargo test"
+                    },
+                    "options": [
+                        {
+                            "optionId": "allow-once",
+                            "name": "Allow once",
+                            "kind": "allow_once"
+                        },
+                        {
+                            "optionId": "reject-once",
+                            "name": "Reject",
+                            "kind": "reject_once"
+                        }
+                    ]
+                })
+                .to_string(),
+            }),
+            ..AgentPaneWire::default()
+        });
+
+        assert_eq!(
+            state
+                .permission
+                .as_ref()
+                .map(|permission| permission.title.as_str()),
+            Some("Run cargo test")
+        );
+        assert_eq!(state.permission.as_ref().unwrap().options.len(), 2);
+        assert_eq!(
+            state.permission.as_ref().unwrap().options[0].kind,
+            ZzAgentPermissionKind::AllowOnce
+        );
+    }
+
+    #[test]
+    fn attention_edges_keep_their_ffi_flags() {
+        let events = Mutex::new(VecDeque::new());
+        let clipboards = Mutex::new(VecDeque::new());
+        queue_event(
+            &events,
+            &clipboards,
+            &CoreEvent::AgentStateChanged {
+                pane: PaneId(9),
+                attention: Some(AgentAttentionEdge::Request),
+            },
+        );
+
+        assert_eq!(
+            lock(&events).pop_front(),
+            Some(ZzEvent {
+                kind: ZzEventKind::AgentStateChanged,
+                flags: EVENT_AGENT_REQUEST,
+                pane: 9,
+                row_start: 0,
+                row_end: 0,
+            })
+        );
     }
 }

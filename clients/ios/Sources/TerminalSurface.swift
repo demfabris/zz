@@ -47,6 +47,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     var onScroll: ((Int) -> Void)?
     var onFontSizeStep: ((Int) -> Void)?
     var onFocus: (() -> Void)?
+    var onSelection: ((UInt32, UInt16, UInt16, Bool) -> Void)?
 
     private var viewport: TerminalFrame?
     private var interactive = false
@@ -83,6 +84,10 @@ final class TerminalGridView: UIView, UIKeyInput {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(scroll(_:)))
         pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
+        let selection = UILongPressGestureRecognizer(target: self, action: #selector(selectText(_:)))
+        selection.minimumPressDuration = 0.35
+        pan.require(toFail: selection)
+        addGestureRecognizer(selection)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(zoom(_:)))
         addGestureRecognizer(pinch)
         NotificationCenter.default.addObserver(
@@ -254,6 +259,20 @@ final class TerminalGridView: UIView, UIKeyInput {
         }
     }
 
+    override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var forwarded = false
+        for press in presses {
+            guard let key = press.key, let mapped = map(key) else {
+                continue
+            }
+            forwarded = true
+            onKey?(mapped.code, mapped.scalar, modifierBits(key.modifierFlags), UInt8(ZZ_KEY_REPEAT.rawValue))
+        }
+        if !forwarded {
+            super.pressesChanged(presses, with: event)
+        }
+    }
+
     @objc private func focusInput() {
         onFocus?()
     }
@@ -275,6 +294,39 @@ final class TerminalGridView: UIView, UIKeyInput {
         default:
             panRows = 0
         }
+    }
+
+    @objc private func selectText(_ gesture: UILongPressGestureRecognizer) {
+        guard interactive, let viewport, viewport.columns > 0, viewport.rows > 0 else {
+            return
+        }
+        let location = gesture.location(in: self)
+        let column = min(
+            max(Int(floor(location.x / max(measuredCell.width, 1))), 0),
+            viewport.columns - 1
+        )
+        let row = min(
+            max(Int(floor(location.y / max(measuredCell.height, 1))), 0),
+            viewport.rows - 1
+        )
+        let phase: UInt32
+        switch gesture.state {
+        case .began:
+            phase = 0
+            UISelectionFeedbackGenerator().selectionChanged()
+        case .changed:
+            phase = 1
+        case .ended, .cancelled:
+            phase = 2
+        default:
+            return
+        }
+        onSelection?(
+            phase,
+            UInt16(clamping: column),
+            UInt16(clamping: row),
+            false
+        )
     }
 
     @objc private func zoom(_ gesture: UIPinchGestureRecognizer) {
@@ -674,6 +726,15 @@ struct TerminalSurface: UIViewRepresentable {
         view.onScroll = { lines in store.scroll(pane: pane, lines: lines) }
         view.onFontSizeStep = { step in store.setTerminalFontSizeStep(step, for: pane) }
         view.onFocus = { store.requestKeyboard(for: pane) }
+        view.onSelection = { phase, column, row, rectangle in
+            store.updateSelection(
+                pane: pane,
+                phase: phase,
+                column: column,
+                row: row,
+                rectangle: rectangle
+            )
+        }
         view.configure(
             frame: frame,
             interactive: interactive,

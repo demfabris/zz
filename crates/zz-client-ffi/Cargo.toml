@@ -12,6 +12,8 @@ crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
 rustix.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
 zz-client = { path = "../zz-client" }
 zz-daemon = { path = "../zz-daemon", default-features = false }
 zz-protocol = { path = "../zz-protocol" }

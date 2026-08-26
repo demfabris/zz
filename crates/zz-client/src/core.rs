@@ -36,6 +36,58 @@ pub enum Outbound {
     RequestFull(PaneId),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentAttentionStatus {
+    Idle,
+    Working,
+    NeedsInput,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentAttentionEdge {
+    Request,
+    Done,
+    Failed,
+}
+
+#[must_use]
+pub fn agent_attention_status(state: &AgentPaneWire) -> AgentAttentionStatus {
+    if state.pending_permission.is_some() {
+        return AgentAttentionStatus::NeedsInput;
+    }
+    match &state.phase {
+        zz_protocol::AgentConnectionPhase::Running
+        | zz_protocol::AgentConnectionPhase::AwaitingPermission => AgentAttentionStatus::Working,
+        zz_protocol::AgentConnectionPhase::Failed { .. } => AgentAttentionStatus::Failed,
+        zz_protocol::AgentConnectionPhase::Starting | zz_protocol::AgentConnectionPhase::Ready => {
+            AgentAttentionStatus::Idle
+        }
+    }
+}
+
+fn agent_attention_edge(
+    previous: &AgentPaneWire,
+    current: &AgentPaneWire,
+) -> Option<AgentAttentionEdge> {
+    let previous = agent_attention_status(previous);
+    let current = agent_attention_status(current);
+    match (previous, current) {
+        (previous, AgentAttentionStatus::NeedsInput)
+            if previous != AgentAttentionStatus::NeedsInput =>
+        {
+            Some(AgentAttentionEdge::Request)
+        }
+        (AgentAttentionStatus::Working, AgentAttentionStatus::Idle) => {
+            Some(AgentAttentionEdge::Done)
+        }
+        (previous, AgentAttentionStatus::Failed) if previous != AgentAttentionStatus::Failed => {
+            Some(AgentAttentionEdge::Failed)
+        }
+        _ => None,
+    }
+}
+
 /// One state change or side effect produced by reduction. State changes are
 /// notifications — read the new value through the accessors; side effects
 /// (clipboard, URIs, GUI work) carry their payload because the core stores
@@ -158,6 +210,7 @@ pub enum CoreEvent {
     /// The pane's agent state changed; read it with [`ClientCore::agent_state`].
     AgentStateChanged {
         pane: PaneId,
+        attention: Option<AgentAttentionEdge>,
     },
     /// The daemon cleared this pane's agent lane; the shell answers with
     /// `AgentReplay` from `next_seq`.
@@ -731,8 +784,13 @@ impl ClientCore {
                 });
             }
             EventPayload::AgentState { pane, state } => {
+                let attention = self
+                    .agent_states
+                    .get(&pane)
+                    .and_then(|previous| agent_attention_edge(previous, &state));
                 self.agent_states.insert(pane, state);
-                self.events.push_back(CoreEvent::AgentStateChanged { pane });
+                self.events
+                    .push_back(CoreEvent::AgentStateChanged { pane, attention });
             }
             EventPayload::AgentLagged { pane, next_seq } => {
                 self.events
@@ -1073,7 +1131,10 @@ mod tests {
         }));
         assert_eq!(
             drain(&mut core),
-            vec![CoreEvent::AgentStateChanged { pane }]
+            vec![CoreEvent::AgentStateChanged {
+                pane,
+                attention: None,
+            }]
         );
         assert_eq!(core.agent_state(pane), Some(&agent_state("first")));
 
@@ -1083,13 +1144,78 @@ mod tests {
         }));
         assert_eq!(
             drain(&mut core),
-            vec![CoreEvent::AgentStateChanged { pane }]
+            vec![CoreEvent::AgentStateChanged {
+                pane,
+                attention: None,
+            }]
         );
         assert_eq!(
             core.agent_state(pane).and_then(|state| state.title.clone()),
             Some("second".to_owned())
         );
         assert_eq!(core.agent_state(PaneId(8)), None);
+    }
+
+    #[test]
+    fn agent_attention_edges_are_lossless_core_events() {
+        let pane = PaneId(7);
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: agent_state("work"),
+        }));
+        drain(&mut core);
+
+        let ready = AgentPaneWire {
+            phase: AgentConnectionPhase::Ready,
+            ..agent_state("done")
+        };
+        core.handle_message(event(EventPayload::AgentState { pane, state: ready }));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::AgentStateChanged {
+                pane,
+                attention: Some(AgentAttentionEdge::Done),
+            }]
+        );
+
+        let permission = AgentPaneWire {
+            phase: AgentConnectionPhase::AwaitingPermission,
+            pending_permission: Some(zz_protocol::AgentPermissionWire {
+                request_id: 9,
+                payload: "{}".to_owned(),
+            }),
+            ..agent_state("permission")
+        };
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: permission,
+        }));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::AgentStateChanged {
+                pane,
+                attention: Some(AgentAttentionEdge::Request),
+            }]
+        );
+
+        let failed = AgentPaneWire {
+            phase: AgentConnectionPhase::Failed {
+                message: "boom".to_owned(),
+            },
+            ..agent_state("failed")
+        };
+        core.handle_message(event(EventPayload::AgentState {
+            pane,
+            state: failed,
+        }));
+        assert_eq!(
+            drain(&mut core),
+            vec![CoreEvent::AgentStateChanged {
+                pane,
+                attention: Some(AgentAttentionEdge::Failed),
+            }]
+        );
     }
 
     #[test]

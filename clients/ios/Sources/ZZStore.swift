@@ -1,5 +1,19 @@
 import Darwin
 import Foundation
+import Network
+import UIKit
+
+private struct ZZClientConnectionResult: @unchecked Sendable {
+    let client: OpaquePointer?
+    let error: String
+    let failure: ZZConnectFailure
+
+    func release() {
+        if let client {
+            zz_client_free(client)
+        }
+    }
+}
 
 @MainActor
 final class ZZStore: ObservableObject {
@@ -11,9 +25,13 @@ final class ZZStore: ObservableObject {
     @Published var selectedPaneID: UInt64?
     @Published private(set) var terminalInput = TerminalInputState()
     @Published private(set) var sceneIsActive = true
-    @Published private(set) var terminalModifiers: UInt8 = 0
+    @Published private(set) var terminalModifierState = TerminalModifierLatchState()
     @Published private(set) var actionError: String?
     @Published private(set) var isCreatingSession = false
+    @Published private(set) var hostEndpoint = ""
+    @Published private(set) var sshPublicKey: String?
+    @Published private(set) var sshPrompt: ZZSSHPromptRequest?
+    @Published private(set) var agentStates: [UInt64: ZZAgentState] = [:]
 
     private var client: OpaquePointer?
     private var eventSource: DispatchSourceRead?
@@ -23,9 +41,76 @@ final class ZZStore: ObservableObject {
     private var pendingAttachmentSessionID: UInt64?
     private var hasEstablishedAttachment = false
     private var sessionCreationTimeout: Task<Void, Never>?
+    private var connectionTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    private var publicKeyTask: Task<Void, Never>?
+    private var connectionAttempt: UInt64 = 0
+    private var reconnectAttempt = 0
+    private var connectionEndpoint: String?
+    private var connectionSavesHost = false
+    private var connectionReturnsToHostSetup = false
+    private var connectionPromptBroker: ZZSSHPromptBroker?
+    private var rememberedSessionName: String?
+    private var rememberedPaneID: UInt64?
+    private var pendingNavigation: ZZNavigationTarget?
+    private var navigationCommandSent = false
+    private var unseenAgentCompletions: Set<UInt64> = []
+    private var clipboardRequestID: UInt64 = 1
+    private let networkMonitor = NWPathMonitor()
+    private let networkQueue = DispatchQueue(label: "zz-ios-network")
+    private var networkAvailable = true
+    private let agentNotifications = ZZAgentNotifications()
+    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
 
+    private static let shiftModifier: UInt8 = 1 << 0
     private static let controlModifier: UInt8 = 1 << 1
     private static let altModifier: UInt8 = 1 << 2
+    private static let savedHostKey = "zz.saved-host"
+
+    init() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                self?.networkPathChanged(path.status == .satisfied)
+            }
+        }
+        networkMonitor.start(queue: networkQueue)
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: .zzNotificationRoute,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let session = notification.userInfo?["session"] as? NSNumber,
+                      let pane = notification.userInfo?["pane"] as? NSNumber else {
+                    return
+                }
+                Task { @MainActor [weak self] in
+                    self?.open(
+                        ZZNavigationTarget(
+                            session: session.uint64Value,
+                            pane: pane.uint64Value
+                        )
+                    )
+                }
+            }
+        )
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: .zzShortcutCommand,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.consumeShortcutCommand()
+                }
+            }
+        )
+    }
+
+    deinit {
+        networkMonitor.cancel()
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
 
     var selectedSession: ZZSession? {
         guard let selectedSessionID else {
@@ -42,52 +127,149 @@ final class ZZStore: ObservableObject {
     }
 
     var controlModifierEnabled: Bool {
-        terminalModifiers & Self.controlModifier != 0
+        terminalModifierState.contains(Self.controlModifier)
     }
 
     var altModifierEnabled: Bool {
-        terminalModifiers & Self.altModifier != 0
+        terminalModifierState.contains(Self.altModifier)
+    }
+
+    var shiftModifierEnabled: Bool {
+        terminalModifierState.contains(Self.shiftModifier)
+    }
+
+    var controlModifierLocked: Bool {
+        terminalModifierState.isLocked(Self.controlModifier)
+    }
+
+    var altModifierLocked: Bool {
+        terminalModifierState.isLocked(Self.altModifier)
+    }
+
+    var shiftModifierLocked: Bool {
+        terminalModifierState.isLocked(Self.shiftModifier)
+    }
+
+    var isConnected: Bool {
+        client != nil && connectionState == .connected
+    }
+
+    var agentAttention: [ZZAgentAttention] {
+        agentStates.values.compactMap { state in
+            let kind: ZZAgentAttentionKind?
+            if state.status == .needsInput {
+                kind = .blocked
+            } else if state.status == .failed {
+                kind = .failed
+            } else if unseenAgentCompletions.contains(state.pane) {
+                kind = .done
+            } else if state.status == .working {
+                kind = .working
+            } else {
+                kind = nil
+            }
+            guard let kind else {
+                return nil
+            }
+            return ZZAgentAttention(
+                pane: state.pane,
+                session: attachedSessionID,
+                title: state.title ?? paneTitle(state.pane) ?? "Agent",
+                kind: kind
+            )
+        }
+        .sorted {
+            if $0.kind != $1.kind {
+                return $0.kind > $1.kind
+            }
+            return $0.pane < $1.pane
+        }
+    }
+
+    var canConfigureHost: Bool {
+        localSocket == nil
+    }
+
+    var hasSavedHost: Bool {
+        UserDefaults.standard.string(forKey: Self.savedHostKey) != nil
     }
 
     func start() {
-        guard client == nil else {
+        guard sceneIsActive, client == nil, connectionTask == nil else {
             return
         }
-        guard let socket = ProcessInfo.processInfo.environment["ZZ_SOCKET"], !socket.isEmpty else {
-            connectionState = .failed("Launch with `just ios` so zz can reach the daemon on your Mac.")
+        if case .needsHost = connectionState {
             return
         }
-        connectionState = .connecting
-        guard let connected = socket.withCString({ zz_client_connect($0) }) else {
-            connectionState = .failed("Couldn’t connect to the zz daemon at \(socket).")
+        if let localSocket {
+            beginConnection(
+                endpoint: localSocket,
+                password: nil,
+                savesHost: false,
+                returnsToHostSetup: false,
+                reconnecting: reconnectAttempt > 0
+            )
             return
         }
-        client = connected
-        let fileDescriptor = zz_client_event_fd(connected)
-        guard fileDescriptor >= 0 else {
-            zz_client_free(connected)
-            client = nil
-            connectionState = .failed("The zz client opened without an event channel.")
+        if let saved = UserDefaults.standard.string(forKey: Self.savedHostKey), !saved.isEmpty {
+            hostEndpoint = saved
+            beginConnection(
+                endpoint: saved,
+                password: nil,
+                savesHost: true,
+                returnsToHostSetup: true,
+                reconnecting: reconnectAttempt > 0
+            )
             return
         }
-        let source = DispatchSource.makeReadSource(fileDescriptor: fileDescriptor, queue: .main)
-        source.setEventHandler { [weak self] in
-            self?.drainEvents()
+        presentHostSetup(message: nil)
+    }
+
+    func connectHost(_ value: String, password: String?) {
+        guard let endpoint = ZZHostEndpoint.normalized(value) else {
+            presentHostSetup(message: "Enter a host as user@hostname or ssh://user@hostname.")
+            return
         }
-        source.resume()
-        eventSource = source
-        connectionState = .connected
-        _ = "".withCString { zz_client_attach(connected, $0) }
-        drainEvents()
-        refreshSnapshot()
+        disconnect(preservingTerminalState: true)
+        reconnectAttempt = 0
+        hostEndpoint = endpoint
+        beginConnection(
+            endpoint: endpoint,
+            password: password,
+            savesHost: true,
+            returnsToHostSetup: true,
+            reconnecting: false
+        )
+    }
+
+    func showHostSetup() {
+        guard canConfigureHost else {
+            return
+        }
+        disconnect(preservingTerminalState: true)
+        if hostEndpoint.isEmpty {
+            hostEndpoint = UserDefaults.standard.string(forKey: Self.savedHostKey) ?? ""
+        }
+        presentHostSetup(message: nil)
+    }
+
+    func forgetHost() {
+        disconnect(preservingTerminalState: false)
+        UserDefaults.standard.removeObject(forKey: Self.savedHostKey)
+        hostEndpoint = ""
+        presentHostSetup(message: nil)
     }
 
     func retry() {
-        disconnect(preservingTerminalState: true)
+        let preservesPresentation = !sessions.isEmpty
+        tearDownConnection(preservingPresentation: preservesPresentation)
+        reconnectAttempt = 0
         start()
     }
 
     func stop() {
+        publicKeyTask?.cancel()
+        publicKeyTask = nil
         disconnect(preservingTerminalState: false)
     }
 
@@ -99,7 +281,7 @@ final class ZZStore: ObservableObject {
             return
         }
         sceneIsActive = active
-        terminalModifiers = 0
+        terminalModifierState.reset()
         if active {
             let wasConnected = client != nil
             start()
@@ -109,7 +291,14 @@ final class ZZStore: ObservableObject {
             if let pane = terminalInput.owner.pane {
                 focus(pane: pane, focused: true)
             }
+            consumeShortcutCommand()
         } else {
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            if connectionTask != nil {
+                cancelConnectionAttempt()
+                connectionState = .disconnected
+            }
             if let client {
                 _ = zz_client_set_focused(client, false)
             }
@@ -121,6 +310,33 @@ final class ZZStore: ObservableObject {
     }
 
     private func disconnect(preservingTerminalState: Bool) {
+        tearDownConnection(preservingPresentation: false)
+        rememberedSessionName = nil
+        rememberedPaneID = nil
+        pendingNavigation = nil
+        navigationCommandSent = false
+        reconnectAttempt = 0
+        if preservingTerminalState {
+            invalidateSentGeometries()
+        } else {
+            terminalFontSizeSteps = [:]
+            terminalGeometries = [:]
+        }
+    }
+
+    private func tearDownConnection(preservingPresentation: Bool) {
+        if preservingPresentation {
+            rememberedSessionName = selectedSession?.name ?? rememberedSessionName
+            rememberedPaneID = selectedPaneID ?? rememberedPaneID
+        }
+        connectionAttempt &+= 1
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        connectionPromptBroker?.cancel()
+        connectionPromptBroker = nil
+        sshPrompt = nil
+        connectionTask?.cancel()
+        connectionTask = nil
         sessionCreationTimeout?.cancel()
         sessionCreationTimeout = nil
         pendingSessionIDs = nil
@@ -134,19 +350,262 @@ final class ZZStore: ObservableObject {
             zz_client_free(client)
         }
         client = nil
-        sessions = []
-        frames = [:]
-        if preservingTerminalState {
+        if preservingPresentation {
             invalidateSentGeometries()
         } else {
-            terminalFontSizeSteps = [:]
-            terminalGeometries = [:]
+            sessions = []
+            frames = [:]
+            agentStates = [:]
+            unseenAgentCompletions = []
+            selectedSessionID = nil
+            selectedPaneID = nil
+            terminalInput = TerminalInputState()
         }
-        selectedSessionID = nil
-        selectedPaneID = nil
-        terminalInput = TerminalInputState()
-        terminalModifiers = 0
+        terminalModifierState.reset()
         connectionState = .idle
+    }
+
+    private func cancelConnectionAttempt() {
+        connectionAttempt &+= 1
+        connectionPromptBroker?.cancel()
+        connectionPromptBroker = nil
+        sshPrompt = nil
+        connectionTask?.cancel()
+        connectionTask = nil
+    }
+
+    private var localSocket: String? {
+        ProcessInfo.processInfo.environment["ZZ_SOCKET"].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    private func beginConnection(
+        endpoint: String,
+        password: String?,
+        savesHost: Bool,
+        returnsToHostSetup: Bool,
+        reconnecting: Bool
+    ) {
+        guard client == nil, connectionTask == nil else {
+            return
+        }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        connectionEndpoint = endpoint
+        connectionSavesHost = savesHost
+        connectionReturnsToHostSetup = returnsToHostSetup
+        connectionState = reconnecting
+            ? .reconnecting(attempt: max(reconnectAttempt, 1), delay: 0)
+            : .connecting
+        connectionAttempt &+= 1
+        let attempt = connectionAttempt
+        let broker = ZZSSHPromptBroker(initialSecret: password) { [weak self] prompt in
+            Task { @MainActor [weak self] in
+                guard let self, self.connectionAttempt == attempt else {
+                    return
+                }
+                self.sshPrompt = prompt
+            }
+        }
+        connectionPromptBroker = broker
+        connectionTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.openClient(endpoint: endpoint, broker: broker)
+            }.value
+            guard let self else {
+                result.release()
+                return
+            }
+            guard !Task.isCancelled, self.connectionAttempt == attempt else {
+                result.release()
+                return
+            }
+            self.connectionTask = nil
+            self.connectionPromptBroker = nil
+            self.sshPrompt = nil
+            self.finishConnection(
+                result,
+                endpoint: endpoint,
+                savesHost: savesHost,
+                returnsToHostSetup: returnsToHostSetup
+            )
+        }
+    }
+
+    private func finishConnection(
+        _ result: ZZClientConnectionResult,
+        endpoint: String,
+        savesHost: Bool,
+        returnsToHostSetup: Bool
+    ) {
+        guard let connected = result.client else {
+            let message = result.error.isEmpty
+                ? "zz couldn’t connect to \(endpoint)."
+                : result.error
+            if result.failure.shouldRetry, sceneIsActive {
+                scheduleReconnect(message: message)
+            } else if returnsToHostSetup {
+                hostEndpoint = endpoint
+                presentHostSetup(message: message)
+            } else {
+                connectionState = .failed(message)
+            }
+            return
+        }
+        let fileDescriptor = zz_client_event_fd(connected)
+        guard fileDescriptor >= 0 else {
+            zz_client_free(connected)
+            if returnsToHostSetup {
+                presentHostSetup(message: "The zz client opened without an event channel.")
+            } else {
+                connectionState = .failed("The zz client opened without an event channel.")
+            }
+            return
+        }
+        client = connected
+        let source = DispatchSource.makeReadSource(fileDescriptor: fileDescriptor, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.drainEvents()
+        }
+        source.resume()
+        eventSource = source
+        if savesHost {
+            hostEndpoint = endpoint
+            UserDefaults.standard.set(endpoint, forKey: Self.savedHostKey)
+        }
+        reconnectAttempt = 0
+        connectionState = .connected
+        if pendingNavigation == nil, let rememberedPaneID {
+            pendingNavigation = ZZNavigationTarget(session: nil, pane: rememberedPaneID)
+        }
+        let attachment = rememberedSessionName ?? ""
+        _ = attachment.withCString { zz_client_attach(connected, $0) }
+        drainEvents()
+        refreshSnapshot()
+    }
+
+    private func scheduleReconnect(message: String) {
+        guard let endpoint = connectionEndpoint else {
+            connectionState = .failed(message)
+            return
+        }
+        reconnectAttempt += 1
+        let delay = ZZReconnectPolicy.delay(for: reconnectAttempt)
+        connectionState = .reconnecting(attempt: reconnectAttempt, delay: delay)
+        guard sceneIsActive, networkAvailable else {
+            return
+        }
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, self.sceneIsActive,
+                  self.networkAvailable,
+                  self.client == nil, self.connectionTask == nil else {
+                return
+            }
+            self.reconnectTask = nil
+            self.beginConnection(
+                endpoint: endpoint,
+                password: nil,
+                savesHost: self.connectionSavesHost,
+                returnsToHostSetup: self.connectionReturnsToHostSetup,
+                reconnecting: true
+            )
+        }
+    }
+
+    private func networkPathChanged(_ available: Bool) {
+        let restored = available && !networkAvailable
+        networkAvailable = available
+        guard restored, sceneIsActive, client == nil, connectionTask == nil,
+              case .reconnecting = connectionState,
+              let endpoint = connectionEndpoint else {
+            return
+        }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        beginConnection(
+            endpoint: endpoint,
+            password: nil,
+            savesHost: connectionSavesHost,
+            returnsToHostSetup: connectionReturnsToHostSetup,
+            reconnecting: true
+        )
+    }
+
+    func respondToSSHPrompt(_ answer: ZZSSHPromptAnswer) {
+        guard let prompt = sshPrompt else {
+            return
+        }
+        sshPrompt = nil
+        connectionPromptBroker?.respond(to: prompt.id, with: answer)
+    }
+
+    private func presentHostSetup(message: String?) {
+        connectionState = .needsHost(message)
+        loadSSHPublicKey()
+    }
+
+    private func loadSSHPublicKey() {
+        guard sshPublicKey == nil, publicKeyTask == nil else {
+            return
+        }
+        publicKeyTask = Task { [weak self] in
+            let publicKey = await Task.detached(priority: .utility) {
+                Self.readSSHPublicKey()
+            }.value
+            guard let self, !Task.isCancelled else {
+                return
+            }
+            self.publicKeyTask = nil
+            self.sshPublicKey = publicKey
+        }
+    }
+
+    private nonisolated static func openClient(
+        endpoint: String,
+        broker: ZZSSHPromptBroker
+    ) -> ZZClientConnectionResult {
+        var errorBuffer = [CChar](repeating: 0, count: 2_048)
+        var rawFailure = ZZ_CONNECT_FAILURE_NONE
+        let retainedBroker = Unmanaged.passRetained(broker)
+        defer { retainedBroker.release() }
+        let connected = errorBuffer.withUnsafeMutableBufferPointer { error in
+            endpoint.withCString { endpoint in
+                zz_client_connect_endpoint_interactive(
+                    endpoint,
+                    zzSSHPromptCallback,
+                    retainedBroker.toOpaque(),
+                    &rawFailure,
+                    error.baseAddress,
+                    error.count
+                )
+            }
+        }
+        let message = errorBuffer.withUnsafeBufferPointer { error in
+            error.baseAddress.map(String.init(cString:)) ?? ""
+        }
+        return ZZClientConnectionResult(
+            client: connected,
+            error: message,
+            failure: ZZConnectFailure(rawValue: UInt32(rawFailure.rawValue)) ?? .configuration
+        )
+    }
+
+    private nonisolated static func readSSHPublicKey() -> String? {
+        let length = zz_client_ssh_public_key(nil, 0)
+        guard length > 0 else {
+            return nil
+        }
+        var buffer = [CChar](repeating: 0, count: length + 1)
+        let returned = buffer.withUnsafeMutableBufferPointer { buffer in
+            zz_client_ssh_public_key(buffer.baseAddress, buffer.count)
+        }
+        guard returned > 0 else {
+            return nil
+        }
+        return buffer.withUnsafeBufferPointer { buffer in
+            buffer.baseAddress.map(String.init(cString:))
+        }
     }
 
     func selectSession(_ session: ZZSession) {
@@ -162,7 +621,7 @@ final class ZZStore: ObservableObject {
         let previousPendingAttachment = pendingAttachmentSessionID
         selectedSessionID = session.id
         selectedPaneID = nil
-        terminalModifiers = 0
+        terminalModifierState.reset()
         if !requestAttachment(to: session, client: client) {
             selectedSessionID = previous
             pendingAttachmentSessionID = previousPendingAttachment
@@ -185,8 +644,10 @@ final class ZZStore: ObservableObject {
     }
 
     func openPane(_ pane: ZZPane) {
-        terminalModifiers = 0
+        terminalModifierState.reset()
         selectedPaneID = pane.id
+        unseenAgentCompletions.remove(pane.id)
+        agentNotifications.clear(pane: pane.id)
         if pane.kind == .terminal {
             acquireTerminalInput(pane.id)
         } else {
@@ -209,7 +670,7 @@ final class ZZStore: ObservableObject {
     func showOverview() {
         releaseTerminalInput()
         selectedPaneID = nil
-        terminalModifiers = 0
+        terminalModifierState.reset()
     }
 
     func requestKeyboard(for pane: UInt64) {
@@ -239,20 +700,19 @@ final class ZZStore: ObservableObject {
         guard let client, !text.isEmpty else {
             return
         }
-        if terminalModifiers != 0,
+        if terminalModifierState.active != 0,
            text.unicodeScalars.count == 1,
            let scalar = text.unicodeScalars.first {
             sendKey(
                 UInt32(ZZ_KEY_CHARACTER.rawValue),
                 to: pane,
                 codepoint: scalar.value,
-                modifiers: terminalModifiers
+                modifiers: 0
             )
-            terminalModifiers = 0
             return
         }
         _ = text.withCString { zz_client_send_text(client, pane, $0) }
-        terminalModifiers = 0
+        terminalModifierState.consumeOneShot()
     }
 
     func sendKey(
@@ -267,6 +727,7 @@ final class ZZStore: ObservableObject {
         guard let client else {
             return
         }
+        let combinedModifiers = modifiers | terminalModifierState.active
         _ = zz_client_send_key(
             client,
             pane,
@@ -274,10 +735,13 @@ final class ZZStore: ObservableObject {
             codepoint,
             function,
             action,
-            modifiers,
+            combinedModifiers,
             nil,
             textFollows
         )
+        if action != UInt32(ZZ_KEY_RELEASE.rawValue) {
+            terminalModifierState.consumeOneShot()
+        }
     }
 
     func resize(pane: UInt64, layout: TerminalLayout, stable: Bool) {
@@ -302,20 +766,105 @@ final class ZZStore: ObservableObject {
 
     func sendPrefix(to pane: UInt64) {
         _ = execute("send-prefix", args: ["-t", "%\(pane)"])
-        terminalModifiers = 0
+        terminalModifierState.reset()
     }
 
     func sendShortcutKey(_ code: UInt32, to pane: UInt64) {
-        sendKey(code, to: pane, modifiers: terminalModifiers)
-        terminalModifiers = 0
+        sendKey(code, to: pane)
     }
 
     func toggleControlModifier() {
-        terminalModifiers ^= Self.controlModifier
+        terminalModifierState.tap(Self.controlModifier, at: Date.timeIntervalSinceReferenceDate)
     }
 
     func toggleAltModifier() {
-        terminalModifiers ^= Self.altModifier
+        terminalModifierState.tap(Self.altModifier, at: Date.timeIntervalSinceReferenceDate)
+    }
+
+    func toggleShiftModifier() {
+        terminalModifierState.tap(Self.shiftModifier, at: Date.timeIntervalSinceReferenceDate)
+    }
+
+    func updateSelection(
+        pane: UInt64,
+        phase: UInt32,
+        column: UInt16,
+        row: UInt16,
+        clickCount: UInt8 = 1,
+        rectangle: Bool = false
+    ) {
+        guard let client else {
+            return
+        }
+        _ = zz_client_terminal_selection(
+            client,
+            pane,
+            phase,
+            column,
+            row,
+            clickCount,
+            rectangle
+        )
+    }
+
+    func copySelection(pane: UInt64) {
+        guard let client else {
+            return
+        }
+        let request = clipboardRequestID
+        clipboardRequestID &+= 1
+        _ = zz_client_copy_selection(client, pane, request)
+    }
+
+    func agentState(for pane: UInt64) -> ZZAgentState? {
+        agentStates[pane]
+    }
+
+    func respondToPermission(pane: UInt64, request: UInt64, option: String?) {
+        guard let client else {
+            return
+        }
+        let sent = if let option {
+            option.withCString {
+                zz_client_agent_respond_permission(client, pane, request, $0)
+            }
+        } else {
+            zz_client_agent_respond_permission(client, pane, request, nil)
+        }
+        if !sent {
+            actionError = "zz couldn’t send that approval response."
+        }
+    }
+
+    func cancelAgent(pane: UInt64) {
+        guard let client, zz_client_agent_cancel(client, pane) else {
+            actionError = "zz couldn’t cancel that Agent turn."
+            return
+        }
+    }
+
+    func open(_ url: URL) {
+        guard let target = ZZNavigationTarget(url: url) else {
+            return
+        }
+        if target.attention {
+            openHighestAttention()
+        } else {
+            open(target)
+        }
+    }
+
+    func open(_ target: ZZNavigationTarget) {
+        pendingNavigation = target
+        navigationCommandSent = false
+        resolvePendingNavigation()
+    }
+
+    func openHighestAttention() {
+        guard let attention = agentAttention.first else {
+            return
+        }
+        open(ZZNavigationTarget(session: attention.session, pane: attention.pane))
     }
 
     func newSession() {
@@ -427,12 +976,16 @@ final class ZZStore: ObservableObject {
         }
         var event = zz_client_event()
         var refreshMux = false
-        while zz_client_next_event(client, &event) {
+        var disconnected = false
+        while !disconnected, zz_client_next_event(client, &event) {
             switch event.kind {
             case ZZ_EVENT_HELLO:
                 connectionState = .connected
             case ZZ_EVENT_ATTACHED:
                 _ = zz_client_set_focused(client, sceneIsActive)
+                agentStates = [:]
+                unseenAgentCompletions = []
+                navigationCommandSent = false
                 refreshMux = true
             case ZZ_EVENT_SNAPSHOT_CHANGED:
                 refreshMux = true
@@ -447,6 +1000,9 @@ final class ZZStore: ObservableObject {
                 frames.removeValue(forKey: event.pane)
                 terminalGeometries.removeValue(forKey: event.pane)
                 terminalFontSizeSteps.removeValue(forKey: event.pane)
+                agentStates.removeValue(forKey: event.pane)
+                unseenAgentCompletions.remove(event.pane)
+                agentNotifications.clear(pane: event.pane)
                 if terminalInput.owner.owns(event.pane) {
                     terminalInput.release()
                 }
@@ -454,11 +1010,19 @@ final class ZZStore: ObservableObject {
             case ZZ_EVENT_DETACHED:
                 invalidateSentGeometries()
                 refreshMux = true
+            case ZZ_EVENT_AGENT_STATE_CHANGED:
+                refreshAgentState(pane: event.pane, flags: event.flags)
+            case ZZ_EVENT_CLIPBOARD:
+                drainClipboard(client)
             case ZZ_EVENT_SERVER_STOPPING, ZZ_EVENT_DISCONNECTED:
-                connectionState = .disconnected
+                disconnected = true
             default:
                 break
             }
+        }
+        if disconnected {
+            handleUnexpectedDisconnect()
+            return
         }
         if refreshMux {
             refreshSnapshot()
@@ -566,6 +1130,168 @@ final class ZZStore: ObservableObject {
                 actionError = "zz couldn’t recover after that session closed."
             }
         }
+        resolvePendingNavigation()
+    }
+
+    private func handleUnexpectedDisconnect() {
+        tearDownConnection(preservingPresentation: true)
+        scheduleReconnect(message: "The connection to zz closed.")
+    }
+
+    private func refreshAgentState(pane: UInt64, flags: UInt32) {
+        guard let client, let snapshot = zz_client_agent_state_acquire(client, pane) else {
+            return
+        }
+        defer { zz_agent_state_release(snapshot) }
+        let rawPhase = zz_agent_state_phase(snapshot)
+        let rawStatus = zz_agent_attention_status(snapshot)
+        let phase = ZZAgentPhase(rawValue: UInt32(rawPhase.rawValue)) ?? .starting
+        let status = ZZAgentStatus(rawValue: UInt32(rawStatus.rawValue)) ?? .idle
+        let permission: ZZAgentPermission?
+        if zz_agent_has_permission(snapshot) {
+            let count = Int(zz_agent_permission_option_count(snapshot))
+            let options = (0..<count).map { index in
+                let rawKind = zz_agent_permission_option_kind(snapshot, index)
+                let kind: ZZAgentPermissionKind = switch UInt32(rawKind.rawValue) {
+                case 1: .allowOnce
+                case 2: .allowAlways
+                case 3: .rejectOnce
+                case 4: .rejectAlways
+                default: .unknown
+                }
+                return ZZAgentPermissionOption(
+                    id: string(zz_agent_permission_option_id(snapshot, index)),
+                    name: string(zz_agent_permission_option_name(snapshot, index)),
+                    kind: kind
+                )
+            }
+            permission = ZZAgentPermission(
+                requestID: zz_agent_permission_request_id(snapshot),
+                title: string(zz_agent_permission_title(snapshot)),
+                options: options
+            )
+        } else {
+            permission = nil
+        }
+        let git = zz_agent_has_git(snapshot)
+            ? ZZAgentGitSummary(
+                branch: optionalString(zz_agent_git_branch(snapshot)),
+                changedFiles: zz_agent_git_changed_files(snapshot),
+                additions: zz_agent_git_additions(snapshot),
+                deletions: zz_agent_git_deletions(snapshot)
+            )
+            : nil
+        let state = ZZAgentState(
+            pane: pane,
+            phase: phase,
+            status: status,
+            queuedPrompts: zz_agent_queued_prompts(snapshot),
+            sessionID: optionalString(zz_agent_session_id(snapshot)),
+            title: optionalString(zz_agent_title(snapshot)),
+            error: optionalString(zz_agent_error(snapshot)),
+            permission: permission,
+            git: git
+        )
+        agentStates[pane] = state
+
+        let hidden = !sceneIsActive || selectedPaneID != pane
+        let session = attachedSessionID
+        if flags & UInt32(ZZ_EVENT_AGENT_REQUEST) != 0, permission != nil {
+            if hidden, let session {
+                notifyAgent(.blocked, state: state, session: session)
+            }
+        }
+        if flags & UInt32(ZZ_EVENT_AGENT_DONE) != 0 {
+            if hidden {
+                unseenAgentCompletions.insert(pane)
+                if let session {
+                    notifyAgent(.done, state: state, session: session)
+                }
+            }
+        }
+        if flags & UInt32(ZZ_EVENT_AGENT_FAILED) != 0,
+           status == .failed, hidden, let session {
+            notifyAgent(.failed, state: state, session: session)
+        }
+    }
+
+    private func notifyAgent(
+        _ kind: ZZAgentAttentionKind,
+        state: ZZAgentState,
+        session: UInt64
+    ) {
+        agentNotifications.schedule(
+            kind: kind,
+            pane: state.pane,
+            session: session,
+            title: state.title ?? paneTitle(state.pane) ?? "zz Agent",
+            permission: state.permission?.requestID
+        )
+    }
+
+    private func drainClipboard(_ client: OpaquePointer) {
+        while let clipboard = zz_client_clipboard_next(client) {
+            UIPasteboard.general.string = string(zz_clipboard_text(clipboard))
+            zz_clipboard_release(clipboard)
+        }
+    }
+
+    private func resolvePendingNavigation() {
+        guard let target = pendingNavigation, client != nil else {
+            return
+        }
+        if let sessionID = target.session, attachedSessionID != sessionID {
+            guard let session = sessions.first(where: { $0.id == sessionID }) else {
+                return
+            }
+            if pendingAttachmentSessionID != sessionID {
+                selectSession(session)
+            }
+            return
+        }
+        guard let paneID = target.pane else {
+            pendingNavigation = nil
+            showOverview()
+            return
+        }
+        if let pane = sessions.lazy.flatMap(\.panes).first(where: { $0.id == paneID }) {
+            pendingNavigation = nil
+            navigationCommandSent = false
+            rememberedPaneID = nil
+            openPane(pane)
+            return
+        }
+        guard !navigationCommandSent else {
+            return
+        }
+        navigationCommandSent = true
+        let paneTarget = "%\(paneID)"
+        if !execute("select-window", args: ["-t", paneTarget])
+            || !execute("select-pane", args: ["-t", paneTarget]) {
+            navigationCommandSent = false
+            actionError = "zz couldn’t open that Agent pane."
+        }
+    }
+
+    private func consumeShortcutCommand() {
+        guard let raw = UserDefaults.standard.string(forKey: ZZShortcutCommand.key),
+              let command = ZZShortcutCommand(rawValue: raw) else {
+            return
+        }
+        UserDefaults.standard.removeObject(forKey: ZZShortcutCommand.key)
+        switch command {
+        case .reconnect: retry()
+        case .attention: openHighestAttention()
+        }
+    }
+
+    private func paneTitle(_ pane: UInt64) -> String? {
+        sessions.lazy.flatMap(\.panes).first { $0.id == pane }?.title
+    }
+
+    private func optionalString(_ bytes: zz_bytes) -> String? {
+        let value = string(bytes)
+        return value.isEmpty ? nil : value
     }
 
     private func refreshFrame(pane: UInt64, damage: TerminalDamage) {

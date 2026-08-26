@@ -1,8 +1,8 @@
 ---
 type: Design Plan
 title: Client core & contract - one brain, every face
-description: Decision record for the shared client contract - command and key ownership moved to zz-protocol, v52 publishes live tables, zz-client provides sans-IO reduction and chrome actions, and a narrow C ABI proves the integration shape.
-status: Contract consolidation, v52 key-table publication, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native iPhone client extended zz-client-ffi with mux snapshots, styled terminal planes, raw keys, focus, scroll, damage, and disconnect events on 2026-08-15. Broader connection, history, Kitty, and non-terminal viewport extraction remain open. GPUI cross-surface rebinding still needs a restart
+description: Decision record for the shared client contract - protocol-owned commands and keys, sans-IO reduction, typed Agent attention, and a native-shell C ABI.
+status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native iPhone ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, then interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26. History, Kitty, multi-host selection, Browser and Editor viewports, and the Agent transcript stream remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -27,8 +27,11 @@ frames in `RetainedTerminalViewport`, avoiding a second patch application on the
 `zz-client-ffi` proves the C integration shape with a pollable wake fd and a from-scratch smoke
 client. The native iPhone client extended the hand-maintained header with raw key forwarding,
 style/grapheme tables, generation counters, mux/session/pane snapshots, damage rows, terminal focus
-and scrolling, appearance, and disconnect events. Catalog/table access, chrome actions, history,
-Kitty images, and non-terminal viewport models remain outside the ABI.
+and scrolling, semantic selection and typed clipboard delivery, appearance, disconnect events,
+interactive endpoint connection with typed failures and SSH prompts, its iOS SSH public identity, and
+retained Agent summaries, attention edges, permission responses, and cancellation. Catalog/table
+access, chrome actions, history, Kitty images, multi-host presentation, Browser and Editor viewports,
+and the heavy Agent transcript stream remain outside the ABI.
 
 The sections below retain the original proposal and its acceptance criteria. The rung ladder marks
 the parts that shipped and the parts that remain design intent.
@@ -161,19 +164,22 @@ is not chrome and not part of the contract.
 
 ## Pillar 6 - zz-client-ffi target and shipped proof
 
-The shipped `#[no_mangle]` shim and hand-maintained header now cover connection, pollable event
-wake/drain, attach, typed mux snapshots, caller-owned styled terminal viewports, raw key and text
-input, command execution, resize, separate client-window and terminal pane focus, scrolling, damage,
-appearance, and disconnect events. The
+The shipped `#[no_mangle]` shim and hand-maintained header now cover interactive connection with
+typed SSH prompts and failures, pollable event wake/drain, attach, typed mux snapshots, caller-owned
+styled terminal viewports, raw key and text input, command execution, resize, separate client-window
+and terminal pane focus, scrolling, semantic selection, typed clipboard delivery, retained Agent
+summaries and actions, attention edges, damage, appearance, and disconnect events. The
 viewport is the render contract: a flat cell plane plus style table, grapheme arena, cursor, colors,
 and generation counters remain alive until the caller releases the handle. The reader stays inside
 the core and toolkits integrate its wake fd with GSource, `QSocketNotifier`, or DispatchSource; Rust
 threads never call toolkit code.
 
-The C smoke compiles and links the contract, creates sessions and panes, renders styled content,
-types through the raw-key path, reports client focus and blur, kills the attached session, reattaches
-a survivor and recovers its viewport, then frees and reconnects in one process. Catalog and live key-table access, resolved
-chrome action events, history, Kitty images, and non-terminal viewport models remain outside the ABI.
+The C smoke compiles and links the contract, rejects an invalid interactive endpoint with a typed
+failure, creates sessions and panes, renders styled content, types through the raw-key path, exercises
+the selection, clipboard, and Agent symbols, reports client focus and blur, kills the attached
+session, reattaches a survivor and recovers its viewport, then frees and reconnects in one process.
+Catalog and live key-table access, resolved chrome action events, history, Kitty images, Browser and
+Editor viewports, and the Agent transcript stream remain outside the ABI.
 
 The desktop shell caches its desired window-focus state outside the pane-focus path. Construction
 seeds `true` only when the window is already active; an inactive window waits for its first real
@@ -198,14 +204,12 @@ retain pane focus when the active pane is a terminal.
 
 # What stays out of the core
 
-- **CEF and ACP are process runtimes, not state.** The core exposes descriptors
-  (`BrowserDescriptor`, `AgentDescriptor`) and a provider seam like the TUI's
-  `BrowserFrameProvider` (`crates/zz-tui/src/browser.rs`); a GTK skin shows
-  placeholder cards or brings WebKitGTK, Qt brings QtWebEngine, Swift brings
-  WKWebView. The agent *reducer* (streaming state machine in
-  `crates/zz/src/agent/controller.rs`) is pure state and can migrate into the
-  core later so agent panes work everywhere; the provider process stays with the
-  skin.
+- **CEF and ACP remain process runtimes, not client-core runtimes.** The daemon owns the Agent ACP
+  process and retained `AgentPaneWire` state; `ClientCore` reduces that state and derives lossless
+  request, completion, and failure edges without retaining the heavy transcript stream. The C ABI
+  exposes this bounded supervision model. Browser rendering still uses a provider seam like the
+  TUI's `BrowserFrameProvider` (`crates/zz-tui/src/browser.rs`), and each graphical shell chooses its
+  own native browser surface or a placeholder.
 - **The zz-ui editor vim layer** — an editor engine behind a config flag, not a
   binding surface.
 - **gpui anything.** The core must build for a musl target with no display
@@ -294,9 +298,12 @@ API emit identical event sequences.
    assembly remain in their shells; desktop keeps its retained terminal frame path.
 5. **Chrome keymap: shipped.** Desktop and TUI resolve client-owned actions through profile tables;
    desktop config supports `chrome-keybind` and `chrome-unbind`.
-6. **`zz-client-ffi`: proof surface shipped.** The C smoke client attaches, reads rows, types,
-   creates a session and pane, frees, and reconnects. The full catalog/action contract above remains
-   open, and the header is hand-maintained rather than generated by cbindgen.
+6. **`zz-client-ffi`: proof surface shipped.** The C smoke client validates typed interactive
+   endpoint errors, attaches through a parsed endpoint, reads rows, types, selects, copies, references
+   Agent supervision actions, creates a session and pane, frees, and reconnects. The iPhone shell
+   consumes the in-process SSH identity plus explicit trust and keyboard-interactive prompt path. The
+   full catalog/action contract above remains open, and the header is hand-maintained rather than
+   generated by cbindgen.
 
 # Hard parts
 
@@ -322,8 +329,7 @@ API emit identical event sequences.
 
 - [TUI client](/designs/tui-client.md) - the existing proof that a protocol-only
   client works; rung 4 subsumes its client brain.
-- [iOS client](/designs/ios-client.md) - the recompile-the-desktop pattern this
-  plan leaves intact.
+- [iOS client](/designs/ios-client.md) - the native Swift shell over this contract.
 - [Fleet attach](/designs/fleet-attach.md) - host handling the core inherits.
 - [tmux superset roadmap](/designs/tmux-superset-roadmap.md) - doctrine for what
   the daemon owns.

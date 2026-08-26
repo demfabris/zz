@@ -120,6 +120,10 @@ pub enum EndpointError {
     ProbeFailure { target: String, reason: String },
     #[error("ssh to {target} failed: {reason}")]
     SshFailed { target: String, reason: String },
+    #[error("the SSH host key for {target} was not trusted")]
+    HostKeyRejected { target: String },
+    #[error("SSH authentication to {target} failed: {reason}")]
+    AuthenticationFailed { target: String, reason: String },
     #[error("zz is not installed on {target}")]
     RemoteBinaryMissing { target: String },
     #[error("the zz daemon on {target} never started listening")]
@@ -176,6 +180,12 @@ impl EndpointError {
             }
             Self::ProbeFailure { target, reason } | Self::SshFailed { target, reason } => {
                 format!("Could not reach {target} over ssh: {reason}")
+            }
+            Self::HostKeyRejected { target } => {
+                format!("The SSH host key for {target} was not trusted.")
+            }
+            Self::AuthenticationFailed { target, reason } => {
+                format!("Could not sign in to {target}: {reason}")
             }
             Self::RemoteBinaryMissing { target } => format!(
                 "zz is not installed on {target}.\nInstall it there, or put it on the login \

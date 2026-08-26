@@ -104,6 +104,7 @@ pub enum AskpassPromptKind {
 pub struct AskpassPrompt {
     mode: AskpassMode,
     text: String,
+    echo: bool,
 }
 
 impl AskpassPrompt {
@@ -112,7 +113,14 @@ impl AskpassPrompt {
         Self {
             mode,
             text: text.into(),
+            echo: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_echo(mut self, echo: bool) -> Self {
+        self.echo = echo;
+        self
     }
 
     /// ssh's own words, shown to the user unedited.
@@ -124,6 +132,11 @@ impl AskpassPrompt {
     #[must_use]
     pub const fn mode(&self) -> AskpassMode {
         self.mode
+    }
+
+    #[must_use]
+    pub const fn echo(&self) -> bool {
+        self.echo
     }
 
     #[must_use]

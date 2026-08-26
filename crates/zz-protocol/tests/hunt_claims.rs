@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
 use zz_protocol::{
-    BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, CommandResponse, Event,
-    EventPayload, GuiResponse, InputMessage, LayoutNode, MuxOptionKey, MuxSnapshot,
-    PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PaneSnapshot, PasteUploadPurpose, ProtocolMessage,
-    ServerError, TmuxColour, WindowId, WindowSnapshot, encode_protocol_message,
+    BrowserDescriptor, ClientHello, ClientInstanceId, ClientKind, CommandResponse,
+    ControlSourceFileEvent, Event, EventPayload, GuiResponse, InputMessage, LayoutNode,
+    MuxOptionKey, MuxSnapshot, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PaneSnapshot,
+    PasteUploadPurpose, ProtocolMessage, ServerError, TmuxColour, WindowId, WindowSnapshot,
+    encode_protocol_message,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -13,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_seventy_seven() {
-    assert_eq!(PROTOCOL_VERSION, 77);
+fn protocol_version_on_this_commit_is_seventy_eight() {
+    assert_eq!(PROTOCOL_VERSION, 78);
 }
 
 #[test]
@@ -134,6 +135,23 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
             event
         );
     }
+    for source_event in [
+        ControlSourceFileEvent::ReadError("Is a directory: source.conf".to_owned()),
+        ControlSourceFileEvent::Complete,
+    ] {
+        let event = Event {
+            sequence: 0,
+            payload: EventPayload::ControlSourceFile {
+                event: source_event,
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("encode control source-file event");
+        assert_eq!(bytes[1], 48);
+        assert_eq!(
+            postcard::from_bytes::<Event>(&bytes).expect("decode control source-file event"),
+            event
+        );
+    }
 
     let window = WindowSnapshot {
         id: WindowId(1),
@@ -201,7 +219,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4d, 0x00, 0x00, 0x4d, 0x00, 0x00, 0x00, 0x00,
+            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4e, 0x00, 0x00, 0x4e, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00,
         ]
     );

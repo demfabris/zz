@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 77;
+pub const PROTOCOL_VERSION: u16 = 78;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1947,6 +1947,12 @@ impl DetachReason {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ControlSourceFileEvent {
+    ReadError(String),
+    Complete,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EventPayload {
     Snapshot(MuxSnapshot),
     AppearanceChanged {
@@ -2161,6 +2167,9 @@ pub enum EventPayload {
         error: bool,
         sticky_failure: bool,
         flags: u8,
+    },
+    ControlSourceFile {
+        event: ControlSourceFileEvent,
     },
 }
 
@@ -3177,6 +3186,28 @@ mod tests {
     }
 
     #[test]
+    fn control_source_file_holds_wire_tag_forty_eight_and_round_trips_events() {
+        for source_event in [
+            super::ControlSourceFileEvent::ReadError("Is a directory: source.conf".to_owned()),
+            super::ControlSourceFileEvent::Complete,
+        ] {
+            let event = super::Event {
+                sequence: 8,
+                payload: super::EventPayload::ControlSourceFile {
+                    event: source_event,
+                },
+            };
+            let bytes = postcard::to_stdvec(&event).expect("control source-file event encodes");
+            assert_eq!(bytes[1], 48);
+            assert_eq!(
+                postcard::from_bytes::<super::Event>(&bytes)
+                    .expect("control source-file event decodes"),
+                event
+            );
+        }
+    }
+
+    #[test]
     fn client_terminal_size_input_holds_wire_tag_seventeen() {
         assert_eq!(super::CLIENT_NESTED_CAPABILITY, "client-nested-v1");
         assert_eq!(super::CLIENT_TTY_CAPABILITY_PREFIX, "client-tty-v1:");
@@ -3291,7 +3322,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 77);
+        assert_eq!(super::PROTOCOL_VERSION, 78);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

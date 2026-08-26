@@ -90,7 +90,7 @@ askpass . and only refuses to open the GUI, pointing at the bundle instead.
 ## Control-mode front end (`control_mode.rs`)
 
 The `-C` front end owns direct flags-1 command frames, stdin and protocol ordering, deferred Control
-command guards, and the process exit code. Protocol v77 supplies
+command guards, source-file events, and the process exit code. Protocol v77 supplies
 `ControlCommandGuard { output, error, sticky_failure, flags }` at the existing tail tag 47. Parser
 replay plus synchronous foreground shell-evaluated `if-shell`, immediate `if-shell -F` including
 `-bF`, and foreground `run-shell -C` keep flags 1. The writer closes the direct outer frame, then
@@ -108,15 +108,17 @@ The flags-0 terminator and `sticky_failure` are independent, so a mixed source h
 Shell-evaluated `if-shell -b` and `run-shell -bC` retain the exact originating Control target through
 callback entry and emit flags-0 command trees. A missing origin cancels callback work before entry;
 hard disconnect after an immediate hook or source queue has started remains under
-`control-mode.disconnect-cancels-command-queue`. Parser and hook-source OS or path read failures still
-differ in raw placement, and zz does not model the pin's invisible source-completion command numbers;
-`control-mode.hook-source-read-diagnostics` owns both residues. Existing daemon preflight guarantees root
+`control-mode.disconnect-cancels-command-queue`. Protocol v78 adds `ControlSourceFileEvent` at tail
+tag 48. `ReadError` sets retained status 1 and writes the diagnostic as a raw unframed line.
+`Complete` writes nothing and increments `ControlWriter::next_number` once after that invocation's
+descendants. Events defer while a direct frame is open, preserving the source guard before the raw
+read error. Existing daemon preflight guarantees root
 missing-path guard, then middle missing-path guard, then leaf output guard in a three-level replay,
 each exactly once.
 
 `ControlState::return_code` now follows the pin's long-lived retval contract. Direct runtime errors,
-sourced runtime errors, nonruntime source failures returned through `source-file`, and typed OS or
-path source-read failures set it to 1. Non-UTF-8 config content remains under
+sourced runtime errors, nonruntime source failures returned through `source-file`, and v78
+source-read failures set it to 1. Non-UTF-8 config content remains under
 `config.non-utf8-file-bytes`; the pinned lone-`0xff` case succeeds where zz currently emits a typed
 Error and status 1. Generic nonzero successes and flags-1 parse or preparation failures do not set
 or change it, so a fresh client stays at 0 while a prior sticky failure stays at 1. A blank line or EOF
@@ -127,7 +129,9 @@ arrives. An actual self-targeted `Detached` event exits 0 after the command resp
 `detach-client -a`, a target naming another client, an excluded
 or missing session, and aliases for those forms keep the caller alive and preserve the queued Return.
 This uses the existing response and detach messages. The strict eight-step `source-file-control`
-differential is clean, while the checked-in canonical row still records three steps.
+differential closed that return-status matrix. The current strict 12-step row also covers v78 raw
+source-read placement and hidden numbering, while the checked-in canonical row still records three
+steps.
 
 # Application configuration (`config/mod.rs`)
 

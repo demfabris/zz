@@ -10,8 +10,8 @@ use std::{
 
 use zz_daemon::InteractiveClient;
 use zz_protocol::{
-    CommandInvocation, CommandResponse, EventPayload, MuxSnapshot, PreparedCommand,
-    PreparedCommandResult, ProtocolMessage, ServerError, SessionId, WindowId,
+    CommandInvocation, CommandResponse, ControlSourceFileEvent, EventPayload, MuxSnapshot,
+    PreparedCommand, PreparedCommandResult, ProtocolMessage, ServerError, SessionId, WindowId,
 };
 
 use super::{
@@ -727,6 +727,12 @@ fn handle_protocol<W: Write>(
                 }
                 output.control_command_guard(&text, error, flags)?;
             }
+            EventPayload::ControlSourceFile { event } => {
+                if matches!(event, ControlSourceFileEvent::ReadError(_)) {
+                    state.return_code = 1;
+                }
+                output.control_source_file(event)?;
+            }
             EventPayload::ClientMessage {
                 kind: zz_protocol::ClientMessageKind::Error,
                 text,
@@ -1208,6 +1214,7 @@ enum DeferredOutput {
         error: bool,
         flags: u8,
     },
+    ControlSourceFile(ControlSourceFileEvent),
 }
 
 struct ControlWriter<W: Write> {
@@ -1269,6 +1276,9 @@ impl<W: Write> ControlWriter<W> {
                     error,
                     flags,
                 } => self.write_control_command_guard(time, &output, error, flags)?,
+                DeferredOutput::ControlSourceFile(event) => {
+                    self.write_control_source_file(event)?;
+                }
             }
         }
         Ok(())
@@ -1329,6 +1339,26 @@ impl<W: Write> ControlWriter<W> {
         self.write_frame_begin(&frame)?;
         self.payload(output)?;
         self.write_frame_end(&frame, error)
+    }
+
+    fn control_source_file(&mut self, event: ControlSourceFileEvent) -> io::Result<()> {
+        if self.block_open {
+            self.deferred
+                .push_back(DeferredOutput::ControlSourceFile(event));
+            return Ok(());
+        }
+        self.write_control_source_file(event)?;
+        self.output.flush()
+    }
+
+    fn write_control_source_file(&mut self, event: ControlSourceFileEvent) -> io::Result<()> {
+        match event {
+            ControlSourceFileEvent::ReadError(text) => self.write_line(&text),
+            ControlSourceFileEvent::Complete => {
+                self.next_number = self.next_number.saturating_add(1);
+                Ok(())
+            }
+        }
     }
 
     fn begin(&mut self, flags: u8) -> io::Result<Frame> {
@@ -1850,6 +1880,87 @@ mod tests {
             .unwrap();
             assert_eq!(state.return_code, 1);
         }
+    }
+
+    #[test]
+    fn control_source_file_events_defer_raw_errors_and_consume_hidden_numbers() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let mut state = ControlState::default();
+        let direct = writer.begin_at(18, 1).unwrap();
+        for (sequence, payload) in [
+            (
+                1,
+                EventPayload::ControlCommandGuard {
+                    output: String::new(),
+                    error: false,
+                    sticky_failure: false,
+                    flags: 1,
+                },
+            ),
+            (
+                2,
+                EventPayload::ControlSourceFile {
+                    event: ControlSourceFileEvent::ReadError(
+                        "Is a directory: nested.conf".to_owned(),
+                    ),
+                },
+            ),
+            (
+                3,
+                EventPayload::ControlSourceFile {
+                    event: ControlSourceFileEvent::Complete,
+                },
+            ),
+            (
+                4,
+                EventPayload::ControlCommandGuard {
+                    output: "AFTER".to_owned(),
+                    error: false,
+                    sticky_failure: false,
+                    flags: 1,
+                },
+            ),
+        ] {
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event { sequence, payload }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+        }
+        writer
+            .response(
+                &direct,
+                CommandResponse::Success {
+                    request_id: 1,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(state.return_code, 1);
+        let lines = std::str::from_utf8(&writer.output)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 8);
+        assert_eq!(lines[0], "%begin 18 1 1");
+        assert_eq!(lines[1], "%end 18 1 1");
+        assert!(lines[2].starts_with("%begin "));
+        assert!(lines[2].ends_with(" 2 1"));
+        assert_eq!(
+            lines[2].strip_prefix("%begin "),
+            lines[3].strip_prefix("%end ")
+        );
+        assert_eq!(lines[4], "Is a directory: nested.conf");
+        assert!(lines[5].starts_with("%begin "));
+        assert!(lines[5].ends_with(" 4 1"));
+        assert_eq!(lines[6], "AFTER");
+        assert_eq!(
+            lines[5].strip_prefix("%begin "),
+            lines[7].strip_prefix("%end ")
+        );
     }
 
     #[test]

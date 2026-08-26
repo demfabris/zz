@@ -110,9 +110,15 @@ command list, later entries continue, and output never folds into the triggering
 ambiguous sourced names publish `%config-error` without a guard or `command-error`; aliases use one
 frozen resolution for classification and execution. A mixed missing-and-matched hook source ends
 `%end` but sets `sticky_failure`, retaining process status 1 while later hook commands continue.
-Matched parser and hook-source OS or path read failures still differ in raw diagnostic placement,
-and zz does not model the pin's invisible source-completion command numbers. Both residues stay under
-`control-mode.hook-source-read-diagnostics`.
+Protocol v78 gives matched parser and hook-source OS or path read failures a typed
+`ControlSourceFileEvent::ReadError`. The Control writer prints that text raw after the source guard,
+without allocating a frame, and retains process status 1. Each source invocation that passes depth
+checking also publishes one `Complete` after its descendants. The writer renders nothing for that
+event and consumes one command number. Empty files, loud and quiet misses, matched parser errors,
+nested and hook-owned sources, and `source-file -` all take that depth-admitted path. One or several
+matched read failures print before replay and still share the invocation's single completion after
+all descendants. The refused 51st invocation and dispatch-time syntax, arity, or flag errors consume
+none.
 
 Shell-evaluated `if-shell -b` and `run-shell -bC` run later with flags 0, retain the exact originating
 Control recipient through callback entry, and cancel before any callback work when that origin is
@@ -131,18 +137,24 @@ command waits keeps its arrival-time snapshot ahead of later queued stdin. A Ret
 self-detach waits is discarded when the caller's `Detached` event arrives. Nonself and no-victim
 detach commands keep the Control loop alive.
 
-Matched child OS and path read failures follow their parent source guard as typed standalone Error
-events. Numeric OS errors and colon-space paths use that path without text classification. A pinned
+Matched child OS and path read failures follow their parent source guard through the v78 typed
+source-read event, which Control renders as raw unframed text. Numeric OS errors and colon-space
+paths use that path without text classification. A pinned
 config containing only byte `0xff` behaves differently: direct Command and Control sources succeed
-without a visible diagnostic, and a synchronous `if-shell` source emits successful parent and
-source guards before later root commands run. zz currently rejects that byte during
+without a visible diagnostic, Control consumes an extra hidden empty-command item plus the ordinary
+source completion, and a synchronous `if-shell` source emits successful parent and source guards
+before later root commands run. zz currently rejects that byte during
 `read_to_string`, emits `stream did not contain valid UTF-8`, and returns status 1.
 `config.non-utf8-file-bytes` owns the byte-input matrix and fix.
+The `source-file -` completion number agrees, but caller stdin transport remains open under
+`protocol.binary-streams`. Parser abort, sourced-hook cwd, deferred event-hook cwd and routing, and
+hard-disconnect queue cancellation also remain under their named gaps.
 No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
 summaries and lexer-owned diagnostics remain generic Warning events
 behind the prose classifier in `control-mode.diagnostic-typing`. The known-family Warning fallback
 remains for legacy producers, while the exact protocol handshake rejects v76 and v77 client-daemon
-skew before either event path can mix. Counting the initial `source-file` as invocation 1, both sides run 50 concurrent
+skew before either event path can mix. Protocol v78 peers reject both older shapes as well. Counting
+the initial `source-file` as invocation 1, both sides run 50 concurrent
 source invocations and refuse invocation 51 with `too many nested files` before any of its
 paths are matched or loaded: Command stderr at rc 1, the same lowercase text on the Control
 error channel while the outer typed line continues, and the capitalized `Too many nested
@@ -178,8 +190,8 @@ inner or outer continuation. Unknown command names and malformed set-option synt
 existing file-prefixed parse-diagnostic path. Protocol v77 carries parser-owned runtime failures
 inside their own Control command guards. Synchronous foreground inserted lists use the same flags-1
 path. Immediate command hooks and background inserted lists use independent flags-0 guards.
-Parser and hook-source read placement plus completion numbering and hard-disconnect queue cancellation
-remain under their active Control groups. Successful stdout before and after a failure remains in the
+Parser and hook-source read placement plus completion numbering now use the v78 source event.
+Hard-disconnect queue cancellation remains under its active Control group. Successful stdout before and after a failure remains in the
 invocation transcript; the original stderr and status 1 remain separate. Clientless startup delivery
 stays separate.
 `source-file -n` runs the same lexer and condition evaluation, retains syntax diagnostics and

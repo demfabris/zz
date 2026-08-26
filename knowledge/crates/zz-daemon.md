@@ -527,9 +527,13 @@ continues.
 Shell-evaluated `if-shell -b` and `run-shell -bC` now publish asynchronous flags-0 callback frames.
 Hard disconnect after an immediate hook or source queue has started remains under
 `control-mode.disconnect-cancels-command-queue`; ordinary `run-shell -b` output remains under
-`control-mode.async-command-output`. Matched parser and hook-source OS or path read failures still
-differ from the pin's raw unframed placement, and invisible source-completion command numbers are not
-modeled. `control-mode.hook-source-read-diagnostics` owns both residues.
+`control-mode.async-command-output`. Protocol v78 appends
+`EventPayload::ControlSourceFile { event }` at tag 48. For a matched parser or hook-source OS or path
+read failure, the daemon publishes `ReadError` after the source guard instead of a standalone client
+message. It publishes one `Complete` after every depth-admitted invocation's descendants. The event
+capture shares the originating Control client and thread with command guards, so neither signal can
+fold into the trigger or leak to another client. A depth refusal and a dispatch-time syntax, arity,
+or flag rejection publish no completion.
 Invalid UTF-8 config content remains under `config.non-utf8-file-bytes` after
 the pinned lone-`0xff` case disproved the earlier zz-side typed-error assumption.
 
@@ -539,7 +543,7 @@ before recursion. A focused regression, the 601-test daemon suite, and the then-
 differential prove that a three-level replay publishes the root missing-path guard, the middle
 missing-path guard, and the leaf output guard in that order, each once. No production change was
 required for that closure. The Control front end combines direct runtime errors, source guards,
-typed OS or path source-read errors, and a nonzero outer `source-file` success into the pin's retval.
+v78 source-read errors, and a nonzero outer `source-file` success into the pin's retval.
 A Return captured while a preceding non-detach command waits keeps its arrival-time snapshot ahead
 of later queued stdin. The daemon sends `Detached` only to actual victims, so nonself and no-victim
 detach commands leave the caller running. A Return observed while self-detach waits is discarded on
@@ -567,11 +571,13 @@ under `config.startup-diagnostic-delivery`.
 
 The hook matrix, source and replay clusters, protocol and client suites, and Control units pass. Strict
 clippy across protocol, client, mux, daemon, and zz, formatting, shell syntax, and diff checks pass.
-The strict `source-file-control` differential passes 11 steps and `source-file-output` passes 12,
-both with zero differences and no skips. The stored canonical `source-file-control` row remains
-unchanged at three steps. Generic config Warning typing, Control source-read placement and completion
-numbering, hard-disconnect queue cancellation, config byte input, retained startup causes, and TUI
-command-output navigation remain open.
+The strict `source-file-control` differential passes 12 steps and `source-file-output` passes 12,
+both with zero differences and no skips. The focused Control row now covers raw parser and hook
+source-read placement plus hidden numbering alongside its earlier queue and status matrix. The
+stored canonical `source-file-control` row remains unchanged at three steps. Generic config Warning
+typing, hard-disconnect queue cancellation, config
+byte input, source stdin transport, parser abort semantics, hook cwd selection, deferred event hooks,
+retained startup causes, and TUI command-output navigation remain open.
 
 # Examples
 

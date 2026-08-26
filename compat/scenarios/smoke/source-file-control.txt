@@ -21,4 +21,5 @@ out: show-environment -g SOURCE_FILE_CONTROL_DEPTH
 out: show-environment -g SOURCE_FILE_CONTROL_STATUS_MATRIX
 out: show-environment -g SOURCE_FILE_CONTROL_RETURN_PRECEDENCE
 out: show-environment -g SOURCE_FILE_CONTROL_HOOKS
+out: show-environment -g SOURCE_FILE_CONTROL_READ_PLACEMENT
 out: show-environment -g SOURCE_FILE_CONTROL_BACKGROUND

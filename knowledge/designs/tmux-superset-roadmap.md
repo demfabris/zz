@@ -38,21 +38,20 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-26
 
-The live tracker has 93 active groups, 666 classified active items, 62 closed groups, and two known
-differentials. `control-mode.hook-command-frames` and
-`control-mode.background-inserted-command-frames` are closed. Protocol v77 carries explicit command
-frame flags and independent sticky status in `ControlCommandGuard`, so parser replay stays at flags 1
-while immediate command hooks, background callbacks, and all of their sourced descendants use flags
-0. The strict eleven-step `smoke/source-file-control` differential is clean with no skips; the stored
-canonical summary remains unchanged until the final full strict and attached-client run.
+The live tracker has 92 active groups, 663 classified active items, 63 closed groups, and two known
+differentials. Protocol v77 carries explicit command frame flags and independent sticky status in
+`ControlCommandGuard`, so parser replay stays at flags 1 while immediate command hooks, background
+callbacks, and all of their sourced descendants use flags 0. Protocol v78 adds typed source-read and
+completion events at tail tag 48. Matched parser and hook-source read errors now render raw after the
+source guard, and every depth-admitted source invocation consumes one hidden command number after its
+descendants. The strict twelve-step `smoke/source-file-control` differential is clean with no skips;
+the stored canonical summary remains unchanged until the final full strict and attached-client run.
 
-The next dependency-free slice is `control-mode.hook-source-read-diagnostics`. Pinned tmux closes
-both parser flags-1 and immediate-hook flags-0 source guards, writes matched OS or path read failures
-as raw unframed text, and consumes an invisible completion command number per source invocation. zz
-currently emits standalone typed Error frames without those hidden numbers.
-`control-mode.disconnect-cancels-command-queue` separately owns hard disconnect after an immediate
-hook or source queue has started. Deferred event hooks, sourced-hook cwd, event-hook cwd, missing hook
-producers, config byte input, and TUI command-output navigation remain separate.
+This closure leaves hard-disconnect cancellation, invalid config bytes, source stdin transport,
+parser abort, sourced-hook cwd, deferred event-hook cwd and routing, missing hook producers, and TUI
+command-output navigation tracked under their existing groups. The generated tracker owns the next
+ease-ranked selection. Choose that slice after this milestone's commit and review instead of making
+the hard disconnect gap the implicit next task.
 
 # Baseline captured 2026-08-22
 
@@ -512,8 +511,8 @@ empty success guard and later siblings continue, but it does not join `ConfigLoa
 summary. An unknown child command produces successful parent and source guards, then `%config-error`
 without its own guard, matching the pin. The closure reuses protocol v76. The later protocol v77
 closures give immediate hook commands and shell-evaluated `if-shell -b` or `run-shell -bC` callbacks
-flags 0. Source-read placement and completion numbering plus hard-disconnect queue cancellation remain
-under their active Control groups; ordinary `run-shell -b` output remains under
+flags 0. Protocol v78 later closed source-read placement and completion numbering.
+Hard-disconnect queue cancellation remains under its active Control group; ordinary `run-shell -b` output remains under
 `control-mode.async-command-output`.
 The nesting limit is closed for guard
 placement, depth wording, count, and
@@ -551,9 +550,9 @@ may still publish their existing Warning summary. Successful output leaves stder
 zero. A runtime failure retains stderr and status 1 while stdout before and after it remains ordered.
 Cross-depth parser-owned Control ordering, synchronous inserted flags-1 framing, and
 return-versus-detach precedence are closed. The later protocol-v77 slice also closes immediate command
-hook flags-0 frames. Background inserted frames, hook-source read placement, config byte input, parser
-abort, and error shapes remain with their named groups; the same-line close does not cover exact
-matched-read text.
+hook flags-0 frames. The later background slice closes callback frames, and protocol v78 closes
+parser and hook-source raw read placement plus completion numbering. Config byte input, parser abort,
+and error shapes remain with their named groups; the same-line close did not cover those contracts.
 Startup accounting is closed: one
 budget spans every startup root, the roots do not count, source commands 1 through 50 run, and later
 source commands retain their declaring file and line while runtime sequential sources stay
@@ -716,7 +715,13 @@ permanent product decision has been recorded for them.
   Immediate `after-*` and `command-error` hooks now retain the originating Control recipient at flags
   0 without copying parser replay state. Hook arrays, source descendants, failures, unknown commands,
   alias resolution, and status retention match the pin. Background inserted frames and raw matched
-  hook-source read placement remain separate active groups.
+  hook-source read placement remained separate at that checkpoint.
+- 2026-08-26: Protocol v78 appended `ControlSourceFile` at event tail tag 48. Typed `ReadError`
+  events render as raw unframed lines after parser flags-1 or immediate-hook flags-0 source guards
+  and retain status 1. Invisible `Complete` events consume one command number after every
+  depth-admitted invocation's descendants. Depth refusals and dispatch-time syntax, arity, and flag
+  rejections consume none. Invalid UTF-8, source stdin transport, parser abort, hook cwd, deferred
+  event hooks, and hard-disconnect queue cancellation retain separate gaps.
 
 # Related
 

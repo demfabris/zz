@@ -34,16 +34,17 @@ use zz_protocol::{
     ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
     CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
     CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
-    DisplayPanesAction, DisplayPanesState, Event, EventPayload, GuiResponse, InputMessage,
-    MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT, MAX_CHOOSE_BUFFER_QUERY_BYTES,
-    MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource,
-    MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
-    PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
-    PopupBorderLines, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
-    ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer,
-    SourceSpan, SplitId, StatusLine, WindowId, canonical_key, encode_protocol_message_into,
-    encode_terminal_viewport_event_into, is_key_name, read_protocol_message_into, resolve_command,
+    ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
+    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState,
+    MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
+    PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose,
+    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, PreparedCommand,
+    PreparedCommandResult, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    read_protocol_message_into, resolve_command,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -6361,6 +6362,7 @@ impl Shared {
         let mut source_diagnostics_output = String::new();
         let mut source_invocations = SourceInvocationAccounting::default();
         let mut pending_source_files = Vec::new();
+        let control_source_invocation = control_target.is_some() && !source_files.is_empty();
         let captured_control_source = control_client.is_some_and(|client| {
             !source_files.is_empty() && self.is_capturing_control_command_events(client)
         });
@@ -6466,11 +6468,16 @@ impl Shared {
             match self.parse_config_file(&pending.path, &mut report, pending.options, true) {
                 Ok(parsed) => parsed_source_files.push((pending, parsed, report)),
                 Err(DaemonError::Io(error)) => {
-                    let warning = source_glob_error_warning(&pending.path, &error.to_string());
+                    let warning = if control_target.is_some() {
+                        source_read_error_warning(&pending.path, &error)
+                    } else {
+                        source_glob_error_warning(&pending.path, &error.to_string())
+                    };
                     if let Some(target) = control_target {
                         self.publish_control_source_read_error(
                             target,
                             pending.context.pane,
+                            error.kind(),
                             warning,
                         );
                     } else {
@@ -6511,9 +6518,18 @@ impl Shared {
             match replayed {
                 Ok(()) => {}
                 Err(DaemonError::Io(error)) => {
-                    let warning = source_glob_error_warning(&path, &error.to_string());
+                    let warning = if control_target.is_some() {
+                        source_read_error_warning(&path, &error)
+                    } else {
+                        source_glob_error_warning(&path, &error.to_string())
+                    };
                     if let Some(target) = control_target {
-                        self.publish_control_source_read_error(target, context.pane, warning);
+                        self.publish_control_source_read_error(
+                            target,
+                            context.pane,
+                            error.kind(),
+                            warning,
+                        );
                     } else {
                         self.route_source_error(source_client, source_kind, context.pane, &warning);
                     }
@@ -6582,6 +6598,9 @@ impl Shared {
                     },
                 );
             }
+        }
+        if control_source_invocation {
+            self.publish_control_source_complete(control_target);
         }
         append_inserted_output(&mut execution.output, &source_verbose_output);
         append_inserted_output(&mut execution.output, &source_replay_output);
@@ -15391,7 +15410,9 @@ impl Shared {
     fn publish_to_client(&self, client: ClientId, payload: EventPayload) {
         if matches!(
             &payload,
-            EventPayload::ControlCommandGuard { .. } | EventPayload::ClientMessage { .. }
+            EventPayload::ControlCommandGuard { .. }
+                | EventPayload::ControlSourceFile { .. }
+                | EventPayload::ClientMessage { .. }
         ) {
             let capture_key = (client, thread::current().id());
             let mut inner = self.inner.lock();
@@ -15507,6 +15528,7 @@ impl Shared {
         &self,
         target: (ClientId, u8),
         pane: Option<PaneId>,
+        kind: ErrorKind,
         text: String,
     ) {
         let client = target.0;
@@ -15518,14 +15540,29 @@ impl Shared {
                 .or_default()
                 .exit_code = 1;
         }
-        self.publish_to_client(
-            client,
+        let payload = if kind == ErrorKind::InvalidData {
             EventPayload::ClientMessage {
                 pane,
                 kind: ClientMessageKind::Error,
                 text,
-            },
-        );
+            }
+        } else {
+            EventPayload::ControlSourceFile {
+                event: ControlSourceFileEvent::ReadError(text),
+            }
+        };
+        self.publish_to_client(client, payload);
+    }
+
+    fn publish_control_source_complete(&self, target: Option<(ClientId, u8)>) {
+        if let Some((client, _)) = target {
+            self.publish_to_client(
+                client,
+                EventPayload::ControlSourceFile {
+                    event: ControlSourceFileEvent::Complete,
+                },
+            );
+        }
     }
 
     fn sourced_command_name_error(&self, command: &CommandInvocation) -> Option<String> {
@@ -16981,7 +17018,9 @@ impl Shared {
         report.control_guarded |= options.control_target.is_some();
         let input = match fs::read_to_string(path) {
             Ok(input) => input,
-            Err(error) if error.kind() == ErrorKind::NotFound => {
+            Err(error)
+                if error.kind() == ErrorKind::NotFound && options.control_target.is_none() =>
+            {
                 log::warn!("ignoring missing config file: {}", path.display());
                 return Ok(None);
             }
@@ -17279,14 +17318,18 @@ impl Shared {
                     match self.parse_config_file(&pending.path, report, pending.options, true) {
                         Ok(Some(parsed)) => parsed_sources.push((pending, parsed)),
                         Err(DaemonError::Io(error)) => {
-                            let warning =
-                                source_glob_error_warning(&pending.path, &error.to_string());
+                            let warning = if options.control_target.is_some() {
+                                source_read_error_warning(&pending.path, &error)
+                            } else {
+                                source_glob_error_warning(&pending.path, &error.to_string())
+                            };
                             log::warn!("{warning}");
                             report.note_source_error(&mut source_error_group, &warning);
                             if let Some(target) = options.control_target {
                                 self.publish_control_source_read_error(
                                     target,
                                     pending.context.pane,
+                                    error.kind(),
                                     warning,
                                 );
                             }
@@ -17309,14 +17352,18 @@ impl Shared {
                         pending.options,
                     ) {
                         Err(DaemonError::Io(error)) => {
-                            let warning =
-                                source_glob_error_warning(&pending.path, &error.to_string());
+                            let warning = if options.control_target.is_some() {
+                                source_read_error_warning(&pending.path, &error)
+                            } else {
+                                source_glob_error_warning(&pending.path, &error.to_string())
+                            };
                             log::warn!("{warning}");
                             report.note_source_error(&mut source_error_group, &warning);
                             if let Some(target) = options.control_target {
                                 self.publish_control_source_read_error(
                                     target,
                                     pending.context.pane,
+                                    error.kind(),
                                     warning,
                                 );
                             }
@@ -17326,6 +17373,7 @@ impl Shared {
                     }
                 }
                 report.pop_stdout_frame();
+                self.publish_control_source_complete(options.control_target);
                 if let Some(error) = source_error {
                     return Err(error);
                 }
@@ -26095,6 +26143,17 @@ const NESTED_SOURCE_LIMIT_ERROR: &str = "too many nested files";
 
 fn source_glob_error_warning(path: &Path, error: &str) -> String {
     format!("{error}: {}", path.display())
+}
+
+fn source_read_error_warning(path: &Path, error: &std::io::Error) -> String {
+    let message = error.to_string();
+    let message = error.raw_os_error().map_or(message.clone(), |code| {
+        message
+            .strip_suffix(&format!(" (os error {code})"))
+            .unwrap_or(&message)
+            .to_owned()
+    });
+    source_glob_error_warning(path, &message)
 }
 
 fn missing_source_error(path: &Path) -> String {
@@ -35428,7 +35487,7 @@ mod tests {
                 &CommandInvocation::new("source-file", [source.display().to_string()]),
             ),
             CommandResponse::Success {
-                request_id: 2,
+                request_id: 1,
                 output: String::new(),
                 exit_code: 1,
                 stderr: String::new(),
@@ -36855,7 +36914,7 @@ mod tests {
                 &CommandInvocation::new("source-file", [error_root.display().to_string()]),
             ),
             CommandResponse::Success {
-                request_id: 3,
+                request_id: 2,
                 output: String::new(),
                 exit_code: 1,
                 stderr: String::new(),
@@ -36962,8 +37021,7 @@ mod tests {
         let unreadable = directory.path().join("hook-read-error");
         fs::create_dir(&unreadable).expect("hook read error directory");
         let unreadable_error = fs::read_to_string(&unreadable).expect_err("directory read error");
-        let unreadable_error =
-            source_glob_error_warning(&unreadable, &unreadable_error.to_string());
+        let unreadable_error = source_read_error_warning(&unreadable, &unreadable_error);
         let root = directory.path().join("hook-root.conf");
         fs::write(
             &root,
@@ -37091,15 +37149,24 @@ mod tests {
                         },
                     ..
                 }) => Some(format!("warning:{text}")),
-                ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Error,
-                            text,
-                            ..
-                        },
-                    ..
-                }) => Some(format!("error:{text}")),
+                ProtocolMessage::Event(
+                    Event {
+                        payload:
+                            EventPayload::ClientMessage {
+                                kind: ClientMessageKind::Error,
+                                text,
+                                ..
+                            },
+                        ..
+                    }
+                    | Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::ReadError(text),
+                            },
+                        ..
+                    },
+                ) => Some(format!("error:{text}")),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -38035,6 +38102,18 @@ mod tests {
                     },
                     ..
                 }),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlSourceFile {
+                        event: ControlSourceFileEvent::Complete,
+                    },
+                    ..
+                }),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlSourceFile {
+                        event: ControlSourceFileEvent::Complete,
+                    },
+                    ..
+                }),
             ] if output == missing_after_invalid_utf8 && text == &invalid_utf8_error
         ));
 
@@ -38056,14 +38135,22 @@ mod tests {
         );
         assert!(matches!(
             take_reliable_messages(&control_mailbox).as_slice(),
-            [ProtocolMessage::Event(Event {
-                payload: EventPayload::ClientMessage {
-                    kind: ClientMessageKind::Error,
-                    text,
+            [
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Error,
+                        text,
+                        ..
+                    },
                     ..
-                },
-                ..
-            })] if text == &invalid_utf8_error
+                }),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlSourceFile {
+                        event: ControlSourceFileEvent::Complete,
+                    },
+                    ..
+                }),
+            ] if text == &invalid_utf8_error
         ));
 
         #[cfg(unix)]
@@ -38111,6 +38198,18 @@ mod tests {
                             kind: ClientMessageKind::Error,
                             text,
                             ..
+                        },
+                        ..
+                    }),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::Complete,
+                        },
+                        ..
+                    }),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::Complete,
                         },
                         ..
                     }),
@@ -38247,6 +38346,177 @@ mod tests {
                 ("CONTROL_QUEUE_LEAF".to_owned(), false, false),
             ]
         );
+    }
+
+    #[test]
+    fn control_source_read_events_preserve_tree_order_and_completion_cardinality() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let first_unreadable = directory.path().join("first unreadable");
+        let second_unreadable = directory.path().join("second unreadable");
+        fs::create_dir(&first_unreadable).expect("first unreadable directory");
+        fs::create_dir(&second_unreadable).expect("second unreadable directory");
+        let child = directory.path().join("child.conf");
+        fs::write(&child, "display-message -p CHILD\n").expect("child source fixture");
+        let root = directory.path().join("root.conf");
+        fs::write(
+            &root,
+            format!(
+                "display-message -p ROOT_BEFORE\n\
+                 source-file '{}' '{}' '{}'\n\
+                 display-message -p ROOT_AFTER\n",
+                first_unreadable.display(),
+                second_unreadable.display(),
+                child.display(),
+            ),
+        )
+        .expect("root source fixture");
+        let first_read_error =
+            fs::read_to_string(&first_unreadable).expect_err("first source read fails");
+        let first_error = source_read_error_warning(&first_unreadable, &first_read_error);
+        let second_read_error =
+            fs::read_to_string(&second_unreadable).expect_err("second source read fails");
+        let second_error = source_read_error_warning(&second_unreadable, &second_read_error);
+
+        let shared = Arc::new(Shared::new(78));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut command_context = ExecutionContext::default();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        let mut control_context = ExecutionContext::default();
+        let timeline = |messages: Vec<ProtocolMessage>| {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlCommandGuard {
+                                output,
+                                error,
+                                flags,
+                                ..
+                            },
+                        ..
+                    }) => Some(format!("guard:{flags}:{error}:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::ReadError(text),
+                            },
+                        ..
+                    }) => Some(format!("read:{text}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::Complete,
+                            },
+                        ..
+                    }) => Some("complete".to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                1,
+                &CommandInvocation::new("source-file", [root.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            timeline(take_reliable_messages(&mailbox)),
+            [
+                "guard:1:false:ROOT_BEFORE".to_owned(),
+                "guard:1:false:".to_owned(),
+                format!("read:{first_error}"),
+                format!("read:{second_error}"),
+                "guard:1:false:CHILD".to_owned(),
+                "complete".to_owned(),
+                "guard:1:false:ROOT_AFTER".to_owned(),
+                "complete".to_owned(),
+            ]
+        );
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "after-display-message".to_owned(),
+                        format!("source-file '{}'", root.display()),
+                    ],
+                ),
+            )
+            .expect("source hook");
+        take_reliable_messages(&mailbox);
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                2,
+                &CommandInvocation::new("display-message", ["-p", "TRIGGER"]),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: "TRIGGER".to_owned(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            timeline(take_reliable_messages(&mailbox)),
+            [
+                "guard:0:false:".to_owned(),
+                "guard:0:false:ROOT_BEFORE".to_owned(),
+                "guard:0:false:".to_owned(),
+                format!("read:{first_error}"),
+                format!("read:{second_error}"),
+                "guard:0:false:CHILD".to_owned(),
+                "complete".to_owned(),
+                "guard:0:false:ROOT_AFTER".to_owned(),
+                "complete".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_source_read_preserves_not_found_after_the_match_boundary() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let vanished = directory.path().join("vanished.conf");
+        fs::write(&vanished, "display-message -p VANISHED\n").expect("vanished fixture");
+        fs::remove_file(&vanished).expect("remove matched source");
+        let shared = Shared::new(79);
+        let mut report = ConfigLoadReport::default();
+        assert!(matches!(
+            shared.parse_config_file(
+                &vanished,
+                &mut report,
+                SourceFileLoadOptions {
+                    control_target: Some((
+                        ClientId(7),
+                        CONTROL_COMMAND_FRAME_FLAGS_CONTROL,
+                    )),
+                    ..SourceFileLoadOptions::default()
+                },
+                true,
+            ),
+            Err(DaemonError::Io(error)) if error.kind() == ErrorKind::NotFound
+        ));
     }
 
     #[cfg(unix)]

@@ -161,12 +161,15 @@ path diagnostics plus replayed runtime failures, continuation, and outer propaga
 check sources the active default config, a loud missing middle path, an after file, and the default
 again. It pins rc 1, declared `-v` order, later-file continuation, and final `DAD` state.
 `source-file-format` contributes 40 checks for parse-only, target, target-format, quiet miss,
-verbose order, and final state. `smoke/source-file-control` contributes 11 focused checks including
+verbose order, and final state. `smoke/source-file-control` contributes 12 focused checks including
 Control verbose suppression, replayed runtime error delivery, the three-level root-miss,
 middle-miss, leaf-output guard order, the full return-status matrix, queued Return precedence,
-immediate hook flags-0 frames, and background inserted-command frames. Its status coverage includes
-actual self-detach, nonself and no-victim detach, alias targeting, sticky background failures, and
-`%end` before `%exit`; a manual `detach-client -a` probe also matches the pin. `resize-directions`
+immediate hook flags-0 frames, background inserted-command frames, and parser flags-1 plus hook
+flags-0 read-error placement and hidden numbering. The source-read check covers multiple matched
+read failures before replay, one completion after descendants, raw unframed diagnostics, retained
+status, and later-line continuation. Its status coverage includes actual self-detach, nonself and
+no-victim detach, alias targeting, sticky background failures, and `%end` before `%exit`; a manual
+`detach-client -a` probe also matches the pin. `resize-directions`
 contributes 16 checks for bare direction flags with
 the default amount 1, attached amounts such as `-L2`, separated amounts such as `-L 2`, and the
 existing absolute resize forms. `formats-values` also proves explicit
@@ -178,7 +181,7 @@ dependencies.
 The checked-in summary is intentionally stale for the current focused slices and remains the last
 completed canonical artifact pending the final strict-plus-attached regeneration. The tracker
 closures record `smoke/source-file-diagnostics`, `source-file-format`, and
-`smoke/source-file-control` at 12, 40, and 11 focused steps while the summary retains 9, 20, and 3.
+`smoke/source-file-control` at 12, 40, and 12 focused steps while the summary retains 9, 20, and 3.
 The `resize-directions` focused row has 16 clean steps while the summary retains 8. Its stored
 ordinary, known-row, and attached-client results describe the earlier corpus and do not prove the
 current full inventory.
@@ -186,7 +189,7 @@ current full inventory.
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
 requires its persisted attached-client status to be `PASS`. Until the final strict-plus-attached run
-replaces the summary, `--check-summary` is expected to fail on the 12/40/11 versus 9/20/3 source-row
+replaces the summary, `--check-summary` is expected to fail on the 12/40/12 versus 9/20/3 source-row
 counts and the 16 versus 8 `resize-directions` count. The check exits before building or running
 either server. Linux CI first asserts that
 `compat/results/summary.md` is tracked, then runs

@@ -3303,7 +3303,7 @@ mod daemon_autostart {
             fields.next().is_none().then_some((time, number, flags))
         }
 
-        fn parse_stream(output: &[u8], double: bool) -> Stream {
+        fn parse_stream_impl(output: &[u8], double: bool, contiguous: bool) -> Stream {
             let output = if double {
                 assert!(output.starts_with(b"\x1bP1000p"));
                 assert!(output.ends_with(b"\x1b\\"));
@@ -3351,10 +3351,30 @@ mod daemon_autostart {
                 });
             }
             for (index, block) in blocks.iter().enumerate() {
-                assert_eq!(block.number, index as u64 + 1);
+                if contiguous {
+                    assert_eq!(block.number, index as u64 + 1);
+                }
                 assert!(block.time > 0);
             }
             Stream { blocks, outside }
+        }
+
+        fn parse_stream(output: &[u8], double: bool) -> Stream {
+            parse_stream_impl(output, double, true)
+        }
+
+        fn parse_stream_allow_gaps(output: &[u8], double: bool) -> Stream {
+            parse_stream_impl(output, double, false)
+        }
+
+        fn os_error_text(error: &std::io::Error) -> String {
+            let message = error.to_string();
+            error.raw_os_error().map_or(message.clone(), |code| {
+                message
+                    .strip_suffix(&format!(" (os error {code})"))
+                    .unwrap_or(&message)
+                    .to_owned()
+            })
         }
 
         fn assert_block(block: &Block, number: u64, flags: u8, payload: &[&str], error: bool) {
@@ -4091,14 +4111,14 @@ mod daemon_autostart {
             );
             assert_eq!(quiet_output.status.code(), Some(0));
             assert!(quiet_output.stderr.is_empty());
-            let quiet_stream = parse_stream(&quiet_output.stdout, false);
+            let quiet_stream = parse_stream_allow_gaps(&quiet_output.stdout, false);
             assert_eq!(quiet_stream.blocks.len(), 6);
             assert_block(&quiet_stream.blocks[0], 1, 0, &[], false);
             assert_block(&quiet_stream.blocks[1], 2, 1, &[], false);
             assert_block(&quiet_stream.blocks[2], 3, 1, &[], false);
             assert_block(&quiet_stream.blocks[3], 4, 1, &[], false);
-            assert_block(&quiet_stream.blocks[4], 5, 1, &["quiet-fresh"], false);
-            assert_block(&quiet_stream.blocks[5], 6, 1, &[], false);
+            assert_block(&quiet_stream.blocks[4], 7, 1, &["quiet-fresh"], false);
+            assert_block(&quiet_stream.blocks[5], 8, 1, &[], false);
             assert_attached_startup(&quiet_stream.outside, "quiet-guards");
 
             let fixture = Fixture::new();
@@ -4132,7 +4152,7 @@ mod daemon_autostart {
             );
             assert_eq!(partial_output.status.code(), Some(1));
             assert!(partial_output.stderr.is_empty());
-            let partial_stream = parse_stream(&partial_output.stdout, false);
+            let partial_stream = parse_stream_allow_gaps(&partial_output.stdout, false);
             assert_eq!(partial_stream.blocks.len(), 7);
             assert_block(&partial_stream.blocks[0], 1, 0, &[], false);
             assert_block(&partial_stream.blocks[1], 2, 1, &[], false);
@@ -4144,9 +4164,9 @@ mod daemon_autostart {
                 false,
             );
             assert_block(&partial_stream.blocks[3], 4, 1, &[], false);
-            assert_block(&partial_stream.blocks[4], 5, 1, &["sourced-output"], false);
-            assert_block(&partial_stream.blocks[5], 6, 1, &["partial-fresh"], false);
-            assert_block(&partial_stream.blocks[6], 7, 1, &[], false);
+            assert_block(&partial_stream.blocks[4], 6, 1, &["sourced-output"], false);
+            assert_block(&partial_stream.blocks[5], 8, 1, &["partial-fresh"], false);
+            assert_block(&partial_stream.blocks[6], 9, 1, &[], false);
             assert_attached_startup(&partial_stream.outside, "partial-guards");
         }
 
@@ -4163,12 +4183,9 @@ mod daemon_autostart {
                 "read-entry.conf",
                 &format!("source-file '{}'\n", unreadable.display()),
             );
-            let expected = format!(
-                "{}: {}",
-                std::fs::read_to_string(&unreadable)
-                    .expect_err("reading the source directory must fail"),
-                unreadable.display()
-            );
+            let read_error = std::fs::read_to_string(&unreadable)
+                .expect_err("reading the source directory must fail");
+            let expected = format!("{}: {}", os_error_text(&read_error), unreadable.display());
             let input = format!("source-file '{entry}'\ndisplay-message -p after-read-error\n");
             let marker = fixture._directory.path().join("source-read.complete");
             let output = run_control_until_return(
@@ -4180,15 +4197,32 @@ mod daemon_autostart {
             );
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 6);
+            let lines = std::str::from_utf8(&output.stdout)
+                .expect("UTF-8 source read output")
+                .lines()
+                .collect::<Vec<_>>();
+            let error_index = lines
+                .iter()
+                .position(|line| line == &expected)
+                .expect("raw source read error");
+            assert!(lines[error_index - 1].starts_with("%end "));
+            assert!(lines[error_index - 1].ends_with(" 3 1"));
+            assert!(lines[error_index + 1].starts_with("%begin "));
+            assert!(lines[error_index + 1].ends_with(" 6 1"));
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 5);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_block(&stream.blocks[2], 3, 1, &[], false);
-            assert_block(&stream.blocks[3], 4, 1, &[&expected], true);
-            assert_block(&stream.blocks[4], 5, 1, &["after-read-error"], false);
-            assert_block(&stream.blocks[5], 6, 1, &[], false);
-            assert_attached_startup(&stream.outside, "source-read-error");
+            assert_block(&stream.blocks[3], 6, 1, &["after-read-error"], false);
+            assert_block(&stream.blocks[4], 7, 1, &[], false);
+            assert!(stream.outside.contains(&expected));
+            let outside = stream
+                .outside
+                .into_iter()
+                .filter(|line| line != &expected)
+                .collect::<Vec<_>>();
+            assert_attached_startup(&outside, "source-read-error");
         }
 
         #[test]
@@ -4223,7 +4257,7 @@ mod daemon_autostart {
             );
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
             assert_eq!(stream.blocks.len(), 11);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
@@ -4234,20 +4268,20 @@ mod daemon_autostart {
                 &["No such file or directory: nested-missing.conf"],
                 true,
             );
-            assert_block(&stream.blocks[3], 4, 1, &["same-nested"], false);
+            assert_block(&stream.blocks[3], 6, 1, &["same-nested"], false);
             assert_block(
                 &stream.blocks[4],
-                5,
+                7,
                 1,
                 &["No such file or directory: top-missing.conf"],
                 true,
             );
-            assert_block(&stream.blocks[5], 6, 1, &[], false);
-            assert_block(&stream.blocks[6], 7, 1, &["same-invalid"], false);
-            assert_block(&stream.blocks[7], 8, 1, &[], false);
-            assert_block(&stream.blocks[8], 9, 1, &[], false);
-            assert_block(&stream.blocks[9], 10, 1, &["fresh"], false);
-            assert_block(&stream.blocks[10], 11, 1, &[], false);
+            assert_block(&stream.blocks[5], 9, 1, &[], false);
+            assert_block(&stream.blocks[6], 11, 1, &["same-invalid"], false);
+            assert_block(&stream.blocks[7], 12, 1, &[], false);
+            assert_block(&stream.blocks[8], 13, 1, &[], false);
+            assert_block(&stream.blocks[9], 16, 1, &["fresh"], false);
+            assert_block(&stream.blocks[10], 17, 1, &[], false);
             let diagnostic = format!(
                 "%config-error {}:1: unknown command: wibble",
                 invalid.display()
@@ -4290,7 +4324,7 @@ mod daemon_autostart {
             );
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
             assert_eq!(stream.blocks.len(), 9);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
@@ -4310,9 +4344,9 @@ mod daemon_autostart {
             );
             assert_block(&stream.blocks[4], 5, 1, &["empty variable name"], true);
             assert_block(&stream.blocks[5], 6, 1, &[], false);
-            assert_block(&stream.blocks[6], 7, 1, &["yes"], false);
-            assert_block(&stream.blocks[7], 8, 1, &["fresh"], false);
-            assert_block(&stream.blocks[8], 9, 1, &[], false);
+            assert_block(&stream.blocks[6], 8, 1, &["yes"], false);
+            assert_block(&stream.blocks[7], 9, 1, &["fresh"], false);
+            assert_block(&stream.blocks[8], 10, 1, &[], false);
             assert_attached_startup(&stream.outside, "control-replay-errors");
         }
 
@@ -4468,7 +4502,22 @@ mod daemon_autostart {
                     assert_eq!(output.status.code(), Some(expected_status), "{label}");
                     assert!(output.stderr.is_empty(), "{label}");
                     let stdout = std::fs::read(&output_path).expect("read matrix control output");
-                    let stream = parse_stream(&stdout, false);
+                    let hidden = match row.name {
+                        "sourced-runtime" => 1,
+                        "sourced-command" => 2,
+                        _ => 0,
+                    };
+                    let stream = if hidden == 0 {
+                        parse_stream(&stdout, false)
+                    } else {
+                        parse_stream_allow_gaps(&stdout, false)
+                    };
+                    assert_eq!(
+                        stream.blocks.last().expect("matrix block").number
+                            - stream.blocks.len() as u64,
+                        hidden,
+                        "{label}: {stream:?}"
+                    );
                     assert!(
                         stream.blocks.iter().any(|block| {
                             block.error == row.error
@@ -4831,7 +4880,12 @@ mod daemon_autostart {
             );
             assert!(output.stderr.is_empty());
             let stdout = std::fs::read(output_path).expect("read completed control output");
-            let stream = parse_stream(&stdout, false);
+            let stream = parse_stream_allow_gaps(&stdout, false);
+            assert_eq!(
+                stream.blocks.last().expect("post-detach block").number
+                    - stream.blocks.len() as u64,
+                1
+            );
             assert!(stream.blocks.iter().any(|block| {
                 block.error && block.payload == ["can't find session: post-detach-missing"]
             }));
@@ -4868,7 +4922,12 @@ mod daemon_autostart {
             let output = collect_control_process(child, Some(stdin), "server stop status");
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            assert_eq!(
+                stream.blocks.last().expect("server-stop block").number
+                    - stream.blocks.len() as u64,
+                1
+            );
             assert!(stream.blocks.iter().any(|block| {
                 block.error && block.payload == ["can't find session: server-stop-missing"]
             }));
@@ -4895,7 +4954,7 @@ mod daemon_autostart {
             );
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
             assert_eq!(stream.blocks.len(), 155);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
@@ -4910,8 +4969,9 @@ mod daemon_autostart {
                     .iter()
                     .all(|block| block.payload == ["too many nested files"])
             );
-            assert_block(&stream.blocks[153], 154, 1, &["after-the-limit"], false);
-            assert_block(&stream.blocks[154], 155, 1, &[], false);
+            assert_block(&stream.blocks[153], 204, 1, &["after-the-limit"], false);
+            assert_block(&stream.blocks[154], 205, 1, &[], false);
+            assert_eq!(stream.blocks[154].number - stream.blocks.len() as u64, 50);
             assert_attached_startup(&stream.outside, "control-depth");
         }
 
@@ -5023,7 +5083,7 @@ mod daemon_autostart {
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stderr.is_empty());
             let stdout = std::fs::read(&output_path).expect("read background control output");
-            let stream = parse_stream(&stdout, false);
+            let stream = parse_stream_allow_gaps(&stdout, false);
             assert_eq!(stream.blocks.len(), 14, "{stream:?}");
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
@@ -5036,7 +5096,7 @@ mod daemon_autostart {
             assert_block(&stream.blocks[8], 9, 0, &["BACKGROUND_CHILD"], false);
             assert_block(
                 &stream.blocks[9],
-                10,
+                11,
                 0,
                 &[&format!(
                     "No such file or directory: {}",
@@ -5046,16 +5106,16 @@ mod daemon_autostart {
             );
             assert_block(
                 &stream.blocks[10],
-                11,
+                13,
                 0,
                 &["can't find session: background-runtime-missing"],
                 true,
             );
-            assert_block(&stream.blocks[11], 12, 0, &["BACKGROUND_RUN"], false);
-            assert_block(&stream.blocks[12], 13, 0, &["BACKGROUND_ELSE"], false);
+            assert_block(&stream.blocks[11], 14, 0, &["BACKGROUND_RUN"], false);
+            assert_block(&stream.blocks[12], 15, 0, &["BACKGROUND_ELSE"], false);
             assert_block(
                 &stream.blocks[13],
-                14,
+                16,
                 1,
                 &["BACKGROUND_STICKY_LATER"],
                 false,
@@ -5296,7 +5356,7 @@ mod daemon_autostart {
                 String::from_utf8_lossy(&output.stderr),
             );
             assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
             assert_eq!(stream.blocks.len(), 10, "{stream:?}");
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &["TRIGGER"], false);
@@ -5310,10 +5370,10 @@ mod daemon_autostart {
                 true,
             );
             assert_block(&stream.blocks[5], 6, 0, &["HOOK_AFTER_ERROR"], false);
-            assert_block(&stream.blocks[6], 7, 0, &["HOOK_LATER_ARRAY"], false);
-            assert_block(&stream.blocks[7], 8, 1, &[], false);
-            assert_block(&stream.blocks[8], 9, 1, &["LATER_FLAGS_ONE"], false);
-            assert_block(&stream.blocks[9], 10, 1, &[], false);
+            assert_block(&stream.blocks[6], 8, 0, &["HOOK_LATER_ARRAY"], false);
+            assert_block(&stream.blocks[7], 9, 1, &[], false);
+            assert_block(&stream.blocks[8], 10, 1, &["LATER_FLAGS_ONE"], false);
+            assert_block(&stream.blocks[9], 11, 1, &[], false);
             assert!(
                 stream
                     .outside
@@ -5367,7 +5427,7 @@ mod daemon_autostart {
             );
             assert_eq!(mixed.status.code(), Some(1));
             assert!(mixed.stderr.is_empty());
-            let mixed = parse_stream(&mixed.stdout, false);
+            let mixed = parse_stream_allow_gaps(&mixed.stdout, false);
             assert_eq!(mixed.blocks.len(), 7, "{mixed:?}");
             assert_block(&mixed.blocks[0], 1, 0, &[], false);
             assert_block(&mixed.blocks[1], 2, 1, &["MIXED_TRIGGER"], false);
@@ -5379,9 +5439,9 @@ mod daemon_autostart {
                 false,
             );
             assert_block(&mixed.blocks[3], 4, 0, &["MIXED_HIT"], false);
-            assert_block(&mixed.blocks[4], 5, 1, &[], false);
-            assert_block(&mixed.blocks[5], 6, 1, &["MIXED_LATER"], false);
-            assert_block(&mixed.blocks[6], 7, 1, &[], false);
+            assert_block(&mixed.blocks[4], 6, 1, &[], false);
+            assert_block(&mixed.blocks[5], 7, 1, &["MIXED_LATER"], false);
+            assert_block(&mixed.blocks[6], 8, 1, &[], false);
 
             assert!(
                 fixture
@@ -5396,7 +5456,7 @@ mod daemon_autostart {
             );
             let read_error = std::fs::read_to_string(&directory)
                 .expect_err("source directory must fail as a file read");
-            let read_error = format!("{read_error}: {}", directory.display());
+            let read_error = format!("{}: {}", os_error_text(&read_error), directory.display());
             let read_marker = directory.join("read-complete");
             let read = run_control_until_return(
                 &fixture,
@@ -5409,15 +5469,27 @@ mod daemon_autostart {
             );
             assert_eq!(read.status.code(), Some(1));
             assert!(read.stderr.is_empty());
-            let read = parse_stream(&read.stdout, false);
-            assert_eq!(read.blocks.len(), 7, "{read:?}");
+            let read_lines = std::str::from_utf8(&read.stdout)
+                .expect("UTF-8 hook source read output")
+                .lines()
+                .collect::<Vec<_>>();
+            let read_error_index = read_lines
+                .iter()
+                .position(|line| line == &read_error)
+                .expect("raw hook source read error");
+            assert!(read_lines[read_error_index - 1].starts_with("%end "));
+            assert!(read_lines[read_error_index - 1].ends_with(" 3 0"));
+            assert!(read_lines[read_error_index + 1].starts_with("%begin "));
+            assert!(read_lines[read_error_index + 1].ends_with(" 5 1"));
+            let read = parse_stream_allow_gaps(&read.stdout, false);
+            assert_eq!(read.blocks.len(), 6, "{read:?}");
             assert_block(&read.blocks[0], 1, 0, &[], false);
             assert_block(&read.blocks[1], 2, 1, &["READ_TRIGGER"], false);
             assert_block(&read.blocks[2], 3, 0, &[], false);
-            assert_block(&read.blocks[3], 4, 1, &[&read_error], true);
-            assert_block(&read.blocks[4], 5, 1, &[], false);
-            assert_block(&read.blocks[5], 6, 1, &["READ_LATER"], false);
-            assert_block(&read.blocks[6], 7, 1, &[], false);
+            assert_block(&read.blocks[3], 5, 1, &[], false);
+            assert_block(&read.blocks[4], 6, 1, &["READ_LATER"], false);
+            assert_block(&read.blocks[5], 7, 1, &[], false);
+            assert!(read.outside.contains(&read_error));
         }
 
         #[test]

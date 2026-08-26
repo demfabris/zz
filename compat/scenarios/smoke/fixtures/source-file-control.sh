@@ -28,6 +28,21 @@ printf '%s\n' \
     "source-file '$hooks_dir/unknown.conf'" \
     'kill-session -t hook-source-runtime' \
     'display-message -p HOOK_SOURCE_AFTER' >"$hooks_dir/root.conf"
+read_dir="$control_dir/read-placement"
+mkdir -p "$read_dir/direct-one" "$read_dir/direct-two" "$read_dir/hook-bad"
+printf '%s\n' 'display-message -p DIRECT_READ_CHILD' >"$read_dir/direct-child.conf"
+printf '%s\n' \
+    'display-message -p DIRECT_READ_BEFORE' \
+    "source-file '$read_dir/direct-one' '$read_dir/direct-two' '$read_dir/direct-child.conf'" \
+    'display-message -p DIRECT_READ_AFTER' >"$read_dir/direct-root.conf"
+printf '%s\n' \
+    'display-message -p HOOK_READ_NESTED_BEFORE' \
+    "source-file '$read_dir/hook-bad'" \
+    'display-message -p HOOK_READ_NESTED_AFTER' >"$read_dir/hook-nested.conf"
+printf '%s\n' \
+    'display-message -p HOOK_READ_ROOT_BEFORE' \
+    "source-file '$read_dir/hook-nested.conf'" \
+    'display-message -p HOOK_READ_ROOT_AFTER' >"$read_dir/hook-root.conf"
 queue_dir="$control_dir/queue"
 mkdir -p "$queue_dir"
 printf '%s\n' 'display-message -p CONTROL_QUEUE_LEAF' >"$queue_dir/leaf.conf"
@@ -195,6 +210,47 @@ control_frame_sequence() {
         active && !/^%/ {
             if (payload != "") payload = payload "+"
             payload = payload $0
+        }
+        END { print "" }
+    '
+}
+
+control_numbered_timeline() {
+    sed "s|$control_dir|<DIR>|g" "$1" | awk '
+        function emit(terminator) {
+            if (payload == "") payload = "_"
+            printf "%s%s:%s:%s:%s", separator, number, flags, terminator, payload
+            separator = "|"
+            active = 0
+            payload = ""
+        }
+        /^%begin [0-9]+ [0-9]+ [0-9]+$/ {
+            active = 1
+            frame_count++
+            if (frame_count == 2) base = $3 - 1
+            number = $3 - base
+            flags = $4
+            payload = ""
+            next
+        }
+        /^%end [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active && frame_count > 1) emit("end")
+            active = 0
+            next
+        }
+        /^%error [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active && frame_count > 1) emit("error")
+            active = 0
+            next
+        }
+        active && !/^%/ {
+            if (payload != "") payload = payload "+"
+            payload = payload $0
+            next
+        }
+        !active && !/^%/ && $0 != "" {
+            printf "%sraw:%s", separator, $0
+            separator = "|"
         }
         END { print "" }
     '
@@ -775,6 +831,67 @@ hooks_unknown="$(grep -c '^%config-error .*unknown command: wibble$' "$hooks_raw
 hooks_skipped="$(grep -c '^HOOK_ARRAY_ZERO_SKIPPED$' "$hooks_raw" || true)"
 main_client set-environment -g SOURCE_FILE_CONTROL_HOOKS \
     "rc=$hooks_status unknown=$hooks_unknown skipped=$hooks_skipped seq=$hooks_sequence"
+
+direct_read_raw="$read_dir/direct.raw"
+direct_read_errors="$read_dir/direct.err"
+direct_read_input="$read_dir/direct.in"
+: >"$direct_read_raw"
+: >"$direct_read_errors"
+rm -f -- "$direct_read_input"
+mkfifo "$direct_read_input"
+control_client <"$direct_read_input" >"$direct_read_raw" 2>"$direct_read_errors" &
+control_pid=$!
+exec 3>"$direct_read_input"
+printf "source-file '%s'\n" "$read_dir/direct-root.conf" >&3
+printf '%s\n' 'display-message -p DIRECT_READ_LATER' >&3
+wait_for_control_output_marker \
+    "$direct_read_raw" DIRECT_READ_LATER "$control_pid" direct-read
+exec 3>&-
+if wait_for_process "$control_pid" 200; then
+    direct_read_status=0
+else
+    direct_read_status=$?
+fi
+control_pid=''
+if [ "$direct_read_status" -gt 1 ] || [ -s "$direct_read_errors" ]; then
+    sed -n '1,120p' "$direct_read_errors" >&2
+    exit 1
+fi
+direct_read_timeline="$(control_numbered_timeline "$direct_read_raw")"
+
+probe_command set-hook -g 'after-display-message[0]' \
+    "source-file '$read_dir/hook-root.conf'"
+probe_command set-hook -g 'after-display-message[1]' \
+    'display-message -p HOOK_READ_ARRAY_LATER'
+hook_read_raw="$read_dir/hook.raw"
+hook_read_errors="$read_dir/hook.err"
+hook_read_input="$read_dir/hook.in"
+: >"$hook_read_raw"
+: >"$hook_read_errors"
+rm -f -- "$hook_read_input"
+mkfifo "$hook_read_input"
+control_client <"$hook_read_input" >"$hook_read_raw" 2>"$hook_read_errors" &
+control_pid=$!
+exec 3>"$hook_read_input"
+printf '%s\n' 'display-message -p HOOK_READ_TRIGGER' >&3
+printf '%s\n' 'set-hook -gu after-display-message' >&3
+printf '%s\n' 'display-message -p HOOK_READ_INPUT_LATER' >&3
+wait_for_control_output_marker \
+    "$hook_read_raw" HOOK_READ_INPUT_LATER "$control_pid" hook-read
+exec 3>&-
+if wait_for_process "$control_pid" 200; then
+    hook_read_status=0
+else
+    hook_read_status=$?
+fi
+control_pid=''
+if [ "$hook_read_status" -gt 1 ] || [ -s "$hook_read_errors" ]; then
+    sed -n '1,120p' "$hook_read_errors" >&2
+    exit 1
+fi
+hook_read_timeline="$(control_numbered_timeline "$hook_read_raw")"
+main_client set-environment -g SOURCE_FILE_CONTROL_READ_PLACEMENT \
+    "direct:rc=$direct_read_status,seq=$direct_read_timeline;hook:rc=$hook_read_status,seq=$hook_read_timeline"
 
 background_raw="$background_dir/background.raw"
 background_errors="$background_dir/background.err"

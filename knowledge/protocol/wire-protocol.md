@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v77)
+title: zz wire protocol (v78)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 77`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 78`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (77) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (78) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -270,17 +270,27 @@ nothing from it. `control-mode.disconnect-cancels-command-queue` separately owns
 after an immediate hook or source queue has already started. Ordinary `run-shell -b` shell jobs
 remain outside this command-guard path.
 
-Matched parser-owned and immediate-hook OS or path read failures still differ from the pin. Pinned
-tmux closes the flags-1 parser or flags-0 hook source guard with `%end`, writes the read diagnostic as
-raw unframed Control output, retains status 1, and consumes an invisible completion callback command
-number for every source invocation. zz instead routes the read failure through a typed standalone
-Error frame and does not model that hidden number. `control-mode.hook-source-read-diagnostics` owns
-both placements and source-completion numbering. Non-UTF-8 content remains under
-`config.non-utf8-file-bytes`. Config command-name and lexer diagnostics remain generic Warning events
-on the `%config-error` classification path.
+v78 appends `ControlSourceFile { event: ControlSourceFileEvent }` at `EventPayload` tail tag 48.
+`ControlSourceFileEvent::ReadError(String)` keeps matched OS or path read failures typed on the wire,
+while the Control writer renders the text as one raw unframed line immediately after the source
+guard and retains status 1. `Complete` emits no text or frame. It advances the writer's command
+number once after the invocation's descendants, matching the pin's invisible source-completion
+callback item. One invocation emits one `Complete` even when it has multiple matched read failures.
 
-`zz-client::ClientCore` accepts and ignores `ControlCommandGuard`; `crates/zz/src/control_mode.rs`
-renders it. The daemon preflights every declared path for one source command before recursion, so a
+Every source invocation that passes depth checking publishes `Complete`, including an empty file, a
+loud or quiet miss, a matched parser error, and `source-file -`. A depth-refused invocation and a
+syntax, arity, or unknown-flag rejection publish none. Parser-owned flags-1 and immediate-hook
+flags-0 sources share this event path. The daemon reads every matched file before replay, so multiple
+raw read diagnostics precede the first replayed child while the single completion follows all
+descendants. Non-UTF-8 content remains under `config.non-utf8-file-bytes`: the pin's measured
+lone-`0xff` case also consumes an extra invisible empty-command item that zz does not model. Source
+stdin transport, parser abort semantics, sourced-hook cwd, and deferred event hooks retain their
+separate gaps. Config command-name and lexer diagnostics remain generic Warning events on the
+`%config-error` classification path.
+
+`zz-client::ClientCore` accepts and ignores `ControlCommandGuard` and `ControlSourceFile`;
+`crates/zz/src/control_mode.rs` renders both Control-only events. The daemon preflights every declared
+path for one source command before recursion, so a
 three-level parser replay publishes the root missing-path guard, middle missing-path guard, and leaf
 output guard once each. The Control front end combines guards with existing `CommandResponse` and
 `Detached` messages. Direct runtime errors, parser-owned sourced runtime errors, nonruntime source
@@ -298,9 +308,9 @@ invocations insert their complete frame at the parent replay position. Command r
 transcript once in its existing response output. Interactive renders one existing command-output
 viewport from the same transcript, subject to the existing command-output size bound. This is
 per-invocation batching, not a claim of physical interleaving.
-Generic config Warning typing, startup diagnostic delivery, Control source read placement and
-completion numbering, hard-disconnect queue cancellation, config byte input, and TUI command-output
-navigation remain open.
+Generic config Warning typing, startup diagnostic delivery, hard-disconnect queue cancellation,
+config byte input, source stdin transport, parser abort semantics, hook cwd selection, deferred event
+hooks, and TUI command-output navigation remain open.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -479,9 +489,12 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 77`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 78`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v78 appends `EventPayload::ControlSourceFile` at tail tag 48. Its `ReadError(String)` event renders
+  one raw unframed Control line and retains retval 1. Its `Complete` event renders nothing and
+  consumes one command number after the source invocation's descendants.
 - v77 renames tail-tag-47 `EventPayload::SourcedCommandGuard` in place to
   `ControlCommandGuard { output, error, sticky_failure, flags }`. The new flag carries tmux command
   frame state 0 or 1, and `sticky_failure` separates retained process status from the `%end` or

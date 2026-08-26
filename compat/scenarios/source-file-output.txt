@@ -1,0 +1,12 @@
+out: source-file -v compat/scenarios/source-file-output-root.conf
+out: source-file -v compat/scenarios/source-file-output-child.conf compat/scenarios/source-file-output-root.conf
+out: source-file -v compat/scenarios/source-file-output-[cr]*.conf
+out: source-file -v compat/scenarios/source-file-parse-assignment.conf compat/scenarios/source-file-parse-assignment-branch.conf compat/scenarios/source-file-parse-replay.conf compat/scenarios/source-file-parse-replay-branch.conf
+out: source-file -nv compat/scenarios/source-file-parse-only-assignment.conf compat/scenarios/source-file-parse-only-branch.conf
+set-option -s command-alias[90] 'indirect=source-file -v compat/scenarios/source-file-output-child.conf'
+out: source-file compat/scenarios/source-file-output-alias-root.conf
+set-hook -g after-display-message 'source-file compat/scenarios/source-file-output-hook-child.conf'
+out: source-file compat/scenarios/source-file-output-hook-root.conf
+set-hook -gu after-display-message
+source-file compat/scenarios/source-file-output-indirect-error-root.conf
+source-file compat/scenarios/source-file-output-ordered-error-root.conf

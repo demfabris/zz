@@ -849,9 +849,11 @@ from a `run-shell` job and diffs stdout, stderr, exit code, runtime errors, and 
 byte-for-byte. `source-file -`
 remains in the separate G6 streaming contract; it now refuses on stderr at rc 1.
 
-The current eight-step `smoke/source-file-control` scenario separately preserves attached Control frame
-boundaries. Protocol v76 now emits one tail-tag-47 `SourcedCommandGuard` for each replayed command
-that survives command-name resolution. Unknown or ambiguous command names and malformed alias names
+The focused eight-step `smoke/source-file-control` scenario separately preserves attached Control
+frame boundaries. It does not refresh the stored canonical row, which remains at three steps.
+Protocol v76 now emits one tail-tag-47 `SourcedCommandGuard` for each parser-owned
+replayed command that survives command-name resolution. An alias resolved to `source-file` before
+replay retains the same recursion path. Unknown or ambiguous command names and malformed alias names
 publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary success
 and quiet all-miss use an empty flags-1 `%end`; a mixed hit and miss keeps
 its diagnostic inside `%end`; and all-miss, flag or arity failure, runtime failure, or depth refusal
@@ -861,7 +863,7 @@ collects one command's path diagnostics before recursion. A focused daemon regre
 scenario check prove root missing-path guard, then middle missing-path guard, then leaf output guard,
 each exactly once. That closed cross-depth ordering with no production change when the scenario had
 six steps. The later return-status checks close the full client process-state matrix without making
-source-command diagnostics globally sticky. Direct runtime failures, sourced runtime failures,
+source-command diagnostics globally sticky. Direct runtime failures, parser-owned sourced runtime failures,
 nonruntime source failures, and typed source-read failures set retained retval 1. EOF and blank input
 return the current snapshot. Generic nonzero success and flags-1 parse or preparation failures do not
 set or change retval, so a fresh client remains at 0 while a prior sticky failure stays at 1. Actual
@@ -871,6 +873,9 @@ including detach. A Return observed while self-detach itself waits is discarded 
 `Detached` event arrives. Detaching another client, excluding the caller with
 `-s`, finding no victim, or using an alias that targets another client keeps the caller alive and
 preserves the queued Return; self-targeting aliases exit 0. The response `%end` precedes `%exit`.
+Runtime `if-shell` branches and hooks still execute through the sentinel replay client. A source
+reached through either path loses the original Control recipient, its child guards, and its sticky
+failure state. `control-mode.indirect-source-frames` owns that residue.
 The asynchronous
 `run-shell` exit text itself is excluded from the slice because zz still emits it inside the completed
 response where tmux prints it unframed after `%end`; `control-mode.async-command-output` tracks that
@@ -911,15 +916,19 @@ remains in `clients.attach-context`; the deferred event-hook and startup cases r
 sourced commands also start from `ClientId::MAX`; `source-file.sourced-hook-client-cwd` owns that
 client-identity path. Nested loud no-match and glob errors now use
 the post-`-F` declared argument on the invoking client's diagnostic stream, and nested quiet
-no-match stays silent. For Control, protocol v76 carries one sourced guard for each replayed command
-that survives command-name resolution. Unknown or ambiguous command names and malformed alias names
+no-match stays silent. For Control, protocol v76 carries one sourced guard for each parser-owned
+replayed command that survives command-name resolution. Alias recursion resolved before replay keeps
+the same path. Unknown or ambiguous command names and malformed alias names
 publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary and
 quiet commands get an empty `%end`, nested partial matches retain diagnostics inside
 `%end`, and all-miss or execution failures end `%error`. Guards stay in FIFO order after the direct
 outer frame. The existing per-command preflight publishes the containing command's guards before
 deeper replay; the then-six-step scenario and focused daemon regression prove that order with no
-production change. Registered-client nested cwd rebasing is closed. The later eight-step scenario
-closes Control return status and detach precedence without changing the wire.
+production change. Registered-client nested cwd rebasing is closed. The later focused eight-step
+scenario closes Control return status and detach precedence without changing the wire; the stored
+canonical row remains at three steps.
+Runtime `if-shell` and hook recursion remain outside that recipient path under
+`control-mode.indirect-source-frames`.
 The nesting limit is closed for depth wording, count, and continuation. Counting the initial
 `source-file` as invocation 1, both sides run 50 concurrent source invocations and refuse invocation
 51 before any of its paths are matched or loaded: Command stderr at rc 1, the same lowercase text on
@@ -937,26 +946,49 @@ the same parser-owned source line while the next physical line runs. Matched sou
 propagate child runtime, parser, or read failures into the parent group; zz retains matched child
 read failures in `ConfigLoadReport`. Quiet zero-file misses, asynchronous commands, and unsupported
 capability gaps retain continuation. Replayed target and set-option runtime failures now keep their
-encounter order, use the invoking client's error channel, set the Command or Control status to 1,
-capitalize attached warnings, and continue later physical lines through an outer source. Control
+encounter order, use the invoking client's error channel, set the Command status or parser-owned
+Control status to 1, capitalize attached warnings, and continue later physical lines through an
+outer source. Control
 guard framing, cross-depth ordering, and return-versus-detach status are closed. Parser abort
 behavior remains open under its named gap. Startup accounting
 now matches the pin: one budget spans
 every startup root, top-level roots do not count, and source commands after the first 50 retain their
-declaring file and line. zz still discards those causes before Control or attached clients can read
-them; `config.startup-diagnostic-delivery` owns that. Unix matching uses the
+declaring file and line. The detached startup launch stays silent on stdout and stderr. A separate
+manual probe of pinned tmux `d77c9dc6`, outside the 12-step runtime scenario, found that later Control
+and attached clients receive retained `display-message -p` output with its file and line while list
+output such as `list-sessions` is discarded. zz still discards those retained causes;
+`config.startup-diagnostic-delivery` owns that. Unix matching uses the
 pin's `glob(3)` contract for backslashes, dotfiles, repeated stars, malformed patterns, and result
 order.
-One source-order residue stays explicit. `config.replayed-command-output` owns the fact that zz
-routes the collected `-v` batch after replay rather than interleaving it with ordinary command
-output. Runtime `source-file` now loads the active default config through the ordinary declared-order
-path. Repeating default, after, and default files applies `DAD`; a loud miss returns status 1 while
-later matches load; and ordinary diagnostics plus `-v` lines retain path and match order. Explicit
+Replay transcript delivery closed on 2026-08-25. Each invocation parses every declared and globbed
+match before replay, appends its complete `-v` batch, replays parsed files in match order, then
+appends buffered command-name and parser diagnostics. Source no-match, glob, and read failures retain
+their existing error channels. A nested source inserts its own complete verbose, replay,
+command-diagnostic frame at the parent command's replay position, so nested frames are depth-first.
+This is per-invocation batching, not a claim of physical verbose and replay interleaving. Command
+clients receive the transcript once on stdout. For valid successful replay and `-v` output,
+Interactive clients open one command-output view without duplicate Info or Warning events. Parser
+diagnostics may still publish their existing Warning summary. Successful output leaves stderr empty
+and status zero. A runtime failure keeps its stderr and status 1 while stdout before and after it,
+hook output, and list output remain ordered. The attached proof covers presentation and q dismissal;
+line and page movement, search, selection and copy, custom copy tables, and mode-key selection remain
+under `clients.tui-command-output-navigation`.
+
+One top-level invocation parses every match before replay. A bare assignment in an earlier file
+applies during parsing, affects a later file's conditional, and persists. A replayed
+`set-environment` runs too late to change the already parsed later branch but persists after replay.
+With `-n`, neither assignment nor command effects apply, later parse-only files see the assignment as
+absent, and `-v` still reports the selected branch. Runtime `source-file` parses the active default
+and every other match in declared-path and glob order, then replays those matches in the same order.
+Repeating default, after, and default files applies `DAD`; a loud miss returns status 1 while later
+matches replay; and ordinary diagnostics plus
+`-v` lines retain path and match order. Explicit
 native `reload-config` keeps rediscovery, key-table and appearance reset, and stored override replay.
 Startup first-existing discovery, ordered explicit `-f`, parse-only, and nested paths retain their
 existing contracts. The focused CLI and daemon gates plus the 12-step diagnostics, 40-step format,
 and then-six-step Control differential pass without skips or differences. The later status proof
-grows the current Control row to eight clean steps. Neither focused run makes a canonical-suite claim.
+grows the focused Control row to eight clean steps. Neither focused run refreshes the stored canonical
+row, which remains at three steps.
 `source-file` no longer performs a second tilde rewrite after parsing, so parser-expanded tildes
 stay absolute and literal tildes follow the selected relative-path base. SSH
 omission is covered at the endpoint-facts helper but still lacks an end-to-end remote fixture. The
@@ -2139,9 +2171,12 @@ assignment-leak quirk is NOT reproduced (zz keeps single-branch assignment scope
 `%if c ; cmd ; %endif` is zz-lax (pin rejects the `;`). Oh My Tmux joined the smoke
 corpus on 2026-08-20. The later source-file diagnostics wave fixed command-stream delivery and
 exit status for the file's own parser diagnostics. Replayed target and set-option runtime failures
-now use the invoking error channel and nonzero status as well. First-diagnostic whole-file abort
-remains live in `config.parser-edge-cases`; successful replay output remains under
-`config.replayed-command-output`.
+now use the invoking error channel and nonzero status as well. The 2026-08-25 replay-output closure
+added per-invocation verbose, replay, and buffered command-name or parser diagnostic batching plus one
+Command stdout transcript and one Interactive command-output view. Source no-match, glob, and read
+failures retain their existing error channels. First-diagnostic whole-file abort remains live in
+`config.parser-edge-cases`; TUI output-view navigation and indirect Control source frames remain
+under their named gaps.
 
 # Risks
 

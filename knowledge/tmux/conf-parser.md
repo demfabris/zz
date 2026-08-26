@@ -78,8 +78,9 @@ the sentinel replay client, outside this recursion base; `source-file.sourced-ho
 tracks that path.
 `clients.attach-context` still owns the attached case where the session cwd differs
 from the cwd in the client hello. Command and Interactive clients receive those diagnostics
-directly. Protocol v76 gives Control one `SourcedCommandGuard` for each replayed command that
-survives command-name resolution. Unknown or ambiguous command names and malformed alias names
+directly. Protocol v76 gives Control one `SourcedCommandGuard` for each parser-owned replay command
+that survives command-name resolution. An alias resolved to `source-file` before replay stays on
+this path. Unknown or ambiguous command names and malformed alias names
 publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary success
 and a quiet all-miss produce an empty flags-1 `%end` guard. A nested hit plus miss carries
 its declared-path diagnostic inside `%end`; an all-miss, flag or arity failure, runtime failure, or
@@ -90,12 +91,15 @@ loader preflights every declared path for one source command before recursion. A
 and the then-six-step Control differential prove the resulting root-miss guard, middle-miss guard,
 then leaf-output guard order, each exactly once; no production change was required. This closes
 `source-file.nested-control-queue` for ordering only. The later
-`control-mode.source-file-exit-status` closure retains direct and sourced runtime failures plus
-nonruntime source failures as retval 1. A Return captured while a preceding non-detach command waits
+`control-mode.source-file-exit-status` closure retains direct and parser-owned sourced runtime
+failures plus nonruntime source failures as retval 1. A Return captured while a preceding non-detach command waits
 keeps its arrival-time snapshot ahead of later queued stdin. A Return observed while self-detach waits
 is discarded when the caller's `Detached` event arrives. Nonself and no-victim detach commands keep
-the Control loop alive. The strict current differential passes eight steps without making generic
-source or config diagnostics sticky.
+the Control loop alive. A focused eight-step differential passes without making generic source or
+config diagnostics sticky. It does not refresh the stored canonical row, which remains at three
+steps. A runtime `if-shell` branch or hook that starts another
+`source-file` still runs through the sentinel replay client and loses the Control recipient.
+`control-mode.indirect-source-frames` owns those missing child guards and their failure state.
 
 Matched child read failures follow their parent source guard as typed standalone Error events.
 Invalid UTF-8, numeric OS errors, and colon-space paths use that path without text classification.
@@ -126,16 +130,27 @@ one cumulative 50-command source budget across every top-level config. Top-level
 slots, quiet misses do, and one command with many paths consumes one slot. Invocation 51 and later
 retain `<file>:<line>: too many nested files` in the startup report while later ordinary commands
 continue. Runtime sequential sources stay unbounded. zz still discards that startup report before a
-client can see it, which `config.startup-diagnostic-delivery` owns. Runtime replay errors now follow
+client can see it, which `config.startup-diagnostic-delivery` owns. A separate manual probe of pinned
+tmux `d77c9dc6`, outside the 12-step runtime scenario, found that startup `display-message -p` text
+becomes a file-and-line config cause for the first eligible client while list-style output is
+discarded. The detached launching command receives neither form on stdout or stderr.
+Runtime replay errors now follow
 the invoking client. A missing `kill-session` target and a semantic failure from a syntactically
 valid `set-option` use the pin's bare text on Command stderr at rc 1, as typed Control errors with
 the client's final status retained at 1, and as capitalized attached warnings. Later physical lines
 still run, and a containing `source-file` propagates the inner error and status without blocking
 inner or outer continuation. Unknown command names and malformed set-option syntax retain the
-existing file-prefixed parse-diagnostic path. Protocol v76 carries runtime failures inside their
-own sourced guards. Clientless startup delivery stays separate.
+existing file-prefixed parse-diagnostic path. Protocol v76 carries parser-owned runtime failures
+inside their own sourced guards. Runtime `if-shell` and hook recursion remains outside that Control
+recipient path. Successful stdout before and after a failure remains in the invocation transcript;
+the original stderr and status 1 remain separate. Clientless startup delivery stays separate.
 `source-file -n` runs the same lexer and condition evaluation, retains syntax diagnostics and
 optional verbose output, and applies neither parser environment assignments nor parsed commands.
+One invocation parses all of its top-level matches before replay. A bare assignment applies during
+that parse, affects conditionals in later files, and persists. A parsed `set-environment` command
+runs during replay, so it cannot change a later file's branch after that file has parsed, though the
+environment change persists after replay. Under `-n`, a bare assignment does not affect a later file
+and neither kind of assignment persists.
 This is no-effect source parsing, not full tmux parse validation: tmux also validates command names,
 flags, and arity while building its command list, while zz still performs those checks during replay.
 `config.parser-edge-cases`, `mux.error-shapes`, and `mux.chain-parse-abort` retain that boundary.
@@ -144,12 +159,18 @@ flags, and arity while building its command list, while zz still performs those 
 cwd remains the source base. `-F` reads the resolved target context. `-v` emits canonical parsed
 command groups as `path:line: command`, preserves declared-path and glob order, and carries into
 nested sources. Control clients suppress explicit and inherited verbose lines. Command clients get
-stdout; Interactive clients get Info events, while `config.replayed-command-output` still owns exact
-attached view-mode presentation plus physical ordering between ordinary replay output and the
-collected verbose batch. Every runtime match, including the active native `zz/mux.conf`, enters the
-ordinary loader when encountered. Declared default, after, and default paths therefore apply as
-`DAD`; a loud miss returns status 1 without stopping later matches, and diagnostics plus `-v` lines
-retain declared path and glob order. Explicit `reload-config` keeps its native default rediscovery,
+one stdout transcript, and Interactive clients open one command-output view. Each invocation emits
+its complete verbose batch, then replay output, then buffered command-name and parser diagnostics.
+Source no-match, glob, and read failures retain their existing error channels. A nested source
+inserts its own complete frame at the parent command's replay position, so recursion is depth-first.
+This is per-invocation batching, not a claim of physical verbose and replay interleaving. Valid
+successful replay and `-v` output produce no duplicate Info or Warning event; parser diagnostics may
+still publish their existing Warning summary. The attached fixture proves presentation and dismissal;
+TUI navigation remains under `clients.tui-command-output-navigation`. Every runtime invocation,
+including one that names the active native `zz/mux.conf`, parses its matches in declared-path and
+glob order before replaying them in the same order. Declared default, after, and default paths
+therefore apply as `DAD`; a loud miss returns status 1 without stopping later matches, and diagnostics
+plus `-v` lines retain declared path and glob order. Explicit `reload-config` keeps its native default rediscovery,
 key-table reset, appearance rebuild, and stored-override replay. Startup still chooses the first
 existing zz-owned candidate, while ordered explicit `-f` files remain its roots. Parse-only and
 nested source paths keep their existing behavior.

@@ -371,9 +371,9 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   through the ordinary loader. Direct `reload-config` uses the same registered-client base through
   its separate native reset path. Startup, deferred event hooks, hooks raised during sentinel
   replay, and exact attached session-cwd selection retain their tracker groups.
-- **Runtime source versus native reload.** Runtime `source-file` loads every declared match through
-  `load_config_file_with_report_for_terminal_and_options` in declared path and glob order, including
-  the active default `zz/mux.conf`. A loud miss marks failure without stopping later matches, and a
+- **Runtime source versus native reload.** Runtime `source-file` parses every declared match through
+  `load_config_file_with_report_for_terminal_and_options` in declared-path and glob order, then
+  replays those matches in the same order, including the active default `zz/mux.conf`. A loud miss marks failure without stopping later matches, and a
   repeated default, after, default list applies as `DAD`. Only explicit `reload-config` rediscovers
   the current default candidate, replaces `config_files`, resets `KeyTables`, rebuilds appearance,
   and reapplies stored mux overrides. Startup retains first-existing default discovery or the
@@ -489,16 +489,17 @@ ordering. Cold CLI preparation and full config or source prevalidation remain un
 `mux.chain-parse-abort`.
 
 The same protocol version appends `EventPayload::SourcedCommandGuard` at tail tag 47 for Control
-replay. `load_config_file_with_report_for_terminal_and_options` emits one guard for each replayed
-command that survives command-name resolution before it recurses to later commands. Unknown or
-ambiguous command names and malformed alias names publish a located Warning that Control renders as
+replay. `load_config_file_with_report_for_terminal_and_options` emits one guard for each
+parser-owned replayed command that survives command-name resolution before it recurses to later
+commands. An alias resolved to `source-file` before replay retains that path. Unknown or ambiguous
+command names and malformed alias names publish a located Warning that Control renders as
 `%config-error`, without a guard. Ordinary success and quiet misses carry an
 empty success guard. A partial source match carries its misses but still ends `%end`; an all-miss,
 flag or arity failure, runtime failure, or depth refusal ends `%error`. Runtime failures set the
 separate `client_failure` bit, which sets Control retval 1 independently of the frame terminator.
-Successful command output is captured for that Control guard, but Command stdout, the attached-client
-view, and ordering against the collected `source-file -v` batch remain open under
-`config.replayed-command-output`.
+Successful command output is captured for that Control guard. Runtime `if-shell` branches and hooks
+still execute through the sentinel replay client, so a child source reached through either path loses
+the Control recipient and its child guards. `control-mode.indirect-source-frames` owns that residue.
 Matched child read failures follow the parent guard as typed Error events. Generic config and lexer
 warnings still use the Control client's prose classifier under `control-mode.diagnostic-typing`, and
 the existing loader preflights all paths for one source command before recursion. A focused regression,
@@ -511,8 +512,30 @@ waits keeps its arrival-time snapshot ahead of later queued stdin. The daemon se
 actual victims, so nonself and no-victim detach commands leave the caller running. A Return observed
 while self-detach waits is discarded on that event, and self-detach exits 0 after its response frame
 closes. No new protocol field or version was required.
-The strict current `source-file-control` differential passes eight steps. Startup delivery, successful
-Command and attached replay output, `-v` interleaving, and generic config Warning typing remain open.
+Runtime `source-file` also retains one transcript for Command and Interactive callers. Each invocation
+appends its complete `-v` batch, replays every parsed match, then appends buffered command-name,
+and parser diagnostics. Source no-match, glob, and read failures retain their existing error channels.
+A nested source inserts the same complete frame at its parent command's replay position, so nested
+frames are depth-first. This is per-invocation batching, not a claim of physical verbose and replay
+interleaving. Command clients receive the transcript once on stdout. For valid successful replay and
+`-v` output, Interactive clients open one command-output view without duplicate Info or Warning
+events. Parser diagnostics may still publish their existing Warning summary. Successful output keeps
+stderr empty and status zero. A runtime failure keeps its stderr and status 1 while stdout before and
+after it remains ordered.
+
+One top-level invocation parses every declared and globbed match before replay. A bare assignment in
+an earlier file applies during that parse, affects later conditional parsing, and persists. A replayed
+`set-environment` runs too late to affect an already parsed later branch, but persists after replay.
+With `-n`, neither assignment nor command effects apply, later parse-only files see the assignment as
+absent, and `-v` still reports the selected branch. Clientless startup creates no transcript, so the
+detached launch remains silent. A separate manual probe of pinned tmux `d77c9dc6`, outside the
+12-step runtime scenario, found that startup `display-message -p` output becomes a located config
+cause while list output is discarded. zz still drops that retained cause, which remains
+under `config.startup-diagnostic-delivery`.
+
+The focused `source-file-control` differential passes eight steps. It does not refresh the stored
+canonical row, which remains at three steps. Generic config Warning typing, indirect Control frames,
+retained startup causes, and TUI command-output navigation remain open.
 
 # Examples
 

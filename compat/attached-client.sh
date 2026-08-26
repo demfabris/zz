@@ -68,6 +68,9 @@ OUTER_SESSION="driver"
 SOURCE_CWD="$SCRATCH_DIR/client [literal]*? cwd"
 SOURCE_CONFIG_DIR="$SOURCE_CWD/config-$INNER_SESSION"
 SOURCE_DEPTH_DIR="$SCRATCH_DIR/source-depth"
+SOURCE_OUTPUT_DIR="$SCRATCH_DIR/o"
+SOURCE_OUTPUT_CHILD="$SOURCE_OUTPUT_DIR/c"
+SOURCE_OUTPUT_ROOT="$SOURCE_OUTPUT_DIR/r"
 DAEMON_STDOUT="$SCRATCH_DIR/zz-daemon.stdout"
 DAEMON_STDERR="$SCRATCH_DIR/zz-daemon.stderr"
 ZZ_ATTACH="$SCRATCH_DIR/attach-zz"
@@ -75,11 +78,16 @@ TMUX_ATTACH="$SCRATCH_DIR/attach-tmux"
 ZZ_PID=""
 
 mkdir -p "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$TMUX_HOME" "$TMUX_CONFIG_HOME" \
-  "$OUTER_HOME" "$OUTER_CONFIG_HOME" "$SOURCE_CONFIG_DIR" "$SOURCE_DEPTH_DIR"
+  "$OUTER_HOME" "$OUTER_CONFIG_HOME" "$SOURCE_CONFIG_DIR" "$SOURCE_DEPTH_DIR" \
+  "$SOURCE_OUTPUT_DIR"
 printf 'set-option -g @attached_source_order glob-first\n' >"$SOURCE_CONFIG_DIR/10.conf"
 printf 'set-option -g @attached_source_order glob-second\n' >"$SOURCE_CONFIG_DIR/20.conf"
 
 printf 'set-option -g @attached_depth_leaf yes\n' >"$SOURCE_DEPTH_DIR/leaf.conf"
+printf 'display-message -p ATTACHED_CHILD_ONE\nlist-sessions -F "ATTACHED_CHILD_LIST_#{session_name}"\n' \
+  >"$SOURCE_OUTPUT_CHILD"
+printf 'display-message -p ATTACHED_ROOT_ONE\nsource-file -v %s\ndisplay-message -p ATTACHED_ROOT_TWO\n' \
+  "$SOURCE_OUTPUT_CHILD" >"$SOURCE_OUTPUT_ROOT"
 for ((depth_level = 1; depth_level <= 50; depth_level++)); do
   {
     printf 'set-option -g @attached_depth %s\n' "$depth_level"
@@ -405,6 +413,51 @@ wait_for_current_marker_absent() {
   fixture_failure "$side current screen still showed $marker after 10 seconds"
 }
 
+wait_for_ordered_current_lines() {
+  local side="$1"
+  shift
+  local attempt
+  local marker
+  local line
+  local previous
+  local screen
+  local ordered
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+    previous=0
+    ordered=1
+    for marker in "$@"; do
+      line="$(awk -v marker="$marker" -v after="$previous" -v side="$side" '
+        {
+          line = $0
+          sub(/\r$/, "", line)
+          sub(/^[[:space:]]+/, "", line)
+          if (side == "tmux") sub(/[[:space:]]+\[[0-9]+\/[0-9]+\]$/, "", line)
+          sub(/[[:space:]]+$/, "", line)
+          if (line == marker) {
+            count++
+            if (NR > after && found == 0) found = NR
+          }
+        }
+        END {
+          if (count == 1 && found != 0) print found
+        }
+      ' <<<"$screen")"
+      if [ -z "$line" ]; then
+        ordered=0
+        break
+      fi
+      previous="$line"
+    done
+    if [ "$ordered" -eq 1 ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side command-output view did not show one ordered replay transcript"
+}
+
 LAST_SIDE_OUTPUT=""
 wait_for_side_output() {
   local side="$1"
@@ -532,6 +585,7 @@ configure_side() {
     return
   side_command "$side" bind-key -n F5 choose-tree -s -f 0 || return
   side_command "$side" bind-key -n F4 choose-buffer -f 0 || return
+  side_command "$side" bind-key -n F3 source-file -v "$SOURCE_OUTPUT_ROOT" || return
   side_command "$side" bind-key -N ZZLK1 -T attached-list a display-message unused || return
   side_command "$side" bind-key Q command-prompt -p ATTACHED_LIST_KEYS_PROMPT || return
   side_command "$side" bind-key R send-keys -l \
@@ -912,6 +966,27 @@ probe_source_file_depth() {
   fi
 }
 
+probe_source_file_output() {
+  local side="$1"
+
+  tmux_outer_command resize-window -t "$OUTER_SESSION:$side" -x 200
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F3
+  wait_for_mode_state "$side" copy-mode
+  wait_for_ordered_current_lines "$side" \
+    "$SOURCE_OUTPUT_ROOT:1: display-message -p ATTACHED_ROOT_ONE" \
+    "$SOURCE_OUTPUT_ROOT:2: source-file -v $SOURCE_OUTPUT_CHILD" \
+    "$SOURCE_OUTPUT_ROOT:3: display-message -p ATTACHED_ROOT_TWO" \
+    ATTACHED_ROOT_ONE \
+    "$SOURCE_OUTPUT_CHILD:1: display-message -p ATTACHED_CHILD_ONE" \
+    "$SOURCE_OUTPUT_CHILD:2: list-sessions -F \"ATTACHED_CHILD_LIST_#{session_name}\"" \
+    ATTACHED_CHILD_ONE \
+    ATTACHED_CHILD_LIST_attached \
+    ATTACHED_CHILD_LIST_chooser-target \
+    ATTACHED_ROOT_TWO
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_mode_state "$side" root
+}
+
 probe_list_keys_single() {
   local side="$1"
   local screen
@@ -1009,6 +1084,8 @@ probe_forced_nested_attaches zz
 probe_forced_nested_attaches tmux
 probe_source_file_cwd zz
 probe_source_file_cwd tmux
+probe_source_file_output zz
+probe_source_file_output tmux
 probe_source_file_depth zz
 probe_source_file_depth tmux
 probe_detach_client_tty zz

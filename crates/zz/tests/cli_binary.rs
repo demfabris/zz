@@ -784,6 +784,346 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn source_file_replayed_output_batches_top_level_paths() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert_eq!(
+            fixture
+                .run(&["new-session", "-d", "-s", "output"])
+                .status
+                .code(),
+            Some(0)
+        );
+        let directory = source_directory(&fixture, "replayed-output");
+        let child = write_source(
+            &directory,
+            "10-child.conf",
+            "display-message -p CHILD_ONE\nlist-sessions -F CHILD_TWO\n",
+        );
+        let root = write_source(
+            &directory,
+            "20-root.conf",
+            &format!(
+                "display-message -p ROOT_ONE\n\
+                 source-file -v {child}\n\
+                 display-message -p ROOT_TWO\n"
+            ),
+        );
+        let child_verbose = format!(
+            "{child}:1: display-message -p CHILD_ONE\n\
+             {child}:2: list-sessions -F CHILD_TWO"
+        );
+        let root_verbose = format!(
+            "{root}:1: display-message -p ROOT_ONE\n\
+             {root}:2: source-file -v {child}\n\
+             {root}:3: display-message -p ROOT_TWO"
+        );
+        let child_replay = "CHILD_ONE\nCHILD_TWO";
+        let root_replay = format!("ROOT_ONE\n{child_verbose}\n{child_replay}\nROOT_TWO");
+        let nested_expected = format!("{root_verbose}\n{root_replay}\n");
+        let aggregate_expected =
+            format!("{child_verbose}\n{root_verbose}\n{child_replay}\n{root_replay}\n");
+
+        let nested = fixture.run(&["source-file", "-v", &root]);
+        assert_eq!(nested.status.code(), Some(0));
+        assert_eq!(nested.stdout, nested_expected.into_bytes());
+        assert!(nested.stderr.is_empty());
+
+        let declared = fixture.run(&["source-file", "-v", &child, &root]);
+        assert_eq!(declared.status.code(), Some(0));
+        assert_eq!(declared.stdout, aggregate_expected.as_bytes());
+        assert!(declared.stderr.is_empty());
+
+        let glob = directory.join("*.conf").display().to_string();
+        let globbed = fixture.run(&["source-file", "-v", &glob]);
+        assert_eq!(globbed.status.code(), Some(0));
+        assert_eq!(globbed.stdout, aggregate_expected.as_bytes());
+        assert!(globbed.stderr.is_empty());
+
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[90]",
+                    &format!("indirect=source-file -v {child}"),
+                ])
+                .status
+                .success()
+        );
+        let alias_root = write_source(
+            &directory,
+            "alias-root.conf",
+            "display-message -p ALIAS_BEFORE\nindirect\ndisplay-message -p ALIAS_AFTER\n",
+        );
+        let aliased = fixture.run(&["source-file", &alias_root]);
+        assert_eq!(aliased.status.code(), Some(0));
+        assert_eq!(
+            aliased.stdout,
+            format!("ALIAS_BEFORE\n{child_verbose}\n{child_replay}\nALIAS_AFTER\n").into_bytes()
+        );
+        assert!(aliased.stderr.is_empty());
+
+        let conditional_root = write_source(
+            &directory,
+            "conditional-root.conf",
+            &format!(
+                "display-message -p CONDITIONAL_BEFORE\n\
+                 if-shell -F 1 'source-file -v {child}'\n\
+                 display-message -p CONDITIONAL_AFTER\n"
+            ),
+        );
+        let conditional = fixture.run(&["source-file", &conditional_root]);
+        assert_eq!(conditional.status.code(), Some(0));
+        assert_eq!(
+            conditional.stdout,
+            format!("CONDITIONAL_BEFORE\n{child_verbose}\n{child_replay}\nCONDITIONAL_AFTER\n")
+                .into_bytes()
+        );
+        assert!(conditional.stderr.is_empty());
+
+        let hook_child = write_source(
+            &directory,
+            "hook-child.conf",
+            "list-sessions -F HOOK_CHILD\n",
+        );
+        let hook_root = write_source(
+            &directory,
+            "hook-root.conf",
+            "display-message -p HOOK_TRIGGER\nlist-sessions -F HOOK_LATER\n",
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-hook",
+                    "-g",
+                    "after-display-message",
+                    &format!("source-file {hook_child}"),
+                ])
+                .status
+                .success()
+        );
+        let hooked = fixture.run(&["source-file", &hook_root]);
+        assert_eq!(hooked.status.code(), Some(0));
+        assert_eq!(hooked.stdout, b"HOOK_TRIGGER\nHOOK_CHILD\nHOOK_LATER\n");
+        assert!(hooked.stderr.is_empty());
+        assert!(
+            fixture
+                .run(&["set-hook", "-gu", "after-display-message"])
+                .status
+                .success()
+        );
+
+        let indirect_error_child = write_source(
+            &directory,
+            "indirect-error-child.conf",
+            "display-message -p BEFORE_CHILD\n\
+             kill-session -t missing-indirect\n\
+             display-message -p AFTER_CHILD\n",
+        );
+        let indirect_error_root = write_source(
+            &directory,
+            "indirect-error-root.conf",
+            &format!(
+                "display-message -p ROOT_BEFORE\n\
+                 if-shell -F 1 'source-file {indirect_error_child}'\n\
+                 display-message -p ROOT_AFTER\n"
+            ),
+        );
+        let indirect_error = fixture.run(&["source-file", &indirect_error_root]);
+        assert_eq!(indirect_error.status.code(), Some(1));
+        assert_eq!(
+            indirect_error.stdout,
+            b"ROOT_BEFORE\nBEFORE_CHILD\nAFTER_CHILD\nROOT_AFTER\n"
+        );
+        assert_eq!(
+            indirect_error.stderr,
+            b"can't find session: missing-indirect\n"
+        );
+
+        let ordered_error_child = write_source(
+            &directory,
+            "ordered-error-child.conf",
+            "kill-session -t missing-B\n",
+        );
+        let ordered_error_root = write_source(
+            &directory,
+            "ordered-error-root.conf",
+            &format!(
+                "kill-session -t missing-A\n\
+                 if-shell -F 1 'source-file {ordered_error_child}'\n\
+                 kill-session -t missing-C\n"
+            ),
+        );
+        let ordered_error = fixture.run(&["source-file", &ordered_error_root]);
+        assert_eq!(ordered_error.status.code(), Some(1));
+        assert!(ordered_error.stdout.is_empty());
+        assert_eq!(
+            ordered_error.stderr,
+            b"can't find session: missing-A\n\
+              can't find session: missing-B\n\
+              can't find session: missing-C\n"
+        );
+
+        let invalid_parse = write_source(
+            &directory,
+            "invalid-parse.conf",
+            "display-message -p CHILD_SHOULD_NOT_RUN\nset @bad \\400\n",
+        );
+        let diagnostic = format!("{invalid_parse}:2: invalid octal escape");
+        let direct_parse = write_source(
+            &directory,
+            "direct-parse.conf",
+            &format!(
+                "display-message -p ROOT_BEFORE\n\
+                 source-file {invalid_parse}\n\
+                 display-message -p ROOT_AFTER\n"
+            ),
+        );
+        let direct_diagnostic = fixture.run(&["source-file", "-v", &direct_parse]);
+        assert_eq!(direct_diagnostic.status.code(), Some(1));
+        assert_eq!(
+            direct_diagnostic.stdout,
+            format!(
+                "{direct_parse}:1: display-message -p ROOT_BEFORE\n\
+                 {direct_parse}:2: source-file {invalid_parse}\n\
+                 {direct_parse}:3: display-message -p ROOT_AFTER\n\
+                 ROOT_BEFORE\n{diagnostic}\nROOT_AFTER\n"
+            )
+            .into_bytes()
+        );
+        assert!(direct_diagnostic.stderr.is_empty());
+
+        let conditional_parse = write_source(
+            &directory,
+            "conditional-parse.conf",
+            &format!(
+                "display-message -p ROOT_BEFORE\n\
+                 if-shell -F 1 'source-file {invalid_parse}'\n\
+                 display-message -p ROOT_AFTER\n"
+            ),
+        );
+        let conditional_diagnostic = fixture.run(&["source-file", &conditional_parse]);
+        assert_eq!(conditional_diagnostic.status.code(), Some(1));
+        assert_eq!(
+            conditional_diagnostic.stdout,
+            format!("ROOT_BEFORE\n{diagnostic}\nROOT_AFTER\n").into_bytes()
+        );
+        assert!(conditional_diagnostic.stderr.is_empty());
+
+        let diagnostic_good = write_source(
+            &directory,
+            "diagnostic-good.conf",
+            "display-message -p GOOD_DIAGNOSTIC_OUTPUT\n",
+        );
+        let diagnostic_later = write_source(
+            &directory,
+            "diagnostic-later.conf",
+            "display-message -p LATER_DIAGNOSTIC_OUTPUT\n",
+        );
+        let top_level_diagnostic = fixture.run(&[
+            "source-file",
+            "-v",
+            &diagnostic_good,
+            &invalid_parse,
+            &diagnostic_later,
+        ]);
+        assert_eq!(top_level_diagnostic.status.code(), Some(1));
+        assert_eq!(
+            top_level_diagnostic.stdout,
+            format!(
+                "{diagnostic_good}:1: display-message -p GOOD_DIAGNOSTIC_OUTPUT\n\
+                 {diagnostic_later}:1: display-message -p LATER_DIAGNOSTIC_OUTPUT\n\
+                 GOOD_DIAGNOSTIC_OUTPUT\nLATER_DIAGNOSTIC_OUTPUT\n{diagnostic}\n"
+            )
+            .into_bytes()
+        );
+        assert!(top_level_diagnostic.stderr.is_empty());
+
+        let nested_multi_parse = write_source(
+            &directory,
+            "nested-multi-parse.conf",
+            &format!(
+                "display-message -p ROOT_BEFORE\n\
+                 source-file -v {diagnostic_good} {invalid_parse} {diagnostic_later}\n\
+                 display-message -p ROOT_AFTER\n"
+            ),
+        );
+        let nested_multi_diagnostic = fixture.run(&["source-file", "-v", &nested_multi_parse]);
+        assert_eq!(nested_multi_diagnostic.status.code(), Some(1));
+        assert_eq!(
+            nested_multi_diagnostic.stdout,
+            format!(
+                "{nested_multi_parse}:1: display-message -p ROOT_BEFORE\n\
+                 {nested_multi_parse}:2: source-file -v {diagnostic_good} {invalid_parse} {diagnostic_later}\n\
+                 {nested_multi_parse}:3: display-message -p ROOT_AFTER\n\
+                 ROOT_BEFORE\n\
+                 {diagnostic_good}:1: display-message -p GOOD_DIAGNOSTIC_OUTPUT\n\
+                 {diagnostic_later}:1: display-message -p LATER_DIAGNOSTIC_OUTPUT\n\
+                 GOOD_DIAGNOSTIC_OUTPUT\nLATER_DIAGNOSTIC_OUTPUT\n{diagnostic}\nROOT_AFTER\n"
+            )
+            .into_bytes()
+        );
+        assert!(nested_multi_diagnostic.stderr.is_empty());
+
+        let unknown_command = write_source(&directory, "unknown-command.conf", "wibble\n");
+        let nested_unknown = write_source(
+            &directory,
+            "nested-unknown.conf",
+            &format!(
+                "display-message -p ROOT_BEFORE\n\
+                 source-file {unknown_command}\n\
+                 display-message -p ROOT_AFTER\n"
+            ),
+        );
+        let unknown_diagnostic = fixture.run(&["source-file", "-v", &nested_unknown]);
+        assert_eq!(unknown_diagnostic.status.code(), Some(1));
+        assert_eq!(
+            unknown_diagnostic.stdout,
+            format!(
+                "{nested_unknown}:1: display-message -p ROOT_BEFORE\n\
+                 {nested_unknown}:2: source-file {unknown_command}\n\
+                 {nested_unknown}:3: display-message -p ROOT_AFTER\n\
+                 ROOT_BEFORE\n\
+                 {unknown_command}:1: wibble\n\
+                 {unknown_command}:1: unknown command: wibble\n\
+                 ROOT_AFTER\n"
+            )
+            .into_bytes()
+        );
+        assert!(unknown_diagnostic.stderr.is_empty());
+
+        let good = write_source(
+            &directory,
+            "30-good.conf",
+            "display-message -p GOOD_OUTPUT\n",
+        );
+        let unreadable = directory.join("middle-directory");
+        std::fs::create_dir(&unreadable).expect("unreadable source directory");
+        let later = write_source(
+            &directory,
+            "40-later.conf",
+            "display-message -p LATER_OUTPUT\n",
+        );
+        let read_error = std::fs::read_to_string(&unreadable)
+            .expect_err("reading the source directory must fail");
+        let continued = fixture.run(&[
+            "source-file",
+            &good,
+            unreadable.to_str().expect("UTF-8 unreadable path"),
+            &later,
+        ]);
+        assert_eq!(continued.status.code(), Some(1));
+        assert_eq!(continued.stdout, b"GOOD_OUTPUT\nLATER_OUTPUT\n");
+        assert_eq!(
+            continued.stderr,
+            format!("{read_error}: {}\n", unreadable.display()).into_bytes()
+        );
+    }
+
+    #[test]
     fn source_file_replayed_runtime_errors_are_bare_and_propagate_outward() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -863,6 +1203,28 @@ mod daemon_autostart {
                 .stdout,
             b"yes\n"
         );
+
+        let hook_runtime = write_source(
+            &directory,
+            "hook-runtime.conf",
+            "display-message -p BEFORE\n\
+             kill-session -t missing-runtime\n\
+             display-message -p AFTER\n\
+             list-sessions -F 'LIST_#{session_name}'\n",
+        );
+        assert!(
+            fixture
+                .run(&["set-hook", "-g", "command-error", "display-message -p HOOK",])
+                .status
+                .success()
+        );
+        let hooked = fixture.run(&["source-file", &hook_runtime]);
+        assert_eq!(hooked.status.code(), Some(1));
+        assert_eq!(
+            hooked.stdout,
+            b"BEFORE\nHOOK\nAFTER\nLIST_replayed-errors\n"
+        );
+        assert_eq!(hooked.stderr, b"can't find session: missing-runtime\n");
     }
 
     fn write_source_chain(directory: &Path, invocations: usize) -> String {

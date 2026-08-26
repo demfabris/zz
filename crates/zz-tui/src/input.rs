@@ -132,7 +132,7 @@ fn handle_key(
         return Ok(InputOutcome::None);
     }
     if model.command_output.is_some() {
-        if event.kind != KeyEventKind::Release && matches!(event.code, TerminalKeyCode::Esc) {
+        if command_output_cancel_key(event) {
             client
                 .send_input(InputMessage::CommandOutputView {
                     action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
@@ -175,6 +175,13 @@ fn handle_key(
         })
         .map_err(|error| error.to_string())?;
     Ok(InputOutcome::None)
+}
+
+fn command_output_cancel_key(event: KeyEvent) -> bool {
+    event.kind != KeyEventKind::Release
+        && (matches!(event.code, TerminalKeyCode::Esc)
+            || matches!(event.code, TerminalKeyCode::Char('q'))
+                && event.modifiers == KeyModifiers::NONE)
 }
 
 const fn should_forward_key(
@@ -1111,6 +1118,27 @@ mod tests {
         assert!(should_forward_key(KeyEventKind::Release, false, true));
         assert!(!should_forward_key(KeyEventKind::Release, false, false));
         assert!(should_forward_key(KeyEventKind::Press, false, false));
+    }
+
+    #[test]
+    fn command_output_accepts_plain_q_and_escape_as_cancel_keys() {
+        assert!(command_output_cancel_key(KeyEvent::new(
+            TerminalKeyCode::Esc,
+            KeyModifiers::NONE,
+        )));
+        assert!(command_output_cancel_key(KeyEvent::new(
+            TerminalKeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )));
+        assert!(!command_output_cancel_key(KeyEvent::new(
+            TerminalKeyCode::Char('q'),
+            KeyModifiers::CONTROL,
+        )));
+        assert!(!command_output_cancel_key(KeyEvent {
+            code: TerminalKeyCode::Char('q'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+        }));
     }
 
     #[test]

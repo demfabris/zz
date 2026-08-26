@@ -7,8 +7,8 @@ use std::{
 };
 
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, CommandInvocation,
-    CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
+    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, ClientId,
+    CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
     MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError,
@@ -202,6 +202,7 @@ pub struct ExecutionContext {
     client_attached: bool,
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     repeat_binding: bool,
+    replay_client: Option<ClientId>,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
 }
@@ -226,6 +227,7 @@ impl Default for ExecutionContext {
             client_attached: true,
             client_attached_context: None,
             repeat_binding: false,
+            replay_client: None,
             no_hooks: false,
             format_variables: BTreeMap::new(),
         }
@@ -332,6 +334,15 @@ impl ExecutionContext {
 
     pub fn set_repeat_binding(&mut self, repeat: bool) {
         self.repeat_binding = repeat;
+    }
+
+    #[must_use]
+    pub fn replay_client(&self) -> Option<ClientId> {
+        self.replay_client
+    }
+
+    pub fn set_replay_client(&mut self, client: Option<ClientId>) {
+        self.replay_client = client;
     }
 
     pub fn retarget_to_pane(&mut self, state: &MuxState, pane: PaneId) -> bool {
@@ -2775,6 +2786,15 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let mut hooks = CommandHooks::new(self.format_now);
         self.execute_with_format_hooks(context, command, &mut hooks)
+    }
+
+    pub fn execute_prepared(
+        &mut self,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+    ) -> Result<Execution, ServerError> {
+        let mut hooks = CommandHooks::new(self.format_now);
+        self.execute_without_alias_expansion(context, command, &mut hooks, &mut |_| true)
     }
 
     pub fn execute_with_format_hooks(

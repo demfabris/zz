@@ -460,8 +460,9 @@ normal relative-path resolution, while tildes expanded by the config parser alre
 absolute paths. The nested declared-path slice is closed: loud no-match and glob errors reach the
 invoking client with the post-`-F` declared argument, while a quiet no-match stays silent. A direct
 Control all-miss aborts its line; a direct partial match ends with `%end` and continues; matched
-parser errors remain `%config-error`. Protocol v76 now gives each replayed command that survives
-command-name resolution a tail-tag-47 `SourcedCommandGuard`. Unknown or ambiguous command names and
+parser errors remain `%config-error`. Protocol v76 now gives each parser-owned replayed command that
+survives command-name resolution a tail-tag-47 `SourcedCommandGuard`. An alias resolved to
+`source-file` before replay retains the same recursion path. Unknown or ambiguous command names and
 malformed alias names publish a located Warning that Control renders as `%config-error`, without a
 guard. Ordinary success and quiet all-miss use an empty flags-1 `%end`;
 a mixed hit and miss keeps the declared-path diagnostic inside `%end`; and all-miss, flag or arity
@@ -474,14 +475,18 @@ command before recursion. A focused regression and the then-six-step Control dif
 root missing-path guard, then middle missing-path guard, then leaf output guard, each exactly once.
 That closes `source-file.nested-control-queue` with no production change. The later
 `control-mode.source-file-exit-status` closure completes the long-lived Control matrix. Direct and
-sourced runtime errors plus nonruntime source failures set retval 1. Generic nonzero successes and
+parser-owned sourced runtime errors plus nonruntime source failures set retval 1. Generic nonzero successes and
 flags-1 parse or preparation errors do not set or change it, so a fresh client stays at 0 while a
 prior sticky failure stays at 1. A blank line or EOF snapshots the current value. A Return captured
 while a preceding non-detach command waits precedes later queued stdin commands, including detach;
 a Return observed while self-detach itself waits is discarded on the caller's `Detached` event. Only
 a caller-targeted `Detached` event exits 0, so nonself and no-victim detach forms keep the loop alive.
-The command response closes before `%exit`. The strict
-current differential passes eight steps without making every source or config diagnostic sticky.
+The command response closes before `%exit`. A focused eight-step differential passes without making
+every source or config diagnostic sticky. It does not refresh the stored canonical row, which
+remains at three steps.
+Runtime `if-shell` branches and hooks still execute through the sentinel replay client. A child
+source reached through either route loses the original Control recipient, its child guards, and its
+sticky failure state. `control-mode.indirect-source-frames` owns that residue.
 The nesting limit is closed for guard
 placement, depth wording, count, and
 later-line continuation: both sides run 50 concurrent source invocations counting the initial
@@ -502,36 +507,54 @@ load report without using it to prune the parent group. Quiet zero-file misses s
 slice zz-classified unsupported capability gaps changed from pruning later same-line siblings to
 skip-and-continue. That continuation is desirable for zz import capability gaps but remains
 pin-unproven because the corresponding commands are unsupported in zz. Replayed error delivery is
-closed for the pinned target and set-option failures on Command, Control, and attached clients.
-Successful replay output is now captured inside Control guards, while Command stdout, attached
-presentation, and physical interleaving with `-v` remain under `config.replayed-command-output`.
-Cross-depth nested ordering and Control return-versus-detach precedence are closed. Parser abort and
-error shapes remain with their named groups; the same-line close does not cover exact matched-read
-text.
+closed for the pinned target and set-option failures on Command, parser-owned Control, and attached
+clients. Successful output plus command-name and parser diagnostics share one per-invocation
+transcript. Each invocation
+appends its complete `-v` batch, replays every parsed match, then appends buffered command-name,
+and parser diagnostics. Source no-match, glob, and read failures retain their existing error channels.
+A nested source inserts its own complete frame at the parent command's replay position, so nested
+frames are depth-first. This does not claim physical verbose and replay interleaving. Command clients
+receive the transcript once on stdout. For valid successful replay and `-v` output, Interactive
+clients open one command-output view without duplicate Info or Warning events. Parser diagnostics
+may still publish their existing Warning summary. Successful output leaves stderr empty and status
+zero. A runtime failure retains stderr and status 1 while stdout before and after it remains ordered.
+Cross-depth parser-owned Control ordering and return-versus-detach precedence are
+closed. Indirect Control frames, parser abort, and error shapes remain with their named groups; the
+same-line close does not cover exact matched-read text.
 Startup accounting is closed: one
 budget spans every startup root, the roots do not count, source commands 1 through 50 run, and later
 source commands retain their declaring file and line while runtime sequential sources stay
-unbounded. zz still discards those startup causes before a client can see them, tracked in
-`config.startup-diagnostic-delivery`. Replayed runtime failures now retain encounter order, use the
-invoking client's error channel, set the Command or Control exit status, capitalize the attached
-warning, and continue later physical lines through an outer source. The config parser group
-separately retains tmux's first-error file abort and its unusual tilde expansion immediately after
-a closing quote.
-The `source-file.flags` slice is closed through the existing effect and replay-loader seam. `-n`
-parses without environment or command effects while keeping syntax diagnostics and optional verbose
-lines. `-t` resolves one pane context for path formats and replay, with a quiet empty context on a
+unbounded. A detached startup launch is silent on stdout and stderr. A separate manual probe of
+pinned tmux `d77c9dc6`, outside the 12-step runtime scenario, found that later Control and attached
+clients receive retained `display-message -p` text with its file and line while list output such as
+`list-sessions` is discarded. zz still drops those retained causes, tracked in
+`config.startup-diagnostic-delivery`. Replayed runtime failures retain encounter order, use the
+invoking client's error channel, set the Command status and parser-owned Control status, capitalize
+the attached warning, and continue later physical lines through an outer source. The config parser
+group separately retains tmux's first-error file abort and its unusual tilde expansion immediately
+after a closing quote.
+The `source-file.flags` slice is closed through the existing effect and replay-loader seam. One
+ordinary invocation parses every declared and globbed match before replay. A bare assignment in an
+earlier file applies during parsing, affects a later file's conditional, and persists. A replayed
+`set-environment` runs after the later file was parsed, so it cannot change that branch but persists
+after replay. `-n` applies neither assignment nor command effects, later parse-only files see the
+assignment as absent, and `-v` still reports the selected branch. `-t` resolves one pane context for path formats and replay, with a quiet empty context on a
 miss and no change to the invoking client cwd. `-v` preserves file and line order, inherits through
 nested sources, and stays suppressed for Control. Full tmux command, flag, and arity validation
-during parse remains under the parser, error-shape, and chain-abort groups. Exact attached verbose
-presentation and ordering relative to ordinary replay output remain under
-`config.replayed-command-output`. Runtime `source-file` now treats the active default config like
-every other matched path: declared default, after, and default files apply as `DAD`; a loud miss
+during parse remains under the parser, error-shape, and chain-abort groups. Command and Interactive
+transcript presentation and ordering are closed under `config.replayed-command-output`. The attached
+proof covers presentation and q dismissal only; line and page movement, search, selection and copy,
+custom tables, and mode-key selection remain under `clients.tui-command-output-navigation`.
+Runtime `source-file` now treats the active default config like every other matched path: one
+invocation parses all matches in declared-path and glob order, then replays them in the same order.
+Declared default, after, and default files apply as `DAD`; a loud miss
 returns status 1 without stopping later matches; and ordinary diagnostics plus `-v` lines retain
 declared path and match order. Explicit native `reload-config`, startup first-existing discovery,
 and ordered explicit `-f` roots keep their separate behavior. Parse-only and nested paths are
 unchanged. Focused CLI and daemon tests, strict clippy, fmt, and the 12-step diagnostics, 40-step
 format, and then-six-step Control differentials pass with zero differences and no skips. The later
-Control return-status close grows that focused row to eight. Neither run is a canonical-suite claim.
+Control return-status close grows that focused row to eight. Neither focused run refreshes the stored
+canonical row, which remains at three steps.
 Control source diagnostics now use the existing Error kind and reach standalone `%error` frames
 without text classification. Config summaries still use Warning events, so
 `control-mode.diagnostic-typing` retains only future or localized config wording.

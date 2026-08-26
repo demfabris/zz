@@ -233,9 +233,10 @@ Surfaces must match the identity before dropping anything, so a retired message'
 never take down the message that replaced it.
 
 v76 appends `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
-The daemon sends it only to the Control client that invoked `source-file`. Each replayed command
-that survives command-name resolution gets one in recursive file order. Unknown or ambiguous
-command names and malformed alias names publish a located Warning that Control renders as
+The daemon sends it only to the Control client retained by a parser-owned `source-file` invocation.
+Each replayed command that survives command-name resolution gets one in recursive file order. An
+alias resolved to `source-file` before replay retains that path. Unknown or ambiguous command names
+and malformed alias names publish a located Warning that Control renders as
 `%config-error`, without a guard. `output` is the command's captured output or source diagnostic;
 `error` selects `%error` instead of `%end`; `client_failure` independently sets the Control
 client's retained retval to 1. A runtime failure sets both booleans. A flag, arity, source
@@ -251,15 +252,27 @@ The daemon preflights every declared path for one source command before it recur
 replay publishes the root command's missing-path guard, the middle command's missing-path guard, and
 the leaf output guard in that order, each exactly once. Proving that order required no wire change.
 The Control front end combines that event with existing `CommandResponse` and `Detached` messages.
-Direct runtime errors, sourced runtime errors, nonruntime source failures, and typed source-read errors
-set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not set or change
+Direct runtime errors, parser-owned sourced runtime errors, nonruntime source failures, and typed
+source-read errors set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not set or change
 it, so a fresh client remains at 0 while a prior sticky failure stays at 1. A Return captured while a
 preceding non-detach command waits keeps its arrival-time snapshot and precedes later queued stdin. A
 Return observed while self-detach waits is discarded when the caller-targeted `Detached` event arrives.
 Nonself and no-victim detach commands preserve a pending Return and keep the client alive. The command
 response closes before `%exit`. This closed
-`control-mode.source-file-exit-status` without a wire change. Generic config Warning typing, startup
-diagnostic delivery, and replay output outside Control guards remain open.
+`control-mode.source-file-exit-status` without a wire change for direct and parser-owned replay.
+Runtime `if-shell` branches and hooks execute through the sentinel replay client, so a child source
+reached through either path loses the original Control recipient, its guards, and its sticky failure
+state. `control-mode.indirect-source-frames` owns that residue.
+
+Command and Interactive replay transcripts closed without another wire field. Each source invocation
+appends its complete verbose batch, replay output, and buffered command-name or parser diagnostics in
+that order. Source no-match, glob, and read failures retain their existing error channels. Nested
+invocations insert their complete frame at the parent replay position. Command returns that
+transcript once in its existing response output. Interactive renders one existing command-output
+viewport from the same transcript, subject to the existing command-output size bound. This is
+per-invocation batching, not a claim of physical interleaving.
+Generic config Warning typing, startup diagnostic delivery, indirect Control frames, and TUI
+command-output navigation remain open.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
@@ -444,8 +457,8 @@ now validate on both encode and decode.
 - v76 appends `ServerError::CommandParse(String)` at tail tag 12 and
   `EventPayload::SourcedCommandGuard` at tail tag 47. `CommandParse` gives command parsing and
   preparation a wire-stable phase separate from target lookup and runtime command failures. The
-  sourced guard carries one Control replay command's output, `%end` or `%error` choice, and sticky
-  client-failure bit without changing the framing of direct commands.
+  sourced guard carries one parser-owned Control replay command's output, `%end` or `%error` choice,
+  and sticky client-failure bit without changing the framing of direct commands.
 - v75 appends the counted copy-mode action and repeated browser-key command used by `send-keys -N`.
   `TerminalViewAction::CopyModeCounted { action, count }` uses tail tag 28 and embeds one flat
   `CopyModeAction`; the removed recursive action tag cannot decode or nest. Browser command tail tag

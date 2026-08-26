@@ -22,7 +22,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
     CellLayout, CommandAliasResolution, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope,
     Execution, ExecutionContext, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
-    PaneRuntimeFacts, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
+    PaneRuntimeFacts, ParsedConfig, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
     canonical_command, command_block_body, copy_mode_action_is_read_only_safe, display_width,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
     if_shell_truthy, parse_tmux_colour, send_keys_is_read_only_safe,
@@ -4221,31 +4221,6 @@ impl Shared {
         )
     }
 
-    fn execute_with_mux_source_for_terminal(
-        self: &Arc<Self>,
-        client: ClientId,
-        kind: ClientKind,
-        context: &mut ExecutionContext,
-        command: &CommandInvocation,
-        mux_source: MuxOptionSource,
-        client_terminal: ClientTerminal,
-    ) -> Result<Execution, DaemonError> {
-        let routed = self
-            .inner
-            .lock()
-            .engine
-            .resolve_command_alias(command)
-            .into_command(command)?;
-        self.execute_with_mux_source_routed_for_terminal(
-            client,
-            kind,
-            context,
-            &routed,
-            mux_source,
-            client_terminal,
-        )
-    }
-
     fn execute_with_mux_source_routed_for_terminal(
         self: &Arc<Self>,
         client: ClientId,
@@ -4623,7 +4598,7 @@ impl Shared {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
-        client_terminal: ClientTerminal,
+        invoking_client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
         let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
@@ -4747,7 +4722,7 @@ impl Shared {
             .with_status_options(&status_options);
             inner.engine.set_format_now(unix_timestamp());
             let mut prospective_context = context.clone();
-            set_context_client_terminal(&mut prospective_context, client_terminal);
+            set_context_client_terminal(&mut prospective_context, invoking_client_terminal);
             let nested_attach_guard = match (command_name, nested_attach_refusal(&inner, client)) {
                 ("attach-session", Some(refusal)) => return Err(refusal.into()),
                 ("new-session", Some(refusal))
@@ -4776,7 +4751,7 @@ impl Shared {
                 inner.client_working_directories.get(&client).cloned(),
             );
             let previous_client_terminal = context_client_terminal(context);
-            set_context_client_terminal(context, client_terminal);
+            set_context_client_terminal(context, invoking_client_terminal);
             let execution = inner.engine.execute_without_alias_expansion(
                 context,
                 command,
@@ -6172,7 +6147,7 @@ impl Shared {
             }
         }
         if let Some((session, detach_others, read_only)) = attach {
-            if client_terminal == ClientTerminal::Present {
+            if invoking_client_terminal == ClientTerminal::Present {
                 if read_only {
                     self.inner.lock().read_only_clients.insert(client);
                 }
@@ -6282,41 +6257,77 @@ impl Shared {
         } else if !status_refresh_sessions.is_empty() {
             self.refresh_status_for_sessions(false, Some(&status_refresh_sessions));
         }
+        let replay_client = context.replay_client();
+        let source_client = replay_client.unwrap_or(client);
+        let (
+            source_kind,
+            source_client_working_directory,
+            source_client_registered,
+            source_client_terminal,
+        ) = {
+            let inner = self.inner.lock();
+            let registered = inner.client_kinds.contains_key(&source_client);
+            let source_kind = if source_client == client {
+                kind
+            } else {
+                inner
+                    .client_kinds
+                    .get(&source_client)
+                    .copied()
+                    .unwrap_or(kind)
+            };
+            let source_client_terminal = if context.has_no_client() {
+                ClientTerminal::NoClient
+            } else if replay_client.is_some() && registered {
+                client_terminal(&inner, source_client, source_kind)
+            } else {
+                invoking_client_terminal
+            };
+            (
+                source_kind,
+                inner
+                    .client_working_directories
+                    .get(&source_client)
+                    .cloned(),
+                registered,
+                source_client_terminal,
+            )
+        };
         let source_working_directory = (reload_config || !source_files.is_empty()).then(|| {
-            context
-                .client_working_directory()
-                .map(Path::to_owned)
+            source_client_working_directory
+                .or_else(|| context.client_working_directory().map(Path::to_owned))
                 .or_else(home_directory)
                 .unwrap_or_else(|| PathBuf::from("/"))
         });
-        let source_client_base = if client == ClientId(u64::MAX) {
+        let source_client_base = if source_client == ClientId(u64::MAX) {
             None
         } else {
-            let inner = self.inner.lock();
-            inner
-                .client_kinds
-                .contains_key(&client)
+            source_client_registered
                 .then(|| source_working_directory.clone())
                 .flatten()
         };
         let mut source_file_error = None;
         let mut control_source_errors = Vec::new();
         let mut control_source_matched = false;
+        let mut source_verbose_output = String::new();
+        let mut source_replay_output = String::new();
+        let mut source_diagnostics_output = String::new();
         let mut source_invocations = SourceInvocationAccounting::default();
+        let mut pending_source_files = Vec::new();
         for request in source_files {
             let path = request.path;
             if path == "-" {
                 self.publish_to_client(
-                    client,
+                    source_client,
                     EventPayload::ClientMessage {
                         pane: request.context.pane,
                         kind: ClientMessageKind::Warning,
                         text: STANDARD_INPUT_SOURCE_WARNING.to_owned(),
                     },
                 );
-                if kind == ClientKind::Command {
-                    self.record_command_stderr(client, STANDARD_INPUT_SOURCE_WARNING);
-                    self.record_command_failure(client);
+                if source_kind == ClientKind::Command {
+                    self.record_command_stderr(source_client, STANDARD_INPUT_SOURCE_WARNING);
+                    self.record_command_failure(source_client);
                 }
                 continue;
             }
@@ -6325,111 +6336,190 @@ impl Shared {
             let matches = source_glob_matches(&pattern);
             for error in &matches.errors {
                 let text = source_glob_error_warning(&declared_path, error);
-                if kind == ClientKind::Control {
+                if source_kind == ClientKind::Control {
                     control_source_errors.push(text);
                 } else {
-                    self.route_source_error(client, kind, request.context.pane, &text);
+                    self.route_source_error(
+                        source_client,
+                        source_kind,
+                        request.context.pane,
+                        &text,
+                    );
                 }
             }
             if matches.paths.is_empty() && matches.errors.is_empty() {
                 if !request.quiet {
                     let error = missing_source_error(&declared_path);
-                    if kind == ClientKind::Control {
+                    if source_kind == ClientKind::Control {
                         control_source_errors.push(error);
                     } else {
-                        self.route_source_error(client, kind, request.context.pane, &error);
+                        self.route_source_error(
+                            source_client,
+                            source_kind,
+                            request.context.pane,
+                            &error,
+                        );
                     }
                 }
                 continue;
             }
-            if kind == ClientKind::Control && !matches.paths.is_empty() {
+            if source_kind == ClientKind::Control && !matches.paths.is_empty() {
                 control_source_matched = true;
             }
             for path in matches.paths {
-                let options = SourceFileLoadOptions {
-                    parse_only: request.parse_only,
-                    verbose: request.verbose && kind != ClientKind::Control,
-                    suppress_verbose: kind == ClientKind::Control,
-                    control_client: (kind == ClientKind::Control).then_some(client),
+                pending_source_files.push(PendingConfigFile {
+                    path,
+                    context: request.context.clone(),
+                    options: SourceFileLoadOptions {
+                        parse_only: request.parse_only,
+                        verbose: request.verbose && source_kind != ClientKind::Control,
+                        suppress_verbose: source_kind == ClientKind::Control,
+                        control_client: (source_kind == ClientKind::Control)
+                            .then_some(source_client),
+                        replay_client: (source_kind != ClientKind::Control
+                            && source_client != ClientId(u64::MAX))
+                        .then_some(source_client),
+                    },
+                });
+            }
+        }
+        let mut parsed_source_files = Vec::new();
+        for pending in pending_source_files {
+            let mut report =
+                if source_kind == ClientKind::Control || source_client == ClientId(u64::MAX) {
+                    ConfigLoadReport::default()
+                } else {
+                    ConfigLoadReport::with_stdout_transcript()
                 };
-                let mut source_context = request.context.clone();
-                let mut report = ConfigLoadReport::default();
-                if let Err(error) = self.load_config_file_with_report_for_terminal_and_options(
-                    &path,
-                    &mut source_context,
-                    0,
-                    &mut report,
-                    client_terminal,
-                    source_client_base.as_deref(),
-                    &mut source_invocations,
-                    options,
-                ) {
-                    if kind == ClientKind::Control
-                        && let DaemonError::Io(error) = error
-                    {
-                        let warning = source_glob_error_warning(&path, &error.to_string());
+            match self.parse_config_file(&pending.path, &mut report, pending.options, true) {
+                Ok(parsed) => parsed_source_files.push((pending, parsed, report)),
+                Err(DaemonError::Io(error)) => {
+                    let warning = source_glob_error_warning(&pending.path, &error.to_string());
+                    if source_kind == ClientKind::Control {
                         self.inner
                             .lock()
                             .command_streams
-                            .entry(client)
+                            .entry(source_client)
                             .or_default()
                             .exit_code = 1;
                         self.publish_to_client(
-                            client,
+                            source_client,
                             EventPayload::ClientMessage {
-                                pane: request.context.pane,
+                                pane: pending.context.pane,
                                 kind: ClientMessageKind::Error,
                                 text: warning,
                             },
                         );
-                        continue;
+                    } else {
+                        self.route_source_error(
+                            source_client,
+                            source_kind,
+                            pending.context.pane,
+                            &warning,
+                        );
                     }
+                }
+                Err(error) => {
                     if source_file_error.is_none() {
                         source_file_error = Some(error);
                     }
-                    continue;
-                }
-                if !request.parse_only {
-                    self.apply_stored_mux_config_overrides("source-file-replay");
-                }
-                self.route_source_verbose(
-                    client,
-                    kind,
-                    request.context.pane,
-                    report.verbose_lines(),
-                );
-                if kind == ClientKind::Command {
-                    for diagnostic in report.diagnostics() {
-                        self.record_command_stdout(client, diagnostic);
-                        self.record_command_failure(client);
-                    }
-                }
-                self.route_config_replay_errors(client, kind, request.context.pane, &report);
-                if kind == ClientKind::Command
-                    && let Some(skipped) = report.skipped_summary()
-                {
-                    self.record_command_stderr(client, &skipped);
-                }
-                let summary = if kind == ClientKind::Control && report.control_guarded {
-                    report.skipped_summary()
-                } else {
-                    report.message()
-                };
-                if let Some(summary) = summary {
-                    self.publish_to_client(
-                        client,
-                        EventPayload::ClientMessage {
-                            pane: request.context.pane,
-                            kind: ClientMessageKind::Warning,
-                            text: summary,
-                        },
-                    );
                 }
             }
         }
+        for (pending, parsed, mut report) in parsed_source_files {
+            let PendingConfigFile {
+                path,
+                mut context,
+                options,
+            } = pending;
+            let replayed = parsed.map_or(Ok(()), |parsed| {
+                self.replay_config_file(
+                    &path,
+                    parsed,
+                    &mut context,
+                    0,
+                    &mut report,
+                    source_client_terminal,
+                    source_client_base.as_deref(),
+                    &mut source_invocations,
+                    options,
+                )
+            });
+            match replayed {
+                Ok(()) => {}
+                Err(DaemonError::Io(error)) => {
+                    let warning = source_glob_error_warning(&path, &error.to_string());
+                    if source_kind == ClientKind::Control {
+                        self.inner
+                            .lock()
+                            .command_streams
+                            .entry(source_client)
+                            .or_default()
+                            .exit_code = 1;
+                        self.publish_to_client(
+                            source_client,
+                            EventPayload::ClientMessage {
+                                pane: context.pane,
+                                kind: ClientMessageKind::Error,
+                                text: warning,
+                            },
+                        );
+                    } else {
+                        self.route_source_error(source_client, source_kind, context.pane, &warning);
+                    }
+                }
+                Err(error) => {
+                    if source_file_error.is_none() {
+                        source_file_error = Some(error);
+                    }
+                }
+            }
+            if !options.parse_only {
+                self.apply_stored_mux_config_overrides("source-file-replay");
+            }
+            if let Some((verbose, replay)) = report.stdout_transcript() {
+                append_inserted_output(&mut source_verbose_output, verbose);
+                append_inserted_output(&mut source_replay_output, replay);
+            }
+            if let Some(diagnostics) = report.stdout_diagnostics() {
+                append_inserted_output(&mut source_diagnostics_output, diagnostics);
+            }
+            if source_kind == ClientKind::Command {
+                for (index, diagnostic) in report.diagnostics().iter().enumerate() {
+                    if !report.replayed_diagnostics.contains(&index) {
+                        self.record_command_stdout(source_client, diagnostic);
+                    }
+                    self.record_command_failure(source_client);
+                }
+            }
+            self.route_config_replay_errors(source_client, source_kind, context.pane, &mut report);
+            if source_kind == ClientKind::Command
+                && let Some(skipped) = report.skipped_summary()
+            {
+                self.record_command_stderr(source_client, &skipped);
+            }
+            let summary = if source_kind == ClientKind::Control && report.control_guarded {
+                report.skipped_summary()
+            } else {
+                report.message()
+            };
+            if let Some(summary) = summary {
+                self.publish_to_client(
+                    source_client,
+                    EventPayload::ClientMessage {
+                        pane: context.pane,
+                        kind: ClientMessageKind::Warning,
+                        text: summary,
+                    },
+                );
+            }
+        }
+        append_inserted_output(&mut execution.output, &source_verbose_output);
+        append_inserted_output(&mut execution.output, &source_replay_output);
+        append_inserted_output(&mut execution.output, &source_diagnostics_output);
         if !control_source_errors.is_empty() {
             let mut inner = self.inner.lock();
-            let streams = inner.command_streams.entry(client).or_default();
+            let streams = inner.command_streams.entry(source_client).or_default();
             if control_source_matched {
                 for error in control_source_errors {
                     streams.stdout.push_str(&error);
@@ -6442,7 +6532,7 @@ impl Shared {
         }
         if reload_config
             && let Err(error) = self.reload_user_config_with_source_base(
-                client,
+                source_client,
                 context,
                 source_client_base.as_deref(),
                 SourceFileLoadOptions::default(),
@@ -6461,9 +6551,12 @@ impl Shared {
         // `status_prompt_set`, and the callback queues its command behind the
         // item that raised the prompt. Running it last is that ordering.
         if let Some(submission) = incremental_start {
-            self.submit_command_prompt(client, kind, context, &submission);
+            self.submit_command_prompt(source_client, source_kind, context, &submission);
         }
-        source_file_error.map_or(Ok(execution), Err)
+        match source_file_error {
+            Some(error) => Err(prepend_command_output(execution.output, error)),
+            None => Ok(execution),
+        }
     }
 
     fn publish_key_tables_if_changed(&self) {
@@ -15233,9 +15326,10 @@ impl Shared {
         client: ClientId,
         kind: ClientKind,
         pane: Option<PaneId>,
-        report: &ConfigLoadReport,
+        report: &mut ConfigLoadReport,
     ) {
-        for issue in report.replay_issues() {
+        let delivered = report.delivered_replay_issues;
+        for issue in &report.replay_issues()[delivered..] {
             match issue {
                 ConfigReplayIssue::SourceErrors(index) => {
                     let errors = &report.source_error_groups()[*index];
@@ -15293,6 +15387,7 @@ impl Shared {
                 }
             }
         }
+        report.delivered_replay_issues = report.replay_issues().len();
     }
 
     /// Publish the complete option map with the recipient's session-effective
@@ -16423,7 +16518,7 @@ impl Shared {
             appearance: Box::new((*published).clone()),
             provenance,
         });
-        self.route_config_replay_errors(client, kind, context.pane, &report);
+        self.route_config_replay_errors(client, kind, context.pane, &mut report);
         if kind == ClientKind::Control && report.control_guarded {
             if let Some(text) = report.skipped_summary() {
                 self.publish_to_client(
@@ -16531,12 +16626,35 @@ impl Shared {
         source_invocations: &mut SourceInvocationAccounting,
         options: SourceFileLoadOptions,
     ) -> Result<(), DaemonError> {
+        let Some(parsed) = self.parse_config_file(path, report, options, depth == 0)? else {
+            return Ok(());
+        };
+        self.replay_config_file(
+            path,
+            parsed,
+            context,
+            depth,
+            report,
+            client_terminal,
+            source_client_base,
+            source_invocations,
+            options,
+        )
+    }
+
+    fn parse_config_file(
+        &self,
+        path: &Path,
+        report: &mut ConfigLoadReport,
+        options: SourceFileLoadOptions,
+        top_level: bool,
+    ) -> Result<Option<ParsedConfig>, DaemonError> {
         report.control_guarded |= options.control_client.is_some();
         let input = match fs::read_to_string(path) {
             Ok(input) => input,
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 log::warn!("ignoring missing config file: {}", path.display());
-                return Ok(());
+                return Ok(None);
             }
             Err(error) => return Err(error.into()),
         };
@@ -16546,8 +16664,7 @@ impl Shared {
                 .engine
                 .parse_config(path.display().to_string(), &input)
         };
-        let mut failed_group = None;
-        for diagnostic in parsed.diagnostics {
+        for diagnostic in &parsed.diagnostics {
             log::warn!(
                 "{}:{}:{}: {}",
                 diagnostic.source,
@@ -16555,22 +16672,56 @@ impl Shared {
                 diagnostic.column,
                 diagnostic.message
             );
-            report.note_invalid_at(&diagnostic.source, diagnostic.line, &diagnostic.message);
+            report.note_parse_diagnostic(
+                &diagnostic.source,
+                diagnostic.line,
+                &diagnostic.message,
+                top_level,
+            );
         }
         if options.verbose {
-            report.note_verbose_commands(&parsed.commands);
+            report.note_verbose_commands(&parsed.commands, top_level);
         }
+        if !options.parse_only {
+            let mut inner = self.inner.lock();
+            for assignment in &parsed.environment {
+                inner.engine.set_config_environment(
+                    assignment.name.clone(),
+                    assignment.value.clone(),
+                    assignment.hidden,
+                );
+            }
+        }
+        Ok(Some(parsed))
+    }
+
+    fn replay_config_file(
+        self: &Arc<Self>,
+        path: &Path,
+        parsed: ParsedConfig,
+        context: &mut ExecutionContext,
+        depth: usize,
+        report: &mut ConfigLoadReport,
+        client_terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
+        source_invocations: &mut SourceInvocationAccounting,
+        options: SourceFileLoadOptions,
+    ) -> Result<(), DaemonError> {
         if options.parse_only {
             return Ok(());
         }
-        for assignment in parsed.environment {
-            self.inner.lock().engine.set_config_environment(
-                assignment.name,
-                assignment.value,
-                assignment.hidden,
-            );
-        }
+        let mut failed_group = None;
         for command in parsed.commands {
+            if let Some(replay_client) = options.replay_client {
+                let replay_kind = self
+                    .inner
+                    .lock()
+                    .client_kinds
+                    .get(&replay_client)
+                    .copied()
+                    .unwrap_or(ClientKind::Command);
+                self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
+            }
             let group = command
                 .source
                 .as_ref()
@@ -16581,7 +16732,52 @@ impl Shared {
             {
                 continue;
             }
-            if command.name == "reload-config" {
+            let routed = {
+                let inner = self.inner.lock();
+                inner
+                    .engine
+                    .resolve_command_alias(&command)
+                    .into_command(&command)
+            };
+            let routed = match routed {
+                Ok(routed) => routed,
+                Err(ServerError::CommandParse(message)) => {
+                    log::warn!(
+                        "{}: ignoring invalid tmux command: {message}",
+                        path.display()
+                    );
+                    report.note_invalid_command(&command, &message);
+                    if options.control_client.is_some()
+                        && let Some(name_error) = self.sourced_command_name_error(&command)
+                    {
+                        self.publish_sourced_config_warning(
+                            options.control_client,
+                            context.pane,
+                            &command,
+                            &name_error,
+                        );
+                        failed_group = group;
+                        continue;
+                    }
+                    self.publish_sourced_command_guard(
+                        options.control_client,
+                        config_command_error(&command, &message),
+                        true,
+                        false,
+                    );
+                    failed_group = group;
+                    continue;
+                }
+                Err(error) => {
+                    let message = error.tmux_message();
+                    log::warn!("{}: tmux command error: {message}", path.display());
+                    report.note_command_error(&command, &message);
+                    self.publish_sourced_command_guard(options.control_client, message, true, true);
+                    failed_group = group;
+                    continue;
+                }
+            };
+            if routed.name == "reload-config" {
                 log::warn!(
                     "{}: ignoring reload-config while loading configuration",
                     path.display()
@@ -16594,10 +16790,10 @@ impl Shared {
                 );
                 continue;
             }
-            if matches!(command.name.as_str(), "source" | "source-file") {
+            if matches!(routed.name.as_str(), "source" | "source-file") {
                 let source_effects = {
                     let mut inner = self.inner.lock();
-                    inner.engine.execute(context, &command)
+                    inner.engine.execute_prepared(context, &routed)
                 };
                 let source_effects = match source_effects {
                     Ok(execution) => execution
@@ -16742,6 +16938,7 @@ impl Shared {
                     source_parse_error || source_command_error && !source_has_file,
                     false,
                 );
+                let mut pending_sources = Vec::new();
                 for (source_request, sources) in prepared_sources {
                     let nested_options = SourceFileLoadOptions {
                         parse_only: source_request.parse_only,
@@ -16749,40 +16946,75 @@ impl Shared {
                             && (options.verbose || source_request.verbose),
                         suppress_verbose: options.suppress_verbose,
                         control_client: options.control_client,
+                        replay_client: options.replay_client,
                     };
                     for source in sources {
-                        let mut source_context = source_request.context.clone();
-                        match self.load_config_file_with_report_for_terminal_and_options(
-                            &source,
-                            &mut source_context,
-                            depth + 1,
-                            report,
-                            client_terminal,
-                            source_client_base,
-                            source_invocations,
-                            nested_options,
-                        ) {
-                            Err(DaemonError::Io(error)) => {
-                                let warning =
-                                    source_glob_error_warning(&source, &error.to_string());
-                                log::warn!("{warning}");
-                                report.note_source_error(&mut source_error_group, &warning);
-                                if let Some(client) = options.control_client {
-                                    self.publish_to_client(
-                                        client,
-                                        EventPayload::ClientMessage {
-                                            pane: source_request.context.pane,
-                                            kind: ClientMessageKind::Error,
-                                            text: warning,
-                                        },
-                                    );
-                                }
-                            }
-                            Err(error) if source_error.is_none() => source_error = Some(error),
-                            Ok(()) | Err(_) => {}
-                        }
+                        pending_sources.push(PendingConfigFile {
+                            path: source,
+                            context: source_request.context.clone(),
+                            options: nested_options,
+                        });
                     }
                 }
+                let mut parsed_sources = Vec::new();
+                report.push_stdout_frame();
+                for pending in pending_sources {
+                    match self.parse_config_file(&pending.path, report, pending.options, true) {
+                        Ok(Some(parsed)) => parsed_sources.push((pending, parsed)),
+                        Err(DaemonError::Io(error)) => {
+                            let warning =
+                                source_glob_error_warning(&pending.path, &error.to_string());
+                            log::warn!("{warning}");
+                            report.note_source_error(&mut source_error_group, &warning);
+                            if let Some(client) = options.control_client {
+                                self.publish_to_client(
+                                    client,
+                                    EventPayload::ClientMessage {
+                                        pane: pending.context.pane,
+                                        kind: ClientMessageKind::Error,
+                                        text: warning,
+                                    },
+                                );
+                            }
+                        }
+                        Err(error) if source_error.is_none() => source_error = Some(error),
+                        Ok(None) | Err(_) => {}
+                    }
+                }
+                for (pending, parsed) in parsed_sources {
+                    let mut source_context = pending.context.clone();
+                    match self.replay_config_file(
+                        &pending.path,
+                        parsed,
+                        &mut source_context,
+                        depth + 1,
+                        report,
+                        client_terminal,
+                        source_client_base,
+                        source_invocations,
+                        pending.options,
+                    ) {
+                        Err(DaemonError::Io(error)) => {
+                            let warning =
+                                source_glob_error_warning(&pending.path, &error.to_string());
+                            log::warn!("{warning}");
+                            report.note_source_error(&mut source_error_group, &warning);
+                            if let Some(client) = options.control_client {
+                                self.publish_to_client(
+                                    client,
+                                    EventPayload::ClientMessage {
+                                        pane: pending.context.pane,
+                                        kind: ClientMessageKind::Error,
+                                        text: warning,
+                                    },
+                                );
+                            }
+                        }
+                        Err(error) if source_error.is_none() => source_error = Some(error),
+                        Ok(()) | Err(_) => {}
+                    }
+                }
+                report.pop_stdout_frame();
                 if let Some(error) = source_error {
                     return Err(error);
                 }
@@ -16791,18 +17023,22 @@ impl Shared {
                 }
                 continue;
             }
-            let result = self.execute_with_mux_source_for_terminal(
+            let previous_replay_client = context.replay_client();
+            context.set_replay_client(options.replay_client);
+            let result = self.execute_with_mux_source_routed_for_terminal(
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 context,
-                &command,
+                &routed,
                 MuxOptionSource::TmuxConfig,
                 client_terminal,
             );
+            context.set_replay_client(previous_replay_client);
             let mut captured_output = result.as_ref().map_or_else(
                 |error| daemon_error_output(error).unwrap_or_default().to_owned(),
                 |execution| execution.output.clone(),
             );
+            report.note_stdout(&captured_output);
             match result.map_err(discard_command_output) {
                 Ok(_) => self.publish_sourced_command_guard(
                     options.control_client,
@@ -16877,6 +17113,16 @@ impl Shared {
                     return Err(error);
                 }
             }
+        }
+        if let Some(replay_client) = options.replay_client {
+            let replay_kind = self
+                .inner
+                .lock()
+                .client_kinds
+                .get(&replay_client)
+                .copied()
+                .unwrap_or(ClientKind::Command);
+            self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
         }
         Ok(())
     }
@@ -17507,6 +17753,13 @@ struct SourceFileLoadOptions {
     verbose: bool,
     suppress_verbose: bool,
     control_client: Option<ClientId>,
+    replay_client: Option<ClientId>,
+}
+
+struct PendingConfigFile {
+    path: PathBuf,
+    context: ExecutionContext,
+    options: SourceFileLoadOptions,
 }
 
 impl SourceInvocationAccounting {
@@ -17548,16 +17801,71 @@ struct ConfigLoadReport {
     invalid_count: usize,
     invalid: Vec<String>,
     diagnostics: Vec<String>,
+    replayed_diagnostics: BTreeSet<usize>,
     verbose_lines: Vec<String>,
+    stdout_transcript: Option<Vec<ConfigStdoutTranscript>>,
     #[cfg(test)]
     source_errors: Vec<String>,
     source_error_groups: Vec<Vec<String>>,
     replay_issues: Vec<ConfigReplayIssue>,
+    delivered_replay_issues: usize,
     control_guarded: bool,
+}
+
+#[derive(Default)]
+struct ConfigStdoutTranscript {
+    top_level_verbose: String,
+    replay: String,
+    diagnostics: String,
 }
 
 impl ConfigLoadReport {
     const SUMMARY_NAMES: usize = 6;
+
+    fn with_stdout_transcript() -> Self {
+        Self {
+            stdout_transcript: Some(vec![ConfigStdoutTranscript::default()]),
+            ..Self::default()
+        }
+    }
+
+    fn note_stdout(&mut self, output: &str) {
+        if let Some(transcript) = self
+            .stdout_transcript
+            .as_mut()
+            .and_then(|transcripts| transcripts.last_mut())
+        {
+            append_inserted_output(&mut transcript.replay, output);
+        }
+    }
+
+    fn note_stdout_line(&mut self, line: &str, top_level: bool) {
+        if let Some(transcript) = self
+            .stdout_transcript
+            .as_mut()
+            .and_then(|transcripts| transcripts.last_mut())
+        {
+            let output = if top_level {
+                &mut transcript.top_level_verbose
+            } else {
+                &mut transcript.replay
+            };
+            append_inserted_output(output, line);
+            output.push('\n');
+        }
+    }
+
+    fn stdout_transcript(&self) -> Option<(&str, &str)> {
+        self.stdout_transcript.as_ref().map(|transcripts| {
+            let transcript = transcripts
+                .first()
+                .expect("stdout transcript has a root frame");
+            (
+                transcript.top_level_verbose.as_str(),
+                transcript.replay.as_str(),
+            )
+        })
+    }
 
     fn note_skip(&mut self, name: &str) {
         self.skipped_count += 1;
@@ -17566,22 +17874,59 @@ impl ConfigLoadReport {
         }
     }
 
-    fn note_invalid(&mut self, message: &str) {
+    fn note_invalid(&mut self, message: &str) -> usize {
         self.invalid_count += 1;
         self.diagnostics.push(message.to_owned());
         if !self.invalid.iter().any(|existing| existing == message) {
             self.invalid.push(message.to_owned());
         }
+        self.diagnostics.len() - 1
     }
 
+    #[cfg(test)]
     fn note_invalid_at(&mut self, source: &str, line: u32, message: &str) {
         self.note_invalid(&format!("{source}:{line}: {message}"));
     }
 
+    fn note_parse_diagnostic(&mut self, source: &str, line: u32, message: &str, top_level: bool) {
+        let diagnostic = format!("{source}:{line}: {message}");
+        let index = self.note_invalid(&diagnostic);
+        if self.stdout_transcript.is_some() {
+            self.replayed_diagnostics.insert(index);
+            if top_level {
+                let transcript = self
+                    .stdout_transcript
+                    .as_mut()
+                    .and_then(|transcripts| transcripts.last_mut())
+                    .expect("stdout transcript has a current frame");
+                append_inserted_output(&mut transcript.diagnostics, &diagnostic);
+                transcript.diagnostics.push('\n');
+            } else {
+                let transcript = self
+                    .stdout_transcript
+                    .as_mut()
+                    .and_then(|transcripts| transcripts.last_mut())
+                    .expect("stdout transcript has a current frame");
+                append_inserted_output(&mut transcript.replay, &diagnostic);
+                transcript.replay.push('\n');
+            }
+        }
+    }
+
     fn note_invalid_command(&mut self, command: &CommandInvocation, message: &str) {
-        match &command.source {
-            Some(source) => self.note_invalid_at(&source.source, source.line, message),
-            None => self.note_invalid(message),
+        let diagnostic = command.source.as_ref().map_or_else(
+            || message.to_owned(),
+            |source| format!("{}:{}: {message}", source.source, source.line),
+        );
+        let index = self.note_invalid(&diagnostic);
+        if let Some(transcript) = self
+            .stdout_transcript
+            .as_mut()
+            .and_then(|transcripts| transcripts.last_mut())
+        {
+            self.replayed_diagnostics.insert(index);
+            append_inserted_output(&mut transcript.diagnostics, &diagnostic);
+            transcript.diagnostics.push('\n');
         }
     }
 
@@ -17591,7 +17936,41 @@ impl ConfigLoadReport {
         &self.diagnostics
     }
 
-    fn note_verbose_commands(&mut self, commands: &[CommandInvocation]) {
+    fn stdout_diagnostics(&self) -> Option<&str> {
+        self.stdout_transcript.as_ref().map(|transcripts| {
+            transcripts
+                .first()
+                .expect("stdout transcript has a root frame")
+                .diagnostics
+                .as_str()
+        })
+    }
+
+    fn push_stdout_frame(&mut self) {
+        if let Some(transcripts) = &mut self.stdout_transcript {
+            transcripts.push(ConfigStdoutTranscript::default());
+        }
+    }
+
+    fn pop_stdout_frame(&mut self) {
+        let Some(transcripts) = &mut self.stdout_transcript else {
+            return;
+        };
+        if transcripts.len() == 1 {
+            return;
+        }
+        let transcript = transcripts.pop().expect("nested stdout frame exists");
+        let mut output = String::new();
+        append_inserted_output(&mut output, &transcript.top_level_verbose);
+        append_inserted_output(&mut output, &transcript.replay);
+        append_inserted_output(&mut output, &transcript.diagnostics);
+        let parent = transcripts
+            .last_mut()
+            .expect("nested stdout frame has a parent");
+        append_inserted_output(&mut parent.replay, &output);
+    }
+
+    fn note_verbose_commands(&mut self, commands: &[CommandInvocation], top_level: bool) {
         for group in commands.chunk_by(|left, right| {
             left.source
                 .as_ref()
@@ -17609,8 +17988,9 @@ impl ConfigLoadReport {
                 .map(format_command)
                 .collect::<Vec<_>>()
                 .join(" ; ");
-            self.verbose_lines
-                .push(format!("{}:{}: {commands}", source.source, source.line));
+            let line = format!("{}:{}: {commands}", source.source, source.line);
+            self.verbose_lines.push(line.clone());
+            self.note_stdout_line(&line, top_level);
         }
     }
 
@@ -26144,7 +26524,7 @@ mod tests {
         let (control, _) =
             shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
         take_reliable_messages(&mailbox);
-        shared.route_config_replay_errors(control, ClientKind::Control, None, &report);
+        shared.route_config_replay_errors(control, ClientKind::Control, None, &mut report);
         assert!(matches!(
             take_reliable_messages(&mailbox).as_slice(),
             [ProtocolMessage::Event(Event {
@@ -34334,7 +34714,9 @@ mod tests {
             attended,
             CommandResponse::Success {
                 request_id: 7,
-                output: String::new(),
+                output: format!(
+                    "{bad}:1: unknown command: wibble\n{bad}:2: unknown command: wibble\n"
+                ),
                 exit_code: 0,
                 stderr: String::new(),
             }
@@ -34357,11 +34739,11 @@ mod tests {
         assert_eq!(
             warnings,
             [
+                format!("No such file or directory: {missing}"),
                 format!(
                     "2 invalid lines: {bad}:1: unknown command: wibble, \
                      {bad}:2: unknown command: wibble"
                 ),
-                format!("No such file or directory: {missing}"),
             ]
         );
     }
@@ -35043,6 +35425,893 @@ mod tests {
                 output: String::new(),
                 exit_code: 0,
                 stderr: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn replayed_command_stdout_is_ordered_and_routed_once_per_invoking_client() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("child.conf");
+        fs::write(
+            &child,
+            "display-message -p CHILD_ONE\nlist-sessions -F CHILD_TWO\n",
+        )
+        .expect("child source");
+        let root = directory.path().join("root.conf");
+        fs::write(
+            &root,
+            format!(
+                "display-message -p ROOT_ONE\nsource-file -v {}\ndisplay-message -p ROOT_TWO\n",
+                child.display()
+            ),
+        )
+        .expect("root source");
+
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "replay-output"]),
+            )
+            .expect("source output session");
+        let session = context.session.expect("source output session id");
+        let pane = context.pane.expect("source output pane");
+        let child_verbose = format!(
+            "{}:1: display-message -p CHILD_ONE\n\
+             {}:2: list-sessions -F CHILD_TWO",
+            child.display(),
+            child.display(),
+        );
+        let root_verbose = format!(
+            "{}:1: display-message -p ROOT_ONE\n\
+             {}:2: source-file -v {}\n\
+             {}:3: display-message -p ROOT_TWO",
+            root.display(),
+            root.display(),
+            child.display(),
+            root.display(),
+        );
+        let child_replay = "CHILD_ONE\nCHILD_TWO";
+        let root_replay = format!("ROOT_ONE\n{child_verbose}\n{child_replay}\nROOT_TWO");
+        let expected = format!("{root_verbose}\n{root_replay}");
+        let aggregate_expected =
+            format!("{child_verbose}\n{root_verbose}\n{child_replay}\n{root_replay}");
+        let invocation =
+            CommandInvocation::new("source-file", ["-v".to_owned(), root.display().to_string()]);
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &invocation,
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: expected.clone(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                2,
+                &CommandInvocation::new(
+                    "source-file",
+                    [
+                        "-v".to_owned(),
+                        child.display().to_string(),
+                        root.display().to_string(),
+                    ],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: aggregate_expected.clone(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                3,
+                &CommandInvocation::new(
+                    "source-file",
+                    [
+                        "-v".to_owned(),
+                        directory.path().join("*.conf").display().to_string()
+                    ],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 3,
+                output: aggregate_expected,
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+
+        let mut startup_report = ConfigLoadReport::default();
+        shared
+            .load_config_file_with_report(&root, &mut context, 0, &mut startup_report)
+            .expect("clientless source replay");
+        assert_eq!(startup_report.stdout_transcript(), None);
+
+        let interactive_mailbox = OutboundMailbox::new();
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive source client");
+        take_reliable_messages(&interactive_mailbox);
+        let mut interactive_context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+                .expect("interactive source context");
+        assert_eq!(
+            shared.execute_command_request(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                4,
+                &invocation,
+            ),
+            CommandResponse::Success {
+                request_id: 4,
+                output: expected.clone(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::CommandOutput {
+                    viewport: Some(viewport),
+                    ..
+                },
+            ..
+        }) = take_command_output_message(&interactive_mailbox)
+        else {
+            panic!("expected replay command-output viewport");
+        };
+        let rendered = viewport_text(&viewport);
+        for marker in ["ROOT_ONE", "CHILD_ONE", "CHILD_TWO", "ROOT_TWO"] {
+            assert_eq!(rendered.matches(marker).count(), 2, "{marker}");
+        }
+        let mut offset = 0;
+        for marker in ["ROOT_ONE", "CHILD_ONE", "CHILD_TWO", "ROOT_TWO"] {
+            let index = rendered[offset..]
+                .find(marker)
+                .unwrap_or_else(|| panic!("missing replay output marker {marker}"));
+            offset += index + marker.len();
+        }
+        assert_eq!(shared.inner.lock().command_outputs.len(), 1);
+        assert!(
+            take_reliable_messages(&interactive_mailbox)
+                .iter()
+                .all(|message| !matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Info | ClientMessageKind::Warning,
+                            ..
+                        },
+                        ..
+                    })
+                ))
+        );
+        shared
+            .input(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                InputMessage::Text {
+                    pane,
+                    text: "q".to_owned(),
+                },
+            )
+            .expect("dismiss replay command output");
+        wait_for_command_output_close(&interactive_mailbox);
+        assert!(shared.inner.lock().command_outputs.is_empty());
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared
+            .attach(control, session)
+            .expect("attach control source client");
+        take_reliable_messages(&control_mailbox);
+        let mut control_context = interactive_context;
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                5,
+                &invocation,
+            ),
+            CommandResponse::Success {
+                request_id: 5,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            sourced_command_guards(take_reliable_messages(&control_mailbox)),
+            [
+                ("ROOT_ONE".to_owned(), false, false),
+                (String::new(), false, false),
+                ("CHILD_ONE".to_owned(), false, false),
+                ("CHILD_TWO".to_owned(), false, false),
+                ("ROOT_TWO".to_owned(), false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn replayed_indirect_source_stdout_is_routed_once() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("child.conf");
+        fs::write(
+            &child,
+            "display-message -p CHILD_ONE\nlist-sessions -F CHILD_TWO\n",
+        )
+        .expect("child source");
+        let alias_root = directory.path().join("alias-root.conf");
+        fs::write(
+            &alias_root,
+            "display-message -p ALIAS_BEFORE\nindirect\ndisplay-message -p ALIAS_AFTER\n",
+        )
+        .expect("alias source");
+        let conditional_root = directory.path().join("conditional-root.conf");
+        fs::write(
+            &conditional_root,
+            format!(
+                "display-message -p CONDITIONAL_BEFORE\n\
+                 if-shell -F 1 'source-file -v {}'\n\
+                 display-message -p CONDITIONAL_AFTER\n",
+                child.display()
+            ),
+        )
+        .expect("conditional source");
+        let hook_child = directory.path().join("hook-child.conf");
+        fs::write(&hook_child, "list-sessions -F HOOK_CHILD\n").expect("hook child source");
+        let hook_root = directory.path().join("hook-root.conf");
+        fs::write(
+            &hook_root,
+            "display-message -p HOOK_TRIGGER\nlist-sessions -F HOOK_LATER\n",
+        )
+        .expect("hook source");
+        let error_child = directory.path().join("error-child.conf");
+        fs::write(
+            &error_child,
+            "display-message -p BEFORE_CHILD\n\
+             kill-session -t missing-indirect\n\
+             display-message -p AFTER_CHILD\n",
+        )
+        .expect("indirect error child source");
+        let error_root = directory.path().join("error-root.conf");
+        fs::write(
+            &error_root,
+            format!(
+                "display-message -p ROOT_BEFORE\n\
+                 if-shell -F 1 'source-file {}'\n\
+                 display-message -p ROOT_AFTER\n",
+                error_child.display()
+            ),
+        )
+        .expect("indirect error source");
+        let ordered_error_child = directory.path().join("ordered-error-child.conf");
+        fs::write(&ordered_error_child, "kill-session -t missing-B\n")
+            .expect("ordered error child source");
+        let ordered_error_root = directory.path().join("ordered-error-root.conf");
+        fs::write(
+            &ordered_error_root,
+            format!(
+                "kill-session -t missing-A\n\
+                 if-shell -F 1 'source-file {}'\n\
+                 kill-session -t missing-C\n",
+                ordered_error_child.display()
+            ),
+        )
+        .expect("ordered error source");
+        let terminal_hook_child = directory.path().join("terminal-hook-child.conf");
+        fs::write(&terminal_hook_child, "new-session -s hook-clientless\n")
+            .expect("terminal hook child source");
+        let terminal_hook_root = directory.path().join("terminal-hook-root.conf");
+        fs::write(
+            &terminal_hook_root,
+            "display-message -p TERMINAL_HOOK_TRIGGER\nset-option -g @terminal-hook-after yes\n",
+        )
+        .expect("terminal hook source");
+
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "indirect-output"]),
+            )
+            .expect("indirect output session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[90]".to_owned(),
+                        format!("indirect=source-file -v {}", child.display()),
+                    ],
+                ),
+            )
+            .expect("indirect source alias");
+        let child_output = format!(
+            "{}:1: display-message -p CHILD_ONE\n\
+             {}:2: list-sessions -F CHILD_TWO\n\
+             CHILD_ONE\nCHILD_TWO",
+            child.display(),
+            child.display(),
+        );
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [alias_root.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: format!("ALIAS_BEFORE\n{child_output}\nALIAS_AFTER"),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                2,
+                &CommandInvocation::new("source-file", [conditional_root.display().to_string()],),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: format!("CONDITIONAL_BEFORE\n{child_output}\nCONDITIONAL_AFTER"),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "after-display-message".to_owned(),
+                        format!("source-file {}", hook_child.display()),
+                    ],
+                ),
+            )
+            .expect("indirect source hook");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                3,
+                &CommandInvocation::new("source-file", [hook_root.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 3,
+                output: "HOOK_TRIGGER\nHOOK_CHILD\nHOOK_LATER".to_owned(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-gu", "after-display-message"]),
+            )
+            .expect("clear indirect source hook");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                4,
+                &CommandInvocation::new("source-file", [error_root.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 4,
+                output: "ROOT_BEFORE\nBEFORE_CHILD\nAFTER_CHILD\nROOT_AFTER".to_owned(),
+                exit_code: 1,
+                stderr: "can't find session: missing-indirect\n".to_owned(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                5,
+                &CommandInvocation::new("source-file", [ordered_error_root.display().to_string()],),
+            ),
+            CommandResponse::Success {
+                request_id: 5,
+                output: String::new(),
+                exit_code: 1,
+                stderr: "can't find session: missing-A\n\
+                         can't find session: missing-B\n\
+                         can't find session: missing-C\n"
+                    .to_owned(),
+            }
+        );
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "after-display-message".to_owned(),
+                        format!("source-file {}", terminal_hook_child.display()),
+                    ],
+                ),
+            )
+            .expect("clientless source hook");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                6,
+                &CommandInvocation::new("source-file", [terminal_hook_root.display().to_string()],),
+            ),
+            CommandResponse::Success {
+                request_id: 6,
+                output: "TERMINAL_HOOK_TRIGGER".to_owned(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("has-session", ["-t", "hook-clientless"]),
+            )
+            .expect("clientless hook-created session");
+    }
+
+    #[test]
+    fn nested_parse_diagnostics_stay_at_the_source_position() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let invalid = directory.path().join("invalid.conf");
+        fs::write(
+            &invalid,
+            "display-message -p CHILD_SHOULD_NOT_RUN\nset @bad \\400\n",
+        )
+        .expect("invalid child source");
+        let direct = directory.path().join("direct.conf");
+        fs::write(
+            &direct,
+            format!(
+                "display-message -p ROOT_BEFORE\n\
+                 source-file {}\n\
+                 display-message -p ROOT_AFTER\n",
+                invalid.display()
+            ),
+        )
+        .expect("direct diagnostic source");
+        let conditional = directory.path().join("conditional.conf");
+        fs::write(
+            &conditional,
+            format!(
+                "display-message -p ROOT_BEFORE\n\
+                 if-shell -F 1 'source-file {}'\n\
+                 display-message -p ROOT_AFTER\n",
+                invalid.display()
+            ),
+        )
+        .expect("conditional diagnostic source");
+        let good = directory.path().join("good.conf");
+        fs::write(&good, "display-message -p GOOD_OUTPUT\n").expect("good source");
+        let later = directory.path().join("later.conf");
+        fs::write(&later, "display-message -p LATER_OUTPUT\n").expect("later source");
+        let nested_multi = directory.path().join("nested-multi.conf");
+        fs::write(
+            &nested_multi,
+            format!(
+                "display-message -p ROOT_BEFORE\n\
+                 source-file -v {} {} {}\n\
+                 display-message -p ROOT_AFTER\n",
+                good.display(),
+                invalid.display(),
+                later.display(),
+            ),
+        )
+        .expect("nested multi diagnostic source");
+        let unknown = directory.path().join("unknown.conf");
+        fs::write(&unknown, "wibble\n").expect("unknown command source");
+        let nested_unknown = directory.path().join("nested-unknown.conf");
+        fs::write(
+            &nested_unknown,
+            format!(
+                "display-message -p ROOT_BEFORE\n\
+                 source-file {}\n\
+                 display-message -p ROOT_AFTER\n",
+                unknown.display()
+            ),
+        )
+        .expect("nested unknown source");
+
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "parse-output"]),
+            )
+            .expect("parse output session");
+        let diagnostic = format!("{}:2: invalid octal escape", invalid.display());
+        let direct_verbose = format!(
+            "{}:1: display-message -p ROOT_BEFORE\n\
+             {}:2: source-file {}\n\
+             {}:3: display-message -p ROOT_AFTER",
+            direct.display(),
+            direct.display(),
+            invalid.display(),
+            direct.display(),
+        );
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new(
+                    "source-file",
+                    ["-v".to_owned(), direct.display().to_string()],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: format!("{direct_verbose}\nROOT_BEFORE\n{diagnostic}\nROOT_AFTER"),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                2,
+                &CommandInvocation::new("source-file", [conditional.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: format!("ROOT_BEFORE\n{diagnostic}\nROOT_AFTER"),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                3,
+                &CommandInvocation::new(
+                    "source-file",
+                    [
+                        "-v".to_owned(),
+                        good.display().to_string(),
+                        invalid.display().to_string(),
+                        later.display().to_string(),
+                    ],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 3,
+                output: format!(
+                    "{}:1: display-message -p GOOD_OUTPUT\n\
+                     {}:1: display-message -p LATER_OUTPUT\n\
+                     GOOD_OUTPUT\nLATER_OUTPUT\n{diagnostic}\n",
+                    good.display(),
+                    later.display(),
+                ),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                4,
+                &CommandInvocation::new(
+                    "source-file",
+                    ["-v".to_owned(), nested_multi.display().to_string()],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 4,
+                output: format!(
+                    "{}:1: display-message -p ROOT_BEFORE\n\
+                     {}:2: source-file -v {} {} {}\n\
+                     {}:3: display-message -p ROOT_AFTER\n\
+                     ROOT_BEFORE\n\
+                     {}:1: display-message -p GOOD_OUTPUT\n\
+                     {}:1: display-message -p LATER_OUTPUT\n\
+                     GOOD_OUTPUT\nLATER_OUTPUT\n{diagnostic}\nROOT_AFTER",
+                    nested_multi.display(),
+                    nested_multi.display(),
+                    good.display(),
+                    invalid.display(),
+                    later.display(),
+                    nested_multi.display(),
+                    good.display(),
+                    later.display(),
+                ),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                5,
+                &CommandInvocation::new(
+                    "source-file",
+                    ["-v".to_owned(), nested_unknown.display().to_string()],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 5,
+                output: format!(
+                    "{}:1: display-message -p ROOT_BEFORE\n\
+                     {}:2: source-file {}\n\
+                     {}:3: display-message -p ROOT_AFTER\n\
+                     ROOT_BEFORE\n{}:1: wibble\n{}:1: unknown command: wibble\nROOT_AFTER",
+                    nested_unknown.display(),
+                    nested_unknown.display(),
+                    unknown.display(),
+                    nested_unknown.display(),
+                    unknown.display(),
+                    unknown.display(),
+                ),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn source_file_batches_parsing_before_replay() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let assignment = directory.path().join("assignment.conf");
+        fs::write(&assignment, "SOURCE_BATCH_ASSIGN=1\n").expect("assignment source");
+        let assignment_branch = directory.path().join("assignment-branch.conf");
+        fs::write(
+            &assignment_branch,
+            "%if \"$SOURCE_BATCH_ASSIGN\"\n\
+             display-message -p ASSIGN_VISIBLE\n\
+             %else\n\
+             display-message -p ASSIGN_MISSING\n\
+             %endif\n",
+        )
+        .expect("assignment branch source");
+        let replay = directory.path().join("replay.conf");
+        fs::write(&replay, "set-environment -g SOURCE_REPLAY_FLAG 1\n").expect("replay source");
+        let replay_branch = directory.path().join("replay-branch.conf");
+        fs::write(
+            &replay_branch,
+            "%if \"$SOURCE_REPLAY_FLAG\"\n\
+             display-message -p REPLAY_VISIBLE\n\
+             %else\n\
+             display-message -p REPLAY_NOT_VISIBLE\n\
+             %endif\n",
+        )
+        .expect("replay branch source");
+        let parse_only_assignment = directory.path().join("parse-only-assignment.conf");
+        fs::write(&parse_only_assignment, "SOURCE_PARSE_ONLY_ASSIGN=1\n")
+            .expect("parse-only assignment source");
+        let parse_only_branch = directory.path().join("parse-only-branch.conf");
+        fs::write(
+            &parse_only_branch,
+            "%if \"$SOURCE_PARSE_ONLY_ASSIGN\"\n\
+             display-message -p PARSE_ONLY_VISIBLE\n\
+             %else\n\
+             display-message -p PARSE_ONLY_NOT_VISIBLE\n\
+             %endif\n",
+        )
+        .expect("parse-only branch source");
+
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "source-batch"]),
+            )
+            .expect("source batch session");
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new(
+                    "source-file",
+                    [
+                        "-v".to_owned(),
+                        assignment.display().to_string(),
+                        assignment_branch.display().to_string(),
+                        replay.display().to_string(),
+                        replay_branch.display().to_string(),
+                    ],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: format!(
+                    "{}:2: display-message -p ASSIGN_VISIBLE\n\
+                     {}:1: set-environment -g SOURCE_REPLAY_FLAG 1\n\
+                     {}:4: display-message -p REPLAY_NOT_VISIBLE\n\
+                     ASSIGN_VISIBLE\n\
+                     REPLAY_NOT_VISIBLE",
+                    assignment_branch.display(),
+                    replay.display(),
+                    replay_branch.display(),
+                ),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                2,
+                &CommandInvocation::new(
+                    "source-file",
+                    [
+                        "-nv".to_owned(),
+                        parse_only_assignment.display().to_string(),
+                        parse_only_branch.display().to_string(),
+                    ],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: format!(
+                    "{}:4: display-message -p PARSE_ONLY_NOT_VISIBLE\n",
+                    parse_only_branch.display()
+                ),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner
+                .engine
+                .global_environment_variable("SOURCE_BATCH_ASSIGN"),
+            Some("1".to_owned())
+        );
+        assert_eq!(
+            inner
+                .engine
+                .global_environment_variable("SOURCE_REPLAY_FLAG"),
+            Some("1".to_owned())
+        );
+        assert_eq!(
+            inner
+                .engine
+                .global_environment_variable("SOURCE_PARSE_ONLY_ASSIGN"),
+            None
+        );
+    }
+
+    #[test]
+    fn replayed_error_hook_output_stays_in_stdout_order() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let config = directory.path().join("runtime.conf");
+        fs::write(
+            &config,
+            "display-message -p BEFORE\n\
+             kill-session -t missing-runtime\n\
+             display-message -p AFTER\n\
+             list-sessions -F 'LIST_#{session_name}'\n",
+        )
+        .expect("runtime source");
+
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "s"]),
+            )
+            .expect("runtime source session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    ["-g", "command-error", "display-message -p HOOK"],
+                ),
+            )
+            .expect("command-error hook");
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [config.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: "BEFORE\nHOOK\nAFTER\nLIST_s".to_owned(),
+                exit_code: 1,
+                stderr: "can't find session: missing-runtime\n".to_owned(),
             }
         );
     }

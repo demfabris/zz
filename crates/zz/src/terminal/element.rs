@@ -332,11 +332,15 @@ impl RowRenderCache {
             window
                 .text_system()
                 .shape_line("m".into(), signature.font_size, &[probe_run], None);
-        let width = if f32::from(probe.width) > 1.0 {
-            probe.width
-        } else {
-            px(8.0)
-        };
+        let scale = f32::from_bits(signature.scale_bits);
+        let width = snap_length(
+            if f32::from(probe.width) > 1.0 {
+                probe.width
+            } else {
+                px(8.0)
+            },
+            scale,
+        );
         let font_id = probe.runs.first().map_or_else(
             || window.text_system().resolve_font(&signature.font),
             |run| run.font_id,
@@ -349,7 +353,7 @@ impl RowRenderCache {
             window
                 .text_system()
                 .underline_thickness(font_id, signature.font_size),
-            f32::from_bits(signature.scale_bits),
+            scale,
         );
         let metrics = CellMetrics {
             width,

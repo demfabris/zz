@@ -348,7 +348,7 @@ rather than trusting a count here.
 | --- | --- |
 | Theme | `theme` |
 | Colors | `background`, `foreground`, `cursor-color`, `selection-foreground`, `selection-background`, `palette` |
-| Fonts and geometry | `font-family` plus `-bold` / `-italic` / `-bold-italic` stacks, `font-size`, `font-feature`, `font-synthetic-style`, `font-thicken`, `font-thicken-strength`, `adjust-cell-height`, `window-padding-x`, `window-padding-y` |
+| Fonts and geometry | `font-family` plus `-bold` / `-italic` / `-bold-italic` stacks, `font-size`, `font-feature`, `font-synthetic-style`, `font-thicken`, `font-thicken-strength` (macOS only), `adjust-cell-height`, `window-padding-x`, `window-padding-y` |
 | Policy | `minimum-contrast`, `background-opacity`, `cursor-style`, `cursor-style-blink` |
 | zz extensions | `zz-font-weight`, `zz-cursor-blink-interval-ms`, `zz-search-match-color`, `zz-search-current-color`, `zz-link-color`, `zz-copy-cursor-color`, `zz-rounded-selection` |
 

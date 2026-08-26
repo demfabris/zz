@@ -13,7 +13,7 @@ commits on top of a pinned upstream rev. The manifest of all such forks is
 Current forks and why:
 
 - **zed** (`demfabris/zed`, branch `zz-patches`): carried commits (authoritative
-  list: `git log` on the branch; forty-two as of 2026-08-16), each upstream-able
+  list: `git log` on the branch; forty-three as of 2026-08-25), each upstream-able
   as a small Zed PR; if Zed merges equivalents, drop them and eventually the fork
   branch. The core five:
   1. `RenderImage::into_frames()` — retired browser frames return their pixel
@@ -60,7 +60,10 @@ Current forks and why:
   only when `/dev/dxg` exists, a node native Linux cannot have), and
   `KeystrokeEvent::is_held` (the OS autorepeat flag carried through to
   keystroke observers/interceptors — zz's prefix layer swallows repeats by
-  this flag instead of held-set inference, which a lost macOS keyUp desyncs).
+  this flag instead of held-set inference, which a lost macOS keyUp desyncs). Newest: `gpui_wgpu` subpixel offset kept in
+  device pixels (the swash scaler already runs at `pixel_size * scale_factor`, so the
+  extra `/ scale_factor` upstream still carries shrank the quarter-pixel phase on HiDPI —
+  a one-line upstream-able fix).
 
   Rebase gotchas learned on the 2026-08-16 rebase (base 90d024b → f543a76):
 

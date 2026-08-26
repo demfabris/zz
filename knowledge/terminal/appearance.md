@@ -86,8 +86,10 @@ Each entry produces an `AppearanceConfigDiagnostic` with a disposition (`Applied
 keys warn and keep the previous valid value. An empty value resets a key to its built-in default.
 The default family stack leaves standard OpenType features enabled; no implicit `-liga` or `-calt`
 entries are injected. Style-specific stacks inherit the regular stack when empty, synthetic styles
-default to all three combinations, `font-thicken` defaults off with strength 255, and cell height
-defaults to the font's natural metrics with no adjustment.
+default to all three combinations, `font-thicken` defaults off with strength 255 (macOS only: it
+maps to CoreGraphics font smoothing, and the Linux rasterizer ignores it, matching Ghostty which
+documents the key as macOS-only), and cell height defaults to the font's natural metrics with no
+adjustment.
 
 # zz/config override overlay
 

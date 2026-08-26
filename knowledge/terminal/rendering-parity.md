@@ -73,10 +73,12 @@ scroll ahead of the backfill reads as empty rather than as stale content.
   GPUI paints a Ghostty-compatible fill-plus-stroke bold and 15-degree italic shear. The decision is
   cached with each shaped row. Synthetic-bold line width is converted back to user space before the
   Retina context transform so the stroke remains device-pixel sized. `font-thicken` and its 0–255
-  strength map to explicit CoreGraphics smoothing, independently of synthetic bold.
+  strength map to explicit CoreGraphics smoothing, independently of synthetic bold. Both keys are
+  macOS-only: GPUI's swash rasterizer on Linux never reads the smoothing parameters, as in Ghostty.
 - Font size remains in Ghostty points through the renderer-neutral model. On macOS those points map
   one-to-one to GPUI/CoreText units and display scaling happens later; other backends convert points to
-  GPUI logical pixels at 96 logical DPI. The resolved `m` advance defines cell width; ascent +
+  GPUI logical pixels at 96 logical DPI. The resolved `m` advance, snapped to whole device pixels like the line height so every
+  column origin lands on a device pixel, defines cell width; ascent +
   descent + line gap defines the natural cell height. The optional configured adjustment modifies
   that natural value, which rounds to a whole device pixel and converts back to logical pixels.
 - Padding is independent per edge and excluded before grid dimensions are computed; a float tolerance is

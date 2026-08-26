@@ -1638,10 +1638,10 @@ fn connect_or_spawn_daemon<T>(
     path: &Path,
     color_scheme: Option<TerminalColorScheme>,
     mux_config_files: &[PathBuf],
-    connect: impl Fn() -> Result<T, DaemonError>,
+    connect: impl Fn(bool) -> Result<T, DaemonError>,
     server_hello: impl for<'a> Fn(&'a T) -> &'a ServerHello,
 ) -> Result<T, DaemonError> {
-    match connect() {
+    match connect(false) {
         Ok(client) => {
             log::debug!(
                 target: "zz::diagnostics::process",
@@ -1664,7 +1664,7 @@ fn connect_or_spawn_daemon<T>(
     spawn_daemon(path, color_scheme, mux_config_files)?;
     let deadline = Instant::now() + Duration::from_secs(6);
     loop {
-        match connect() {
+        match connect(true) {
             Ok(client) => return Ok(client),
             Err(error) if Instant::now() >= deadline => {
                 return Err(classify_local_connect_error(path, error));
@@ -1687,7 +1687,7 @@ fn connect_command_client(
         path,
         None,
         mux_config_files,
-        || CommandClient::connect(path),
+        |_| CommandClient::connect(path),
         CommandClient::server_hello,
     )
 }
@@ -2082,7 +2082,7 @@ fn connect_interactive_client_with_config_and_terminal(
         path,
         Some(color_scheme),
         mux_config_files,
-        || {
+        |_| {
             InteractiveClient::connect_with_color_scheme_and_terminal(
                 path,
                 color_scheme,
@@ -2104,7 +2104,7 @@ fn connect_terminal_surface_client_with_config(
         path,
         Some(color_scheme),
         mux_config_files,
-        || InteractiveClient::connect_terminal_surface(path, color_scheme, client_has_terminal),
+        |_| InteractiveClient::connect_terminal_surface(path, color_scheme, client_has_terminal),
         InteractiveClient::server_hello,
     )
 }

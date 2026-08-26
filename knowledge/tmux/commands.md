@@ -156,7 +156,7 @@ terminal; piped Control stdin contributes none.
 | `start-server` | `start` | Ensure the daemon is running, then return success with no output. The CLI's normal connection path starts a missing daemon before the no-op reaches the engine. |
 | `kill-server` | . | Stop the daemon (`KillServer` effect). |
 
-## Control source and hook framing in protocols v77 and v78
+## Control source and hook framing in protocols v77, v78, and v80
 
 The `source-file` row above preserves the v76 parser-replay checkpoint. Protocol v77 renames its
 tail-tag-47 event in place to `ControlCommandGuard { output, error, sticky_failure, flags }` and closes
@@ -173,6 +173,17 @@ disconnect after an immediate hook or source queue starts remains under
 `control-mode.disconnect-cancels-command-queue`. Protocol v78 carries matched parser and hook-source
 read failures as typed `ReadError` events that render raw after their source guards. Its invisible
 `Complete` event consumes the source callback's command number after descendants.
+
+Protocol v80 supersedes the startup-delivery checkpoint preserved in the `source-file` row. Startup
+reads and parses all roots before replay, retains normalized root and nested read errors, parser
+diagnostics, unsupported and runtime failures, and successful `display-message -p` output, then
+replays roots in order with nested depth-first traversal. Startup discards list-style output, and a
+successful physical multiline command uses its completion line. A detached Command launch stays
+silent and cannot drain the causes. The first eligible Control client receives the raw bounded
+vector once; an attached Interactive winner opens a PTY-free `configuration errors` view with an
+ordered, UTF-8-safe 64 KiB preview that replaces every Unicode control except LF and TAB. Its
+truncation notice points to Control mode because exact Interactive recovery of the retained 1 MiB
+vector is not promised.
 
 ## TUI command-output navigation in protocol v79
 

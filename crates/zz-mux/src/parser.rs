@@ -129,6 +129,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         &mut self,
         line: u32,
         column: u32,
+        completion_line: u32,
         word: &mut String,
         word_started: &mut bool,
         words: &mut Vec<String>,
@@ -174,6 +175,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
                     self.finish_command_tokens(
                         line,
                         column,
+                        completion_line,
                         &tokens[start..end],
                         start == 0 && *eager_assignment,
                     );
@@ -267,6 +269,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         &mut self,
         line: u32,
         column: u32,
+        completion_line: u32,
         tokens: &[String],
         assignment_recorded: bool,
     ) {
@@ -301,7 +304,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
             args: command_args,
             source: Some(SourceSpan {
                 source: self.source.clone(),
-                line,
+                line: completion_line,
                 column,
             }),
         });
@@ -503,6 +506,7 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
                 builder.finish_statement(
                     command_line,
                     command_column,
+                    line,
                     &mut word,
                     &mut word_started,
                     &mut words,
@@ -631,6 +635,7 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
                     builder.finish_statement(
                         command_line,
                         command_column,
+                        line,
                         &mut word,
                         &mut word_started,
                         &mut words,
@@ -684,6 +689,7 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
             builder.finish_statement(
                 command_line,
                 command_column,
+                line,
                 &mut word,
                 &mut word_started,
                 &mut words,
@@ -1006,6 +1012,25 @@ mod tests {
         let parsed = parse_config("test.conf", "bind c new-\\\nwindow\nset 'oops");
         assert!(parsed.commands.is_empty());
         assert_eq!(parsed.diagnostics.len(), 1);
+        assert_eq!(parsed.diagnostics[0].line, 3);
+        assert_eq!(parsed.diagnostics[0].column, 1);
+    }
+
+    #[test]
+    fn physical_multiline_command_source_uses_completion_line() {
+        let parsed = parse_config(
+            "test.conf",
+            "display-message -p \"MULTI_FIRST\nMULTI_SECOND\"\n",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(
+            parsed.commands[0].source,
+            Some(SourceSpan {
+                source: "test.conf".to_owned(),
+                line: 2,
+                column: 1,
+            })
+        );
     }
 
     #[test]

@@ -227,6 +227,32 @@ Check whether the persisted inventory and attached proof are current:
 compat/run.sh --check-summary
 ```
 
+## Startup diagnostic differential
+
+`compat/startup-diagnostics.sh` is a separate seven-case gate for clientless startup causes. Run it
+after building the debug binary and fetching the pinned oracle:
+
+```sh
+cargo build -p zz --bin zz
+compat/startup-diagnostics.sh target/debug/zz compat/.cache/tmux-src/tmux
+```
+
+The script requires all seven cases: initial Control cold start; detached launch followed by late
+Control attach; startup list-output discard; explicit-root failure ordering; multiline cause
+prefixing and completion-line location; daemon-restart redelivery; and Interactive delivery with a
+global drain. It compares normalized Control transcripts, checks detached streams and status, and
+drives the attached Interactive view through real outer PTYs.
+
+The oracle must be the checkout-root `tmux` executable from a clean checkout at exact commit
+`d77c9dc6aa021e4bc61f0da128c591af695e6466`, report `tmux next-3.8`, and match the build stamp's
+commit, version, fetch-script checksum, and binary checksum. The probe requires GNU `timeout`, wraps
+commands in real 15-second deadlines, uses 500 ms bounded polls, and stops readiness loops after 10
+seconds. A missing case or any skip fails the run.
+
+The final debug run passes all seven cases with no skips. This focused script does not call
+`compat/run.sh`, regenerate `compat/results/summary.md`, or make the stale canonical scenario rows
+current.
+
 Run the real attached-client fixture separately after building zz and fetching the pin when
 debugging it in isolation:
 
@@ -472,6 +498,7 @@ than this corpus.
 | `compat/tmux-oracle.py` | Captures and verifies the oracle from a clean pinned source checkout |
 | `compat/tmux-tracker.py` | Validates the registry and generates the readable gap report |
 | `compat/run.sh` | Builds both binaries and selects scenarios; a full run with `--attached-client` writes the canonical combined summary |
+| `compat/startup-diagnostics.sh` | Runs the checksum-attested seven-case startup-cause differential without updating the canonical summary |
 | `compat/fetch-tmux.sh` | Acquires tmux and validates its source-aware build stamp |
 | `compat/fetch-corpus.sh` | Acquires and verifies the pinned plugin corpus |
 | `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, FMT, OUT, and WARN diffs |

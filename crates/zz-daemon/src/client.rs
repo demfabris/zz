@@ -317,8 +317,15 @@ impl InteractiveClient {
     }
 
     pub fn connect_control(path: &Path) -> Result<Self, DaemonError> {
+        Self::connect_control_with_startup_owner(path, false)
+    }
+
+    pub fn connect_control_with_startup_owner(
+        path: &Path,
+        startup_config_owner: bool,
+    ) -> Result<Self, DaemonError> {
         let stream = LocalTransport::connect(path)?;
-        let connected = connect_stream(
+        let connected = connect_stream_with_startup_owner(
             ClientStream::Local(stream),
             path.display(),
             ClientKind::Control,
@@ -326,6 +333,7 @@ impl InteractiveClient {
             None,
             false,
             false,
+            startup_config_owner,
             EndpointFactsScope::LocalControlTerminalIdentity,
         )?;
         Ok(Self::from_connected(connected))
@@ -1009,6 +1017,16 @@ fn terminal_facts_capabilities(
     );
 }
 
+fn startup_config_owner_capability(
+    kind: ClientKind,
+    startup_config_owner: bool,
+    capabilities: &mut Vec<String>,
+) {
+    if kind == ClientKind::Control && startup_config_owner {
+        capabilities.push(ClientHello::STARTUP_CONFIG_OWNER_CAPABILITY.to_owned());
+    }
+}
+
 fn terminal_facts_capabilities_with(
     scope: EndpointFactsScope,
     nested: bool,
@@ -1086,6 +1104,31 @@ fn connect_stream<S: TransportStream>(
     send_origin: bool,
     client_facts: EndpointFactsScope,
 ) -> Result<Connected<S>, DaemonError> {
+    connect_stream_with_startup_owner(
+        stream,
+        endpoint_display,
+        kind,
+        device_name,
+        color_scheme,
+        client_has_terminal,
+        send_origin,
+        false,
+        client_facts,
+    )
+}
+
+#[expect(clippy::too_many_arguments)]
+fn connect_stream_with_startup_owner<S: TransportStream>(
+    stream: S,
+    endpoint_display: impl fmt::Display,
+    kind: ClientKind,
+    device_name: Option<String>,
+    color_scheme: Option<TerminalColorScheme>,
+    client_has_terminal: bool,
+    send_origin: bool,
+    startup_config_owner: bool,
+    client_facts: EndpointFactsScope,
+) -> Result<Connected<S>, DaemonError> {
     let started = diagnostic_timer();
     let mut reader = ProtocolReceiver::new(stream.try_clone()?);
     let mut writer = ProtocolSender::new(stream);
@@ -1104,6 +1147,7 @@ fn connect_stream<S: TransportStream>(
     } else {
         Vec::new()
     };
+    startup_config_owner_capability(kind, startup_config_owner, &mut capabilities);
     if kind == ClientKind::Interactive && client_has_terminal {
         capabilities.push(ClientHello::CLIENT_TERMINAL_CAPABILITY.to_owned());
     }
@@ -1157,11 +1201,11 @@ pub fn short_device_name() -> Option<String> {
 mod tests {
     use std::path::PathBuf;
 
-    use zz_protocol::MAX_CLIENT_WORKING_DIRECTORY_BYTES;
+    use zz_protocol::{ClientHello, ClientKind, MAX_CLIENT_WORKING_DIRECTORY_BYTES};
 
     use super::{
         CallerTtyScope, EndpointFactsScope, client_working_directory, terminal_facts_capabilities,
-        terminal_facts_capabilities_with,
+        startup_config_owner_capability, terminal_facts_capabilities_with,
     };
 
     #[test]
@@ -1241,6 +1285,33 @@ mod tests {
             capabilities,
             ["client-tty-v1:/dev/ttys007", "client-nested-v1"]
         );
+    }
+
+    #[test]
+    fn startup_config_owner_capability_is_control_only_and_opt_in() {
+        assert_eq!(
+            ClientHello::STARTUP_CONFIG_OWNER_CAPABILITY,
+            "startup-config-owner-v1"
+        );
+        for (kind, startup_config_owner, expected) in [
+            (ClientKind::Interactive, false, false),
+            (ClientKind::Interactive, true, false),
+            (ClientKind::Command, false, false),
+            (ClientKind::Command, true, false),
+            (ClientKind::Control, false, false),
+            (ClientKind::Control, true, true),
+        ] {
+            let mut capabilities = Vec::new();
+            startup_config_owner_capability(kind, startup_config_owner, &mut capabilities);
+            assert_eq!(
+                capabilities,
+                if expected {
+                    vec![ClientHello::STARTUP_CONFIG_OWNER_CAPABILITY.to_owned()]
+                } else {
+                    Vec::new()
+                }
+            );
+        }
     }
 
     #[test]

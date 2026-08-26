@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 79;
+pub const PROTOCOL_VERSION: u16 = 80;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -40,6 +40,9 @@ pub const MAX_AGENT_SEND_BYTES: usize = 1024 * 1024;
 /// Longest path or human-readable message carried by a GUI request or its reply.
 pub const MAX_GUI_TEXT_BYTES: usize = 64 * 1024;
 pub const MAX_CLIENT_WORKING_DIRECTORY_BYTES: usize = 16 * 1024;
+pub const MAX_STARTUP_CONFIG_CAUSES: usize = 1024;
+pub const MAX_STARTUP_CONFIG_CAUSE_BYTES: usize = 64 * 1024;
+pub const MAX_STARTUP_CONFIG_CAUSES_BYTES: usize = 1024 * 1024;
 /// Largest complete agent prompt: its text plus every attached image. Clients
 /// normalize prompt images the way pasted ones are, so this mirrors
 /// [`MAX_PASTE_UPLOAD_BYTES`].
@@ -896,6 +899,7 @@ impl ClientHello {
     pub const CLIENT_NESTED_CAPABILITY: &'static str = CLIENT_NESTED_CAPABILITY;
     pub const CLIENT_TTY_CAPABILITY_PREFIX: &'static str = CLIENT_TTY_CAPABILITY_PREFIX;
     pub const CLIENT_SIZE_CAPABILITY_PREFIX: &'static str = CLIENT_SIZE_CAPABILITY_PREFIX;
+    pub const STARTUP_CONFIG_OWNER_CAPABILITY: &'static str = "startup-config-owner-v1";
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1952,6 +1956,111 @@ pub enum ControlSourceFileEvent {
     Complete,
 }
 
+struct BoundedStartupConfigCause(String);
+
+impl<'de> Deserialize<'de> for BoundedStartupConfigCause {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct StartupConfigCauseVisitor;
+
+        impl<'de> Visitor<'de> for StartupConfigCauseVisitor {
+            type Value = BoundedStartupConfigCause;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "a startup configuration cause no longer than {MAX_STARTUP_CONFIG_CAUSE_BYTES} bytes"
+                )
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_str(value)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX_STARTUP_CONFIG_CAUSE_BYTES {
+                    return Err(E::invalid_length(value.len(), &self));
+                }
+                Ok(BoundedStartupConfigCause(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX_STARTUP_CONFIG_CAUSE_BYTES {
+                    return Err(E::invalid_length(value.len(), &self));
+                }
+                Ok(BoundedStartupConfigCause(value))
+            }
+        }
+
+        deserializer.deserialize_str(StartupConfigCauseVisitor)
+    }
+}
+
+fn deserialize_startup_config_causes<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct StartupConfigCausesVisitor;
+
+    impl<'de> Visitor<'de> for StartupConfigCausesVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                formatter,
+                "at most {MAX_STARTUP_CONFIG_CAUSES} startup configuration causes totaling at most {MAX_STARTUP_CONFIG_CAUSES_BYTES} bytes"
+            )
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let hint = sequence.size_hint();
+            if hint.is_some_and(|length| length > MAX_STARTUP_CONFIG_CAUSES) {
+                return Err(A::Error::invalid_length(
+                    hint.unwrap_or(MAX_STARTUP_CONFIG_CAUSES.saturating_add(1)),
+                    &self,
+                ));
+            }
+            let mut causes = Vec::with_capacity(hint.unwrap_or(0).min(MAX_STARTUP_CONFIG_CAUSES));
+            let mut total_bytes = 0usize;
+            while causes.len() < MAX_STARTUP_CONFIG_CAUSES {
+                let Some(cause) = sequence.next_element::<BoundedStartupConfigCause>()? else {
+                    return Ok(causes);
+                };
+                total_bytes = total_bytes.checked_add(cause.0.len()).ok_or_else(|| {
+                    A::Error::invalid_length(usize::MAX, &self)
+                })?;
+                if total_bytes > MAX_STARTUP_CONFIG_CAUSES_BYTES {
+                    return Err(A::Error::invalid_length(total_bytes, &self));
+                }
+                causes.push(cause.0);
+            }
+            if sequence.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                return Err(A::Error::invalid_length(
+                    MAX_STARTUP_CONFIG_CAUSES.saturating_add(1),
+                    &self,
+                ));
+            }
+            Ok(causes)
+        }
+    }
+
+    deserializer.deserialize_seq(StartupConfigCausesVisitor)
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EventPayload {
     Snapshot(MuxSnapshot),
@@ -2171,6 +2280,10 @@ pub enum EventPayload {
     },
     ControlSourceFile {
         event: ControlSourceFileEvent,
+    },
+    StartupConfigCauses {
+        #[serde(deserialize_with = "deserialize_startup_config_causes")]
+        causes: Vec<String>,
     },
 }
 
@@ -3209,6 +3322,23 @@ mod tests {
     }
 
     #[test]
+    fn startup_config_causes_hold_wire_tag_forty_nine_and_round_trip() {
+        let event = super::Event {
+            sequence: 9,
+            payload: super::EventPayload::StartupConfigCauses {
+                causes: vec!["one".to_owned(), "two\ncontinued".to_owned()],
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("startup config causes encode");
+        assert_eq!(bytes[1], 49);
+        assert_eq!(
+            postcard::from_bytes::<super::Event>(&bytes)
+                .expect("startup config causes decode"),
+            event
+        );
+    }
+
+    #[test]
     fn client_terminal_size_input_holds_wire_tag_seventeen() {
         assert_eq!(super::CLIENT_NESTED_CAPABILITY, "client-nested-v1");
         assert_eq!(super::CLIENT_TTY_CAPABILITY_PREFIX, "client-tty-v1:");
@@ -3323,7 +3453,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 79);
+        assert_eq!(super::PROTOCOL_VERSION, 80);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

@@ -74,6 +74,7 @@ pub const MAX_LAST_COMMAND_LINES: usize = 200;
 /// Byte ceiling applied after the line cap, whichever bites first.
 pub const MAX_LAST_COMMAND_BYTES: usize = 256 * 1024;
 const MAX_OUTPUT_VIEW_SCROLLBACK: usize = 100_000;
+const MAX_STARTUP_OUTPUT_VIEW_SCROLLBACK: usize = 64 * 1024 * 1024;
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 const SEARCH_REFRESH_DEBOUNCE: Duration = Duration::from_millis(80);
 const MAX_SEARCH_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
@@ -822,6 +823,21 @@ impl TerminalSession {
             text,
             appearance,
             MAX_OUTPUT_VIEW_SCROLLBACK,
+            true,
+        )
+    }
+
+    #[must_use]
+    pub fn spawn_startup_output_view_with_appearance(
+        title: String,
+        text: String,
+        appearance: Arc<TerminalAppearance>,
+    ) -> Self {
+        Self::spawn_surface_with_appearance(
+            title,
+            text,
+            appearance,
+            MAX_STARTUP_OUTPUT_VIEW_SCROLLBACK,
             true,
         )
     }
@@ -16476,6 +16492,19 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn ordinary_and_startup_output_views_use_their_distinct_byte_caps() {
+        let ordinary = TerminalSession::spawn_output_view(String::new(), String::new());
+        let startup = TerminalSession::spawn_startup_output_view_with_appearance(
+            String::new(),
+            String::new(),
+            Arc::new(TerminalAppearance::default()),
+        );
+
+        assert_eq!(ordinary.max_scrollback(), 100_000);
+        assert_eq!(startup.max_scrollback(), 64 * 1024 * 1024);
     }
 
     #[test]

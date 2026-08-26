@@ -97,6 +97,22 @@ replay plus synchronous foreground shell-evaluated `if-shell`, immediate `if-she
 emits the containing command before each inserted command, and an inserted source before its child
 commands. Per-client and per-thread capture keeps nested trees isolated.
 
+Protocol v80 adds the startup cause event. `connect_or_spawn_daemon` passes startup ownership only
+to the successful connection made after this process spawned the daemon, and
+`connect_control_with_startup_owner` publishes `startup-config-owner-v1` only for that Control
+connection. The reader sees `ServerHello` first. `ControlWriter::startup_config_causes` then writes
+one `%config-error ` prefix per cause before the initial command opens its first `%begin`; embedded
+newlines remain unprefixed continuation lines. A late Control client receives the event only after
+its `Attached` message, while the attach frame remains open. The event itself does not change
+`ControlState::return_code`.
+
+An Interactive client does not receive that raw vector. The daemon delivers an ordered, UTF-8-safe
+64 KiB preview through the existing command-output model under the title `configuration errors`,
+replacing every Unicode control except LF and TAB. The normal output actor and exact output ID drive
+presentation and cleanup, so this crate needs no startup-specific GPUI surface. The truncation
+notice tells the user to restart in Control mode for full output; exact Interactive recovery of the
+full retained 1 MiB vector is intentionally not promised.
+
 Immediate `after-*` and `command-error` hooks retain the originating recipient in a separate Control
 target while clearing parser replay state. Every hook command, hook source, and sourced descendant
 therefore emits an independent flags-0 frame. Hook arrays stay ordered, a failure stops only its

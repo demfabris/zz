@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v79)
+title: zz wire protocol (v80)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 79`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 80`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -191,7 +191,8 @@ offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDicti
 (`total_bytes` ≤ `MAX_KITTY_IMAGE_BYTES`, 16 MiB),
 `KittyImageChunk { pane, image_id, generation, bytes }`
 (each chunk ≤ `MAX_KITTY_IMAGE_CHUNK_BYTES`, 1 MiB), and
-`KittyImagesRemoved { pane, image_ids }`.
+`KittyImagesRemoved { pane, image_ids }`, and
+`StartupConfigCauses { causes: Vec<String> }`.
 
 The agent lane added at v53 carries four more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
 carries one coalesced batch of JSON agent stream items numbered by the pane's fanout lane
@@ -309,9 +310,9 @@ invocations insert their complete frame at the parent replay position. Command r
 transcript once in its existing response output. Interactive renders one existing command-output
 viewport from the same transcript, subject to the existing command-output size bound. This is
 per-invocation batching, not a claim of physical interleaving.
-Generic config Warning typing, startup diagnostic delivery, hard-disconnect queue cancellation,
-config byte input, source stdin transport, parser abort semantics, hook cwd selection, and deferred
-event hooks remain open.
+At the v78 checkpoint, generic config Warning typing, startup diagnostic delivery, hard-disconnect
+queue cancellation, config byte input, source stdin transport, parser abort semantics, hook cwd
+selection, and deferred event hooks remained open. v80 later closes startup diagnostic delivery.
 
 v79 changes the existing `EventPayload::CommandOutput` tag 11 in place to
 `CommandOutput { pane, output_id, viewport }`. The daemon allocates each real command-output actor a
@@ -328,6 +329,21 @@ because that handshake may come from a restarted daemon with a fresh ID lifetime
 the same daemon does not restart its counter. The TUI keeps search, swallowed-key, and
 output-geometry state across same-actor frames and resets them when the actor ID changes or the
 output closes.
+
+v80 appends `EventPayload::StartupConfigCauses { causes }` at tail tag 49. A bounded deserializer
+and `validate_control_message` both enforce at most 1,024 causes, 64 KiB per cause, and 1 MiB across
+the vector; validation failures use `ProtocolError::InvalidStartupConfigCauses`. The daemon sends
+the raw vector only to a Control client that wins the global startup-cause delivery. The Control
+front end writes one `%config-error ` prefix per vector element, so embedded newlines remain raw
+continuation lines, and the event alone does not change its return value.
+`startup-config-owner-v1` appears only on the Control connection made after that process spawned the
+daemon. That owner receives the event after `ServerHello` and before its first `%begin`. A Control
+client that connects to a running daemon receives it only after `Attached`, inside the attach frame.
+Interactive clients receive no v80 payload. The daemon opens the existing `CommandOutput` surface
+with an ordered, UTF-8-safe 64 KiB preview, replacing every Unicode control except LF and TAB. A
+truncated preview ends with `... startup diagnostics truncated; restart in Control mode for full
+output`. Exact Interactive recovery of the full retained 1 MiB vector is intentionally not part of
+the protocol. `zz-client::ClientCore` accepts and ignores the Control-only event.
 
 The three payloads `TerminalViewport`, `TerminalPatch`, and
 `CommandOutput { output_id, viewport: Some(..), .. }` are
@@ -507,9 +523,11 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 79`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 80`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v80 appends `EventPayload::StartupConfigCauses` at tail tag 49. Both decode-time and ordinary
+  control-message validation enforce 1,024 entries, 64 KiB per entry, and 1 MiB total.
 - v79 adds `output_id: u64` to existing `EventPayload::CommandOutput` tag 11. Real output actors use
   nonzero daemon-lifetime-global monotonic IDs on populated frames, current resyncs, and closes. The
   zero-ID empty form is the authoritative no-output resync sentinel. The packed populated form puts
@@ -680,6 +698,8 @@ now validate on both encode and decode.
   nonempty keys of at most 128 bytes and values of at most 64 KiB. Each mux-option payload must be a
   complete 17-key map with values of at most 64 KiB; bounded value deserialization rejects an
   oversized string before it can become protocol state.
+  `StartupConfigCauses` has a dedicated `InvalidStartupConfigCauses` validation path with a bounded
+  sequence visitor: at most 1,024 causes, 64 KiB each, and 1 MiB total.
 - The GUI-request path is bounded twice, on encode and on decode: `AgentCommand` text to
   `MAX_AGENT_SEND_BYTES` (1 MiB), the screenshot path and every `GuiResponse` string to
   `MAX_GUI_TEXT_BYTES` (64 KiB), each with a bounded deserializer *and* a `validate_control_message`
@@ -703,21 +723,21 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 79, client_instance_id: ClientInstanceId(0), kind: Interactive,
+`ClientHello { protocol_version: 80, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
 working_directory: None }` is 18 bytes on the wire: an 8-byte envelope over a 10-byte postcard
 payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17
-      0e 00 00 00  00     00      4f 00         00 4f 00 00 00 00 01 01 00 00
+      0e 00 00 00  00     00      50 00         00 50 00 00 00 00 01 01 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 14  Control        (= 79)
+      length = 14  Control        (= 80)
 ```
 
 - **length `14`** = `ENVELOPE_BYTES` (4) + payload (10); it counts the four envelope bytes, not itself.
-- **payload** `00 4f 00 00 00 00 01 01 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x4f` (= 79), `client_instance_id` as varint `00`, `kind`
+- **payload** `00 50 00 00 00 00 01 01 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x50` (= 80), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` and `working_directory` as two `Option::None` tags (`00 00`). Postcard
@@ -744,15 +764,16 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 `UnsupportedLane(u8)`, `UnsupportedFlags(u8)`,
 `VersionMismatch { expected, received }`, `Encode/Decode(postcard::Error)`, `InvalidTerminal`,
 `InvalidAppearance`, `InvalidServerHello`, `InvalidClientHello`, `InvalidConfigOverrides`,
-`InvalidStatusLine`, `InvalidGuiRequest`, `InvalidPasteUpload`, `InvalidAgentPayload`, `Io`.
+`InvalidStartupConfigCauses`, `InvalidStatusLine`, `InvalidGuiRequest`, `InvalidPasteUpload`,
+`InvalidAgentPayload`, `Io`.
 
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 79, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 80, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None,
                        working_directory: Some("/home/demo") }
-server → ServerHello { protocol_version: 79, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 80, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

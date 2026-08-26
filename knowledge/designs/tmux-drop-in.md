@@ -109,8 +109,9 @@ mode, command-output navigation, choosers, prompts, prefix tables, buffers, and 
 bindings, and both mode-key tables as local terminal semantics. The Cargo launcher and a verified
 built-bundle smoke both pass the six bare/new/attach × empty/existing cases through a spaced path.
 Gate 0 provides durable evidence for the surfaces it exercises. The live tracker still records CLI
-and TUI gaps, including startup config cause delivery, ordinary TUI pane copy-search editing, typed
-Control diagnostics, and asynchronous Control output. The command-output fixture makes no mouse,
+and TUI gaps, including ordinary TUI pane copy-search editing, typed Control diagnostics, and
+asynchronous Control output. Protocol v80 now closes startup config cause delivery. The
+command-output fixture makes no mouse,
 OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still needs separate
 visual smoke evidence.
 
@@ -1000,13 +1001,21 @@ Control status to 1, capitalize attached warnings, and continue later physical l
 outer source. Control
 guard framing, cross-depth ordering, and return-versus-detach status are closed. Parser abort
 behavior remains open under its named gap. Startup accounting
-now matches the pin: one budget spans
-every startup root, top-level roots do not count, and source commands after the first 50 retain their
-declaring file and line. The detached startup launch stays silent on stdout and stderr. A separate
-manual probe of pinned tmux `d77c9dc6`, outside the 12-step runtime scenario, found that later Control
-and attached clients receive retained `display-message -p` output with its file and line while list
-output such as `list-sessions` is discarded. zz still discards those retained causes;
-`config.startup-diagnostic-delivery` owns that. Unix matching uses the
+now matches the pin: one budget spans every startup root, top-level roots do not count, and source
+commands after the first 50 retain their declaring file and line. Protocol v80 closes the delivery
+half. The daemon parses all roots before replay, keeps root read and parse causes ahead of replay
+causes, and preserves root order plus nested depth-first traversal. It retains normalized root and
+nested read failures, parser diagnostics, unsupported and runtime failures, and successful
+`display-message -p` output; list-style output is discarded. Successful physical multiline commands
+use their completion line. The detached startup launch stays rc 0 with empty streams and cannot
+drain the set. The spawn-owner Control receives the raw bounded vector after `ServerHello` and
+before its first `%begin`; late Control receives it after `Attached` inside the attach frame. An
+attached Interactive winner receives an ordered, UTF-8-safe 64 KiB preview in a PTY-free
+`configuration errors` view, replacing every Unicode control except LF and TAB. Its explicit
+Control-mode truncation notice reflects a deliberate product boundary: exact Interactive recovery
+of the full retained 1 MiB vector is not promised. Admission failure retains the global set and
+retires only the startup actor by exact ID. Unix
+matching uses the
 pin's `glob(3)` contract for backslashes, dotfiles, repeated stars, malformed patterns, and result
 order.
 Replay transcript delivery closed on 2026-08-25. Each invocation parses every declared and globbed
@@ -1376,6 +1385,7 @@ same loop as phases 0–3: settled plan → codex → full gates → adversarial
 | Styles (`#[…]`, `*-style`) | GUI titlebar strip and tabs render them since waves A/B (2026-08-20); zz-tui still drops them before the wire; the terminal-renderer styles (`pane-*border-style`, `window-style`, `mode-style`) are C3 | partial |
 | `source-file -F` | format-expanded paths | **shipped 2026-08-22** |
 | `source-file -n`/`-t`/`-v` | parse-only replay, pane-targeted context, and ordered verbose diagnostics | **shipped 2026-08-25** |
+| Startup configuration causes | v80 retained Control delivery, attached Interactive preview, completion-line locations, and seven-case pinned differential | **shipped 2026-08-26** |
 
 `switch-client` shipped as protocol v70 on 2026-08-20. A pane script can retarget the
 Interactive client selected from its retained `ClientHello.origin`; the daemon reuses its

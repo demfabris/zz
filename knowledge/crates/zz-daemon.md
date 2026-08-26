@@ -363,6 +363,13 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   Fresh `new-session` and `new-session -A` misses still create and attach. Duplicate and validation
   errors retain their existing precedence. Registration and unregister already store and clear the
   additive facts, so this behavior needed no protocol-version change.
+- **Startup configuration causes.** The daemon parses every startup root before replay, then
+  replays roots in declaration order and nested sources depth-first. It retains normalized root and
+  nested read errors, parser diagnostics, unsupported and runtime failures, and successful
+  `display-message -p` output. An implicit default that disappears with `NotFound` stays silent;
+  other default-read failures and every explicit-root read failure become causes. List-style output
+  is discarded. A successful physical multiline command uses its completion line in the retained
+  location. A detached Command client remains silent and cannot drain the set.
 - **Display-message format client.** `best_display_message_format_client` first checks the retained
   target session. When that valid session has no attached client, it widens to every attached client
   and selects the highest `client_activity`, breaking an equal-activity tie with the oldest
@@ -572,21 +579,33 @@ One top-level invocation parses every declared and globbed match before replay. 
 an earlier file applies during that parse, affects later conditional parsing, and persists. A replayed
 `set-environment` runs too late to affect an already parsed later branch, but persists after replay.
 With `-n`, neither assignment nor command effects apply, later parse-only files see the assignment as
-absent, and `-v` still reports the selected branch. Clientless startup creates no transcript, so the
-detached launch remains silent. A separate manual probe of pinned tmux `d77c9dc6`, outside the
-12-step runtime scenario, found that startup `display-message -p` output becomes a located config
-cause while list output is discarded. zz still drops that retained cause, which remains
-under `config.startup-diagnostic-delivery`.
+absent, and `-v` still reports the selected branch. Clientless startup creates no replay transcript,
+so the detached launch remains silent.
 
-The hook matrix, source and replay clusters, protocol and client suites, and Control units pass. Strict
-clippy across protocol, client, mux, daemon, and zz, formatting, shell syntax, and diff checks pass.
-The strict `source-file-control` differential passes 12 steps and `source-file-output` passes 12,
-both with zero differences and no skips. The focused Control row now covers raw parser and hook
-source-read placement plus hidden numbering alongside its earlier queue and status matrix. The
-stored canonical `source-file-control` row remains unchanged at three steps. Generic config Warning
-typing, hard-disconnect queue cancellation, config
-byte input, source stdin transport, parser abort semantics, hook cwd selection, deferred event hooks,
-and retained startup causes remain open.
+Protocol v80 appends `StartupConfigCauses` at event tag 49. Only the Control connection created
+after its process spawned the daemon advertises `startup-config-owner-v1`; registration queues the
+raw bounded cause vector after `ServerHello`, before the first `%begin`. A Control client that finds
+an existing daemon does not advertise ownership. It becomes eligible after attachment and receives
+the event after `Attached`, inside that attach frame. A Control winner consumes the global set only
+after the event enters its reliable mailbox.
+
+An attached Interactive winner receives a PTY-free command-output actor titled `configuration
+errors`. `startup_config_preview` joins causes in order, replaces every Unicode control except LF
+and TAB, preserves UTF-8 boundaries, and caps the preview at 64 KiB. Truncation ends with
+`... startup diagnostics truncated; restart in Control mode for full output`. This is a product
+tradeoff: Interactive clients cannot recover the exact retained 1 MiB vector. Startup-output actors
+alone use `TerminalSession::spawn_startup_output_view_with_appearance`, whose pinned Ghostty history
+cap is 64 MiB in bytes; ordinary command output keeps the 100,000-byte setting.
+
+`send_attached` linearizes eligibility, cause ownership, and mailbox admission. It commits the
+global one-shot only after `Attached`, the startup actor, resync, and effective mux options remain
+admitted. Count or byte pressure retains the cause set and retires that startup actor by exact output
+ID, leaving unrelated output intact. A daemon restart constructs a fresh set.
+
+The v80 startup closure adds a separate checksum-attested seven-case differential against pinned
+tmux `d77c9dc6`; it passes with no skips and does not rewrite the canonical scenario summary.
+Generic config Warning typing, hard-disconnect queue cancellation, config byte input, source stdin
+transport, parser abort semantics, hook cwd selection, and deferred event hooks remain open.
 
 # Examples
 
@@ -626,9 +645,9 @@ send-keys data flow (CLI → PTY):
 | File | Role |
 |------|------|
 | `crates/zz-daemon/src/lib.rs` | Crate root and public re-exports |
-| `crates/zz-daemon/src/daemon.rs` | `Daemon`, `run_foreground` accept loop, `Shared`/`ServerState`, `execute`, `OutboundMailbox` fan-out, `watch_terminal`, `attach`/`detach`, `input_*` routing |
+| `crates/zz-daemon/src/daemon.rs` | `Daemon`, `run_foreground` accept loop, `Shared`/`ServerState`, startup config retention and one-shot delivery, `execute`, `OutboundMailbox` fan-out, `watch_terminal`, `attach`/`detach`, `input_*` routing |
 | `crates/zz-daemon/src/transport.rs` | `LocalListener`/`LocalStream` over `interprocess`, blocking accepted-stream normalization, `default_socket_path`, `PeerCredentials` |
-| `crates/zz-daemon/src/client.rs` | `CommandClient`, `InteractiveClient`, framed `ProtocolSender`/`ProtocolReceiver`, `connect`/`connect_endpoint` handshake, `short_device_name` |
+| `crates/zz-daemon/src/client.rs` | `CommandClient`, `InteractiveClient`, framed `ProtocolSender`/`ProtocolReceiver`, `connect`/`connect_endpoint` handshake, post-spawn Control startup ownership, `short_device_name` |
 | `crates/zz-daemon/src/endpoint.rs` | `Endpoint`/`SshEndpoint` parsing, the probe/auto-start/forward ssh commands and their shell quoting, `SshForward`'s RAII child, and the `EndpointError` → host-row advice mapping |
 | `crates/zz-daemon/src/paths.rs` | Platform discovery of the zz-owned `zz/mux.conf` and its write path |
 | `crates/zz-daemon/src/status.rs` | `StatusRenderer`: strftime, bounded `#()` execution with an output cache, and per-client status diffing. See [status line](/tmux/status-line.md). |

@@ -43,7 +43,12 @@ pub(crate) fn run(
             socket_path,
             None,
             mux_config_files,
-            || InteractiveClient::connect_control(socket_path),
+            |startup_config_owner| {
+                InteractiveClient::connect_control_with_startup_owner(
+                    socket_path,
+                    startup_config_owner,
+                )
+            },
             InteractiveClient::server_hello,
         )
     } else {
@@ -733,6 +738,9 @@ fn handle_protocol<W: Write>(
                 }
                 output.control_source_file(event)?;
             }
+            EventPayload::StartupConfigCauses { causes } => {
+                output.startup_config_causes(&causes)?;
+            }
             EventPayload::ClientMessage {
                 kind: zz_protocol::ClientMessageKind::Error,
                 text,
@@ -1254,6 +1262,15 @@ impl<W: Write> ControlWriter<W> {
         }
         self.output.write_all(line)?;
         self.output.write_all(b"\n")?;
+        self.output.flush()
+    }
+
+    fn startup_config_causes(&mut self, causes: &[String]) -> io::Result<()> {
+        for cause in causes {
+            self.output.write_all(b"%config-error ")?;
+            self.output.write_all(cause.as_bytes())?;
+            self.output.write_all(b"\n")?;
+        }
         self.output.flush()
     }
 
@@ -2343,6 +2360,60 @@ mod tests {
         assert_eq!(
             writer.output,
             b"%sessions-changed\n%begin 21 1 1\nbody\n%end 21 1 1\n%window-add @3\n%window-renamed @3 shell\n%session-renamed $1 dev\n"
+        );
+    }
+
+    #[test]
+    fn startup_config_causes_are_immediate_and_prefix_each_element_once() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let mut state = ControlState::default();
+        let event = |sequence, causes| {
+            ProtocolMessage::Event(zz_protocol::Event {
+                sequence,
+                payload: EventPayload::StartupConfigCauses { causes },
+            })
+        };
+
+        assert_eq!(
+            handle_protocol(
+                event(
+                    1,
+                    vec!["first\ncontinued".to_owned(), "second".to_owned()],
+                ),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::None
+        );
+        let frame = writer.begin_at(21, 1).unwrap();
+        writer.notify(b"%window-add @3").unwrap();
+        assert_eq!(
+            handle_protocol(
+                event(2, vec!["inside\nstill inside".to_owned()]),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::None
+        );
+        writer
+            .response(
+                &frame,
+                CommandResponse::Success {
+                    request_id: 5,
+                    output: "body\n".to_owned(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            writer.output,
+            b"%config-error first\ncontinued\n%config-error second\n\
+              %begin 21 1 1\n%config-error inside\nstill inside\nbody\n\
+              %end 21 1 1\n%window-add @3\n"
         );
     }
 

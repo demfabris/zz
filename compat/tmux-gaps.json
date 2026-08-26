@@ -659,38 +659,6 @@
       "reason": "The normal parser path works; first-error transactionality plus the closing-quote boundary and these filesystem and account lookups remain."
     },
     {
-      "id": "config.startup-diagnostic-delivery",
-      "title": "Deliver retained startup configuration causes",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "scripts"
-      ],
-      "owner": "client",
-      "items": [
-        "presentation:attached-startup-config-error-view",
-        "semantic:config-startup-diagnostic-retention",
-        "semantic:control-mode-startup-config-error-order"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz/src/control_mode.rs",
-        "resource:third_party/tmux-reference/UPSTREAM.md",
-        "resource:knowledge/references/tmux-upstream.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Startup configuration causes survive daemon initialization and reach the first eligible Control or attached client, while a detached Command start still exits 0 with empty stdout and stderr.",
-        "Initial Control writes every `%config-error <declaring-file>:<line>: <cause>` before its first `%begin`; a Control client that attaches after detached startup receives retained causes inside the attach frame; a normal attached client opens the cause view.",
-        "A separate manual probe of pinned tmux d77c9dc6, outside the 12-step runtime scenario, proves that startup `display-message -p` becomes a retained file-and-line config cause while list-style output such as `list-sessions` is discarded. Neither output reaches the detached launching command's stdout or stderr."
-      ],
-      "depends_on": [],
-      "reason": "tmux retains clientless startup causes and routes them when a client becomes available. A separate manual pinned d77c9dc6 observation established the display-versus-list distinction; the 12-step runtime scenario does not prove it. zz currently logs and drops the startup ConfigLoadReport, so the detached launch stays quiet but later Control and attached clients miss both errors and retained display output."
-    },
-    {
       "id": "control-mode.async-command-output",
       "title": "Place asynchronous command diagnostics",
       "decision": "adopt",
@@ -3201,6 +3169,30 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Config and source replay now keys each parser-owned command group by exact source and physical line. A synchronous invalid or runtime command error, a nested source depth refusal, or a loud source-file no-match or glob error with zero matched files drops only later siblings from that group; the next physical line still runs. A quiet no-match is success. A matched path puts source-file on its asynchronous wait path, so child replay and parser failures, child read failures, and mixed missing-and-matched arguments do not prune the invoking line; zz retains a matched child read failure in the load report instead of returning it into parent group control flow. An asynchronous run-shell failure does not prune either. Both sides also keep the same-line sibling for a `-` path, while zz's missing stdin transport remains open under protocol.binary-streams. Equal line numbers in separate source files remain independent. zz-classified UnsupportedCommand results now skip and continue later same-line siblings; before this slice they pruned those siblings. That new continuation is desirable for zz import capability gaps, but this slice has no pinned proof that those gaps represent synchronous tmux failures. Direct CLI and Control chains are unchanged. Replayed error delivery and parser-owned sourced Control frame ownership closed under config.replayed-command-errors and control-mode.sourced-command-frames. The later config.replayed-command-output closure places each nested invocation's complete verbose, replay, and command-name or parser diagnostic transcript frame at this asynchronous source position. Source no-match, glob, and actual OS or path read failures keep their existing error channels at that position. The later source-file.nested-control-queue closure proved cross-depth containing-before-child order for parser-owned recursion. The later control-mode.indirect-source-frames closure covers synchronous foreground inserted lists. At this checkpoint immediate-hook and background-callback flags-0 framing remained open under control-mode.hook-command-frames and control-mode.background-inserted-command-frames. Later closures closed both groups. Unsupported-command continuation still does not prove parity for ConfigLoadReport's skipped summary. Parser abort behavior and error shapes remain open under config.parser-edge-cases and mux.error-shapes."
+    },
+    {
+      "id": "config.startup-diagnostic-delivery",
+      "title": "Deliver retained startup configuration causes",
+      "closed_on": "2026-08-26",
+      "evidence": [
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-protocol/src/framing.rs",
+        "resource:crates/zz-protocol/src/terminal_codec.rs",
+        "resource:crates/zz-protocol/src/lib.rs",
+        "resource:crates/zz-client/src/core.rs",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-daemon/src/client.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/lib.rs",
+        "resource:crates/zz/src/control_mode.rs",
+        "resource:crates/zz-mux/src/parser.rs",
+        "file:compat/startup-diagnostics.sh",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Protocol v80 appends `EventPayload::StartupConfigCauses` at tail tag 49, bounded to 1,024 causes, 64 KiB each, and 1 MiB total with dedicated payload validation. Startup parses every root before replay. A missing implicit default is silent; explicit-root read failures, non-`NotFound` default-root failures, normalized nested read failures, parser and unknown-command diagnostics, unsupported and runtime failures, and successful `display-message -p` output are retained in root order with nested depth-first replay. List-style output stays discarded. Successful physical multiline commands use their completion line. A detached Command launch remains rc 0 with empty stdout and stderr and cannot drain the causes. Only the post-spawn Control connection advertises `startup-config-owner-v1`; it receives causes after `ServerHello` and before its first `%begin`. A Control connection to an existing daemon waits for attachment, then receives causes after `Attached` inside that attach frame. An attached Interactive client instead receives an ordered, UTF-8-safe 64 KiB preview in a PTY-free `configuration errors` view, with every Unicode control except LF and TAB replaced. A truncated preview ends with `... startup diagnostics truncated; restart in Control mode for full output`; full 1 MiB Interactive recovery is not promised. Startup output alone uses the pinned Ghostty 64 MiB byte history cap, while ordinary command output keeps its 100,000-byte setting. Eligible delivery is linearized globally. The post-spawn owner commits after the raw event is admitted. For an attached winner, the daemon commits the one-shot only after the `Attached` frame, diagnostic, resync, and mux options remain admitted; count or byte admission failure retains the causes and retires only the startup actor by exact ID. A daemon restart builds a fresh set. Control receives the raw bounded vector when it wins and prefixes each multiline cause once with `%config-error`, preserving raw continuation lines without changing retval. The checksum-attested seven-case differential against pinned tmux `d77c9dc6` passes with no skips."
     },
     {
       "id": "control-mode.background-inserted-command-frames",

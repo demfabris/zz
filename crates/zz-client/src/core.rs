@@ -757,6 +757,7 @@ impl ClientCore {
             | EventPayload::ControlFlags { .. }
             | EventPayload::ControlCommandGuard { .. }
             | EventPayload::ControlSourceFile { .. }
+            | EventPayload::StartupConfigCauses { .. }
             | EventPayload::SubscriptionChanged { .. } => {}
         }
     }

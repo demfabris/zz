@@ -12,6 +12,7 @@ use zz_terminal::{
 
 use crate::message::{
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES,
+    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
 };
 use crate::{
     AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
@@ -364,6 +365,34 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
         status
             .validate()
             .map_err(|error| ProtocolError::InvalidStatusLine(error.to_owned()))?;
+    }
+    if let ProtocolMessage::Event(Event {
+        payload: EventPayload::StartupConfigCauses { causes },
+        ..
+    }) = message
+    {
+        if causes.len() > MAX_STARTUP_CONFIG_CAUSES {
+            return Err(ProtocolError::InvalidStartupConfigCauses(format!(
+                "startup configuration causes must contain at most {MAX_STARTUP_CONFIG_CAUSES} entries"
+            )));
+        }
+        if causes
+            .iter()
+            .any(|cause| cause.len() > MAX_STARTUP_CONFIG_CAUSE_BYTES)
+        {
+            return Err(ProtocolError::InvalidStartupConfigCauses(format!(
+                "startup configuration causes must be at most {MAX_STARTUP_CONFIG_CAUSE_BYTES} bytes each"
+            )));
+        }
+        if causes
+            .iter()
+            .try_fold(0usize, |total, cause| total.checked_add(cause.len()))
+            .is_none_or(|total| total > MAX_STARTUP_CONFIG_CAUSES_BYTES)
+        {
+            return Err(ProtocolError::InvalidStartupConfigCauses(format!(
+                "startup configuration causes must total at most {MAX_STARTUP_CONFIG_CAUSES_BYTES} bytes"
+            )));
+        }
     }
     if let ProtocolMessage::Event(Event {
         payload: EventPayload::AgentCommand { command, .. },
@@ -2215,6 +2244,58 @@ mod tests {
         let frame = encode_protocol_message(&message).expect("encode configuration overrides");
         assert_eq!(frame[4], Lane::Control as u8);
         assert_eq!(decode_protocol_frame(&frame).unwrap(), message);
+    }
+
+    #[test]
+    fn startup_config_causes_enforce_count_item_and_aggregate_bounds() {
+        assert_eq!(MAX_STARTUP_CONFIG_CAUSES, 1024);
+        assert_eq!(MAX_STARTUP_CONFIG_CAUSE_BYTES, 64 * 1024);
+        assert_eq!(MAX_STARTUP_CONFIG_CAUSES_BYTES, 1024 * 1024);
+
+        let message = |causes| {
+            ProtocolMessage::Event(Event {
+                sequence: 1,
+                payload: EventPayload::StartupConfigCauses { causes },
+            })
+        };
+        let rejected = |causes| {
+            let invalid = message(causes);
+            assert!(matches!(
+                encode_protocol_message(&invalid),
+                Err(ProtocolError::InvalidStartupConfigCauses(_))
+            ));
+            let payload = postcard::to_stdvec(&invalid).expect("serialize invalid fixture");
+            let frame = crate::framing::encode_enveloped(Lane::Control, &payload)
+                .expect("envelope invalid fixture");
+            assert!(matches!(
+                decode_protocol_frame(&frame),
+                Err(ProtocolError::Decode(_))
+            ));
+        };
+
+        rejected(vec![String::new(); MAX_STARTUP_CONFIG_CAUSES + 1]);
+        rejected(vec!["x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES + 1)]);
+        rejected(vec![
+            "x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES);
+            MAX_STARTUP_CONFIG_CAUSES_BYTES / MAX_STARTUP_CONFIG_CAUSE_BYTES + 1
+        ]);
+
+        let count_boundary = message(vec![String::new(); MAX_STARTUP_CONFIG_CAUSES]);
+        let frame = encode_protocol_message(&count_boundary).expect("encode count boundary");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode count boundary"),
+            count_boundary
+        );
+
+        let aggregate_boundary = message(vec![
+            "x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES);
+            MAX_STARTUP_CONFIG_CAUSES_BYTES / MAX_STARTUP_CONFIG_CAUSE_BYTES
+        ]);
+        let frame = encode_protocol_message(&aggregate_boundary).expect("encode aggregate boundary");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode aggregate boundary"),
+            aggregate_boundary
+        );
     }
 
     #[test]

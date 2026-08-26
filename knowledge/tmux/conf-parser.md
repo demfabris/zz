@@ -26,6 +26,9 @@ The lexer is a single character-by-character state machine (modeled on tmux's `c
 `list-keys` output can point back at the origin. It produces `CommandInvocation`s only. It does
 **not** validate command names or arguments; that happens later in
 [`MuxEngine::execute`](/tmux/commands.md).
+Parser diagnostics keep the location where the invalid statement began. A successfully parsed
+physical multiline command instead records the line where that command completes, matching tmux's
+startup cause location.
 
 `parse_config` never panics, but since the 2026-08-19 grammar wave it follows the pin's
 whole-file abort: the FIRST diagnostic stops the scan and drops every command in the file
@@ -177,13 +180,21 @@ containing file after it is tracked under `config.parser-edge-cases`. Startup co
 one cumulative 50-command source budget across every top-level config. Top-level roots do not consume
 slots, quiet misses do, and one command with many paths consumes one slot. Invocation 51 and later
 retain `<file>:<line>: too many nested files` in the startup report while later ordinary commands
-continue. Runtime sequential sources stay unbounded. zz still discards that startup report before a
-client can see it, which `config.startup-diagnostic-delivery` owns. A separate manual probe of pinned
-tmux `d77c9dc6`, outside the 12-step runtime scenario, found that startup `display-message -p` text
-becomes a file-and-line config cause for the first eligible client while list-style output is
-discarded. The detached launching command receives neither form on stdout or stderr.
-This startup diagnostic delivery gap is the next compatibility slice after command-output
-navigation.
+continue. Runtime sequential sources stay unbounded.
+
+The v80 startup path first reads and parses every root, then replays those parsed roots in declared
+order. Root read or parse causes therefore precede replay causes, while nested replay remains
+depth-first at its parent command. The report retains normalized explicit-root read failures,
+non-`NotFound` default-root failures, parser and unknown-command diagnostics, unsupported and runtime
+replay failures, nested-source failures, and successful `display-message -p` output. Startup
+discards list-style output. A missing implicit default remains silent. A detached Command launch
+exits 0 with empty stdout and stderr and does not consume the report.
+
+The first eligible Control or attached Interactive client consumes the report after successful
+delivery. Control receives the full bounded vector through v80 `StartupConfigCauses`; each element
+gets one `%config-error` prefix and keeps raw continuation lines. Interactive receives a sanitized,
+ordered 64 KiB preview in a `configuration errors` command-output view. A daemon restart parses a
+fresh set.
 Runtime replay errors now follow
 the invoking client. A missing `kill-session` target and a semantic failure from a syntactically
 valid `set-option` use the pin's bare text on Command stderr at rc 1, as typed Control errors with

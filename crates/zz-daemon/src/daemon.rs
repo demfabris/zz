@@ -37,12 +37,13 @@ use zz_protocol::{
     ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
     GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem, MenuState,
-    MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY,
-    PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose,
-    PastedImageFormat, PopupAction, PopupBorderLines, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
+    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
+    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem,
+    MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
+    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
+    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupState,
+    PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS,
+    ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
     canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
     read_protocol_message_into, resolve_command,
 };
@@ -50,9 +51,9 @@ use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, CursorBlinkPolicy, CursorStyle,
     LastCommandCapture, PasteBufferAction, RawOutputTapError, TerminalAppearance,
-    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalMode,
-    TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport, WordSeparators,
-    apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
+    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents,
+    TerminalMode, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId, TerminalViewport,
+    WordSeparators, apply_appearance_overrides, parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -124,6 +125,9 @@ const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_ITEMS: usize = 20;
 const MAX_COMMAND_PROMPT_HISTORY_SNAPSHOT_BYTES: usize = 32 * 1024;
 const MAX_COMMAND_PROMPT_OUTPUT_BYTES: usize = 1024 * 1024;
 const COMMAND_PROMPT_OUTPUT_TRUNCATED: &str = "… output truncated";
+const MAX_STARTUP_CONFIG_PREVIEW_BYTES: usize = 64 * 1024;
+const STARTUP_CONFIG_PREVIEW_TRUNCATED: &str =
+    "... startup diagnostics truncated; restart in Control mode for full output";
 const CONTROL_COMMAND_FRAME_FLAGS_NONE: u8 = 0;
 const CONTROL_COMMAND_FRAME_FLAGS_CONTROL: u8 = 1;
 const MAX_CHOOSE_TREE_ITEMS: usize = 4_096;
@@ -1509,6 +1513,26 @@ impl OutboundMailbox {
         true
     }
 
+    #[must_use]
+    fn enqueue_encoded_reliable(&self, encoded: Vec<u8>) -> bool {
+        let mut state = self.state.lock();
+        if state.closed {
+            return false;
+        }
+        if state.reliable.len() >= MAX_RELIABLE_MESSAGES
+            || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
+        {
+            close_outbound_too_far_behind(&mut state);
+            self.ready.notify_all();
+            return false;
+        }
+        state.queued_bytes += encoded.len();
+        state.reliable.push_back(encoded);
+        drop(state);
+        self.ready.notify_one();
+        true
+    }
+
     fn enqueue_kitty_image(
         &self,
         pane: PaneId,
@@ -2007,6 +2031,10 @@ impl OutboundMailbox {
         (!state.closed).then_some((state.queued_bytes, state.reliable.len()))
     }
 
+    fn is_open(&self) -> bool {
+        !self.state.lock().closed
+    }
+
     fn close_too_far_behind(&self) {
         let mut state = self.state.lock();
         close_outbound_too_far_behind(&mut state);
@@ -2273,6 +2301,7 @@ struct Shared {
     stopping: AtomicBool,
     startup_ready: Mutex<bool>,
     startup_changed: Condvar,
+    startup_config_causes: Mutex<Option<Vec<String>>>,
     exit_empty_armed: AtomicBool,
     server_id: u64,
     load_user_config: bool,
@@ -2282,6 +2311,28 @@ struct Shared {
     delivered_wrap_search_commands: Mutex<Vec<bool>>,
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartupConfigDelivery {
+    Ineligible,
+    NoPending,
+    Delivered,
+    InteractiveOutput(u64),
+    AdmissionFailed,
+}
+
+impl StartupConfigDelivery {
+    const fn delivered(self) -> bool {
+        matches!(self, Self::Delivered | Self::InteractiveOutput(_))
+    }
+
+    const fn command_output(self) -> Option<u64> {
+        match self {
+            Self::InteractiveOutput(output_id) => Some(output_id),
+            Self::Ineligible | Self::NoPending | Self::Delivered | Self::AdmissionFailed => None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -3100,6 +3151,7 @@ impl Shared {
             stopping: AtomicBool::new(false),
             startup_ready: Mutex::new(true),
             startup_changed: Condvar::new(),
+            startup_config_causes: Mutex::new(None),
             exit_empty_armed: AtomicBool::new(false),
             server_id,
             load_user_config,
@@ -3151,18 +3203,31 @@ impl Shared {
         let config_files =
             startup_mux_config_files(load_user_config, mux_config_files, default_mux_config);
         self.inner.lock().config_files = format_config_files(&config_files);
-        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
+        let mut report = ConfigLoadReport::startup();
+        let explicit_roots = mux_config_files.is_some();
+        let mut parsed_roots = Vec::new();
         for config in &config_files {
-            self.load_config_file_with_report_for_terminal(
+            if let Some(parsed) =
+                self.parse_startup_config_file(config, &mut report, explicit_roots)
+            {
+                parsed_roots.push((config, parsed));
+            }
+        }
+        let mut source_invocations = SourceInvocationAccounting::Startup { used: 0 };
+        for (config, parsed) in parsed_roots {
+            self.replay_config_file(
                 config,
+                parsed,
                 &mut context,
                 0,
-                &mut ConfigLoadReport::default(),
+                &mut report,
                 ClientTerminal::NoClient,
                 None,
                 &mut source_invocations,
+                SourceFileLoadOptions::default(),
             )?;
         }
+        *self.startup_config_causes.lock() = report.take_startup_causes();
         self.apply_stored_mux_config_overrides("startup-mux-replay");
         let history_settings = {
             let inner = self.inner.lock();
@@ -3875,6 +3940,134 @@ impl Shared {
         if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
             inner.control_outputs.entry(client).or_default();
         }
+    }
+
+    fn try_deliver_startup_config_causes(
+        self: &Arc<Self>,
+        client: ClientId,
+        outbound: &Arc<OutboundMailbox>,
+        registration_owner: bool,
+    ) -> StartupConfigDelivery {
+        let Some((kind, pane)) = self.startup_config_delivery_target(client, registration_owner)
+        else {
+            return StartupConfigDelivery::Ineligible;
+        };
+        let mut pending = self.startup_config_causes.lock();
+        let Some(causes) = pending.as_ref() else {
+            return StartupConfigDelivery::NoPending;
+        };
+        let delivery = self.deliver_startup_config_causes(client, kind, pane, causes, outbound);
+        if delivery.delivered() {
+            pending.take();
+        }
+        delivery
+    }
+
+    fn startup_config_delivery_target(
+        &self,
+        client: ClientId,
+        registration_owner: bool,
+    ) -> Option<(ClientKind, Option<PaneId>)> {
+        let (kind, pane, attached) = {
+            let inner = self.inner.lock();
+            (
+                inner.client_kinds.get(&client).copied(),
+                client_context_pane(&inner, client),
+                client_attached_session(&inner, client).is_some(),
+            )
+        };
+        let eligible = matches!(kind, Some(ClientKind::Interactive)) && attached
+            || matches!(kind, Some(ClientKind::Control)) && (registration_owner || attached);
+        if !eligible {
+            return None;
+        }
+        kind.map(|kind| (kind, pane))
+    }
+
+    fn deliver_startup_config_causes(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        pane: Option<PaneId>,
+        causes: &[String],
+        outbound: &Arc<OutboundMailbox>,
+    ) -> StartupConfigDelivery {
+        match kind {
+            ClientKind::Control
+                if outbound.enqueue_reliable(&Self::event(EventPayload::StartupConfigCauses {
+                    causes: causes.to_vec(),
+                })) =>
+            {
+                StartupConfigDelivery::Delivered
+            }
+            ClientKind::Interactive => {
+                let text = startup_config_preview(causes);
+                match self.open_startup_command_output(
+                    client,
+                    pane,
+                    "configuration errors".to_owned(),
+                    &text,
+                    outbound,
+                ) {
+                    Ok(output_id) => StartupConfigDelivery::InteractiveOutput(output_id),
+                    Err(error) => {
+                        log::warn!(
+                            "could not deliver startup configuration errors to {client}: {error}"
+                        );
+                        StartupConfigDelivery::AdmissionFailed
+                    }
+                }
+            }
+            ClientKind::Control | ClientKind::Command => StartupConfigDelivery::AdmissionFailed,
+        }
+    }
+
+    fn send_attached(
+        self: &Arc<Self>,
+        client: ClientId,
+        outbound: &Arc<OutboundMailbox>,
+        session: SessionId,
+        snapshot: MuxSnapshot,
+    ) -> bool {
+        let target = self.startup_config_delivery_target(client, false);
+        let mut pending = target.map(|_| self.startup_config_causes.lock());
+        if pending.as_ref().is_some_and(|causes| causes.is_none()) {
+            pending = None;
+        }
+        outbound.reset_kitty_images();
+        outbound.reset_pasted_images();
+        if !outbound.enqueue_reliable(&ProtocolMessage::Attached { session, snapshot }) {
+            return false;
+        }
+        let startup_delivery = match (target, pending.as_ref().and_then(|causes| causes.as_ref())) {
+            (Some((kind, pane)), Some(causes)) => {
+                self.deliver_startup_config_causes(client, kind, pane, causes, outbound)
+            }
+            (Some(_), None) => StartupConfigDelivery::NoPending,
+            (None, _) => StartupConfigDelivery::Ineligible,
+        };
+        if startup_delivery == StartupConfigDelivery::AdmissionFailed {
+            return false;
+        }
+        self.send_resync_inner(client, outbound, startup_delivery.command_output());
+        if !outbound.is_open() {
+            if let Some(output_id) = startup_delivery.command_output() {
+                self.retire_command_output_if_exact(client, output_id);
+            }
+            return false;
+        }
+        if !self.publish_effective_mux_options_to(client, outbound) || !outbound.is_open() {
+            if let Some(output_id) = startup_delivery.command_output() {
+                self.retire_command_output_if_exact(client, output_id);
+            }
+            return false;
+        }
+        if startup_delivery.delivered()
+            && let Some(pending) = pending.as_mut()
+        {
+            pending.take();
+        }
+        true
     }
 
     fn client_instance_id(&self, client: ClientId) -> Option<ClientInstanceId> {
@@ -6257,12 +6450,7 @@ impl Shared {
                 }
                 let outbound = self.inner.lock().subscribers.get(&client).cloned();
                 if let Some(outbound) = outbound {
-                    outbound.reset_kitty_images();
-                    outbound.reset_pasted_images();
-                    let _ =
-                        outbound.enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
-                    self.send_resync(client, &outbound);
-                    self.publish_effective_mux_options_to(client);
+                    self.send_attached(client, &outbound, session, snapshot);
                 }
                 self.publish_snapshot();
             } else if detach_others {
@@ -8898,14 +9086,7 @@ impl Shared {
         }
         let outbound = { self.inner.lock().subscribers.get(&target_client).cloned() };
         if let Some(outbound) = outbound {
-            outbound.reset_kitty_images();
-            outbound.reset_pasted_images();
-            let _ = outbound.enqueue_reliable(&ProtocolMessage::Attached {
-                session: target_session,
-                snapshot,
-            });
-            self.send_resync(target_client, &outbound);
-            self.publish_effective_mux_options_to(target_client);
+            self.send_attached(target_client, &outbound, target_session, snapshot);
         }
         self.publish_snapshot();
         Ok(Execution::default())
@@ -9082,7 +9263,7 @@ impl Shared {
         };
         apply_terminal_resizes(resizes);
         if changed {
-            self.publish_snapshot();
+            self.publish_snapshot_state();
         }
         Ok(())
     }
@@ -11534,7 +11715,7 @@ impl Shared {
         apply_terminal_resizes(resizes);
         let bell_cleared = clear_bell && self.clear_pane_bell(pane);
         if layout_changed || bell_cleared {
-            self.publish_snapshot();
+            self.publish_snapshot_state();
         } else if refresh_activity_choosers {
             self.refresh_choose_trees();
         }
@@ -11674,7 +11855,7 @@ impl Shared {
         };
         apply_terminal_resizes(resizes);
         if layout_changed {
-            self.publish_snapshot();
+            self.publish_snapshot_state();
         }
         if refresh_activity_choosers {
             self.refresh_choose_trees();
@@ -13953,6 +14134,15 @@ impl Shared {
     }
 
     fn send_resync(&self, client: ClientId, outbound: &OutboundMailbox) {
+        self.send_resync_inner(client, outbound, None);
+    }
+
+    fn send_resync_inner(
+        &self,
+        client: ClientId,
+        outbound: &OutboundMailbox,
+        skip_command_output: Option<u64>,
+    ) {
         let (
             snapshot,
             viewports,
@@ -14065,6 +14255,9 @@ impl Shared {
         self.send_agent_resync(client, outbound);
         let inner = self.inner.lock();
         if let Some(output) = inner.command_outputs.get(&client) {
+            if skip_command_output == Some(output.output_id) {
+                return;
+            }
             if let Some(viewport) = output
                 .terminal
                 .latest_viewport_for(TerminalViewId(client.0))
@@ -14173,6 +14366,101 @@ impl Shared {
         if text.is_empty() {
             return Ok(());
         }
+        let (pane, terminal, events) =
+            self.install_command_output(client, preferred_pane, title, text, false)?;
+        if let Err(error) = self.watch_command_output(
+            client,
+            pane,
+            Arc::clone(&terminal),
+            events,
+            VecDeque::new(),
+            None,
+            None,
+        ) {
+            self.close_command_output(client, &terminal);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn open_startup_command_output(
+        self: &Arc<Self>,
+        client: ClientId,
+        preferred_pane: Option<PaneId>,
+        title: String,
+        text: &str,
+        outbound: &Arc<OutboundMailbox>,
+    ) -> Result<u64, DaemonError> {
+        let (pane, terminal, events) =
+            self.install_command_output(client, preferred_pane, title, text, true)?;
+        let result = (|| {
+            let view = TerminalViewId(client.0);
+            let mut prefetched = VecDeque::new();
+            let viewport = loop {
+                let event = events.recv_blocking().map_err(|error| {
+                    DaemonError::Thread(format!(
+                        "command output event stream closed before its initial viewport: {error}"
+                    ))
+                })?;
+                match event {
+                    TerminalEvent::ViewportReady { .. } => {
+                        break terminal.latest_viewport_for(view).ok_or_else(|| {
+                            DaemonError::Thread(
+                                "command output did not publish its initial viewport".to_owned(),
+                            )
+                        })?;
+                    }
+                    TerminalEvent::ViewClosed(closed) if closed == view => {
+                        return Err(DaemonError::Thread(
+                            "command output closed before its initial viewport".to_owned(),
+                        ));
+                    }
+                    event => prefetched.push_back(event),
+                }
+            };
+            let admitted_generation = viewport_generation(&viewport);
+            let (start, start_rx) = mpsc::channel();
+            self.watch_command_output(
+                client,
+                pane,
+                Arc::clone(&terminal),
+                events,
+                prefetched,
+                Some(admitted_generation),
+                Some(start_rx),
+            )?;
+            let output_id = self.enqueue_initial_command_output(
+                client,
+                pane,
+                &terminal,
+                viewport.as_ref(),
+                outbound,
+            )?;
+            if start.send(()).is_err() {
+                self.retire_current_command_output(client, &terminal);
+            }
+            Ok(output_id)
+        })();
+        if result.is_err() {
+            self.retire_current_command_output(client, &terminal);
+        }
+        result
+    }
+
+    fn install_command_output(
+        self: &Arc<Self>,
+        client: ClientId,
+        preferred_pane: Option<PaneId>,
+        title: String,
+        text: &str,
+        startup: bool,
+    ) -> Result<(PaneId, Arc<TerminalSession>, TerminalEvents), DaemonError> {
+        if text.is_empty() {
+            return Err(ServerError::InvalidCommand(
+                "command output requires non-empty text".to_owned(),
+            )
+            .into());
+        }
         self.close_popup(client, true);
         let text = bounded_command_output(text);
         let (pane, word_separators, terminal_options) = {
@@ -14198,11 +14486,20 @@ impl Shared {
                 )?,
             )
         };
-        let terminal = Arc::new(TerminalSession::spawn_output_view_with_appearance(
-            title,
-            text,
-            Arc::clone(&terminal_options.appearance),
-        ));
+        let terminal = Arc::new(if startup {
+            TerminalSession::spawn_startup_output_view_with_appearance(
+                title,
+                text,
+                Arc::clone(&terminal_options.appearance),
+            )
+        } else {
+            TerminalSession::spawn_output_view_with_appearance(
+                title,
+                text,
+                Arc::clone(&terminal_options.appearance),
+            )
+        });
+        let events = terminal.events();
         terminal.set_wrap_search(terminal_options.wrap_search);
         let view = TerminalViewId(client.0);
 
@@ -14292,11 +14589,7 @@ impl Shared {
         if let Some(replaced) = replaced {
             Self::retire_command_output(client, replaced);
         }
-        if let Err(error) = self.watch_command_output(client, pane, Arc::clone(&terminal)) {
-            self.close_command_output(client, &terminal);
-            return Err(error);
-        }
-        Ok(())
+        Ok((pane, terminal, events))
     }
 
     fn watch_command_output(
@@ -14304,13 +14597,26 @@ impl Shared {
         client: ClientId,
         pane: PaneId,
         terminal: Arc<TerminalSession>,
+        events: TerminalEvents,
+        mut prefetched: VecDeque<TerminalEvent>,
+        mut admitted_generation: Option<TerminalGeneration>,
+        start: Option<mpsc::Receiver<()>>,
     ) -> Result<(), DaemonError> {
-        let events = terminal.events();
         let shared = Arc::clone(self);
         thread::Builder::new()
             .name(format!("zz-output-{}", client.0))
             .spawn(move || {
-                while let Ok(event) = events.recv_blocking() {
+                if start.is_some_and(|start| start.recv().is_err()) {
+                    return;
+                }
+                loop {
+                    let event = match prefetched.pop_front() {
+                        Some(event) => event,
+                        None => match events.recv_blocking() {
+                            Ok(event) => event,
+                            Err(_) => break,
+                        },
+                    };
                     if !shared.is_current_command_output(client, &terminal) {
                         break;
                     }
@@ -14319,6 +14625,10 @@ impl Shared {
                             if let Some(viewport) =
                                 terminal.latest_viewport_for(TerminalViewId(client.0))
                             {
+                                if admitted_generation == Some(viewport_generation(&viewport)) {
+                                    continue;
+                                }
+                                admitted_generation = None;
                                 shared.publish_command_output(client, pane, &terminal, &viewport);
                             }
                         }
@@ -14603,6 +14913,60 @@ impl Shared {
         );
     }
 
+    fn enqueue_initial_command_output(
+        &self,
+        client: ClientId,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        viewport: &TerminalViewport,
+        outbound: &Arc<OutboundMailbox>,
+    ) -> Result<u64, DaemonError> {
+        let current = {
+            let inner = self.inner.lock();
+            current_command_output_subscriber(&inner, client, pane, terminal)
+        };
+        let Some((output_id, subscriber)) = current else {
+            return Err(DaemonError::Thread(
+                "startup command output was replaced before admission".to_owned(),
+            ));
+        };
+        if !Arc::ptr_eq(&subscriber, outbound) {
+            return Err(DaemonError::Thread(
+                "startup command output subscriber changed before admission".to_owned(),
+            ));
+        }
+        let message = Self::event(EventPayload::CommandOutput {
+            output_id,
+            pane,
+            viewport: Some(viewport.clone()),
+        });
+        let encoded = subscriber.encode_message(&message)?;
+        let mut encoded = Some(encoded);
+        let admitted = {
+            let inner = self.inner.lock();
+            current_command_output_subscriber(&inner, client, pane, terminal)
+                .filter(|(current_id, current)| {
+                    *current_id == output_id && Arc::ptr_eq(current, &subscriber)
+                })
+                .is_some_and(|_| {
+                    subscriber.enqueue_encoded_reliable(
+                        encoded
+                            .take()
+                            .expect("encoded startup command output is available"),
+                    )
+                })
+        };
+        if !admitted {
+            if let Some(encoded) = encoded {
+                subscriber.recycle_frame(encoded);
+            }
+            return Err(DaemonError::Thread(
+                "startup command output was not admitted".to_owned(),
+            ));
+        }
+        Ok(output_id)
+    }
+
     fn publish_command_output_with_encoder(
         &self,
         client: ClientId,
@@ -14644,6 +15008,38 @@ impl Shared {
         };
         if !installed && let Some(encoded) = encoded {
             subscriber.recycle_frame(encoded);
+        }
+    }
+
+    fn retire_current_command_output(&self, client: ClientId, terminal: &Arc<TerminalSession>) {
+        let retired = {
+            let mut inner = self.inner.lock();
+            let current = inner
+                .command_outputs
+                .get(&client)
+                .is_some_and(|output| Arc::ptr_eq(&output.terminal, terminal));
+            current
+                .then(|| take_command_output(&mut inner, client))
+                .flatten()
+        };
+        if let Some(retired) = retired {
+            Self::retire_command_output(client, retired);
+        }
+    }
+
+    fn retire_command_output_if_exact(&self, client: ClientId, output_id: u64) {
+        let retired = {
+            let mut inner = self.inner.lock();
+            let current = inner
+                .command_outputs
+                .get(&client)
+                .is_some_and(|output| output.output_id == output_id);
+            current
+                .then(|| take_command_output(&mut inner, client))
+                .flatten()
+        };
+        if let Some(retired) = retired {
+            Self::retire_command_output(client, retired);
         }
     }
 
@@ -15141,7 +15537,7 @@ impl Shared {
         self.run_event_hooks(events);
     }
 
-    fn detach_removed_sessions(&self) {
+    fn detach_removed_sessions(self: &Arc<Self>) {
         let destroyed = {
             let mut inner = self.inner.lock();
             let mut destroyed = inner
@@ -15184,14 +15580,7 @@ impl Shared {
                             let outbound = inner.subscribers.get(&client).cloned();
                             drop(inner);
                             if let Some(outbound) = outbound {
-                                outbound.reset_kitty_images();
-                                outbound.reset_pasted_images();
-                                let _ = outbound.enqueue_reliable(&ProtocolMessage::Attached {
-                                    session: survivor,
-                                    snapshot,
-                                });
-                                self.send_resync(client, &outbound);
-                                self.publish_effective_mux_options_to(client);
+                                self.send_attached(client, &outbound, survivor, snapshot);
                             }
                             continue;
                         }
@@ -15207,8 +15596,12 @@ impl Shared {
         }
     }
 
-    fn publish_snapshot(&self) {
+    fn publish_snapshot(self: &Arc<Self>) {
         self.detach_removed_sessions();
+        self.publish_snapshot_state();
+    }
+
+    fn publish_snapshot_state(&self) {
         let (snapshots, appearance_updates) = {
             let mut inner = self.inner.lock();
             let snapshot = inner.engine.state.snapshot();
@@ -15862,20 +16255,30 @@ impl Shared {
         }
     }
 
-    fn publish_effective_mux_options_to(&self, client: ClientId) {
-        let options = {
-            let mut inner = self.inner.lock();
-            if !inner.subscribers.contains_key(&client) {
-                return;
-            }
-            let options = effective_mux_options(&inner, client);
-            if inner.published_mux_options.get(&client) == Some(&options) {
-                return;
-            }
-            inner.published_mux_options.insert(client, options.clone());
-            options
-        };
-        self.publish_to_client(client, EventPayload::MuxOptionsChanged { options });
+    fn publish_effective_mux_options_to(
+        &self,
+        client: ClientId,
+        outbound: &Arc<OutboundMailbox>,
+    ) -> bool {
+        let mut inner = self.inner.lock();
+        if !inner
+            .subscribers
+            .get(&client)
+            .is_some_and(|subscriber| Arc::ptr_eq(subscriber, outbound))
+        {
+            return false;
+        }
+        let options = effective_mux_options(&inner, client);
+        if inner.published_mux_options.get(&client) == Some(&options) {
+            return outbound.is_open();
+        }
+        if !outbound.enqueue_reliable(&Self::event(EventPayload::MuxOptionsChanged {
+            options: options.clone(),
+        })) {
+            return false;
+        }
+        inner.published_mux_options.insert(client, options);
+        true
     }
 
     fn refresh_published_appearance(&self) {
@@ -17030,6 +17433,7 @@ impl Shared {
         )
     }
 
+    #[cfg(test)]
     fn load_config_file_with_report_for_terminal(
         self: &Arc<Self>,
         path: &Path,
@@ -17097,11 +17501,42 @@ impl Shared {
             }
             Err(error) => return Err(error.into()),
         };
+        Ok(Some(self.parse_config_input(
+            path, &input, report, options, top_level,
+        )))
+    }
+
+    fn parse_startup_config_file(
+        &self,
+        path: &Path,
+        report: &mut ConfigLoadReport,
+        explicit: bool,
+    ) -> Option<ParsedConfig> {
+        let input = match fs::read_to_string(path) {
+            Ok(input) => input,
+            Err(error) => {
+                log::warn!(
+                    "ignoring unreadable config file {}: {error}",
+                    path.display()
+                );
+                report.note_startup_root_read_error(path, &error, explicit);
+                return None;
+            }
+        };
+        Some(self.parse_config_input(path, &input, report, SourceFileLoadOptions::default(), true))
+    }
+
+    fn parse_config_input(
+        &self,
+        path: &Path,
+        input: &str,
+        report: &mut ConfigLoadReport,
+        options: SourceFileLoadOptions,
+        top_level: bool,
+    ) -> ParsedConfig {
         let parsed = {
             let inner = self.inner.lock();
-            inner
-                .engine
-                .parse_config(path.display().to_string(), &input)
+            inner.engine.parse_config(path.display().to_string(), input)
         };
         for diagnostic in &parsed.diagnostics {
             log::warn!(
@@ -17131,7 +17566,7 @@ impl Shared {
                 );
             }
         }
-        Ok(Some(parsed))
+        parsed
     }
 
     fn replay_config_file(
@@ -17255,12 +17690,12 @@ impl Shared {
                             _ => None,
                         })
                         .collect::<Vec<_>>(),
-                    Err(ServerError::UnsupportedCommand(command)) => {
+                    Err(ServerError::UnsupportedCommand(unsupported)) => {
                         log::warn!(
-                            "{}: ignoring unsupported tmux command: {command}",
+                            "{}: ignoring unsupported tmux command: {unsupported}",
                             path.display()
                         );
-                        report.note_skip(&command);
+                        report.note_skip_command(&command, &unsupported);
                         self.publish_control_command_guard(
                             options.control_target,
                             String::new(),
@@ -17342,7 +17777,11 @@ impl Shared {
                     for error in &matches.errors {
                         let warning = source_glob_error_warning(&declared_path, error);
                         log::warn!("{warning}");
-                        report.note_source_error(&mut source_error_group, &warning);
+                        report.note_located_source_error(
+                            &command,
+                            &mut source_error_group,
+                            &warning,
+                        );
                         append_inserted_output(&mut source_diagnostics, &warning);
                         source_command_error = true;
                     }
@@ -17350,7 +17789,11 @@ impl Shared {
                         if !source_request.quiet {
                             let error = missing_source_error(&declared_path);
                             log::warn!("{error}");
-                            report.note_source_error(&mut source_error_group, &error);
+                            report.note_located_source_error(
+                                &command,
+                                &mut source_error_group,
+                                &error,
+                            );
                             append_inserted_output(&mut source_diagnostics, &error);
                             source_command_error = true;
                         }
@@ -17389,13 +17832,19 @@ impl Shared {
                     match self.parse_config_file(&pending.path, report, pending.options, true) {
                         Ok(Some(parsed)) => parsed_sources.push((pending, parsed)),
                         Err(DaemonError::Io(error)) => {
-                            let warning = if options.control_target.is_some() {
+                            let warning = if options.control_target.is_some()
+                                || source_invocations.is_startup()
+                            {
                                 source_read_error_warning(&pending.path, &error)
                             } else {
                                 source_glob_error_warning(&pending.path, &error.to_string())
                             };
                             log::warn!("{warning}");
-                            report.note_source_error(&mut source_error_group, &warning);
+                            report.note_located_source_error(
+                                &command,
+                                &mut source_error_group,
+                                &warning,
+                            );
                             if let Some(target) = options.control_target {
                                 self.publish_control_source_read_error(
                                     target,
@@ -17406,7 +17855,11 @@ impl Shared {
                             }
                         }
                         Err(error) if source_error.is_none() => source_error = Some(error),
-                        Ok(None) | Err(_) => {}
+                        Ok(None) => report.note_startup_command_cause(
+                            &command,
+                            &missing_source_error(&pending.path),
+                        ),
+                        Err(_) => {}
                     }
                 }
                 for (pending, parsed) in parsed_sources {
@@ -17423,13 +17876,19 @@ impl Shared {
                         pending.options,
                     ) {
                         Err(DaemonError::Io(error)) => {
-                            let warning = if options.control_target.is_some() {
+                            let warning = if options.control_target.is_some()
+                                || source_invocations.is_startup()
+                            {
                                 source_read_error_warning(&pending.path, &error)
                             } else {
                                 source_glob_error_warning(&pending.path, &error.to_string())
                             };
                             log::warn!("{warning}");
-                            report.note_source_error(&mut source_error_group, &warning);
+                            report.note_located_source_error(
+                                &command,
+                                &mut source_error_group,
+                                &warning,
+                            );
                             if let Some(target) = options.control_target {
                                 self.publish_control_source_read_error(
                                     target,
@@ -17506,6 +17965,11 @@ impl Shared {
                 |error| daemon_error_output(error).unwrap_or_default().to_owned(),
                 |execution| execution.output.clone(),
             );
+            if canonical_command(&routed.name) == "display-message"
+                && let Ok(execution) = &result
+            {
+                report.note_startup_display(&command, &execution.output);
+            }
             report.note_stdout(&captured_output);
             match result.map_err(discard_command_output) {
                 Ok(_) => self.publish_control_command_guard_tree(
@@ -17515,12 +17979,12 @@ impl Shared {
                     false,
                     captured_events,
                 ),
-                Err(DaemonError::Server(ServerError::UnsupportedCommand(command))) => {
+                Err(DaemonError::Server(ServerError::UnsupportedCommand(unsupported))) => {
                     log::warn!(
-                        "{}: ignoring unsupported tmux command: {command}",
+                        "{}: ignoring unsupported tmux command: {unsupported}",
                         path.display()
                     );
-                    report.note_skip(&command);
+                    report.note_skip_command(&command, &unsupported);
                     self.publish_control_command_guard_tree(
                         options.control_target,
                         captured_output,
@@ -17563,6 +18027,7 @@ impl Shared {
                     failed_group = group;
                 }
                 Err(error) => {
+                    report.note_startup_command_cause(&command, &daemon_error_text(&error));
                     append_inserted_output(&mut captured_output, &daemon_error_text(&error));
                     self.publish_control_command_guard_tree(
                         options.control_target,
@@ -18123,7 +18588,7 @@ impl AgentPublisher for Shared {
             }
         };
         if changed {
-            self.publish_snapshot();
+            self.publish_snapshot_state();
         }
     }
 
@@ -18143,7 +18608,7 @@ impl AgentPublisher for Shared {
                     .unwrap_or(false)
         };
         if changed {
-            self.publish_snapshot();
+            self.publish_snapshot_state();
         }
     }
 }
@@ -18271,6 +18736,7 @@ struct ConfigLoadReport {
     replay_issues: Vec<ConfigReplayIssue>,
     delivered_replay_issues: usize,
     control_guarded: bool,
+    startup_causes: Option<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -18282,6 +18748,64 @@ struct ConfigStdoutTranscript {
 
 impl ConfigLoadReport {
     const SUMMARY_NAMES: usize = 6;
+
+    fn startup() -> Self {
+        Self {
+            startup_causes: Some(Vec::new()),
+            ..Self::default()
+        }
+    }
+
+    fn take_startup_causes(&mut self) -> Option<Vec<String>> {
+        self.startup_causes
+            .take()
+            .filter(|causes| !causes.is_empty())
+    }
+
+    fn note_startup_cause(&mut self, cause: &str) {
+        let Some(causes) = self.startup_causes.as_mut() else {
+            return;
+        };
+        if cause.is_empty() || causes.len() >= MAX_STARTUP_CONFIG_CAUSES {
+            return;
+        }
+        let total = causes.iter().map(String::len).sum::<usize>();
+        let available = MAX_STARTUP_CONFIG_CAUSES_BYTES.saturating_sub(total);
+        let limit = MAX_STARTUP_CONFIG_CAUSE_BYTES.min(available);
+        if limit == 0 {
+            return;
+        }
+        let mut end = cause.len().min(limit);
+        while !cause.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end != 0 {
+            causes.push(cause[..end].to_owned());
+        }
+    }
+
+    fn note_startup_root_read_error(
+        &mut self,
+        path: &Path,
+        error: &std::io::Error,
+        explicit: bool,
+    ) {
+        if !explicit && error.kind() == ErrorKind::NotFound {
+            return;
+        }
+        let message = format!("{}: {}", path.display(), filesystem_error_message(error));
+        self.note_startup_cause(&message);
+    }
+
+    fn note_startup_display(&mut self, command: &CommandInvocation, output: &str) {
+        if !output.is_empty() {
+            self.note_startup_command_cause(command, output);
+        }
+    }
+
+    fn note_startup_command_cause(&mut self, command: &CommandInvocation, cause: &str) {
+        self.note_startup_cause(&config_command_error(command, cause));
+    }
 
     fn with_stdout_transcript() -> Self {
         Self {
@@ -18335,6 +18859,14 @@ impl ConfigLoadReport {
         }
     }
 
+    fn note_skip_command(&mut self, command: &CommandInvocation, name: &str) {
+        self.note_skip(name);
+        self.note_startup_cause(&config_command_error(
+            command,
+            &format!("unsupported tmux command: {name}"),
+        ));
+    }
+
     fn note_invalid(&mut self, message: &str) -> usize {
         self.invalid_count += 1;
         self.diagnostics.push(message.to_owned());
@@ -18351,6 +18883,7 @@ impl ConfigLoadReport {
 
     fn note_parse_diagnostic(&mut self, source: &str, line: u32, message: &str, top_level: bool) {
         let diagnostic = format!("{source}:{line}: {message}");
+        self.note_startup_cause(&diagnostic);
         let index = self.note_invalid(&diagnostic);
         if self.stdout_transcript.is_some() {
             self.replayed_diagnostics.insert(index);
@@ -18379,6 +18912,7 @@ impl ConfigLoadReport {
             || message.to_owned(),
             |source| format!("{}:{}: {message}", source.source, source.line),
         );
+        self.note_startup_cause(&diagnostic);
         let index = self.note_invalid(&diagnostic);
         if let Some(transcript) = self
             .stdout_transcript
@@ -18459,7 +18993,7 @@ impl ConfigLoadReport {
         &self.verbose_lines
     }
 
-    fn note_source_error(&mut self, group: &mut Option<usize>, error: &str) {
+    fn push_source_error(&mut self, group: &mut Option<usize>, error: &str) {
         #[cfg(test)]
         self.source_errors.push(error.to_owned());
         let index = if let Some(index) = *group {
@@ -18475,7 +19009,23 @@ impl ConfigLoadReport {
         self.source_error_groups[index].push(error.to_owned());
     }
 
+    fn note_source_error(&mut self, group: &mut Option<usize>, error: &str) {
+        self.push_source_error(group, error);
+        self.note_startup_cause(error);
+    }
+
+    fn note_located_source_error(
+        &mut self,
+        command: &CommandInvocation,
+        group: &mut Option<usize>,
+        error: &str,
+    ) {
+        self.push_source_error(group, error);
+        self.note_startup_cause(&config_command_error(command, error));
+    }
+
     fn note_command_error(&mut self, command: &CommandInvocation, message: &str) {
+        self.note_startup_cause(&config_command_error(command, message));
         self.replay_issues.push(ConfigReplayIssue::CommandError {
             source: command.source.clone(),
             message: message.to_owned(),
@@ -20796,6 +21346,30 @@ fn bounded_command_output(text: &str) -> String {
         output.push_str(COMMAND_PROMPT_OUTPUT_TRUNCATED);
     }
     output
+}
+
+fn startup_config_preview(causes: &[String]) -> String {
+    let joined = causes.join("\n");
+    let mut preview = String::with_capacity(joined.len().min(MAX_STARTUP_CONFIG_PREVIEW_BYTES));
+    for character in joined.chars() {
+        if character.is_control() && !matches!(character, '\n' | '\t') {
+            preview.push('\u{fffd}');
+        } else {
+            preview.push(character);
+        }
+    }
+    if preview.len() <= MAX_STARTUP_CONFIG_PREVIEW_BYTES {
+        return preview;
+    }
+    let mut end =
+        MAX_STARTUP_CONFIG_PREVIEW_BYTES.saturating_sub(STARTUP_CONFIG_PREVIEW_TRUNCATED.len() + 1);
+    while !preview.is_char_boundary(end) {
+        end -= 1;
+    }
+    preview.truncate(end);
+    preview.push('\n');
+    preview.push_str(STARTUP_CONFIG_PREVIEW_TRUNCATED);
+    preview
 }
 
 fn client_context_pane(inner: &ServerState, client: ClientId) -> Option<PaneId> {
@@ -25672,6 +26246,14 @@ fn handle_connection<S: TransportStream>(
     if matches!(hello.kind, ClientKind::Interactive | ClientKind::Control) {
         shared.subscribe(client, Arc::clone(&outbound));
     }
+    if hello.kind == ClientKind::Control
+        && hello
+            .capabilities
+            .iter()
+            .any(|capability| capability == ClientHello::STARTUP_CONFIG_OWNER_CAPABILITY)
+    {
+        shared.try_deliver_startup_config_causes(client, &outbound, true);
+    }
 
     let context = {
         let inner = shared.inner.lock();
@@ -25808,12 +26390,7 @@ fn handle_connection<S: TransportStream>(
                 match shared.attach_target(client, hello.kind, context, &session) {
                     Ok((session, snapshot)) => {
                         shared.clear_pending_committed_text(client);
-                        outbound.reset_kitty_images();
-                        outbound.reset_pasted_images();
-                        let _ = outbound
-                            .enqueue_reliable(&ProtocolMessage::Attached { session, snapshot });
-                        shared.send_resync(client, &outbound);
-                        shared.publish_effective_mux_options_to(client);
+                        shared.send_attached(client, &outbound, session, snapshot);
                         shared.publish_snapshot();
                     }
                     Err(error) => {
@@ -26249,15 +26826,18 @@ fn source_glob_error_warning(path: &Path, error: &str) -> String {
     format!("{error}: {}", path.display())
 }
 
-fn source_read_error_warning(path: &Path, error: &std::io::Error) -> String {
+fn filesystem_error_message(error: &std::io::Error) -> String {
     let message = error.to_string();
-    let message = error.raw_os_error().map_or(message.clone(), |code| {
+    error.raw_os_error().map_or(message.clone(), |code| {
         message
             .strip_suffix(&format!(" (os error {code})"))
             .unwrap_or(&message)
             .to_owned()
-    });
-    source_glob_error_warning(path, &message)
+    })
+}
+
+fn source_read_error_warning(path: &Path, error: &std::io::Error) -> String {
+    source_glob_error_warning(path, &filesystem_error_message(error))
 }
 
 fn missing_source_error(path: &Path) -> String {
@@ -26447,6 +27027,69 @@ mod tests {
             )
             .expect("read global option")
             .output
+    }
+
+    fn retained_startup_causes(shared: &Shared) -> Vec<String> {
+        shared
+            .startup_config_causes
+            .lock()
+            .clone()
+            .unwrap_or_default()
+    }
+
+    fn startup_config_cause_events(messages: &[ProtocolMessage]) -> Vec<Vec<String>> {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::StartupConfigCauses { causes },
+                    ..
+                }) => Some(causes.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn startup_attach_prefix_bytes(kind: ClientKind) -> (usize, usize) {
+        let shared = Arc::new(Shared::new(1));
+        *shared.startup_config_causes.lock() = Some(vec!["byte pressure".to_owned()]);
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(kind, None, None, Arc::clone(&mailbox));
+        let (session, _, _) = switch_test_session(&shared, "startup-byte-pressure");
+        let snapshot = shared
+            .attach(client, session)
+            .expect("attach calibration client");
+        take_reliable_messages(&mailbox);
+        assert!(shared.send_attached(client, &mailbox, session, snapshot));
+        let state = mailbox.state.lock();
+        assert!(state.reliable.len() >= 3);
+        assert!(matches!(
+            decode_protocol_frame(&state.reliable[0]),
+            Ok(ProtocolMessage::Attached { .. })
+        ));
+        assert!(match decode_protocol_frame(&state.reliable[1]) {
+            Ok(ProtocolMessage::Event(Event {
+                payload: EventPayload::StartupConfigCauses { .. },
+                ..
+            })) => kind == ClientKind::Control,
+            Ok(ProtocolMessage::Event(Event {
+                payload:
+                    EventPayload::CommandOutput {
+                        viewport: Some(_), ..
+                    },
+                ..
+            })) => kind == ClientKind::Interactive,
+            _ => false,
+        });
+        assert!(matches!(
+            decode_protocol_frame(&state.reliable[2]),
+            Ok(ProtocolMessage::Event(Event {
+                payload: EventPayload::Snapshot(_),
+                ..
+            }))
+        ));
+        let prefix = state.reliable[0].len() + state.reliable[1].len();
+        (prefix, state.reliable[2].len())
     }
 
     #[test]
@@ -26970,6 +27613,162 @@ mod tests {
     }
 
     #[test]
+    fn missing_default_startup_config_stays_silent() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let missing = directory.path().join("missing.conf");
+        let shared = Arc::new(Shared::new(1));
+        let mut report = ConfigLoadReport::startup();
+
+        assert!(
+            shared
+                .parse_startup_config_file(&missing, &mut report, false)
+                .is_none()
+        );
+        assert!(report.take_startup_causes().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn implicit_startup_read_errors_are_retained_without_os_error_suffixes() {
+        let path = Path::new("/zz/default/mux.conf");
+        for (code, expected) in [
+            (libc::EACCES, "/zz/default/mux.conf: Permission denied"),
+            (libc::EISDIR, "/zz/default/mux.conf: Is a directory"),
+        ] {
+            let mut report = ConfigLoadReport::startup();
+            report.note_startup_root_read_error(
+                path,
+                &std::io::Error::from_raw_os_error(code),
+                false,
+            );
+            assert_eq!(
+                report.take_startup_causes().as_deref(),
+                Some(&[expected.to_owned()][..])
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_source_read_errors_keep_location_and_normalized_child_path() {
+        let declaring = "/zz/default/mux.conf";
+        let child = Path::new("/zz/default/child.conf");
+        let command = CommandInvocation {
+            name: "source-file".to_owned(),
+            args: vec![child.display().to_string()],
+            source: Some(SourceSpan {
+                source: declaring.to_owned(),
+                line: 7,
+                column: 1,
+            }),
+        };
+        for (code, expected) in [
+            (
+                libc::EACCES,
+                "/zz/default/mux.conf:7: Permission denied: /zz/default/child.conf",
+            ),
+            (
+                libc::EISDIR,
+                "/zz/default/mux.conf:7: Is a directory: /zz/default/child.conf",
+            ),
+        ] {
+            let warning =
+                source_read_error_warning(child, &std::io::Error::from_raw_os_error(code));
+            assert_eq!(config_command_error(&command, &warning), expected);
+        }
+    }
+
+    #[test]
+    fn startup_roots_parse_before_replay_and_retain_ordered_causes() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let first = directory.path().join("first.conf");
+        let missing = directory.path().join("missing.conf");
+        let invalid = directory.path().join("invalid.conf");
+        fs::write(
+            &first,
+            "display-message -p EARLY\n\
+             kill-session -t =missing\n\
+             set-option -g @startup-two-phase-after yes\n",
+        )
+        .expect("first startup config");
+        fs::write(&invalid, "set-option 'unterminated\n").expect("invalid startup config");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(
+                true,
+                Some(&[first.clone(), missing.clone(), invalid.clone()]),
+            )
+            .expect("initialize mixed startup roots");
+
+        assert_eq!(
+            retained_startup_causes(&shared),
+            [
+                format!("{}: No such file or directory", missing.display()),
+                format!("{}:1: unterminated quote", invalid.display()),
+                format!("{}:1: EARLY", first.display()),
+                format!("{}:2: can't find session: missing", first.display()),
+            ]
+        );
+        assert_eq!(
+            read_global_option(&shared, "@startup-two-phase-after"),
+            "yes"
+        );
+    }
+
+    #[test]
+    fn startup_display_causes_follow_root_and_nested_depth_first_order() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let first = directory.path().join("first.conf");
+        let child = directory.path().join("child.conf");
+        let grandchild = directory.path().join("grandchild.conf");
+        let second = directory.path().join("second.conf");
+        fs::write(
+            &first,
+            format!(
+                "new-session -d -s listed\n\
+                 display-message -p ROOT_BEFORE\n\
+                 source-file '{}'\n\
+                 list-sessions -F LIST_#{{session_name}}\n\
+                 display-message -p ROOT_AFTER\n",
+                child.display()
+            ),
+        )
+        .expect("first startup root");
+        fs::write(
+            &child,
+            format!(
+                "display-message -p CHILD_BEFORE\n\
+                 source-file '{}'\n\
+                 display-message -p CHILD_AFTER\n",
+                grandchild.display()
+            ),
+        )
+        .expect("nested startup config");
+        fs::write(&grandchild, "display-message -p GRANDCHILD\n").expect("deep startup config");
+        fs::write(&second, "display-message -p SECOND_ROOT\n").expect("second startup root");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(&[first.clone(), second.clone()]))
+            .expect("initialize valid startup roots");
+
+        let causes = retained_startup_causes(&shared);
+        assert_eq!(
+            causes,
+            [
+                format!("{}:2: ROOT_BEFORE", first.display()),
+                format!("{}:1: CHILD_BEFORE", child.display()),
+                format!("{}:1: GRANDCHILD", grandchild.display()),
+                format!("{}:3: CHILD_AFTER", child.display()),
+                format!("{}:5: ROOT_AFTER", first.display()),
+                format!("{}:1: SECOND_ROOT", second.display()),
+            ]
+        );
+        assert!(causes.iter().all(|cause| !cause.contains("LIST_listed")));
+    }
+
+    #[test]
     fn startup_source_invocations_share_one_budget_across_explicit_configs() {
         let directory = tempfile::tempdir().expect("temporary config directory");
         let first = directory.path().join("first.conf");
@@ -27038,6 +27837,81 @@ mod tests {
         assert_eq!(read_global_option(&shared, "@startup-depth"), "50");
         assert_eq!(read_global_option(&shared, "@startup-after50"), "yes");
         assert!(read_global_option(&shared, "@startup-after51").is_empty());
+        assert_eq!(
+            retained_startup_causes(&shared),
+            [format!(
+                "{}:2: {NESTED_SOURCE_LIMIT_ERROR}",
+                directory.path().join("f50.conf").display()
+            )]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_command_and_source_causes_keep_declaring_locations() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("root.conf");
+        let nested = directory.path().join("nested.conf");
+        let unreadable = directory.path().join("unreadable");
+        fs::create_dir(&unreadable).expect("unreadable startup source");
+        fs::write(&nested, "wibble\n").expect("nested startup config");
+        fs::write(
+            &root,
+            format!(
+                "wibble\n\
+                 clock-mode\n\
+                 source-file nested-missing.conf\n\
+                 source-file 'invalid\0pattern.conf'\n\
+                 source-file '{}'\n\
+                 source-file '{}'\n\
+                 display-message -p \"MULTI_FIRST\n\
+                 MULTI_SECOND\"\n",
+                unreadable.display(),
+                nested.display(),
+            ),
+        )
+        .expect("mixed startup source failures");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(std::slice::from_ref(&root)))
+            .expect("initialize startup source failures");
+        let causes = retained_startup_causes(&shared);
+
+        assert_eq!(
+            causes[0],
+            format!("{}:1: unknown command: wibble", root.display())
+        );
+        assert_eq!(
+            causes[1],
+            format!("{}:2: unsupported tmux command: clock-mode", root.display())
+        );
+        assert_eq!(
+            causes[2],
+            format!(
+                "{}:3: No such file or directory: nested-missing.conf",
+                root.display()
+            )
+        );
+        assert!(causes[3].starts_with(&format!("{}:4: ", root.display())));
+        assert!(causes[3].contains("invalid\0pattern.conf"));
+        assert_eq!(
+            causes[4],
+            format!(
+                "{}:5: Is a directory: {}",
+                root.display(),
+                unreadable.display()
+            )
+        );
+        assert_eq!(
+            causes[5],
+            format!("{}:1: unknown command: wibble", nested.display())
+        );
+        assert_eq!(
+            causes[6],
+            format!("{}:8: MULTI_FIRST\nMULTI_SECOND", root.display())
+        );
+        assert_eq!(causes.len(), 7);
     }
 
     #[test]
@@ -32808,6 +33682,462 @@ mod tests {
             .expect("open command-output actor");
         let output = Arc::clone(&shared.inner.lock().command_outputs[&client].terminal);
         assert_eq!(output.latest_viewport().background, appearance.background);
+    }
+
+    #[test]
+    fn startup_causes_wait_for_attachment_and_never_drain_to_command_clients() {
+        let shared = Arc::new(Shared::new(1));
+        *shared.startup_config_causes.lock() = Some(vec!["retained".to_owned()]);
+        let command_mailbox = OutboundMailbox::new();
+        let (command, _) = shared.register_subscribed(
+            ClientKind::Command,
+            None,
+            None,
+            Arc::clone(&command_mailbox),
+        );
+        assert_eq!(
+            shared.try_deliver_startup_config_causes(command, &command_mailbox, true),
+            StartupConfigDelivery::Ineligible
+        );
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        assert_eq!(
+            shared.try_deliver_startup_config_causes(control, &control_mailbox, false),
+            StartupConfigDelivery::Ineligible
+        );
+        assert_eq!(retained_startup_causes(&shared), ["retained"]);
+        assert!(startup_config_cause_events(&take_reliable_messages(&control_mailbox)).is_empty());
+
+        let (session, _, _) = switch_test_session(&shared, "startup-control");
+        let snapshot = shared.attach(control, session).expect("attach control");
+        assert!(shared.send_attached(control, &control_mailbox, session, snapshot));
+        let messages = take_reliable_messages(&control_mailbox);
+        let attached = messages
+            .iter()
+            .position(|message| matches!(message, ProtocolMessage::Attached { .. }))
+            .expect("attached delivery");
+        let causes = messages
+            .iter()
+            .position(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::StartupConfigCauses { .. },
+                        ..
+                    })
+                )
+            })
+            .expect("startup cause delivery");
+        assert!(attached < causes);
+        assert_eq!(
+            startup_config_cause_events(&messages),
+            [vec!["retained".to_owned()]]
+        );
+        assert!(shared.startup_config_causes.lock().is_none());
+    }
+
+    #[test]
+    fn attached_interactive_client_opens_the_startup_configuration_error_view() {
+        let shared = Arc::new(Shared::new(1));
+        *shared.startup_config_causes.lock() = Some(vec![
+            "root.conf:1: first".to_owned(),
+            "nested.conf:2: second\ncontinued".to_owned(),
+        ]);
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, _, pane) = switch_test_session(&shared, "startup-interactive");
+        let snapshot = shared.attach(client, session).expect("attach interactive");
+
+        assert!(shared.send_attached(client, &mailbox, session, snapshot));
+        let messages = take_reliable_messages(&mailbox);
+        assert!(matches!(
+            messages.first(),
+            Some(ProtocolMessage::Attached { .. })
+        ));
+        let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::CommandOutput {
+                    output_id,
+                    pane: output_pane,
+                    viewport: Some(viewport),
+                },
+            ..
+        }) = &messages[1]
+        else {
+            panic!("expected reliable startup command-output viewport after Attached");
+        };
+        assert_eq!(*output_pane, pane);
+        assert_eq!(viewport.title(), "configuration errors");
+        let text = viewport_text(viewport);
+        assert!(text.contains("root.conf:1: first"));
+        assert!(text.contains("nested.conf:2: second"));
+        assert!(text.contains("continued"));
+        assert!(matches!(
+            messages.get(2),
+            Some(ProtocolMessage::Event(Event {
+                payload: EventPayload::Snapshot(_),
+                ..
+            }))
+        ));
+        assert!(mailbox.state.lock().command_output.is_none());
+        assert!(shared.startup_config_causes.lock().is_none());
+
+        let terminal = Arc::clone(&shared.inner.lock().command_outputs[&client].terminal);
+        terminal.resize(47, 9, 8, 18);
+        let update = take_command_output_message(&mailbox);
+        assert_eq!(command_output_message_id(&update), *output_id);
+        assert!(matches!(
+            update,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::CommandOutput {
+                    viewport: Some(viewport),
+                    ..
+                },
+                ..
+            }) if viewport.columns == 47 && viewport.rows == 9
+        ));
+    }
+
+    #[test]
+    fn control_startup_delivery_keeps_the_raw_tail_beyond_the_interactive_preview() {
+        let mut report = ConfigLoadReport::startup();
+        report.note_startup_cause(&format!(
+            "BEGIN{}",
+            "x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES - "BEGIN".len())
+        ));
+        report.note_startup_cause("CONTROL_TAIL");
+        let causes = report.take_startup_causes().expect("raw startup causes");
+        assert!(!startup_config_preview(&causes).contains("CONTROL_TAIL"));
+
+        let shared = Arc::new(Shared::new(1));
+        *shared.startup_config_causes.lock() = Some(causes.clone());
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let (session, _, _) = switch_test_session(&shared, "startup-control-raw-tail");
+        let snapshot = shared.attach(client, session).expect("attach control");
+        take_reliable_messages(&mailbox);
+
+        assert!(shared.send_attached(client, &mailbox, session, snapshot));
+        assert_eq!(
+            startup_config_cause_events(&take_reliable_messages(&mailbox)),
+            [causes]
+        );
+    }
+
+    #[test]
+    fn interactive_startup_output_retains_blank_history_from_beginning_to_end() {
+        let shared = Arc::new(Shared::new(1));
+        *shared.startup_config_causes.lock() =
+            Some(vec![format!("BEGIN{}END", "\n".repeat(2_048))]);
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, _, _) = switch_test_session(&shared, "startup-interactive-history");
+        let snapshot = shared.attach(client, session).expect("attach interactive");
+        take_reliable_messages(&mailbox);
+
+        assert!(shared.send_attached(client, &mailbox, session, snapshot));
+        let messages = take_reliable_messages(&mailbox);
+        assert!(matches!(
+            messages.get(1),
+            Some(ProtocolMessage::Event(Event {
+                payload: EventPayload::CommandOutput {
+                    viewport: Some(viewport),
+                    ..
+                },
+                ..
+            })) if viewport_text(viewport).contains("BEGIN")
+                && !viewport_text(viewport).contains("END")
+        ));
+
+        let terminal = Arc::clone(&shared.inner.lock().command_outputs[&client].terminal);
+        assert_eq!(terminal.max_scrollback(), 64 * 1024 * 1024);
+        let capture = terminal
+            .capture(CaptureOptions {
+                start: CaptureBoundary::HistoryStart,
+                end: CaptureBoundary::Relative(i64::MAX),
+                mode: true,
+                ..CaptureOptions::default()
+            })
+            .expect("capture startup output");
+        assert!(capture.contains("BEGIN"));
+        assert!(capture.contains("END"));
+
+        let view = TerminalViewId(client.0);
+        terminal.view_action(view, TerminalViewAction::ScrollBottom);
+        wait_for_viewport(
+            &terminal,
+            view,
+            "startup output did not scroll to its tail",
+            |viewport| viewport_text(viewport).contains("END"),
+        );
+    }
+
+    #[test]
+    fn control_startup_transaction_retains_causes_when_resync_overflows() {
+        let shared = Arc::new(Shared::new(1));
+        *shared.startup_config_causes.lock() = Some(vec!["retry me".to_owned()]);
+        let full = OutboundMailbox::new();
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&full));
+        let (session, _, _) = switch_test_session(&shared, "startup-retry");
+        let first_snapshot = shared.attach(first, session).expect("attach first control");
+        take_reliable_messages(&full);
+        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(2) {
+            assert!(full.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
+        }
+
+        assert!(!shared.send_attached(first, &full, session, first_snapshot));
+        assert_eq!(retained_startup_causes(&shared), ["retry me"]);
+
+        let retry = OutboundMailbox::new();
+        let (second, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&retry));
+        let second_snapshot = shared
+            .attach(second, session)
+            .expect("attach second control");
+        assert!(shared.send_attached(second, &retry, session, second_snapshot));
+        assert_eq!(
+            startup_config_cause_events(&take_reliable_messages(&retry)),
+            [vec!["retry me".to_owned()]]
+        );
+        assert!(shared.startup_config_causes.lock().is_none());
+    }
+
+    #[test]
+    fn interactive_startup_transaction_retires_and_retries_when_resync_overflows() {
+        let shared = Arc::new(Shared::new(1));
+        *shared.startup_config_causes.lock() = Some(vec!["retry interactive".to_owned()]);
+        let full = OutboundMailbox::new();
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&full));
+        let (session, _, pane) = switch_test_session(&shared, "startup-interactive-retry");
+        let first_snapshot = shared
+            .attach(first, session)
+            .expect("attach first interactive");
+        take_reliable_messages(&full);
+        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(2) {
+            assert!(full.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
+        }
+
+        assert!(!shared.send_attached(first, &full, session, first_snapshot));
+        assert_eq!(retained_startup_causes(&shared), ["retry interactive"]);
+        assert!(!shared.inner.lock().command_outputs.contains_key(&first));
+
+        let retry = OutboundMailbox::new();
+        let (second, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&retry));
+        let second_snapshot = shared
+            .attach(second, session)
+            .expect("attach retry interactive");
+        assert!(shared.send_attached(second, &retry, session, second_snapshot));
+        let messages = take_reliable_messages(&retry);
+        assert!(matches!(
+            messages.first(),
+            Some(ProtocolMessage::Attached { .. })
+        ));
+        assert!(matches!(
+            messages.get(1),
+            Some(ProtocolMessage::Event(Event {
+                payload: EventPayload::CommandOutput {
+                    pane: output_pane,
+                    viewport: Some(viewport),
+                    ..
+                },
+                ..
+            })) if *output_pane == pane
+                && viewport.title() == "configuration errors"
+                && viewport_text(viewport).contains("retry interactive")
+        ));
+        assert!(retry.state.lock().command_output.is_none());
+        assert!(shared.startup_config_causes.lock().is_none());
+    }
+
+    #[test]
+    fn startup_transactions_retain_causes_under_control_and_interactive_byte_pressure() {
+        for kind in [ClientKind::Control, ClientKind::Interactive] {
+            let (prefix_bytes, first_resync_bytes) = startup_attach_prefix_bytes(kind);
+            let shared = Arc::new(Shared::new(1));
+            *shared.startup_config_causes.lock() = Some(vec!["byte pressure".to_owned()]);
+            let mailbox = OutboundMailbox::new();
+            let (client, _) = shared.register_subscribed(kind, None, None, Arc::clone(&mailbox));
+            let (session, _, _) = switch_test_session(&shared, "startup-byte-pressure");
+            let snapshot = shared
+                .attach(client, session)
+                .expect("attach byte-pressure client");
+            take_reliable_messages(&mailbox);
+            assert!(first_resync_bytes > 64);
+            let available = prefix_bytes + 64;
+            mailbox.state.lock().queued_bytes = MAX_OUTBOUND_BYTES - available;
+
+            assert!(!shared.send_attached(client, &mailbox, session, snapshot));
+            assert_eq!(retained_startup_causes(&shared), ["byte pressure"]);
+            if kind == ClientKind::Interactive {
+                assert!(!shared.inner.lock().command_outputs.contains_key(&client));
+            }
+        }
+    }
+
+    #[test]
+    fn startup_cause_delivery_is_atomic_across_control_and_interactive_clients() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, _) = switch_test_session(&shared, "startup-race");
+        let control_mailbox = OutboundMailbox::new();
+        let interactive_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&interactive_mailbox),
+        );
+        shared.attach(control, session).expect("attach control");
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive");
+        *shared.startup_config_causes.lock() = Some(vec!["one shot".to_owned()]);
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+
+        let control_thread = {
+            let shared = Arc::clone(&shared);
+            let mailbox = Arc::clone(&control_mailbox);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                shared.try_deliver_startup_config_causes(control, &mailbox, false)
+            })
+        };
+        let interactive_thread = {
+            let shared = Arc::clone(&shared);
+            let mailbox = Arc::clone(&interactive_mailbox);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                shared.try_deliver_startup_config_causes(interactive, &mailbox, false)
+            })
+        };
+        barrier.wait();
+        let control_delivered = control_thread.join().expect("control delivery thread");
+        let interactive_delivered = interactive_thread
+            .join()
+            .expect("interactive delivery thread");
+
+        assert_ne!(
+            control_delivered.delivered(),
+            interactive_delivered.delivered()
+        );
+        assert_eq!(
+            startup_config_cause_events(&take_reliable_messages(&control_mailbox)).len()
+                + usize::from(
+                    shared
+                        .inner
+                        .lock()
+                        .command_outputs
+                        .contains_key(&interactive)
+                ),
+            1
+        );
+        assert!(shared.startup_config_causes.lock().is_none());
+    }
+
+    #[test]
+    fn failed_startup_winner_keeps_causes_for_the_waiting_healthy_client() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, pane) = switch_test_session(&shared, "startup-failed-winner");
+        let failed_mailbox = OutboundMailbox::new();
+        let healthy_mailbox = OutboundMailbox::new();
+        let (failed, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&failed_mailbox),
+        );
+        let (healthy, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&healthy_mailbox),
+        );
+        let failed_snapshot = shared
+            .attach(failed, session)
+            .expect("attach failed winner");
+        let healthy_snapshot = shared
+            .attach(healthy, session)
+            .expect("attach healthy waiter");
+        take_reliable_messages(&failed_mailbox);
+        take_reliable_messages(&healthy_mailbox);
+        for _ in 0..MAX_RELIABLE_MESSAGES.saturating_sub(2) {
+            assert!(failed_mailbox.enqueue_reliable(&Shared::event(EventPayload::ServerStopping)));
+        }
+        *shared.startup_config_causes.lock() = Some(vec!["serialized retry".to_owned()]);
+
+        let failed_state = failed_mailbox.state.lock();
+        let failed_thread = {
+            let shared = Arc::clone(&shared);
+            let mailbox = Arc::clone(&failed_mailbox);
+            thread::spawn(move || shared.send_attached(failed, &mailbox, session, failed_snapshot))
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while let Some(guard) = shared.startup_config_causes.try_lock() {
+            drop(guard);
+            assert!(
+                Instant::now() < deadline,
+                "failed winner did not claim startup causes"
+            );
+            thread::yield_now();
+        }
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let healthy_thread = {
+            let shared = Arc::clone(&shared);
+            let mailbox = Arc::clone(&healthy_mailbox);
+            thread::spawn(move || {
+                started_tx.send(()).expect("signal healthy waiter");
+                let delivered = shared.send_attached(healthy, &mailbox, session, healthy_snapshot);
+                result_tx.send(delivered).expect("return healthy result");
+            })
+        };
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("healthy waiter started");
+        assert!(result_rx.recv_timeout(Duration::from_millis(25)).is_err());
+
+        drop(failed_state);
+        assert!(!failed_thread.join().expect("failed winner thread"));
+        assert!(
+            result_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("healthy waiter result")
+        );
+        healthy_thread.join().expect("healthy waiter thread");
+
+        let messages = take_reliable_messages(&healthy_mailbox);
+        assert!(matches!(
+            messages.get(1),
+            Some(ProtocolMessage::Event(Event {
+                payload: EventPayload::CommandOutput {
+                    pane: output_pane,
+                    viewport: Some(viewport),
+                    ..
+                },
+                ..
+            })) if *output_pane == pane && viewport_text(viewport).contains("serialized retry")
+        ));
+        assert!(shared.startup_config_causes.lock().is_none());
     }
 
     #[test]
@@ -38976,6 +40306,61 @@ mod tests {
             missing_source_error(Path::new("/tmp/mux.conf")),
             "No such file or directory: /tmp/mux.conf"
         );
+    }
+
+    #[test]
+    fn startup_causes_obey_wire_count_item_and_aggregate_bounds() {
+        let mut per_item = ConfigLoadReport::startup();
+        per_item.note_startup_cause(&"界".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES));
+        let causes = per_item.take_startup_causes().expect("bounded item");
+        assert_eq!(causes.len(), 1);
+        assert!(causes[0].len() <= MAX_STARTUP_CONFIG_CAUSE_BYTES);
+        assert!(causes[0].is_char_boundary(causes[0].len()));
+
+        let mut count = ConfigLoadReport::startup();
+        for _ in 0..=MAX_STARTUP_CONFIG_CAUSES {
+            count.note_startup_cause("x");
+        }
+        assert_eq!(
+            count.take_startup_causes().expect("bounded count").len(),
+            MAX_STARTUP_CONFIG_CAUSES
+        );
+
+        let mut aggregate = ConfigLoadReport::startup();
+        let full = "x".repeat(MAX_STARTUP_CONFIG_CAUSE_BYTES);
+        for _ in 0..=MAX_STARTUP_CONFIG_CAUSES_BYTES / MAX_STARTUP_CONFIG_CAUSE_BYTES {
+            aggregate.note_startup_cause(&full);
+        }
+        let causes = aggregate.take_startup_causes().expect("bounded aggregate");
+        assert_eq!(
+            causes.iter().map(String::len).sum::<usize>(),
+            MAX_STARTUP_CONFIG_CAUSES_BYTES
+        );
+    }
+
+    #[test]
+    fn startup_config_preview_is_safe_utf8_and_explicitly_truncated() {
+        let causes = vec![format!(
+            "BEGIN\x1b\r\u{0085}\t\n{}{}END",
+            "界".repeat(30_000),
+            "\n".repeat(100_001)
+        )];
+        let preview = startup_config_preview(&causes);
+
+        assert!(preview.len() <= MAX_STARTUP_CONFIG_PREVIEW_BYTES);
+        assert!(preview.starts_with("BEGIN"));
+        assert!(
+            preview
+                .ends_with("\n... startup diagnostics truncated; restart in Control mode for full output")
+        );
+        assert!(!preview.contains("END"));
+        assert!(
+            preview
+                .chars()
+                .filter(|character| character.is_control())
+                .all(|character| matches!(character, '\n' | '\t'))
+        );
+        assert!(std::str::from_utf8(preview.as_bytes()).is_ok());
     }
 
     #[test]
@@ -50768,6 +52153,70 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         assert!(mailbox.state.lock().command_output.is_none());
         mailbox.close();
+    }
+
+    #[test]
+    fn resync_skips_only_the_reliably_admitted_command_output_id() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, _, pane) = switch_test_session(&shared, "resync-command-output-skip");
+        shared.attach(client, session).expect("attach interactive");
+
+        shared
+            .open_command_output(client, Some(pane), "first".to_owned(), "first")
+            .expect("open first output");
+        let admitted = command_output_message_id(&take_command_output_message(&mailbox));
+        shared.send_resync_inner(client, &mailbox, Some(admitted));
+        assert!(mailbox.state.lock().command_output.is_none());
+        take_reliable_messages(&mailbox);
+
+        shared
+            .open_command_output(client, Some(pane), "second".to_owned(), "second")
+            .expect("replace output");
+        let replacement = take_command_output_message(&mailbox);
+        assert_ne!(command_output_message_id(&replacement), admitted);
+        take_reliable_messages(&mailbox);
+
+        shared.send_resync_inner(client, &mailbox, Some(admitted));
+        let replayed = take_command_output_message(&mailbox);
+        assert_eq!(
+            command_output_message_id(&replayed),
+            command_output_message_id(&replacement)
+        );
+    }
+
+    #[test]
+    fn startup_rollback_does_not_retire_a_replacement_command_output() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, _, pane) = switch_test_session(&shared, "startup-output-replacement");
+        shared.attach(client, session).expect("attach interactive");
+        take_reliable_messages(&mailbox);
+
+        let startup_id = shared
+            .open_startup_command_output(
+                client,
+                Some(pane),
+                "configuration errors".to_owned(),
+                "startup",
+                &mailbox,
+            )
+            .expect("open startup output");
+        shared
+            .open_command_output(client, Some(pane), "replacement".to_owned(), "replacement")
+            .expect("replace startup output");
+        let replacement_id = shared.inner.lock().command_outputs[&client].output_id;
+        assert_ne!(startup_id, replacement_id);
+
+        shared.retire_command_output_if_exact(client, startup_id);
+        assert_eq!(
+            shared.inner.lock().command_outputs[&client].output_id,
+            replacement_id
+        );
     }
 
     #[test]
@@ -65497,6 +66946,55 @@ bind - split-window -v -c "#{pane_current_path}"
             .execute(CommandInvocation::new("kill-server", [] as [&str; 0]))
             .unwrap();
         daemon_thread.join().unwrap().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_owner_control_receives_causes_immediately_after_server_hello() {
+        let shared = Arc::new(Shared::new(1));
+        shared.initialize(false).expect("initialize daemon state");
+        *shared.startup_config_causes.lock() = Some(vec!["owner cause".to_owned()]);
+        let (mut client_stream, server_stream) =
+            std::os::unix::net::UnixStream::pair().expect("create paired stream");
+        client_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        let connection_shared = Arc::clone(&shared);
+        let connection =
+            thread::spawn(move || handle_connection(server_stream, &connection_shared));
+
+        zz_protocol::write_protocol_message(
+            &mut client_stream,
+            &ProtocolMessage::ClientHello(ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                client_instance_id: ClientInstanceId(1),
+                kind: ClientKind::Control,
+                device_name: None,
+                capabilities: vec![ClientHello::STARTUP_CONFIG_OWNER_CAPABILITY.to_owned()],
+                color_scheme: None,
+                origin: None,
+                working_directory: None,
+            }),
+        )
+        .expect("send owner hello");
+        assert!(matches!(
+            zz_protocol::read_protocol_message(&mut client_stream).expect("server hello"),
+            ProtocolMessage::ServerHello(_)
+        ));
+        assert!(matches!(
+            zz_protocol::read_protocol_message(&mut client_stream).expect("startup causes"),
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::StartupConfigCauses { causes },
+                ..
+            }) if causes == ["owner cause"]
+        ));
+        assert!(shared.startup_config_causes.lock().is_none());
+
+        drop(client_stream);
+        connection
+            .join()
+            .expect("connection thread")
+            .expect("connection");
     }
 
     #[cfg(unix)]

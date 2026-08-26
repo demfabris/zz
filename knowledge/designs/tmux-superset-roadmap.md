@@ -38,21 +38,25 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-26
 
-The live tracker has 91 active groups, 662 classified active items, 64 closed groups, and two known
-differentials. Protocol v79 adds actor identity to command-output frames and closes the TUI's local
-keyboard-navigation contract. Press and repeat keys use the effective daemon copy table, releases
-are inert, live `mode-keys` and custom bindings retarget the open output, and the TUI owns its search
-editor. Line and page movement, search plus `n`/`N`, selection-to-paste-buffer, and the stock
-vi/emacs exit distinction now match the pin in a 96-line local attached fixture. One exact content
-rectangle drives output painting and resize geometry while reserving the output header, footer or
-message row, and configured status block. Actor IDs and the client watermark prevent a late frame
-or close from replacing a newer output.
+The live tracker has 90 active groups, 659 classified active items, 65 closed groups, and two known
+differentials. Protocol v80 closes `config.startup-diagnostic-delivery`. Startup parses all roots
+before replay, retains normalized root and nested read failures, parser diagnostics, unsupported and
+runtime failures, and successful `display-message -p` output, and discards list-style output. Root
+causes precede replay causes; replay stays root-ordered and nested depth-first. Successful physical
+multiline commands use their completion line.
 
-This closure does not claim mouse behavior, an OS clipboard write, ordinary TUI pane copy-search
-editing, SSH transport, pixel parity, or the stored canonical summary. The 29 unsupported
-`window-copy` actions remain tracked under `copy-mode.action-fidelity`. The next slice is
-`config.startup-diagnostic-delivery`: retain startup config causes, deliver them once to the first
-eligible Control or attached client with pinned placement, and keep detached startup output silent.
+A detached Command launch stays rc 0 with empty stdout and stderr and cannot drain the causes. Only
+the post-spawn Control advertises `startup-config-owner-v1`; it receives the raw bounded vector after
+`ServerHello` and before its first `%begin`. A late Control receives it after `Attached` inside the
+attach frame. An attached Interactive winner opens a PTY-free `configuration errors` view with an
+ordered, control-sanitized, UTF-8-safe 64 KiB preview. The explicit truncation line directs full
+recovery through a Control-mode restart. This preview is a deliberate product boundary: an
+Interactive client cannot recover the exact retained 1 MiB vector.
+
+Eligible delivery is linearized globally. The daemon commits the one-shot only after the complete
+attach sequence remains admitted; failure retains the set and retires only the startup actor by
+exact ID. A restart builds a fresh set. The checksum-attested seven-case differential against pinned
+tmux `d77c9dc6` passes with no skips and leaves the canonical scenario summary untouched.
 
 # Baseline captured 2026-08-22
 
@@ -557,11 +561,19 @@ and error shapes remain with their named groups; the same-line close did not cov
 Startup accounting is closed: one
 budget spans every startup root, the roots do not count, source commands 1 through 50 run, and later
 source commands retain their declaring file and line while runtime sequential sources stay
-unbounded. A detached startup launch is silent on stdout and stderr. A separate manual probe of
-pinned tmux `d77c9dc6`, outside the 12-step runtime scenario, found that later Control and attached
-clients receive retained `display-message -p` text with its file and line while list output such as
-`list-sessions` is discarded. zz still drops those retained causes, tracked in
-`config.startup-diagnostic-delivery`. Replayed runtime failures retain encounter order, use the
+unbounded. Protocol v80 later closes retained delivery and placement. Startup parses every root
+before replay, retains normalized root and nested read failures, parser diagnostics, unsupported and
+runtime failures, and successful `display-message -p` output, and discards list-style output. Root
+causes precede replay causes; replay stays root-ordered and nested depth-first. The detached launch
+stays silent and cannot drain the set. Control receives the raw bounded vector with pinned
+`ServerHello` or attach-frame placement. An attached Interactive winner receives an ordered,
+UTF-8-safe 64 KiB preview that replaces every Unicode control except LF and TAB. Its explicit
+Control-mode recovery notice reflects the product decision not to promise exact Interactive
+recovery of the retained 1 MiB vector. The startup view alone uses a pinned Ghostty 64 MiB byte
+history cap; ordinary output retains its 100,000-byte setting. Attached delivery commits only after
+`Attached`, the diagnostic, resync, and mux options remain admitted; admission failure retains the
+causes and retires only the startup actor by exact ID. Replayed runtime failures
+retain encounter order, use the
 invoking client's error channel, set the Command status and parser-owned Control status, capitalize
 the attached warning, and continue later physical lines through an outer source. The config parser
 group separately retains tmux's first-error file abort and its unusual tilde expansion immediately
@@ -727,8 +739,13 @@ permanent product decision has been recorded for them.
 - 2026-08-26: Protocol v79 added a nonzero actor ID to every real command-output frame and close,
   with zero plus no viewport reserved for an authoritative no-output resync. The client watermark
   rejects stale traffic. TUI search and resize state now belong to the actor, and the local attached
-  fixture closes keyboard navigation over a 96-line output on both mode-key tables. Startup config
-  cause delivery becomes the next ease-ranked slice.
+  fixture closes keyboard navigation over a 96-line output on both mode-key tables. At that
+  checkpoint, startup config cause delivery became the next ease-ranked slice.
+- 2026-08-26: Protocol v80 appended `StartupConfigCauses` at event tail tag 49. The post-spawn
+  Control owner and late attach path now match pinned placement. Attached Interactive clients
+  receive an ordered, control-sanitized 64 KiB preview rather than exact recovery of the retained
+  1 MiB vector. Startup parsing, ordering, completion-line locations, one-shot admission, and
+  restart behavior pass the checksum-attested seven-case pinned probe.
 
 # Related
 

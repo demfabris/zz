@@ -10,9 +10,9 @@ use std::{
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, AnyView, AnyWindowHandle, App, Bounds, Context,
-    CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent, Keystroke,
-    MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size, StyleRefinement,
-    Window, div, ease_out_quint, prelude::*, px,
+    Corners, CursorStyle, DragMoveEvent, Entity, EntityId, FocusHandle, IntoElement, KeyUpEvent,
+    Keystroke, MouseButton, MouseExitEvent, MouseUpEvent, Pixels, Point, Render, Size,
+    StyleRefinement, Window, div, ease_out_quint, prelude::*, px,
 };
 use zz_mux::{display_width, joined_layout, swapped_layout};
 use zz_protocol::{
@@ -2037,10 +2037,11 @@ impl AppView {
         pane: PaneId,
         title: String,
         state: PaneDragOverlayState,
+        radii: Corners<Pixels>,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let app_view = cx.entity();
-        pane_drag_overlay(("pane-drag-overlay", pane.0), state, cx)
+        pane_drag_overlay(("pane-drag-overlay", pane.0), state, radii, cx)
             .on_click(cx.listener(move |view, _, _, cx| {
                 view.on_pane_click(pane, cx);
             }))
@@ -2205,7 +2206,8 @@ impl AppView {
                         .get(pane)
                         .map_or_else(String::new, |pane| pane.title.clone());
                     overlays.push(
-                        Self::pane_drag_handle(*pane, title, drag_state, cx).into_any_element(),
+                        Self::pane_drag_handle(*pane, title, drag_state, radii, cx)
+                            .into_any_element(),
                     );
                 }
                 let surface_dimmed = inactive

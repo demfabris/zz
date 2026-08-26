@@ -103,7 +103,7 @@ and browser search engine), one browser-local hotkey, and six chrome colors.**
 | `pane-inactive-opacity` | `0.7` | `0..=1` | Retained strength of inactive pane content and chrome; `1` disables dimming |
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
-| `pane-border-width` | `1` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
+| `pane-border-width` | `0.5` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
 | `widget-corner-radius` | `6` | `0..=24` | The corner every zz-ui widget turns . buttons, inputs, tags, menus, dialogs |
 | `editor-font-size` | `13` | `8..=32` | Buffer text size in editor panes, in pixels |
 | `editor-line-numbers` | `true` | `true` or `false` | Whether editor panes draw the line-number rail |
@@ -593,7 +593,7 @@ window-background-blur = true
 # Set every interface transition to its static state.
 animations = false
 
-# The toggle uses a 6px margin, 13.5px radius, 1px border, and surface ring.
+# The toggle uses a 6px margin, 13.5px radius, 0.5px border, and surface ring.
 pane-gaps = true
 
 # Keep inactive pane content at 70% strength. Set 1 to disable dimming.
@@ -602,7 +602,7 @@ pane-inactive-opacity = 0.7
 # Optional explicit chrome overrides
 pane-margin = 8
 pane-corner-radius = 6
-pane-border-width = 1
+pane-border-width = 0.5
 
 # One switch drives both FPS readouts; they are separate pipelines.
 show-fps = true

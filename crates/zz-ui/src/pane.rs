@@ -275,6 +275,7 @@ pub enum PaneDragOverlayState {
 pub fn pane_drag_overlay(
     id: impl Into<ElementId>,
     state: PaneDragOverlayState,
+    radii: Corners<Pixels>,
     cx: &App,
 ) -> Stateful<gpui::Div> {
     let (tint, cursor) = match state {
@@ -295,6 +296,10 @@ pub fn pane_drag_overlay(
         .occlude()
         .cursor(cursor)
         .bg(tint)
+        .rounded_tl(radii.top_left)
+        .rounded_tr(radii.top_right)
+        .rounded_bl(radii.bottom_left)
+        .rounded_br(radii.bottom_right)
 }
 
 /// The rectangle a dragged pane lands in if it is dropped now. Positioning and

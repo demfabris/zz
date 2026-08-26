@@ -324,7 +324,7 @@ mkdir -p ~/.config/zz && cp examples/config ~/.config/zz/config
 | `pane-gaps` | `false` | The card treatment. Off pins the next three to zero |
 | `pane-margin` | `6` | Gap between panes and at the window edge, 0–32 |
 | `pane-corner-radius` | `13.5` | 0–32 |
-| `pane-border-width` | `1` | 0–8, zero disables |
+| `pane-border-width` | `0.5` | 0–8, zero disables |
 | `widget-corner-radius` | `6` | Every button, input, menu, and dialog, 0–24 |
 | `animations` | `true` | Interface transitions, loading indicators, scrollbars, and animated UI images |
 | `theme` | unset | A Ghostty theme file by name, or `light:a,dark:b` |

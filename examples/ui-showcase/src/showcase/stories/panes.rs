@@ -89,6 +89,7 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
                         pane_drag_overlay(
                             "pane-drag-armed",
                             PaneDragOverlayState::Armed,
+                            uniform_radii(8.0),
                             cx,
                         ),
                         cx,
@@ -100,6 +101,7 @@ pub(super) fn render(cx: &mut Context<Showcase>) -> AnyElement {
                         pane_drag_overlay(
                             "pane-drag-source",
                             PaneDragOverlayState::Source,
+                            uniform_radii(8.0),
                             cx,
                         ),
                         cx,

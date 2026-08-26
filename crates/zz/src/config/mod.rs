@@ -59,7 +59,7 @@ const MIN_PANE_INACTIVE_OPACITY: f32 = 0.0;
 const MAX_PANE_INACTIVE_OPACITY: f32 = 1.0;
 const DEFAULT_PANE_CORNER_RADIUS: f32 = DEFAULT_WINDOW_CORNER_RADIUS;
 const DEFAULT_PANE_MARGIN: f32 = 6.0;
-const DEFAULT_PANE_BORDER_WIDTH: f32 = 1.0;
+const DEFAULT_PANE_BORDER_WIDTH: f32 = 0.5;
 // The zz-ui theme's own default radius, restated here because the theme now reads it from here.
 const DEFAULT_WIDGET_CORNER_RADIUS: f32 = 6.0;
 const DEFAULT_USE_SYSTEM_TITLEBAR: bool = false;
@@ -3357,7 +3357,7 @@ mod tests {
             parse_config("pane-gaps = yes\npane-border-width = 9\npane-inactive-opacity = 1.1\n");
 
         assert!(parsed.config.pane_gaps.value);
-        assert_f32_eq(parsed.config.pane_border_width.value, 1.0);
+        assert_f32_eq(parsed.config.pane_border_width.value, 0.5);
         assert_f32_eq(parsed.config.pane_inactive_opacity.value, 0.7);
         assert_eq!(
             parsed.config.pane_gaps.provenance,
@@ -3835,7 +3835,7 @@ mod tests {
         cx.update(|cx| cx.set_global(config));
         assert!(cx.update(|cx| pane_gaps(cx)));
         assert_eq!(cx.update(|cx| pane_margin(cx)), px(6.0));
-        assert_eq!(cx.update(|cx| pane_border_width(cx)), px(1.0));
+        assert_eq!(cx.update(|cx| pane_border_width(cx)), px(0.5));
         assert_eq!(
             cx.update(|cx| pane_content_radii(cx, WindowCorners::NONE)),
             Corners {

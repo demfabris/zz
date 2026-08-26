@@ -173,11 +173,9 @@ pub(crate) fn render_gui_status_bar(
         .overflow_hidden()
         .bg(background)
         .text_color(foreground)
-        .when(placement == GuiStatusPlacement::Bottom, |bar| {
-            bar.border_t_1().border_color(cx.theme().border)
-        })
-        .when(placement == GuiStatusPlacement::Titlebar, |bar| {
-            bar.border_b_1().border_color(cx.theme().border)
+        .when(!crate::config::pane_gaps(cx), |bar| match placement {
+            GuiStatusPlacement::Bottom => bar.border_t_1().border_color(cx.theme().border),
+            GuiStatusPlacement::Titlebar => bar.border_b_1().border_color(cx.theme().border),
         })
         .children(leading)
         .children(titlebar_controls)

@@ -2747,6 +2747,7 @@ impl AgentView {
         let directory = self.render_directory_picker(state, view.clone(), local_host);
         let command_hint = active_command_hint(&self.last_input, &state.available_commands);
         let completions = self.render_completions(view, cx);
+        let pane_radii = pane_content_radii(cx, self.window_corners);
 
         v_flex()
             .absolute()
@@ -2764,7 +2765,9 @@ impl AgentView {
                         px(COMPOSER_FOOTER_HEIGHT + COMPOSER_OUTER_PADDING + COMPOSER_SECTION_GAP)
                             + cx.theme().radius,
                     )
-                    .bg(crate::theme::app_pane_background(cx)),
+                    .bg(crate::theme::app_pane_background(cx))
+                    .rounded_bl(pane_radii.bottom_left)
+                    .rounded_br(pane_radii.bottom_right),
             )
             .child(
                 v_flex()
@@ -2848,6 +2851,8 @@ impl AgentView {
                 v_flex()
                     .w_full()
                     .bg(crate::theme::app_pane_background(cx))
+                    .rounded_bl(pane_radii.bottom_left)
+                    .rounded_br(pane_radii.bottom_right)
                     .px(px(COMPOSER_OUTER_PADDING))
                     .pt(px(COMPOSER_SECTION_GAP))
                     .pb(px(COMPOSER_OUTER_PADDING))

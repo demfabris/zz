@@ -41,7 +41,7 @@ pane-inactive-opacity = 0.7
 # same even treatment as other raised surfaces.
 pane-corner-radius = 13.5
 pane-margin = 6
-pane-border-width = 1
+pane-border-width = 0.5
 
 # The corner every widget turns (buttons, inputs, tags, menus, dialogs) in
 # logical pixels (0..=24). One value for the whole chrome: 0 squares it off,

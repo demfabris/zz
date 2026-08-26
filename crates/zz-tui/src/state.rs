@@ -11,10 +11,10 @@ use zz_protocol::{
     MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine,
     StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
-use zz_terminal::{TerminalAppearance, TerminalViewport};
+use zz_terminal::{KeyCode, SearchQuery, TerminalAppearance, TerminalViewport};
 
 use crate::{
-    layout::{PaneRect, ResolvedLayout, resolve},
+    layout::{PaneRect, Rect, ResolvedLayout, resolve},
     picker,
     sidebar::{
         self, Edit as SidebarEdit, EditKind as SidebarEditKind, Row as SidebarRow,
@@ -94,7 +94,10 @@ pub(crate) struct Model {
     pub status: StatusLine,
     pub prefix_armed: bool,
     pub command_prompt: Option<CommandPromptState>,
+    pub command_output_id: Option<u64>,
     pub command_output: Option<(PaneId, TerminalViewport)>,
+    pub command_output_search: Option<SearchQuery>,
+    pub command_output_swallowed_key: Option<KeyCode>,
     pub choose_tree: Option<ChooseTreeState>,
     pub choose_buffer: Option<ChooseBufferState>,
     pub display_panes: Option<DisplayPanesState>,
@@ -107,6 +110,7 @@ pub(crate) struct Model {
     pub size: TerminalSize,
     pub layout: ResolvedLayout,
     pub last_sent_geometry: HashMap<PaneId, (u16, u16, u32, u32)>,
+    pub last_sent_command_output_geometry: Option<(u16, u16, u32, u32)>,
     pub mouse_option: bool,
     pub mouse_modes_active: bool,
     client_focus: ClientFocusState,
@@ -135,7 +139,10 @@ impl Model {
             status: core.status().clone(),
             prefix_armed: core.prefix_armed(),
             command_prompt: core.command_prompt().cloned(),
+            command_output_id: None,
             command_output: None,
+            command_output_search: None,
+            command_output_swallowed_key: None,
             choose_tree: core.choose_tree().cloned(),
             choose_buffer: core.choose_buffer().cloned(),
             display_panes: core.display_panes().cloned(),
@@ -148,6 +155,7 @@ impl Model {
             size,
             layout: ResolvedLayout::default(),
             last_sent_geometry: HashMap::new(),
+            last_sent_command_output_geometry: None,
             mouse_option: crate::app::mouse_option_enabled(core.mux_options()),
             mouse_modes_active: crate::app::mouse_option_enabled(core.mux_options()),
             client_focus: ClientFocusState::default(),
@@ -168,7 +176,10 @@ impl Model {
         self.status = core.status().clone();
         self.prefix_armed = core.prefix_armed();
         self.command_prompt = core.command_prompt().cloned();
+        self.command_output_id = None;
         self.command_output = None;
+        self.command_output_search = None;
+        self.command_output_swallowed_key = None;
         self.choose_tree = core.choose_tree().cloned();
         self.choose_buffer = core.choose_buffer().cloned();
         self.display_panes = core.display_panes().cloned();
@@ -176,6 +187,7 @@ impl Model {
         self.picker_pane = None;
         self.picker_selection = 0;
         self.last_sent_geometry.clear();
+        self.last_sent_command_output_geometry = None;
         self.layout = ResolvedLayout::default();
         self.clamp_sidebar();
     }
@@ -256,6 +268,20 @@ impl Model {
         }
         self.clamp_sidebar();
         self.recompute_layout();
+    }
+
+    pub fn set_command_output(
+        &mut self,
+        output_id: Option<u64>,
+        output: Option<(PaneId, TerminalViewport)>,
+    ) {
+        if output_id.is_none() || self.command_output_id != output_id {
+            self.command_output_search = None;
+            self.command_output_swallowed_key = None;
+            self.last_sent_command_output_geometry = None;
+        }
+        self.command_output_id = output_id;
+        self.command_output = output;
     }
 
     /// Adopts a fresh status publication. Returns whether the block's
@@ -349,6 +375,8 @@ impl Model {
         if block > 0 {
             let line = u16::from(self.status.message_line).min(block.saturating_sub(1));
             Some(self.status_origin_y().saturating_add(line))
+        } else if self.command_output_search.is_some() {
+            Some(self.size.rows.saturating_sub(1))
         } else if self.command_prompt.is_some() || self.client_message.is_some() {
             Some(if self.status_top() {
                 0
@@ -619,6 +647,28 @@ impl Model {
             .collect()
     }
 
+    pub fn command_output_content_rect(&self) -> Rect {
+        let block = self.status_block_rows();
+        let header_y = if self.status_top() { block } else { 0 };
+        Rect {
+            x: 0,
+            y: header_y.saturating_add(1),
+            width: self.size.columns,
+            height: self.size.rows.saturating_sub(block.saturating_add(2)),
+        }
+    }
+
+    pub fn command_output_geometry(&self) -> Option<(u16, u16, u32, u32)> {
+        self.command_output.as_ref()?;
+        let content = self.command_output_content_rect();
+        (content.width > 0 && content.height > 0).then_some((
+            content.width,
+            content.height,
+            self.size.cell_width_px,
+            self.size.cell_height_px,
+        ))
+    }
+
     fn recompute_layout(&mut self) {
         let canvas = sidebar::canvas_rect(
             self.size.columns,
@@ -677,6 +727,108 @@ mod tests {
             endpoint,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn command_output_search_survives_frames_and_clears_with_the_view() {
+        let mut model = make_model(80, 24);
+        let pane = PaneId(7);
+        let viewport = TerminalViewport::blank(80, 22, zz_terminal::SessionStatus::Running);
+        model.set_command_output(Some(17), Some((pane, viewport.clone())));
+        model.command_output_search = Some(SearchQuery::literal("needle"));
+        model.command_output_swallowed_key = Some(KeyCode::Enter);
+
+        model.set_command_output(Some(17), Some((pane, viewport)));
+        assert_eq!(
+            model
+                .command_output_search
+                .as_ref()
+                .map(|query| query.text.as_str()),
+            Some("needle")
+        );
+
+        model.set_command_output(None, None);
+        assert!(model.command_output_search.is_none());
+        assert!(model.command_output_swallowed_key.is_none());
+        assert_eq!(model.message_row_y(), None);
+    }
+
+    #[test]
+    fn command_output_actor_identity_owns_local_overlay_state() {
+        let mut model = make_model(80, 24);
+        let pane = PaneId(7);
+        let content = model.command_output_content_rect();
+        let mut viewport = TerminalViewport::blank(
+            content.width,
+            content.height,
+            zz_terminal::SessionStatus::Running,
+        );
+        model.set_command_output(Some(17), Some((pane, viewport.clone())));
+        let geometry = model.command_output_geometry().expect("output geometry");
+        model.last_sent_command_output_geometry = Some(geometry);
+        model.command_output_search = Some(SearchQuery::literal("needle"));
+        model.command_output_swallowed_key = Some(KeyCode::Enter);
+
+        viewport.generation = viewport.generation.saturating_add(1);
+        model.set_command_output(Some(17), Some((pane, viewport.clone())));
+        assert_eq!(model.last_sent_command_output_geometry, Some(geometry));
+        assert_eq!(
+            model
+                .command_output_search
+                .as_ref()
+                .map(|query| query.text.as_str()),
+            Some("needle")
+        );
+        assert_eq!(model.command_output_swallowed_key, Some(KeyCode::Enter));
+
+        let mut delayed = TerminalViewport::blank(80, 24, zz_terminal::SessionStatus::Running);
+        delayed.generation = viewport.generation.saturating_add(1);
+        model.set_command_output(Some(17), Some((pane, delayed)));
+        assert_eq!(model.last_sent_command_output_geometry, Some(geometry));
+        assert_eq!(
+            model
+                .command_output_search
+                .as_ref()
+                .map(|query| query.text.as_str()),
+            Some("needle")
+        );
+        assert_eq!(model.command_output_swallowed_key, Some(KeyCode::Enter));
+
+        model.set_command_output(Some(18), Some((pane, viewport)));
+        assert_eq!(model.last_sent_command_output_geometry, None);
+        assert!(model.command_output_search.is_none());
+        assert!(model.command_output_swallowed_key.is_none());
+        assert_eq!(model.command_output_id, Some(18));
+    }
+
+    #[test]
+    fn command_output_search_uses_the_reserved_bottom_row_without_status() {
+        let mut model = make_model(80, 24);
+        model.command_output_search = Some(SearchQuery::default());
+        assert_eq!(model.message_row_y(), Some(23));
+    }
+
+    #[test]
+    fn reconnect_clears_command_output_state_and_resize_cache() {
+        let mut model = make_model(80, 24);
+        model.set_command_output(
+            Some(17),
+            Some((
+                PaneId(7),
+                TerminalViewport::blank(80, 22, zz_terminal::SessionStatus::Running),
+            )),
+        );
+        model.command_output_search = Some(SearchQuery::literal("needle"));
+        model.command_output_swallowed_key = Some(KeyCode::Escape);
+        model.last_sent_command_output_geometry = model.command_output_geometry();
+
+        model.reset_connection(&ClientCore::new());
+
+        assert_eq!(model.command_output_id, None);
+        assert!(model.command_output.is_none());
+        assert!(model.command_output_search.is_none());
+        assert!(model.command_output_swallowed_key.is_none());
+        assert_eq!(model.last_sent_command_output_geometry, None);
     }
 
     #[test]

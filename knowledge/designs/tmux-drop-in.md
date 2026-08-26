@@ -104,11 +104,15 @@ stored), `send-keys-repeat`, `smoke/cli-chain-parse-abort`,
 them. The combined summary still records the attached-client fixture separately as `PASS`, and the
 drift check is correctly failing on those named rows meanwhile.
 `compat/attached-client.sh` drives real inner zz/tmux attaches through pinned-tmux PTYs, covering copy
-mode, choosers, prompts, prefix tables, buffers, and nested attach. The Cargo launcher and a verified
+mode, command-output navigation, choosers, prompts, prefix tables, buffers, and nested attach. Its
+96-line command-output case checks line and page movement, search, selection-to-paste-buffer, live
+bindings, and both mode-key tables as local terminal semantics. The Cargo launcher and a verified
 built-bundle smoke both pass the six bare/new/attach × empty/existing cases through a spaced path.
 Gate 0 provides durable evidence for the surfaces it exercises. The live tracker still records CLI
-and TUI gaps, including startup config cause delivery, typed Control diagnostics, and asynchronous
-Control output; native GUI rendering still needs separate visual smoke evidence.
+and TUI gaps, including startup config cause delivery, ordinary TUI pane copy-search editing, typed
+Control diagnostics, and asynchronous Control output. The command-output fixture makes no mouse,
+OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still needs separate
+visual smoke evidence.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -425,6 +429,16 @@ the then-open nested `new-session` check.
 
 The nested `new-session` bound closed on 2026-08-22: attaching forms now run the same tty refusal
 as `attach-session` before the mux mutates.
+
+The later command-output navigation slice closed on 2026-08-26 with protocol v79. The existing
+`CommandOutput` event keeps its tag and gains a nonzero actor ID for real frames and closes; zero
+with no viewport is the authoritative no-output resync. `ClientCore` uses a watermark to reject
+stale traffic, while the TUI keys its search editor and resize cache to the actor. One shared content
+rectangle owns paint and `ResizeCommandOutput` geometry while reserving the output header, footer or
+message row, and configured status block. The TUI forwards press and repeat keys through the
+effective daemon copy table, drops releases, and follows live `mode-keys` and custom bindings. The
+local 96-line attached fixture covers movement, search, selection-to-paste-buffer, both copy tables,
+and their stock exit behavior.
 
 At the source anchor, the TUI ignored `CoreEvent::MuxOptionsChanged`, stored no mux option
 state, and printed daemon-authored `#[style]` markers as text. The safe prelude fixed the
@@ -1005,9 +1019,12 @@ clients receive the transcript once on stdout. For valid successful replay and `
 Interactive clients open one command-output view without duplicate Info or Warning events. Parser
 diagnostics may still publish their existing Warning summary. Successful output leaves stderr empty
 and status zero. A runtime failure keeps its stderr and status 1 while stdout before and after it,
-hook output, and list output remain ordered. The attached proof covers presentation and q dismissal;
-line and page movement, search, selection and copy, custom copy tables, and mode-key selection remain
-under `clients.tui-command-output-navigation`.
+hook output, and list output remain ordered. Protocol v79 closes local TUI keyboard navigation for
+that output: effective copy tables receive press and repeat keys, live table changes apply, search
+editing and `n`/`N` work, and line, page, selection, paste-buffer copy, and vi/emacs exit behavior
+match the pin. Actor IDs keep local search and geometry state attached to the right output. Mouse,
+OS clipboard, ordinary TUI pane copy-search editing, SSH, pixels, and the wider 29-action vocabulary
+remain outside this closure.
 
 One top-level invocation parses every match before replay. A bare assignment in an earlier file
 applies during parsing, affects a later file's conditional, and persists. A replayed
@@ -2211,8 +2228,8 @@ added per-invocation verbose, replay, and buffered command-name or parser diagno
 Command stdout transcript and one Interactive command-output view. Source no-match, glob, and actual
 OS or path read failures retain their existing error channels. Non-UTF-8 config content remains under
 `config.non-utf8-file-bytes`. First-diagnostic whole-file abort remains live in
-`config.parser-edge-cases`; TUI output-view navigation remains under
-`clients.tui-command-output-navigation`. Immediate command-hook flags-0 frames closed later in
+`config.parser-edge-cases`. Protocol v79 later closed the local TUI command-output keyboard contract;
+ordinary TUI pane copy-search editing remains unsupported. Immediate command-hook flags-0 frames closed later in
 protocol v77. Background `if-shell -b` and `run-shell -bC` flags-0 frames closed later without a wire
 bump. Hard disconnect after an immediate hook or source queue starts remains under
 `control-mode.disconnect-cancels-command-queue`. Protocol v78 later closed parser and hook-source raw

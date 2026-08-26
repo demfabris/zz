@@ -16,9 +16,9 @@ use zz_daemon::{Endpoint, HostEntry, InteractiveClient};
 use zz_protocol::{
     BrowserCommand, BrowserDescriptor, CommandInvocation, CommandResponse, GuiResponse,
     InputMessage, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot, ProtocolMessage,
-    ServerError, ServerHello,
+    ServerError, ServerHello, TerminalUiCommand,
 };
-use zz_terminal::{TerminalColorScheme, TerminalViewport};
+use zz_terminal::{SearchQuery, TerminalColorScheme, TerminalViewAction, TerminalViewport};
 
 use crate::{
     browser::{BrowserFrameProvider, BrowserState, BrowserSurface, BrowserWait, SurfaceChanges},
@@ -1278,6 +1278,7 @@ fn handle_core_event(
             *attempt = AttachAttempt::Idle;
             model.attached_session = Some(session);
             model.viewports.clear();
+            model.set_command_output(None, None);
             model.client_message = None;
             model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
             if let Some(input) = model.finish_client_focus_attach() {
@@ -1313,9 +1314,14 @@ fn handle_core_event(
             Ok(ProtocolOutcome::Repaint)
         }
         CoreEvent::CommandOutputChanged => {
-            model.command_output = lock_core(core)
-                .command_output()
-                .map(|(pane, viewport)| (pane, viewport.clone()));
+            let (output_id, output) = {
+                let core = lock_core(core);
+                let output = core
+                    .command_output()
+                    .map(|(pane, viewport)| (pane, viewport.clone()));
+                (core.command_output_id(), output)
+            };
+            model.set_command_output(output_id, output);
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::ChooseTreeChanged => {
@@ -1408,10 +1414,17 @@ fn handle_core_event(
             browser.command(pane, &command);
             Ok(ProtocolOutcome::None)
         }
-        CoreEvent::TerminalUiCommand { .. } => {
-            model.client_message =
-                Some(ClientMessage::local("terminal search is unsupported here"));
-            Ok(ProtocolOutcome::Repaint)
+        CoreEvent::TerminalUiCommand { pane, command } => {
+            if let Some(action) = command_output_ui_action(model, pane, command) {
+                client
+                    .send_input(InputMessage::CommandOutputView { action })
+                    .map_err(|error| error.to_string())?;
+                Ok(ProtocolOutcome::Repaint)
+            } else {
+                model.client_message =
+                    Some(ClientMessage::local("terminal search is unsupported here"));
+                Ok(ProtocolOutcome::Repaint)
+            }
         }
         CoreEvent::CommandResponse(response) => {
             handle_command_response(model, core, client, response, attempt, creating_default)
@@ -1438,6 +1451,31 @@ fn handle_core_event(
         | CoreEvent::AgentLagged { .. }
         | CoreEvent::AgentSessions { .. }
         | CoreEvent::Message(_) => Ok(ProtocolOutcome::None),
+    }
+}
+
+fn command_output_ui_action(
+    model: &mut Model,
+    pane: PaneId,
+    command: TerminalUiCommand,
+) -> Option<TerminalViewAction> {
+    let active = model
+        .command_output
+        .as_ref()
+        .is_some_and(|(output_pane, _)| *output_pane == pane);
+    if !active {
+        return None;
+    }
+    match command {
+        TerminalUiCommand::BeginSearch { direction } => {
+            let query = SearchQuery {
+                direction,
+                ..SearchQuery::default()
+            };
+            model.command_output_search = Some(query.clone());
+            model.command_output_swallowed_key = None;
+            Some(TerminalViewAction::SearchBegin(query))
+        }
     }
 }
 
@@ -1738,12 +1776,35 @@ fn send_resizes(model: &mut Model, client: &InteractiveClient) -> Result<(), Str
             .map_err(|error| error.to_string())?;
         model.last_sent_geometry.insert(pane, geometry);
     }
+    if let Some((geometry, message)) = command_output_resize_message(model) {
+        client
+            .send_input(message)
+            .map_err(|error| error.to_string())?;
+        model.last_sent_command_output_geometry = Some(geometry);
+    } else if model.command_output_geometry().is_none() {
+        model.last_sent_command_output_geometry = None;
+    }
     Ok(())
+}
+
+fn command_output_resize_message(model: &Model) -> Option<((u16, u16, u32, u32), InputMessage)> {
+    let geometry @ (columns, rows, cell_width_px, cell_height_px) =
+        model.command_output_geometry()?;
+    (model.last_sent_command_output_geometry != Some(geometry)).then_some((
+        geometry,
+        InputMessage::ResizeCommandOutput {
+            columns,
+            rows,
+            cell_width_px,
+            cell_height_px,
+        },
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zz_terminal::SearchDirection;
 
     fn paned_model() -> (Model, zz_protocol::PaneId) {
         let core = ClientCore::new();
@@ -1790,6 +1851,149 @@ mod tests {
             focused_window: Some(window),
         }));
         (model, pane)
+    }
+
+    #[test]
+    fn command_output_begin_search_starts_the_matching_local_prompt() {
+        let (mut model, pane) = paned_model();
+        model.set_command_output(
+            Some(1),
+            Some((
+                pane,
+                TerminalViewport::blank(79, 22, zz_terminal::SessionStatus::Running),
+            )),
+        );
+        model.command_output_swallowed_key = Some(zz_terminal::KeyCode::Escape);
+
+        let action = command_output_ui_action(
+            &mut model,
+            pane,
+            TerminalUiCommand::BeginSearch {
+                direction: SearchDirection::Backward,
+            },
+        );
+        assert!(matches!(
+            action,
+            Some(TerminalViewAction::SearchBegin(ref query))
+                if query.direction == SearchDirection::Backward && query.text.is_empty()
+        ));
+        assert_eq!(
+            model
+                .command_output_search
+                .as_ref()
+                .map(|query| query.direction),
+            Some(SearchDirection::Backward)
+        );
+        assert_eq!(model.command_output_swallowed_key, None);
+
+        assert_eq!(
+            command_output_ui_action(
+                &mut model,
+                PaneId(pane.0 + 1),
+                TerminalUiCommand::BeginSearch {
+                    direction: SearchDirection::Forward,
+                },
+            ),
+            None
+        );
+        assert_eq!(
+            model
+                .command_output_search
+                .as_ref()
+                .map(|query| query.direction),
+            Some(SearchDirection::Backward)
+        );
+    }
+
+    #[test]
+    fn command_output_resize_matches_rendered_content_and_tracks_geometry() {
+        let (mut model, pane) = paned_model();
+        let viewport = TerminalViewport::blank(79, 22, zz_terminal::SessionStatus::Running);
+        assert_eq!(command_output_resize_message(&model), None);
+
+        model.set_command_output(Some(1), Some((pane, viewport.clone())));
+        let content = model.command_output_content_rect();
+        let (geometry, message) = command_output_resize_message(&model).expect("open resize");
+        assert_eq!(geometry.0, content.width);
+        assert_eq!(geometry.1, content.height);
+        assert!(matches!(
+            message,
+            InputMessage::ResizeCommandOutput {
+                columns,
+                rows,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            } if columns == content.width && rows == content.height
+        ));
+
+        model.last_sent_command_output_geometry = Some(geometry);
+        assert_eq!(command_output_resize_message(&model), None);
+
+        let mut size = model.size;
+        size.columns = 91;
+        size.rows = 30;
+        model.set_size(size);
+        let resized_content = model.command_output_content_rect();
+        let (resized_geometry, resized_message) =
+            command_output_resize_message(&model).expect("terminal resize");
+        assert_eq!(resized_geometry.0, resized_content.width);
+        assert_eq!(resized_geometry.1, resized_content.height);
+        assert!(matches!(
+            resized_message,
+            InputMessage::ResizeCommandOutput { columns: 91, rows, .. }
+                if rows == resized_content.height
+        ));
+
+        model.last_sent_command_output_geometry = Some(resized_geometry);
+        assert!(model.set_status(zz_protocol::StatusLine {
+            rows: vec!["one".to_owned(), "two".to_owned()],
+            position: zz_protocol::StatusPosition::Bottom,
+            ..zz_protocol::StatusLine::default()
+        }));
+        let status_content = model.command_output_content_rect();
+        let (status_geometry, status_message) =
+            command_output_resize_message(&model).expect("status resize");
+        assert_eq!(status_geometry.1, status_content.height);
+        assert!(matches!(
+            status_message,
+            InputMessage::ResizeCommandOutput { rows, .. } if rows == status_content.height
+        ));
+
+        model.last_sent_command_output_geometry = Some(status_geometry);
+        model.set_command_output(None, None);
+        assert_eq!(model.last_sent_command_output_geometry, None);
+        assert_eq!(command_output_resize_message(&model), None);
+
+        model.set_command_output(Some(2), Some((pane, viewport)));
+        assert!(command_output_resize_message(&model).is_some());
+    }
+
+    #[test]
+    fn same_output_frames_dedupe_but_an_identical_replacement_resizes() {
+        let (mut model, pane) = paned_model();
+        let content = model.command_output_content_rect();
+        let mut frame = TerminalViewport::blank(
+            content.width,
+            content.height,
+            zz_terminal::SessionStatus::Running,
+        );
+        model.set_command_output(Some(1), Some((pane, frame.clone())));
+        let (geometry, _) = command_output_resize_message(&model).expect("open resize");
+        model.last_sent_command_output_geometry = Some(geometry);
+
+        frame.generation = frame.generation.saturating_add(1);
+        model.set_command_output(Some(1), Some((pane, frame.clone())));
+        assert_eq!(command_output_resize_message(&model), None);
+
+        model.set_command_output(Some(2), Some((pane, frame)));
+        let (replacement_geometry, replacement) =
+            command_output_resize_message(&model).expect("replacement resize");
+        assert_eq!(replacement_geometry, geometry);
+        assert!(matches!(
+            replacement,
+            InputMessage::ResizeCommandOutput { columns, rows, .. }
+                if columns == content.width && rows == content.height
+        ));
     }
 
     #[test]

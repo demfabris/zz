@@ -10,8 +10,8 @@ use zz_protocol::{
     parse_styled_segments,
 };
 use zz_terminal::{
-    CellWidth, Color, CursorStyle, Glyph, KittyPlacement, PackedCell, PackedStyle,
-    TerminalAppearance, TerminalMode, TerminalViewport, UnderlineStyle,
+    CellWidth, Color, CursorStyle, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection,
+    SearchQuery, TerminalAppearance, TerminalMode, TerminalViewport, UnderlineStyle,
 };
 
 use crate::{
@@ -95,7 +95,7 @@ impl StyledLine {
     fn len(&self) -> usize {
         self.segments
             .iter()
-            .map(|segment| segment.text.chars().count())
+            .map(|segment| text_display_width(&segment.text))
             .sum()
     }
 
@@ -107,12 +107,13 @@ impl StyledLine {
         let mut truncated = Self::default();
         let mut remaining = width;
         for segment in &self.segments {
-            if remaining == 0 {
+            let text = truncate_display_cells(&segment.text, remaining);
+            let segment_was_truncated = text.len() != segment.text.len();
+            remaining = remaining.saturating_sub(text_display_width(&text));
+            truncated.push_segment(&text, segment.style.clone());
+            if segment_was_truncated {
                 break;
             }
-            let text = segment.text.chars().take(remaining).collect::<String>();
-            remaining = remaining.saturating_sub(text.chars().count());
-            truncated.push_segment(&text, segment.style.clone());
         }
         truncated
     }
@@ -279,18 +280,11 @@ impl Renderer {
             self.kitty.suspend(&mut self.output);
             self.hide_cursor();
         } else if let Some((pane, viewport)) = &model.command_output {
-            let block = model.status_block_rows();
-            let header_y = if model.status_top() { block } else { 0 };
-            let rect = Rect {
-                x: 0,
-                y: header_y.saturating_add(1),
-                width: model.size.columns,
-                height: model.size.rows.saturating_sub(block.saturating_add(2)),
-            };
+            let rect = model.command_output_content_rect();
             self.paint_header_segment(
                 Rect {
                     x: 0,
-                    y: header_y,
+                    y: rect.y.saturating_sub(1),
                     width: model.size.columns,
                     height: 1,
                 },
@@ -303,7 +297,7 @@ impl Renderer {
             self.paint_status_block_in(model, 0, model.size.columns, force);
             self.output.append(&mut self.queued_control);
             self.kitty.suspend(&mut self.output);
-            self.place_viewport_cursor(*pane, viewport, rect, model);
+            self.place_command_output_cursor(*pane, viewport, rect, model);
         } else {
             self.paint_workspace(model, force);
             if model.sidebar_visible() {
@@ -986,11 +980,7 @@ impl Renderer {
             return;
         }
         let block = usize::from(model.status_block_rows());
-        let overlay = if model.sidebar_visible() {
-            None
-        } else {
-            status_overlay(model, width)
-        };
+        let overlay = status_overlay(model, width);
         let origin = model.status_origin_y();
         let mut lines = Vec::with_capacity(block);
         for index in 0..block {
@@ -1226,6 +1216,26 @@ impl Renderer {
         self.place_viewport_cursor(pane, viewport, entry.rect.content(), model);
     }
 
+    fn place_command_output_cursor(
+        &mut self,
+        pane: PaneId,
+        viewport: &TerminalViewport,
+        rect: Rect,
+        model: &Model,
+    ) {
+        let Some(query) = &model.command_output_search else {
+            self.place_viewport_cursor(pane, viewport, rect, model);
+            return;
+        };
+        let Some(row) = model.message_row_y() else {
+            self.hide_cursor();
+            return;
+        };
+        let (_, column) = command_output_search_display(query, model.size.columns);
+        write_cursor_position(&mut self.output, column, row);
+        self.output.extend_from_slice(b"\x1b[6 q\x1b[?25h");
+    }
+
     fn place_sidebar_edit_cursor(&mut self, model: &Model) {
         let Some(edit) = &model.sidebar_edit else {
             self.hide_cursor();
@@ -1459,6 +1469,15 @@ enum StatusOverlay {
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let style = overlay_style(&model.appearance);
+    if let Some(query) = &model.command_output_search {
+        let mut line = StyledLine::default();
+        let (prompt, _) = command_output_search_display(query, width);
+        line.push_segment(&prompt, style);
+        return Some(StatusOverlay::Row(line));
+    }
+    if model.sidebar_visible() && model.command_output.is_none() {
+        return None;
+    }
     if let Some(prompt) = &model.command_prompt {
         let mut line = StyledLine::default();
         line.push_segment(
@@ -1496,40 +1515,13 @@ fn overlay_style(appearance: &TerminalAppearance) -> TmuxStyle {
 }
 
 fn overlay_right(line: &StyledLine, overlay: &StyledLine, width: usize) -> StyledLine {
-    let overlay_width = display_width(overlay);
+    let overlay_width = overlay.len();
     let keep = width.saturating_sub(overlay_width);
-    let mut merged = truncate_display(line, keep);
-    let padding = keep.saturating_sub(display_width(&merged));
+    let mut merged = line.truncate(keep);
+    let padding = keep.saturating_sub(merged.len());
     merged.push_plain(&" ".repeat(padding));
     merged.append(overlay);
     merged
-}
-
-fn display_width(line: &StyledLine) -> usize {
-    line.segments
-        .iter()
-        .flat_map(|segment| segment.text.chars())
-        .map(|character| character.width().unwrap_or(0))
-        .sum()
-}
-
-fn truncate_display(line: &StyledLine, width: usize) -> StyledLine {
-    let mut truncated = StyledLine::default();
-    let mut used = 0;
-    for segment in &line.segments {
-        let mut text = String::new();
-        for character in segment.text.chars() {
-            let character_width = character.width().unwrap_or(0);
-            if used + character_width > width {
-                truncated.push_segment(&text, segment.style.clone());
-                return truncated;
-            }
-            used += character_width;
-            text.push(character);
-        }
-        truncated.push_segment(&text, segment.style.clone());
-    }
-    truncated
 }
 
 fn base_status_left(model: &Model) -> StyledLine {
@@ -1597,7 +1589,12 @@ fn mode_indicator(mode: TerminalMode) -> String {
 
 fn status_indicators(model: &Model) -> String {
     let mut indicators = String::new();
-    if let Some(viewport) = model.active_viewport() {
+    let viewport = model
+        .command_output
+        .as_ref()
+        .map(|(_, viewport)| viewport)
+        .or_else(|| model.active_viewport());
+    if let Some(viewport) = viewport {
         match viewport.mode {
             TerminalMode::Live => {}
             TerminalMode::Copy { .. } | TerminalMode::View { .. } => {
@@ -1621,6 +1618,21 @@ fn status_indicators(model: &Model) -> String {
     indicators
 }
 
+fn command_output_search_prompt(query: &SearchQuery) -> String {
+    let prefix = match query.direction {
+        SearchDirection::Forward => '/',
+        SearchDirection::Backward => '?',
+    };
+    format!("{prefix}{}", query.text)
+}
+
+fn command_output_search_display(query: &SearchQuery, width: u16) -> (String, u16) {
+    let prompt = command_output_search_prompt(query);
+    let visible = truncate(&prompt, width.saturating_sub(1));
+    let cursor = u16::try_from(text_display_width(&visible)).unwrap_or(u16::MAX);
+    (padded_segment(&visible, width, ' '), cursor)
+}
+
 fn combine_status(left: &StyledLine, right: &StyledLine, width: u16) -> StyledLine {
     let width = usize::from(width);
     let right = right.truncate(width);
@@ -1637,18 +1649,53 @@ fn combine_status(left: &StyledLine, right: &StyledLine, width: u16) -> StyledLi
 fn padded_styled(line: &StyledLine, width: u16, fill: char) -> StyledLine {
     let mut line = line.truncate(usize::from(width));
     let padding = usize::from(width).saturating_sub(line.len());
-    line.push_plain(&fill.to_string().repeat(padding));
+    line.push_plain(&fill_cells(fill, padding));
     line
 }
 
 fn padded_segment(text: &str, width: u16, fill: char) -> String {
     let text = truncate(text, width);
-    let padding = usize::from(width).saturating_sub(text.chars().count());
-    format!("{text}{}", fill.to_string().repeat(padding))
+    let padding = usize::from(width).saturating_sub(text_display_width(&text));
+    format!("{text}{}", fill_cells(fill, padding))
 }
 
 fn truncate(text: &str, width: u16) -> String {
-    text.chars().take(usize::from(width)).collect()
+    truncate_display_cells(text, usize::from(width))
+}
+
+fn truncate_display_cells(text: &str, width: usize) -> String {
+    let mut used = 0_usize;
+    text.chars()
+        .take_while(|character| {
+            let next = used.saturating_add(character.width().unwrap_or(0));
+            if next > width {
+                false
+            } else {
+                used = next;
+                true
+            }
+        })
+        .collect()
+}
+
+fn text_display_width(text: &str) -> usize {
+    text.chars()
+        .map(|character| character.width().unwrap_or(0))
+        .sum()
+}
+
+fn fill_cells(fill: char, width: usize) -> String {
+    let fill_width = fill.width().unwrap_or(0);
+    if fill_width == 0 {
+        return " ".repeat(width);
+    }
+    let count = width / fill_width;
+    let remainder = width % fill_width;
+    format!(
+        "{}{}",
+        fill.to_string().repeat(count),
+        " ".repeat(remainder)
+    )
 }
 
 fn clear_screen(output: &mut Vec<u8>, background: Color) {
@@ -1932,6 +1979,21 @@ mod tests {
     }
 
     #[test]
+    fn plain_text_clipping_uses_terminal_display_cells() {
+        assert_eq!(truncate("界ab", 3), "界a");
+        assert_eq!(truncate("界ab", 1), "");
+        assert_eq!(truncate("e\u{301}界", 1), "e\u{301}");
+
+        let padded = padded_segment("界e\u{301}", 5, ' ');
+        assert_eq!(padded, "界e\u{301}  ");
+        assert_eq!(text_display_width(&padded), 5);
+
+        let wide_fill = padded_segment("a", 4, '界');
+        assert_eq!(text_display_width(&wide_fill), 4);
+        assert_eq!(wide_fill, "a界 ");
+    }
+
+    #[test]
     fn styled_lines_render_palette_rgb_and_attributes_without_markers() {
         let appearance = TerminalAppearance::default();
         let line = StyledLine::parsed(
@@ -2188,6 +2250,61 @@ mod tests {
             "VIEW 3/40"
         );
         assert_eq!(mode_indicator(TerminalMode::Live), "");
+    }
+
+    #[test]
+    fn command_output_search_prompt_tracks_direction_and_status_overlay() {
+        let mut model = block_model(12, 8);
+        model.command_output_search = Some(SearchQuery {
+            text: "needle".to_owned(),
+            direction: SearchDirection::Backward,
+            ..SearchQuery::default()
+        });
+        assert_eq!(
+            command_output_search_prompt(model.command_output_search.as_ref().unwrap()),
+            "?needle"
+        );
+        let Some(StatusOverlay::Row(line)) = status_overlay(&model, 12) else {
+            panic!("command output search did not replace the status row");
+        };
+        assert_eq!(line.plain_text(), "?needle     ");
+
+        model.command_output_search.as_mut().unwrap().direction = SearchDirection::Forward;
+        assert_eq!(
+            command_output_search_prompt(model.command_output_search.as_ref().unwrap()),
+            "/needle"
+        );
+
+        let mut sidebar_model = block_model(80, 8);
+        assert!(sidebar_model.sidebar_visible());
+        sidebar_model.command_output_search = Some(SearchQuery::literal("visible"));
+        assert!(matches!(
+            status_overlay(&sidebar_model, 80),
+            Some(StatusOverlay::Row(_))
+        ));
+
+        let query = SearchQuery::literal("界e\u{301}界");
+        let (painted, cursor) = command_output_search_display(&query, 6);
+        assert_eq!(painted, "/界e\u{301}  ");
+        assert_eq!(text_display_width(&painted), 6);
+        assert_eq!(cursor, 4);
+    }
+
+    #[test]
+    fn command_output_viewport_owns_the_mode_indicator() {
+        let mut model = block_model(80, 8);
+        let mut viewport = TerminalViewport::blank(80, 6, SessionStatus::Running);
+        viewport.mode = TerminalMode::View {
+            position: 3,
+            total: 40,
+        };
+        model.command_output = Some((PaneId(9), viewport));
+        assert!(model.sidebar_visible());
+        assert!(status_indicators(&model).starts_with("VIEW 3/40"));
+        let Some(StatusOverlay::Right(overlay)) = status_overlay(&model, 80) else {
+            panic!("command output mode indicator was suppressed with the hidden sidebar");
+        };
+        assert!(overlay.plain_text().contains("VIEW 3/40"));
     }
 
     #[test]

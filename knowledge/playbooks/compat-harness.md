@@ -244,8 +244,15 @@ note and does not appear in the typed prompt. The local Control probe runs `-C` 
 requires existing-session refusal for `attach-session` and `new-session -A`, permits a fresh `-A`
 miss, and pipes stdin through a final attach to prove a nonterminal stdin does not publish tty
 identity. The daemon unit matrix covers `new-session -Ad`; the attached fixture does not. The
-current full fixture passed for zz and pinned tmux after independent review of the fresh-session
-marker. This focused attached proof does not update the intentionally stale canonical summary.
+command-output probe builds a 96-line local transcript and runs on both sides. It checks line and
+page movement, vi Escape selection clearing without exit, search cancel, search editing and submit,
+`n`/`N`, selection-to-paste-buffer, a live custom `copy-mode-vi` binding, a live switch to the emacs
+table, vi `q` cancel, and emacs Escape cancel. It verifies the created paste buffer contains the
+selected match and then removes it. The current full fixture passed for zz and pinned tmux after
+independent review of the fresh-session marker. This focused proof does not cover command-output
+mouse behavior, OS clipboard delivery, ordinary TUI pane copy-search editing, SSH transport, pixel
+comparison, or the 29 unsupported window-copy actions. It does not update the intentionally stale
+canonical summary.
 Failure output includes both
 outer screens and zz daemon stderr; cleanup removes outer servers before inner servers.
 `--attached-client` runs it after the headless scenarios and includes it in the overall exit status

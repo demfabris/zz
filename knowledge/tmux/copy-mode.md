@@ -4,7 +4,7 @@ title: Copy mode and view mode
 description: "Daemon-native tmux copy/view mode over libghostty history: vi/emacs movement tables, selection, incremental search, jumps, and copy/pipe variants, driven by send-keys -X and painted by GPUI."
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, copy-mode, view-mode, selection, search]
-timestamp: 2026-08-25T00:00:00Z
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -49,6 +49,40 @@ actor executes both against the frozen revision. `-X` actions never reach the PT
   `search-again`/`search-reverse` repeat it, while vi `*`/`#` search forward/backward for the word
   under the copy cursor. `word-separators` (a session option) and `set-clipboard` /`copy-command`
   shape word selection and copy destinations.
+
+# TUI command-output navigation
+
+Command output uses the daemon's copy tables without entering an ordinary pane's copy session. The
+daemon switches the attached client's active key engine to the output pane's effective `copy-mode`
+or `copy-mode-vi` table. A live `mode-keys` change retargets the open view, and a live `bind-key`
+change affects its next key. The TUI forwards press and repeat keys into that engine and drops
+releases. Stock emacs `q` and Escape cancel the output. Stock vi `q` cancels, while Escape runs
+`clear-selection` and leaves the output open.
+
+`TerminalUiCommand::BeginSearch` opens a command-output search editor inside the TUI. Text,
+Backspace, and bounded control-free paste send `SearchUpdate`. Enter submits the live query by
+leaving edit mode. Escape sends `SearchClose`, and the effective copy table routes `n` and `N` to
+the next and previous match. This editor belongs only to command output. An ordinary terminal pane
+in TUI copy mode still has no TUI search editor.
+
+Line movement, page movement, selection, rectangle changes, and copy actions operate on the retained
+output terminal. The compatibility fixture checks that a selected match reaches a daemon paste
+buffer. It does not claim an OS clipboard write.
+
+Protocol v79 adds `output_id` to the existing `EventPayload::CommandOutput` tag. Real frames and
+closes use a nonzero actor ID; ID zero with no viewport is the authoritative no-output resync.
+`ClientCore` retains a watermark and ignores older actor traffic, including a late frame after its
+close. The TUI keeps local search, swallowed-key, and resize-cache state while the same actor
+publishes new frames, then clears it for a replacement actor, close, or reconnect. The renderer and
+`ResizeCommandOutput` share one full-width content rectangle that reserves an output-header row, a
+footer or message row, and the tmux status block, so the terminal actor receives the same rows and
+columns the TUI paints.
+
+`compat/attached-client.sh` creates 96 output lines and runs the same semantic checks on zz and pinned
+tmux: line and page movement, search editing, `n`/`N`, selection-to-paste-buffer, a live custom
+binding, and both vi and emacs tables. The fixture compares terminal state and visible markers. It
+does not prove mouse behavior, SSH transport, pixel parity, or the stored canonical summary. The 29
+unsupported `window-copy` actions below remain open.
 
 # Schema: `send-keys -X` action families
 

@@ -153,7 +153,8 @@ No-match, glob, and located depth diagnostics stay inside the source command's g
 summaries and lexer-owned diagnostics remain generic Warning events
 behind the prose classifier in `control-mode.diagnostic-typing`. The known-family Warning fallback
 remains for legacy producers, while the exact protocol handshake rejects v76 and v77 client-daemon
-skew before either event path can mix. Protocol v78 peers reject both older shapes as well. Counting
+skew before either event path can mix. Protocol v78 peers reject both older shapes, and protocol
+v79 peers also reject the pre-actor-ID command-output shape. Counting
 the initial `source-file` as invocation 1, both sides run 50 concurrent
 source invocations and refuse invocation 51 with `too many nested files` before any of its
 paths are matched or loaded: Command stderr at rc 1, the same lowercase text on the Control
@@ -181,6 +182,8 @@ client can see it, which `config.startup-diagnostic-delivery` owns. A separate m
 tmux `d77c9dc6`, outside the 12-step runtime scenario, found that startup `display-message -p` text
 becomes a file-and-line config cause for the first eligible client while list-style output is
 discarded. The detached launching command receives neither form on stdout or stderr.
+This startup diagnostic delivery gap is the next compatibility slice after command-output
+navigation.
 Runtime replay errors now follow
 the invoking client. A missing `kill-session` target and a semantic failure from a syntactically
 valid `set-option` use the pin's bare text on Command stderr at rc 1, as typed Control errors with
@@ -215,8 +218,12 @@ Source no-match, glob, and actual OS or path read failures retain their existing
 inserts its own complete frame at the parent command's replay position, so recursion is depth-first.
 This is per-invocation batching, not a claim of physical verbose and replay interleaving. Valid
 successful replay and `-v` output produce no duplicate Info or Warning event; parser diagnostics may
-still publish their existing Warning summary. The attached fixture proves presentation and dismissal;
-TUI navigation remains under `clients.tui-command-output-navigation`. Every runtime invocation,
+still publish their existing Warning summary. Protocol v79 closes the TUI keyboard-navigation
+contract for the output view: live copy tables, line and page movement, search editing plus `n`/`N`,
+selection-to-paste-buffer, and stock vi/emacs exit behavior. The local attached fixture drives these
+semantics over 96 output lines on zz and the pinned tmux. It does not claim mouse behavior, an OS
+clipboard write, ordinary TUI pane copy-search editing, SSH transport, or presentation pixels.
+Every runtime invocation,
 including one that names the active native `zz/mux.conf`, parses its matches in declared-path and
 glob order before replaying them in the same order. Declared default, after, and default paths
 therefore apply as `DAD`; a loud miss returns status 1 without stopping later matches, and diagnostics

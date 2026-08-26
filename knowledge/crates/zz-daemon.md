@@ -251,7 +251,7 @@ writer thread (`recv()` priority: `reliable` → `command_output` → `agent` �
 | Lane (`OutboundState`) | Content | Coalescing |
 |------------------------|---------|-----------|
 | `reliable: VecDeque<Vec<u8>>` | `ServerHello`, command responses, snapshots, non-terminal events | Never dropped; bounded at `MAX_RELIABLE_MESSAGES = 256` / `MAX_OUTBOUND_BYTES = 72 MiB` |
-| `command_output: Option<Vec<u8>>` | Native command-output viewport | One coalesced slot; newest replaces stale |
+| `command_output: Option<PendingCommandOutput>` | Native command-output viewport plus actor ID | One coalesced slot; the newest frame from the newest actor replaces stale work |
 | `agent: BTreeMap<PaneId, PendingAgent>` | Per-pane `AgentUpdates` batches, already coalesced into 25 ms windows by the fanout | FIFO per pane, round-robin across panes (one frame per pane per turn), capped at `MAX_PENDING_AGENT_BYTES = 4 MiB` |
 | `terminals: BTreeMap<PaneId, PendingTerminal>` | Per-pane `TerminalViewport`/`TerminalPatch` frames | **One pending frame per pane**; newest replaces stale under backpressure |
 
@@ -270,6 +270,15 @@ subscriber under `ServerState`, encodes the potentially megabyte-scale viewport 
 lock, then reacquires it to revalidate both terminal identity and mailbox identity before installing the
 already-encoded frame. A close, replacement, or unregister that wins during encoding makes the stale frame
 eligible only for buffer recycling; it cannot reappear after the newer state transition.
+
+Protocol v79 assigns every command-output actor a nonzero ID from one checked monotonic counter in
+`ServerState`, shared across clients for the daemon lifetime. Initial frames, later watcher updates,
+current-output resyncs, and closes keep that ID. A resync with no live output uses the sole zero-ID
+empty sentinel. Replacement sends the retired actor's reliable close before the new actor's frame.
+The mailbox stores the actor ID beside its coalesced bytes, refuses a frame older than the pending
+actor, and lets a reliable close clear any pending frame no newer than that close. These checks pair
+with the client watermark, so reordered lane priority and mailbox replacement cannot resurrect a
+retired output.
 
 A `zz-pane-{n}` watcher walks the pane's per-view viewports (`TerminalViewId(client.0)`, one per
 attached client), diffs each against that view's previous viewport, and produces either a full
@@ -577,7 +586,7 @@ source-read placement plus hidden numbering alongside its earlier queue and stat
 stored canonical `source-file-control` row remains unchanged at three steps. Generic config Warning
 typing, hard-disconnect queue cancellation, config
 byte input, source stdin transport, parser abort semantics, hook cwd selection, deferred event hooks,
-retained startup causes, and TUI command-output navigation remain open.
+and retained startup causes remain open.
 
 # Examples
 

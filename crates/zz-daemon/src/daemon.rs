@@ -1261,7 +1261,7 @@ struct OutboundMailbox {
 #[derive(Default)]
 struct OutboundState {
     reliable: VecDeque<Vec<u8>>,
-    command_output: Option<Vec<u8>>,
+    command_output: Option<PendingCommandOutput>,
     agent: BTreeMap<PaneId, PendingAgent>,
     agent_order: VecDeque<PaneId>,
     terminals: BTreeMap<PaneId, PendingTerminal>,
@@ -1309,6 +1309,11 @@ struct TerminalGeneration {
 struct PendingTerminal {
     encoded: Vec<u8>,
     current: TerminalGeneration,
+}
+
+struct PendingCommandOutput {
+    output_id: u64,
+    encoded: Vec<u8>,
 }
 
 /// One pane's undelivered agent frames. Unlike a terminal viewport an agent
@@ -1434,13 +1439,18 @@ impl OutboundMailbox {
             }) => Some((*pane, image_ids.as_slice())),
             _ => None,
         };
-        let clears_command_output = matches!(
-            message,
+        let closes_command_output = match message {
             ProtocolMessage::Event(Event {
-                payload: EventPayload::CommandOutput { viewport: None, .. },
+                payload:
+                    EventPayload::CommandOutput {
+                        output_id,
+                        viewport: None,
+                        ..
+                    },
                 ..
-            })
-        );
+            }) => Some(*output_id),
+            _ => None,
+        };
         let encoded = match self.encode_message(message) {
             Ok(encoded) => encoded,
             Err(error) => {
@@ -1472,9 +1482,18 @@ impl OutboundMailbox {
                 state.delivered_images.remove(&pane);
             }
         }
-        if clears_command_output && let Some(frame) = state.command_output.take() {
-            state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
-            recycle_outbound_frame(&mut state, frame);
+        if let Some(output_id) = closes_command_output
+            && state
+                .command_output
+                .as_ref()
+                .is_some_and(|pending| output_id == 0 || pending.output_id <= output_id)
+        {
+            let pending = state
+                .command_output
+                .take()
+                .expect("matching command output is pending");
+            state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
+            recycle_outbound_frame(&mut state, pending.encoded);
         }
         if state.reliable.len() >= MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
@@ -1852,19 +1871,42 @@ impl OutboundMailbox {
     }
 
     fn replace_command_output(&self, message: &ProtocolMessage) -> bool {
+        let output_id = match message {
+            ProtocolMessage::Event(Event {
+                payload:
+                    EventPayload::CommandOutput {
+                        output_id,
+                        viewport: Some(_),
+                        ..
+                    },
+                ..
+            }) => *output_id,
+            _ => return false,
+        };
         let Ok(encoded) = self.encode_message(message) else {
             log::error!("failed to encode command-output viewport");
             return false;
         };
-        self.replace_encoded_command_output(encoded)
+        self.replace_encoded_command_output(output_id, encoded)
     }
 
-    fn replace_encoded_command_output(&self, encoded: Vec<u8>) -> bool {
+    fn replace_encoded_command_output(&self, output_id: u64, encoded: Vec<u8>) -> bool {
         let mut state = self.state.lock();
         if state.closed {
             return false;
         }
-        let replaced_len = state.command_output.as_ref().map_or(0, Vec::len);
+        if state
+            .command_output
+            .as_ref()
+            .is_some_and(|pending| pending.output_id > output_id)
+        {
+            recycle_outbound_frame(&mut state, encoded);
+            return true;
+        }
+        let replaced_len = state
+            .command_output
+            .as_ref()
+            .map_or(0, |pending| pending.encoded.len());
         if !reserve_outbound_bytes(&mut state, encoded.len(), replaced_len) {
             close_outbound(&mut state);
             self.ready.notify_all();
@@ -1874,9 +1916,11 @@ impl OutboundMailbox {
             .queued_bytes
             .saturating_sub(replaced_len)
             .saturating_add(encoded.len());
-        let replaced = state.command_output.replace(encoded);
+        let replaced = state
+            .command_output
+            .replace(PendingCommandOutput { output_id, encoded });
         if let Some(replaced) = replaced {
-            recycle_outbound_frame(&mut state, replaced);
+            recycle_outbound_frame(&mut state, replaced.encoded);
         }
         drop(state);
         self.ready.notify_one();
@@ -1890,9 +1934,9 @@ impl OutboundMailbox {
                 state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
                 return Some(frame);
             }
-            if let Some(frame) = state.command_output.take() {
-                state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
-                return Some(frame);
+            if let Some(pending) = state.command_output.take() {
+                state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
+                return Some(pending.encoded);
             }
             // One frame per pane per turn: a chatty agent never starves the
             // pane beside it, and terminals still drain behind both.
@@ -1999,7 +2043,10 @@ impl OutboundMailbox {
             target: "zz_daemon::diagnostics::outbound",
             "snapshot reason={reason} client={client} reliable_messages={} command_output_bytes={} agent_panes={} agent_frames={} terminal_messages={} delivered_terminals={} delivered_image_panes={} terminal_order={} recycled_frames={} recycled_capacity={} queued_bytes={} closed={}",
             state.reliable.len(),
-            state.command_output.as_ref().map_or(0, Vec::len),
+            state
+                .command_output
+                .as_ref()
+                .map_or(0, |pending| pending.encoded.len()),
             state.agent.len(),
             state.agent.values().map(|queued| queued.frames.len()).sum::<usize>(),
             state.terminals.len(),
@@ -2015,7 +2062,10 @@ impl OutboundMailbox {
             target: "zz_daemon::diagnostics::outbound",
             "snapshot reason={reason} client={client} reliable_frame_lengths={:?} command_output_capacity={:?} terminals={:#?} delivered_terminals={:#?} terminal_order={:#?} recycled_frame_capacities={:?}",
             state.reliable.iter().map(Vec::len).collect::<Vec<_>>(),
-            state.command_output.as_ref().map(Vec::capacity),
+            state
+                .command_output
+                .as_ref()
+                .map(|pending| pending.encoded.capacity()),
             state.terminals.iter().map(|(pane, pending)| (*pane, pending.encoded.len(), pending.encoded.capacity(), pending.current)).collect::<Vec<_>>(),
             state.delivered_terminals,
             state.terminal_order,
@@ -14015,18 +14065,22 @@ impl Shared {
         self.send_agent_resync(client, outbound);
         let inner = self.inner.lock();
         if let Some(output) = inner.command_outputs.get(&client) {
-            let message = Self::event(EventPayload::CommandOutput {
-                pane: output.pane,
-                viewport: output
-                    .terminal
-                    .latest_viewport_for(TerminalViewId(client.0))
-                    .map(|viewport| (*viewport).clone()),
-            });
-            let _ = outbound.replace_command_output(&message);
+            if let Some(viewport) = output
+                .terminal
+                .latest_viewport_for(TerminalViewId(client.0))
+            {
+                let message = Self::event(EventPayload::CommandOutput {
+                    output_id: output.output_id,
+                    pane: output.pane,
+                    viewport: Some((*viewport).clone()),
+                });
+                let _ = outbound.replace_command_output(&message);
+            }
         } else {
             Self::send_event(
                 outbound,
                 EventPayload::CommandOutput {
+                    output_id: 0,
                     pane: client_context_pane(&inner, client).unwrap_or(PaneId(0)),
                     viewport: None,
                 },
@@ -14191,14 +14245,24 @@ impl Shared {
                 .entry(client)
                 .or_default()
                 .switch_table(Some(table));
+            inner.next_command_output_id = inner
+                .next_command_output_id
+                .checked_add(1)
+                .expect("command output IDs exhausted");
+            let output_id = inner.next_command_output_id;
             inner.command_outputs.insert(
                 client,
                 CommandOutputSession {
+                    output_id,
                     pane,
                     terminal: Arc::clone(&terminal),
                     previous_key_table,
                 },
             );
+            let replaced = replaced.map(|output| {
+                let subscriber = inner.subscribers.get(&client).cloned();
+                (output, subscriber)
+            });
             (
                 replaced,
                 choose_tree_closed,
@@ -14226,10 +14290,7 @@ impl Shared {
             }
         }
         if let Some(replaced) = replaced {
-            replaced.terminal.view_action(
-                view,
-                zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::Cancel),
-            );
+            Self::retire_command_output(client, replaced);
         }
         if let Err(error) = self.watch_command_output(client, pane, Arc::clone(&terminal)) {
             self.close_command_output(client, &terminal);
@@ -14550,14 +14611,15 @@ impl Shared {
         viewport: &TerminalViewport,
         encode: impl FnOnce(&OutboundMailbox, &ProtocolMessage) -> Result<Vec<u8>, ProtocolError>,
     ) {
-        let subscriber = {
+        let current = {
             let inner = self.inner.lock();
             current_command_output_subscriber(&inner, client, pane, terminal)
         };
-        let Some(subscriber) = subscriber else {
+        let Some((output_id, subscriber)) = current else {
             return;
         };
         let message = Self::event(EventPayload::CommandOutput {
+            output_id,
             pane,
             viewport: Some(viewport.clone()),
         });
@@ -14570,9 +14632,12 @@ impl Shared {
         let installed = {
             let inner = self.inner.lock();
             current_command_output_subscriber(&inner, client, pane, terminal)
-                .filter(|current| Arc::ptr_eq(current, &subscriber))
+                .filter(|(current_id, current)| {
+                    *current_id == output_id && Arc::ptr_eq(current, &subscriber)
+                })
                 .is_some_and(|_| {
                     subscriber.replace_encoded_command_output(
+                        output_id,
                         encoded.take().expect("encoded command output is available"),
                     )
                 })
@@ -14583,7 +14648,7 @@ impl Shared {
     }
 
     fn close_command_output(&self, client: ClientId, terminal: &Arc<TerminalSession>) {
-        let (pane, subscriber) = {
+        let (output_id, pane, subscriber) = {
             let mut inner = self.inner.lock();
             let Some(output) = inner.command_outputs.get(&client) else {
                 return;
@@ -14600,12 +14665,17 @@ impl Shared {
                 .entry(client)
                 .or_default()
                 .switch_table(output.previous_key_table);
-            (output.pane, inner.subscribers.get(&client).cloned())
+            (
+                output.output_id,
+                output.pane,
+                inner.subscribers.get(&client).cloned(),
+            )
         };
         if let Some(subscriber) = subscriber {
             Self::send_event(
                 &subscriber,
                 EventPayload::CommandOutput {
+                    output_id,
                     pane,
                     viewport: None,
                 },
@@ -14622,6 +14692,7 @@ impl Shared {
             Self::send_event(
                 &subscriber,
                 EventPayload::CommandOutput {
+                    output_id: output.output_id,
                     pane: output.pane,
                     viewport: None,
                 },
@@ -18613,6 +18684,7 @@ struct ServerState {
     deferred_control_refresh: bool,
     terminals: BTreeMap<PaneId, Arc<TerminalSession>>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
+    next_command_output_id: u64,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
     command_streams: BTreeMap<ClientId, CommandStreams>,
     control_command_event_captures: HashMap<(ClientId, thread::ThreadId), Vec<Vec<EventPayload>>>,
@@ -19990,6 +20062,7 @@ const fn choose_tree_flags(expanded: bool, has_children: bool, active: bool) -> 
 
 #[derive(Debug)]
 struct CommandOutputSession {
+    output_id: u64,
     pane: PaneId,
     terminal: Arc<TerminalSession>,
     previous_key_table: Option<String>,
@@ -20049,12 +20122,12 @@ fn current_command_output_subscriber(
     client: ClientId,
     pane: PaneId,
     terminal: &Arc<TerminalSession>,
-) -> Option<Arc<OutboundMailbox>> {
+) -> Option<(u64, Arc<OutboundMailbox>)> {
     let output = inner.command_outputs.get(&client)?;
     if output.pane != pane || !Arc::ptr_eq(&output.terminal, terminal) {
         return None;
     }
-    inner.subscribers.get(&client).cloned()
+    Some((output.output_id, inner.subscribers.get(&client).cloned()?))
 }
 
 type RetiredCommandOutput = (CommandOutputSession, Option<Arc<OutboundMailbox>>);
@@ -20897,8 +20970,30 @@ fn retarget_copy_mode_tables(inner: &mut ServerState, changed_window: Option<Win
     let retargeted = inner
         .copy_sessions
         .iter()
-        .filter(|(_, session)| !session.exiting)
+        .filter(|(client, session)| {
+            !session.exiting && !inner.command_outputs.contains_key(*client)
+        })
         .filter_map(|(client, session)| {
+            let window = inner.engine.state.window_for_pane(session.pane)?;
+            changed_window
+                .is_none_or(|changed| changed == window)
+                .then_some((*client, session.pane))
+        })
+        .chain(inner.command_outputs.iter().filter_map(|(client, output)| {
+            let window = inner.engine.state.window_for_pane(output.pane)?;
+            changed_window
+                .is_none_or(|changed| changed == window)
+                .then_some((*client, output.pane))
+        }))
+        .collect::<Vec<_>>();
+    let restored = inner
+        .command_outputs
+        .keys()
+        .filter_map(|client| {
+            let session = inner
+                .copy_sessions
+                .get(client)
+                .filter(|session| !session.exiting)?;
             let window = inner.engine.state.window_for_pane(session.pane)?;
             changed_window
                 .is_none_or(|changed| changed == window)
@@ -20915,6 +21010,15 @@ fn retarget_copy_mode_tables(inner: &mut ServerState, changed_window: Option<Win
             .entry(client)
             .or_default()
             .switch_table(Some(table));
+    }
+    for (client, pane) in restored {
+        let Ok(table) = inner.engine.copy_mode_table_for_pane(pane) else {
+            continue;
+        };
+        let table = table.to_owned();
+        if let Some(output) = inner.command_outputs.get_mut(&client) {
+            output.previous_key_table = Some(table);
+        }
     }
 }
 
@@ -48398,6 +48502,267 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn mode_keys_retarget_active_command_output_and_restore_the_previous_table() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let observer_mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (observer, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, observer_mailbox);
+        let (session, pane, _) = output_view_session_fixture(&shared, "output-mode-keys", "pane");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("output window");
+        shared
+            .attach(client, session)
+            .expect("attach output client");
+        shared.attach(observer, session).expect("attach observer");
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("output context");
+
+        set_test_window_mode_keys(&shared, 71, &mut context, window, "emacs");
+        for table in ["custom-client-table", "observer-table"] {
+            shared
+                .execute(
+                    ClientId(71),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "bind-key",
+                        ["-T", table, "x", "display-message", "-p", table],
+                    ),
+                )
+                .expect("configure client table");
+        }
+        {
+            let mut inner = shared.inner.lock();
+            inner
+                .key_engines
+                .entry(client)
+                .or_default()
+                .switch_table(Some("custom-client-table".to_owned()));
+            inner
+                .key_engines
+                .entry(observer)
+                .or_default()
+                .switch_table(Some("observer-table".to_owned()));
+        }
+        shared
+            .open_command_output(client, Some(pane), "fixture".to_owned(), "one\ntwo")
+            .expect("open command output");
+        take_command_output_message(&mailbox);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.key_engines[&client].active_table(), Some("copy-mode"));
+            assert_eq!(
+                inner.key_engines[&observer].active_table(),
+                Some("observer-table")
+            );
+        }
+
+        set_test_window_mode_keys(&shared, 72, &mut context, window, "vi");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.key_engines[&client].active_table(),
+                Some("copy-mode-vi")
+            );
+            assert_eq!(
+                inner.key_engines[&observer].active_table(),
+                Some("observer-table")
+            );
+        }
+        shared
+            .execute(
+                ClientId(74),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    [
+                        "-T",
+                        "copy-mode-vi",
+                        "x",
+                        "display-message",
+                        "-p",
+                        "EDITED-BINDING",
+                    ],
+                ),
+            )
+            .expect("edit the active command-output table");
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Character('x'), Modifiers::default(), Some("x")),
+        );
+        let edited = take_command_output_message(&mailbox);
+        let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::CommandOutput {
+                    viewport: Some(viewport),
+                    ..
+                },
+            ..
+        }) = edited
+        else {
+            panic!("expected edited binding output");
+        };
+        assert!(viewport_text(&viewport).contains("EDITED-BINDING"));
+        assert!(shared.inner.lock().command_outputs.contains_key(&client));
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Escape, Modifiers::default(), None),
+        );
+        thread::sleep(Duration::from_millis(50));
+        assert!(shared.inner.lock().command_outputs.contains_key(&client));
+
+        set_test_window_mode_keys(&shared, 73, &mut context, window, "emacs");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.key_engines[&client].active_table(), Some("copy-mode"));
+            assert_eq!(
+                inner.key_engines[&observer].active_table(),
+                Some("observer-table")
+            );
+        }
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Escape, Modifiers::default(), None),
+        );
+        wait_for_command_output_close(&mailbox);
+        let inner = shared.inner.lock();
+        assert!(!inner.command_outputs.contains_key(&client));
+        assert_eq!(
+            inner.key_engines[&client].active_table(),
+            Some("custom-client-table")
+        );
+        assert_eq!(
+            inner.key_engines[&observer].active_table(),
+            Some("observer-table")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_keys_update_the_copy_table_beneath_command_output() {
+        let (shared, client, mut context, pane, terminal, mailbox) =
+            copy_mode_fixture("output-copy-restore", "printf 'one\\ntwo\\n'");
+        let window = context.window.expect("copy window");
+        let mut command_context = context.clone();
+        set_test_window_mode_keys(&shared, 81, &mut command_context, window, "emacs");
+        enter_observed_copy_mode(&shared, client, &mut context, pane, &terminal);
+        shared
+            .open_command_output(client, Some(pane), "fixture".to_owned(), "one\ntwo")
+            .expect("open command output over copy mode");
+        take_command_output_message(&mailbox);
+
+        set_test_window_mode_keys(&shared, 82, &mut command_context, window, "vi");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.key_engines[&client].active_table(),
+                Some("copy-mode-vi")
+            );
+            assert_eq!(
+                inner.command_outputs[&client].previous_key_table.as_deref(),
+                Some("copy-mode-vi")
+            );
+        }
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Character('q'), Modifiers::default(), Some("q")),
+        );
+        wait_for_command_output_close(&mailbox);
+        let inner = shared.inner.lock();
+        assert!(inner.copy_sessions.contains_key(&client));
+        assert_eq!(
+            inner.key_engines[&client].active_table(),
+            Some("copy-mode-vi")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_keys_scope_visible_command_output_separately_from_underlying_copy_mode() {
+        let (shared, client, mut context, pane, terminal, mailbox) =
+            copy_mode_fixture("output-copy-scope", "printf 'one\\ntwo\\n'");
+        let session = context.session.expect("copy session");
+        let copy_window = context.window.expect("copy window");
+        let mut command_context = context.clone();
+        shared
+            .execute(
+                ClientId(83),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "new-window",
+                    ["-d", "-n", "output-scope", "--", "sleep", "30"],
+                ),
+            )
+            .expect("create output window");
+        let (output_window, output_pane) = {
+            let inner = shared.inner.lock();
+            inner
+                .engine
+                .state
+                .windows
+                .iter()
+                .find(|(window, state)| **window != copy_window && state.session == session)
+                .map(|(window, state)| (*window, state.active_pane))
+                .expect("separate output window")
+        };
+        for window in [copy_window, output_window] {
+            set_test_window_mode_keys(&shared, 84, &mut command_context, window, "emacs");
+        }
+        enter_observed_copy_mode(&shared, client, &mut context, pane, &terminal);
+        shared
+            .open_command_output(client, Some(output_pane), "fixture".to_owned(), "one\ntwo")
+            .expect("open differently scoped command output");
+        take_command_output_message(&mailbox);
+
+        set_test_window_mode_keys(&shared, 85, &mut command_context, copy_window, "vi");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(inner.key_engines[&client].active_table(), Some("copy-mode"));
+            assert_eq!(
+                inner.command_outputs[&client].previous_key_table.as_deref(),
+                Some("copy-mode-vi")
+            );
+        }
+        input_test_key(
+            &shared,
+            client,
+            &mut context,
+            pane,
+            test_key(KeyCode::Escape, Modifiers::default(), None),
+        );
+        wait_for_command_output_close(&mailbox);
+        let inner = shared.inner.lock();
+        assert!(inner.copy_sessions.contains_key(&client));
+        assert_eq!(
+            inner.key_engines[&client].active_table(),
+            Some("copy-mode-vi")
+        );
+    }
+
+    #[test]
     fn native_copy_buffers_create_named_entries_and_append_to_the_top() {
         let shared = Arc::new(Shared::new(1));
         shared.store_copy_buffer(
@@ -49365,6 +49730,72 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
+    fn set_test_window_mode_keys(
+        shared: &Arc<Shared>,
+        source: u64,
+        context: &mut ExecutionContext,
+        window: WindowId,
+        value: &str,
+    ) {
+        shared
+            .execute(
+                ClientId(source),
+                ClientKind::Command,
+                context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-t", &window.to_string(), "mode-keys", value],
+                ),
+            )
+            .expect("set test mode-keys");
+    }
+
+    fn input_test_key(
+        shared: &Arc<Shared>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        input: zz_terminal::KeyInput,
+    ) {
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                context,
+                InputMessage::Key {
+                    pane,
+                    input,
+                    text_follows: false,
+                },
+            )
+            .expect("send test key");
+    }
+
+    #[cfg(unix)]
+    fn enter_observed_copy_mode(
+        shared: &Arc<Shared>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+    ) {
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                context,
+                &CommandInvocation::new("copy-mode", ["-t", &pane.to_string()]),
+            )
+            .expect("enter test copy mode");
+        wait_for_view_mode(
+            terminal,
+            TerminalViewId(client.0),
+            "test copy mode did not open",
+            |mode| matches!(mode, TerminalMode::Copy { .. }),
+        );
+        wait_for_observed_copy_session(shared, client);
+    }
+
     #[cfg(unix)]
     fn wait_for_root_key_table(shared: &Arc<Shared>, client: ClientId, expected: &str) {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -50251,14 +50682,15 @@ bind - split-window -v -c "#{pane_current_path}"
     fn outbound_mailbox_coalesces_command_output_and_close_cancels_it() {
         let mailbox = OutboundMailbox::new();
         let pane = PaneId(9);
-        let first = command_output_test_message(pane, 1, 1);
-        let second = command_output_test_message(pane, 2, 2);
+        let first = command_output_test_message(pane, 7, 1, 1);
+        let second = command_output_test_message(pane, 7, 2, 2);
 
         assert!(mailbox.replace_command_output(&first));
         assert!(mailbox.replace_command_output(&second));
         let close = ProtocolMessage::Event(Event {
             sequence: 3,
             payload: EventPayload::CommandOutput {
+                output_id: 7,
                 pane,
                 viewport: None,
             },
@@ -50267,6 +50699,73 @@ bind - split-window -v -c "#{pane_current_path}"
 
         let encoded = mailbox.recv().expect("reliable command-output close");
         assert_eq!(decode_protocol_frame(&encoded).expect("decode"), close);
+        assert!(mailbox.state.lock().command_output.is_none());
+        mailbox.close();
+    }
+
+    #[test]
+    fn stale_command_output_close_preserves_the_newer_pending_frame() {
+        let mailbox = OutboundMailbox::new();
+        let pane = PaneId(9);
+        let old = command_output_test_message(pane, 10, 1, 1);
+        let current = command_output_test_message(pane, 11, 2, 2);
+        assert!(mailbox.replace_command_output(&old));
+        assert!(mailbox.replace_command_output(&current));
+        let stale_close = ProtocolMessage::Event(Event {
+            sequence: 3,
+            payload: EventPayload::CommandOutput {
+                output_id: 10,
+                pane,
+                viewport: None,
+            },
+        });
+        assert!(mailbox.enqueue_reliable(&stale_close));
+
+        let encoded = mailbox.recv().expect("stale command-output close");
+        assert_eq!(
+            decode_protocol_frame(&encoded).expect("decode"),
+            stale_close
+        );
+        let encoded = mailbox.recv().expect("newer command-output viewport");
+        assert_eq!(decode_protocol_frame(&encoded).expect("decode"), current);
+        mailbox.close();
+    }
+
+    #[test]
+    fn stale_command_output_frame_preserves_the_newer_pending_frame() {
+        let mailbox = OutboundMailbox::new();
+        let pane = PaneId(9);
+        let current = command_output_test_message(pane, 11, 2, 2);
+        let stale = command_output_test_message(pane, 10, 3, 3);
+        assert!(mailbox.replace_command_output(&current));
+        assert!(mailbox.replace_command_output(&stale));
+
+        let encoded = mailbox.recv().expect("newer command-output viewport");
+        assert_eq!(decode_protocol_frame(&encoded).expect("decode"), current);
+        mailbox.close();
+    }
+
+    #[test]
+    fn newer_command_output_close_cancels_an_older_pending_frame() {
+        let mailbox = OutboundMailbox::new();
+        let pane = PaneId(9);
+        let old = command_output_test_message(pane, 10, 1, 1);
+        assert!(mailbox.replace_command_output(&old));
+        let newer_close = ProtocolMessage::Event(Event {
+            sequence: 2,
+            payload: EventPayload::CommandOutput {
+                output_id: 11,
+                pane,
+                viewport: None,
+            },
+        });
+        assert!(mailbox.enqueue_reliable(&newer_close));
+
+        let encoded = mailbox.recv().expect("newer command-output close");
+        assert_eq!(
+            decode_protocol_frame(&encoded).expect("decode"),
+            newer_close
+        );
         assert!(mailbox.state.lock().command_output.is_none());
         mailbox.close();
     }
@@ -50347,6 +50846,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.inner.lock().command_outputs.insert(
             client,
             CommandOutputSession {
+                output_id: 1,
                 pane,
                 terminal: Arc::clone(&terminal),
                 previous_key_table: None,
@@ -61075,6 +61575,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 EventPayload::CommandOutput {
                     pane: output_pane,
                     viewport: Some(viewport),
+                    ..
                 },
             ..
         }) = message
@@ -62255,6 +62756,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 EventPayload::CommandOutput {
                     pane: output_pane,
                     viewport: Some(viewport),
+                    ..
                 },
             ..
         }) = message
@@ -62317,6 +62819,89 @@ bind - split-window -v -c "#{pane_current_path}"
         let inner = shared.inner.lock();
         assert!(!inner.command_outputs.contains_key(&client));
         assert_eq!(inner.key_engines[&client].active_table(), None);
+    }
+
+    #[test]
+    fn command_output_ids_advance_and_stay_with_each_actor() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, pane, _) = output_view_session_fixture(&shared, "output-ids", "pane");
+        shared
+            .attach(client, session)
+            .expect("attach output client");
+        take_reliable_messages(&mailbox);
+
+        shared
+            .open_command_output(client, Some(pane), "first".to_owned(), "one\ntwo")
+            .expect("open first command output");
+        let first_id = command_output_message_id(&take_command_output_message(&mailbox));
+        assert_ne!(first_id, 0);
+        let first_terminal = Arc::clone(&shared.inner.lock().command_outputs[&client].terminal);
+        let first_viewport = first_terminal
+            .latest_viewport_for(TerminalViewId(client.0))
+            .expect("first command-output viewport");
+        shared.publish_command_output(client, pane, &first_terminal, &first_viewport);
+        assert_eq!(
+            command_output_message_id(&take_command_output_message(&mailbox)),
+            first_id
+        );
+        shared.send_resync(client, &mailbox);
+        assert_eq!(
+            command_output_message_id(&take_command_output_message(&mailbox)),
+            first_id
+        );
+        take_reliable_messages(&mailbox);
+
+        shared
+            .open_command_output(client, Some(pane), "second".to_owned(), "three\nfour")
+            .expect("replace command output");
+        let (second_id, second_terminal) = {
+            let inner = shared.inner.lock();
+            let output = &inner.command_outputs[&client];
+            (output.output_id, Arc::clone(&output.terminal))
+        };
+        assert!(second_id > first_id);
+        assert_eq!(wait_for_command_output_close(&mailbox), first_id);
+        assert_eq!(
+            command_output_message_id(&take_command_output_message(&mailbox)),
+            second_id
+        );
+        shared.close_command_output(client, &first_terminal);
+        assert_eq!(
+            shared.inner.lock().command_outputs[&client].output_id,
+            second_id
+        );
+        shared.close_command_output(client, &second_terminal);
+        assert_eq!(wait_for_command_output_close(&mailbox), second_id);
+        shared.send_resync(client, &mailbox);
+        assert!(take_reliable_messages(&mailbox).into_iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::CommandOutput {
+                        output_id: 0,
+                        viewport: None,
+                        ..
+                    },
+                    ..
+                })
+            )
+        }));
+
+        shared
+            .open_command_output(client, Some(pane), "third".to_owned(), "five\nsix")
+            .expect("open third command output");
+        let (third_id, third_terminal) = {
+            let inner = shared.inner.lock();
+            let output = &inner.command_outputs[&client];
+            (output.output_id, Arc::clone(&output.terminal))
+        };
+        assert!(third_id > second_id);
+        shared.close_command_output(client, &third_terminal);
+        assert_eq!(wait_for_command_output_close(&mailbox), third_id);
+        assert!(mailbox.state.lock().command_output.is_none());
     }
 
     #[test]
@@ -65482,6 +66067,7 @@ bind - split-window -v -c "#{pane_current_path}"
 
     fn command_output_test_message(
         pane: PaneId,
+        output_id: u64,
         sequence: u64,
         generation: u64,
     ) -> ProtocolMessage {
@@ -65495,6 +66081,7 @@ bind - split-window -v -c "#{pane_current_path}"
         ProtocolMessage::Event(Event {
             sequence,
             payload: EventPayload::CommandOutput {
+                output_id,
                 pane,
                 viewport: Some(viewport),
             },
@@ -65506,11 +66093,11 @@ bind - split-window -v -c "#{pane_current_path}"
         loop {
             let frame = {
                 let mut state = mailbox.state.lock();
-                let frame = state.command_output.take();
-                if let Some(frame) = &frame {
-                    state.queued_bytes = state.queued_bytes.saturating_sub(frame.len());
+                let pending = state.command_output.take();
+                if let Some(pending) = &pending {
+                    state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
                 }
-                frame
+                pending.map(|pending| pending.encoded)
             };
             if let Some(frame) = frame {
                 return decode_protocol_frame(&frame).expect("decode command-output viewport");
@@ -65523,20 +66110,44 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
-    fn wait_for_command_output_close(mailbox: &OutboundMailbox) {
+    fn command_output_message_id(message: &ProtocolMessage) -> u64 {
+        let ProtocolMessage::Event(Event {
+            payload:
+                EventPayload::CommandOutput {
+                    output_id,
+                    viewport: Some(_),
+                    ..
+                },
+            ..
+        }) = message
+        else {
+            panic!("expected command-output viewport");
+        };
+        *output_id
+    }
+
+    fn wait_for_command_output_close(mailbox: &OutboundMailbox) -> u64 {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            let closed = take_reliable_messages(mailbox).into_iter().any(|message| {
-                matches!(
-                    message,
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::CommandOutput { viewport: None, .. },
+            let closed = take_reliable_messages(mailbox)
+                .into_iter()
+                .find_map(|message| {
+                    let ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::CommandOutput {
+                                output_id,
+                                viewport: None,
+                                ..
+                            },
                         ..
-                    })
-                )
-            });
-            if closed {
-                return;
+                    }) = message
+                    else {
+                        return None;
+                    };
+                    Some(output_id)
+                });
+            if let Some(output_id) = closed {
+                return output_id;
             }
             assert!(Instant::now() < deadline, "output view did not close");
             thread::sleep(Duration::from_millis(10));

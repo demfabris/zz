@@ -117,7 +117,7 @@ pub fn encode_terminal_viewport_event_into(
     output: &mut Vec<u8>,
 ) -> Result<(), ProtocolError> {
     output.clear();
-    let result = encode_viewport_into(pane, sequence, viewport, FULL_VIEWPORT, output);
+    let result = encode_viewport_into(pane, sequence, viewport, FULL_VIEWPORT, None, output);
     if result.is_err() {
         output.clear();
     }
@@ -149,7 +149,7 @@ fn encode_protocol_message_into_inner(
         payload: EventPayload::TerminalViewport { pane, viewport },
     }) = message
     {
-        return encode_viewport_into(*pane, *sequence, viewport, FULL_VIEWPORT, output);
+        return encode_viewport_into(*pane, *sequence, viewport, FULL_VIEWPORT, None, output);
     }
     if let ProtocolMessage::Event(Event {
         sequence,
@@ -163,11 +163,19 @@ fn encode_protocol_message_into_inner(
         payload:
             EventPayload::CommandOutput {
                 pane,
+                output_id,
                 viewport: Some(viewport),
             },
     }) = message
     {
-        return encode_viewport_into(*pane, *sequence, viewport, COMMAND_OUTPUT_VIEWPORT, output);
+        return encode_viewport_into(
+            *pane,
+            *sequence,
+            viewport,
+            COMMAND_OUTPUT_VIEWPORT,
+            Some(*output_id),
+            output,
+        );
     }
 
     begin_enveloped_into(output, Lane::Control, CONTROL_PAYLOAD_RESERVE)?;
@@ -245,12 +253,16 @@ fn decode_protocol_payload(lane: Lane, payload: &[u8]) -> Result<ProtocolMessage
                 }))
             }
             Some(COMMAND_OUTPUT_VIEWPORT) => {
-                let (pane, sequence, viewport) =
+                let (pane, sequence, output_id, viewport) =
                     decode_viewport_kind(payload, COMMAND_OUTPUT_VIEWPORT)?;
+                let Some(output_id) = output_id else {
+                    return invalid("command output viewport is missing its output ID");
+                };
                 Ok(ProtocolMessage::Event(Event {
                     sequence,
                     payload: EventPayload::CommandOutput {
                         pane,
+                        output_id,
                         viewport: Some(viewport),
                     },
                 }))
@@ -261,6 +273,19 @@ fn decode_protocol_payload(lane: Lane, payload: &[u8]) -> Result<ProtocolMessage
 }
 
 fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolError> {
+    if let ProtocolMessage::Event(Event {
+        payload:
+            EventPayload::CommandOutput {
+                output_id,
+                viewport: Some(_),
+                ..
+            },
+        ..
+    }) = message
+        && *output_id == 0
+    {
+        return invalid("command output viewport has a zero output ID");
+    }
     if let ProtocolMessage::ClientHello(hello) = message {
         if !capabilities_are_bounded(&hello.capabilities) {
             return Err(ProtocolError::InvalidClientHello(format!(
@@ -613,8 +638,19 @@ fn encode_viewport_into(
     sequence: u64,
     viewport: &TerminalViewport,
     kind: u8,
+    output_id: Option<u64>,
     output: &mut Vec<u8>,
 ) -> Result<(), ProtocolError> {
+    if kind == COMMAND_OUTPUT_VIEWPORT {
+        if output_id == Some(0) {
+            return invalid("command output viewport has a zero output ID");
+        }
+        if output_id.is_none() {
+            return invalid("command output viewport is missing its output ID");
+        }
+    } else if output_id.is_some() {
+        return invalid("terminal viewport carries a command output ID");
+    }
     validate_viewport(viewport)?;
     let title = viewport.title().as_bytes();
     if title.len() > MAX_TITLE_BYTES {
@@ -629,16 +665,22 @@ fn encode_viewport_into(
         return invalid("hovered URI exceeds terminal metadata limit");
     }
 
-    let capacity = viewport_payload_capacity(
-        viewport,
-        title.len(),
-        working_directory.len(),
-        hovered_uri.len(),
-    )?;
+    let capacity = checked_wire_capacity(&[
+        viewport_payload_capacity(
+            viewport,
+            title.len(),
+            working_directory.len(),
+            hovered_uri.len(),
+        )?,
+        output_id.map_or(0, |_| 8),
+    ])?;
     begin_enveloped_into(output, Lane::Terminal, capacity)?;
     output.push(kind);
     push_u64(output, pane.0);
     push_u64(output, sequence);
+    if let Some(output_id) = output_id {
+        push_u64(output, output_id);
+    }
     push_u64(output, viewport.generation);
     push_u64(output, viewport.view_generation);
     push_u32(output, viewport.dictionary_generation);
@@ -973,19 +1015,32 @@ fn decode_patch(payload: &[u8]) -> Result<(PaneId, u64, TerminalViewportPatch), 
 }
 
 fn decode_viewport(payload: &[u8]) -> Result<(PaneId, u64, TerminalViewport), ProtocolError> {
-    decode_viewport_kind(payload, FULL_VIEWPORT)
+    let (pane, sequence, output_id, viewport) = decode_viewport_kind(payload, FULL_VIEWPORT)?;
+    if output_id.is_some() {
+        return invalid("terminal viewport carries a command output ID");
+    }
+    Ok((pane, sequence, viewport))
 }
 
 fn decode_viewport_kind(
     payload: &[u8],
     expected_kind: u8,
-) -> Result<(PaneId, u64, TerminalViewport), ProtocolError> {
+) -> Result<(PaneId, u64, Option<u64>, TerminalViewport), ProtocolError> {
     let mut reader = WireReader::new(payload);
     if reader.u8()? != expected_kind {
         return invalid("unknown terminal update type");
     }
     let pane = PaneId(reader.u64()?);
     let sequence = reader.u64()?;
+    let output_id = if expected_kind == COMMAND_OUTPUT_VIEWPORT {
+        let output_id = reader.u64()?;
+        if output_id == 0 {
+            return invalid("command output viewport has a zero output ID");
+        }
+        Some(output_id)
+    } else {
+        None
+    };
     let generation = reader.u64()?;
     let view_generation = reader.u64()?;
     let dictionary_generation = reader.u32()?;
@@ -1097,7 +1152,7 @@ fn decode_viewport_kind(
         status,
     };
     validate_viewport(&viewport)?;
-    Ok((pane, sequence, viewport))
+    Ok((pane, sequence, output_id, viewport))
 }
 
 fn validate_viewport(viewport: &TerminalViewport) -> Result<(), ProtocolError> {
@@ -2899,7 +2954,7 @@ mod tests {
 
         let viewport = TerminalViewport::blank(2, 1, SessionStatus::Running);
         let mut frame = Vec::new();
-        encode_viewport_into(PaneId(1), 1, &viewport, FULL_VIEWPORT, &mut frame)
+        encode_viewport_into(PaneId(1), 1, &viewport, FULL_VIEWPORT, None, &mut frame)
             .expect("viewport frame");
         let scrollbar_total_offset = 8 + 1 + 8 * 4 + 4 + 2 + 2 + 4 + 4;
         frame[scrollbar_total_offset..scrollbar_total_offset + 8]
@@ -4181,11 +4236,16 @@ mod tests {
             sequence: 104,
             payload: EventPayload::CommandOutput {
                 pane: PaneId(12),
+                output_id: 0x0123_4567_89ab_cdef,
                 viewport: Some(viewport),
             },
         });
         let encoded = encode_protocol_message(&message).expect("encode");
         assert_eq!(encoded[4], Lane::Terminal as u8);
+        assert_eq!(
+            u64::from_le_bytes(encoded[25..33].try_into().expect("output ID")),
+            0x0123_4567_89ab_cdef
+        );
         assert_eq!(decode_protocol_frame(&encoded).expect("decode"), message);
     }
 
@@ -4195,12 +4255,56 @@ mod tests {
             sequence: 105,
             payload: EventPayload::CommandOutput {
                 pane: PaneId(12),
+                output_id: 0x0123_4567_89ab_cdef,
                 viewport: None,
             },
         });
         let encoded = encode_protocol_message(&message).expect("encode");
         assert_eq!(encoded[4], Lane::Control as u8);
         assert_eq!(decode_protocol_frame(&encoded).expect("decode"), message);
+    }
+
+    #[test]
+    fn command_output_zero_id_is_reserved_for_empty_resync() {
+        let empty = ProtocolMessage::Event(Event {
+            sequence: 106,
+            payload: EventPayload::CommandOutput {
+                pane: PaneId(12),
+                output_id: 0,
+                viewport: None,
+            },
+        });
+        let encoded = encode_protocol_message(&empty).expect("encode empty resync");
+        assert_eq!(encoded[4], Lane::Control as u8);
+        assert_eq!(decode_protocol_frame(&encoded).expect("decode"), empty);
+
+        let populated = ProtocolMessage::Event(Event {
+            sequence: 107,
+            payload: EventPayload::CommandOutput {
+                pane: PaneId(12),
+                output_id: 0,
+                viewport: Some(TerminalViewport::blank(4, 2, SessionStatus::Running)),
+            },
+        });
+        assert!(matches!(
+            encode_protocol_message(&populated),
+            Err(ProtocolError::InvalidTerminal(_))
+        ));
+
+        let valid = ProtocolMessage::Event(Event {
+            sequence: 108,
+            payload: EventPayload::CommandOutput {
+                pane: PaneId(12),
+                output_id: 9,
+                viewport: Some(TerminalViewport::blank(4, 2, SessionStatus::Running)),
+            },
+        });
+        let mut encoded = encode_protocol_message(&valid).expect("encode populated output");
+        encoded[25..33].fill(0);
+        assert!(matches!(
+            decode_protocol_frame(&encoded),
+            Err(ProtocolError::InvalidTerminal(_))
+        ));
     }
 
     #[test]

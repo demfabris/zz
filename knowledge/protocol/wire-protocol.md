@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v78)
+title: zz wire protocol (v79)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 78`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 79`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (78) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (79) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -176,7 +176,8 @@ unpaired keys.
 `MuxOptionsChanged { options: MuxOptions }`, `StatusChanged { status: StatusLine }`,
 `TerminalViewport { pane, viewport }`, `TerminalPatch { pane, patch }`,
 `Clipboard { pane, request_id, target, text }`, `BrowserCommand { pane, command }`,
-`TerminalUiCommand { pane, command }`, `CommandPrompt { state }`, `CommandOutput { pane, viewport }`,
+`TerminalUiCommand { pane, command }`, `CommandPrompt { state }`,
+`CommandOutput { pane, output_id, viewport }`,
 `ChooseTree { state }`, `ChooseTreeUpdate { search, selected }`, `ChooseBuffer { state }`,
 `ChooseBufferUpdate { search, selected }`, `DisplayPanes { state }`,
 `ClientMessage { pane, kind: ClientMessageKind, text }`,
@@ -309,10 +310,27 @@ transcript once in its existing response output. Interactive renders one existin
 viewport from the same transcript, subject to the existing command-output size bound. This is
 per-invocation batching, not a claim of physical interleaving.
 Generic config Warning typing, startup diagnostic delivery, hard-disconnect queue cancellation,
-config byte input, source stdin transport, parser abort semantics, hook cwd selection, deferred event
-hooks, and TUI command-output navigation remain open.
+config byte input, source stdin transport, parser abort semantics, hook cwd selection, and deferred
+event hooks remain open.
 
-The three payloads `TerminalViewport`, `TerminalPatch`, and `CommandOutput { viewport: Some(..) }` are
+v79 changes the existing `EventPayload::CommandOutput` tag 11 in place to
+`CommandOutput { pane, output_id, viewport }`. The daemon allocates each real command-output actor a
+nonzero ID from one daemon-lifetime-global monotonic counter. Initial frames, later view updates,
+current-state resync frames, and the actor's close keep that ID. Only
+`CommandOutput { output_id: 0, viewport: None, .. }` means an authoritative resync with no live
+output. A populated viewport with ID zero fails validation on both encode and decode.
+
+The populated form stays on the Terminal lane and inserts `output_id` after `sequence`; closes and
+the zero-ID empty resync stay on the reliable Control lane. `zz-client::ClientCore` advances an ID
+watermark on newer frames and closes, ignores older traffic, and refuses to resurrect a closed actor
+from a delayed same-ID frame. `adopt_hello` resets the watermark for every newly adopted handshake
+because that handshake may come from a restarted daemon with a fresh ID lifetime. Reconnecting to
+the same daemon does not restart its counter. The TUI keeps search, swallowed-key, and
+output-geometry state across same-actor frames and resets them when the actor ID changes or the
+output closes.
+
+The three payloads `TerminalViewport`, `TerminalPatch`, and
+`CommandOutput { output_id, viewport: Some(..), .. }` are
 diverted to the [Terminal lane](/protocol/terminal-lanes.md) by `encode_protocol_message`; all other
 payloads ride the Control lane. `OpenUri`, `TerminalUiCommand`, `ClientMessage`, `TimedClientMessage`,
 `CommandPrompt`, `FocusSidebar`, `PrefixCancelled`, and the choose-tree/buffer state updates use the
@@ -489,9 +507,13 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 78`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 79`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v79 adds `output_id: u64` to existing `EventPayload::CommandOutput` tag 11. Real output actors use
+  nonzero daemon-lifetime-global monotonic IDs on populated frames, current resyncs, and closes. The
+  zero-ID empty form is the authoritative no-output resync sentinel. The packed populated form puts
+  the ID after `sequence`, while close and empty-resync forms use postcard on the Control lane.
 - v78 appends `EventPayload::ControlSourceFile` at tail tag 48. Its `ReadError(String)` event renders
   one raw unframed Control line and retains retval 1. Its `Complete` event renders nothing and
   consumes one command number after the source invocation's descendants.
@@ -681,26 +703,27 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 71, client_instance_id: ClientInstanceId(0), kind: Interactive,
-device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None }` is 17 bytes on the
-wire: an 8-byte envelope over a 9-byte postcard payload.
+`ClientHello { protocol_version: 79, client_instance_id: ClientInstanceId(0), kind: Interactive,
+device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
+working_directory: None }` is 18 bytes on the wire: an 8-byte envelope over a 10-byte postcard
+payload.
 
 ```text
-byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16
-      0d 00 00 00  00     00      47 00         00 47 00 00 00 00 01 01 00
+byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17
+      0e 00 00 00  00     00      4f 00         00 4f 00 00 00 00 01 01 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 13  Control        (= 71)
+      length = 14  Control        (= 79)
 ```
 
-- **length `13`** = `ENVELOPE_BYTES` (4) + payload (9); it counts the four envelope bytes, not itself.
-- **payload** `00 47 00 00 00 00 01 01 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x47` (= 71), `client_instance_id` as varint `00`, `kind`
+- **length `14`** = `ENVELOPE_BYTES` (4) + payload (10); it counts the four envelope bytes, not itself.
+- **payload** `00 4f 00 00 00 00 01 01 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x4f` (= 79), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
-  `origin` as `Option::None` (`00`). Postcard
+  `origin` and `working_directory` as two `Option::None` tags (`00 00`). Postcard
   writes multi-byte integers as LEB128 varints, so the version is one byte here and two in the
-  envelope, which is fixed-width LE. A real interactive hello carries the device's short hostname
-  and still no capabilities.
+  envelope, which is fixed-width LE. A real local interactive hello may carry the device's short
+  hostname, capabilities, origin pane, and working directory.
 
 The round-trip test asserts `&frame[6..8] == PROTOCOL_VERSION.to_le_bytes()` and that lane byte 4 is
 `Lane::Control`.
@@ -726,9 +749,10 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 71, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
-                       capabilities: [], color_scheme: Some(Dark), origin: None }
-server → ServerHello { protocol_version: 71, server_id, client_id: c11, client_instance_id: i1,
+client → ClientHello { protocol_version: 79, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+                       capabilities: [], color_scheme: Some(Dark), origin: None,
+                       working_directory: Some("/home/demo") }
+server → ServerHello { protocol_version: 79, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

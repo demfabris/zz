@@ -49,6 +49,22 @@ requests and events into GPUI state. It intercepts `TerminalViewport`, `Terminal
 diff scratch. Passing those frames through both stores would duplicate the highest-rate work. The
 TUI and C ABI use the core's viewport retention directly.
 
+# Command-output actor state
+
+Protocol v79 gives each real command-output actor a nonzero daemon-lifetime ID. `ClientCore` retains
+the current `(output_id, pane, viewport)` plus a watermark for the newest actor it has observed. A
+newer populated frame installs that actor, a same-ID frame updates it, and older frames or closes do
+nothing. A newer close advances the watermark before clearing the current actor, so a delayed frame
+cannot reopen an output that already closed. The zero-ID empty-resync sentinel clears the current
+output without lowering the watermark.
+
+`adopt_hello` resets the watermark for every newly adopted handshake because that handshake may come
+from a restarted daemon with a fresh ID lifetime. Reconnecting to the same daemon does not restart
+its counter. The method keeps the frozen frame that a reconnecting shell may still be painting; the
+first output state from the new connection replaces or clears it. The TUI reads
+`command_output_id()` with the existing viewport accessor. It keeps search, swallowed-key, and
+geometry caches across same-actor updates and resets them only for a new actor or a close.
+
 # Chrome keymap
 
 `ChromeKeymap` stores the client-owned `ui`, `sidebar`, `browser`, and `terminal` tables. It uses the

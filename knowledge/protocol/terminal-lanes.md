@@ -18,8 +18,9 @@ traffic; the compact layout plus a shared **style dictionary** and **grapheme di
 small . a single-row patch on an 80-column grid is a few hundred bytes.
 
 `encode_protocol_message` is the lane router: it sends `EventPayload::TerminalViewport`,
-`EventPayload::TerminalPatch`, and `EventPayload::CommandOutput { viewport: Some(..) }` down the
-Terminal lane, and everything else through the `postcard` [Control lane](/protocol/wire-protocol.md).
+`EventPayload::TerminalPatch`, and
+`EventPayload::CommandOutput { output_id, viewport: Some(..), .. }` down the Terminal lane, and
+everything else through the `postcard` [Control lane](/protocol/wire-protocol.md).
 All payload types (`TerminalViewport`, `TerminalViewportPatch`, `PackedCell`, `PackedStyle`,
 `OverlaySpan`, `Cursor`, …) come from [zz-terminal](/crates/zz-terminal.md).
 
@@ -35,20 +36,20 @@ The first payload byte after the envelope selects one of three record types:
 |------|----------|---------|------------|
 | `0` | `FULL_VIEWPORT` | complete `TerminalViewport` | `EventPayload::TerminalViewport` |
 | `1` | `VIEWPORT_PATCH` | `TerminalViewportPatch` (changed rows + dictionary appends) | `EventPayload::TerminalPatch` |
-| `2` | `COMMAND_OUTPUT_VIEWPORT` | complete `TerminalViewport` | `EventPayload::CommandOutput { Some }` |
+| `2` | `COMMAND_OUTPUT_VIEWPORT` | nonzero `output_id` + complete `TerminalViewport` | `EventPayload::CommandOutput { output_id, viewport: Some(..), .. }` |
 
 A full viewport is a self-contained frame; a patch references a base generation and only ships the
 rows that changed plus any newly-appended dictionary entries.
 
 # Wire layout . full viewport (`FULL_VIEWPORT` / `COMMAND_OUTPUT_VIEWPORT`)
 
-Fixed header (`VIEWPORT_FIXED_BYTES = 115` for the non-variadic fields), then variable metadata, then
-the packed section counts, then the sections themselves. Offsets below are byte positions inside the
-payload . that is, after the 8-byte envelope:
+The ordinary full viewport uses a fixed 115-byte non-variadic header, then variable metadata, packed
+section counts, and the sections themselves. Offsets below are byte positions inside the payload,
+after the 8-byte envelope:
 
 ```
 off  size  field
-  0    1   kind:u8
+  0    1   kind:u8 = 0
   1    8   pane:u64
   9    8   sequence:u64
  17    8   generation:u64
@@ -87,8 +88,15 @@ kitty_placement_count:u32
 kitty placements [72 B each] × kitty_placement_count              (see table)
 ```
 
-The 115 fixed bytes are the 75 above `mode` plus `unseen_output` (8) plus the eight `u32` counts (32);
-`mode`, `search`, `cursor`, and `status` are sized separately because each is a tagged niche.
+`COMMAND_OUTPUT_VIEWPORT` uses kind 2 and inserts a nonzero `output_id:u64` at offset 17, after
+`sequence`. Every field from `generation` onward shifts forward by eight bytes, so its non-variadic
+header occupies 123 bytes. The codec rejects a missing or zero actor ID for this populated form.
+`EventPayload::CommandOutput { output_id, viewport: None, .. }` remains on the reliable postcard
+Control lane. Only the zero-ID `None` form represents an authoritative resync with no live output.
+
+The ordinary viewport's 115 fixed bytes are the 75 above `mode` plus `unseen_output` (8) plus the
+eight `u32` counts (32). `mode`, `search`, `cursor`, and `status` are sized separately because each
+is a tagged niche.
 
 # Wire layout . row patch (`VIEWPORT_PATCH`)
 
@@ -215,6 +223,13 @@ Supersession therefore lives entirely in the daemon's outbound mailbox rather th
 pending frame per pane, newest replacing stale under backpressure (see
 [zz-daemon](/crates/zz-daemon.md)). A stalled client still converges on the latest frame; what it no
 longer does is discard bytes already in flight.
+
+Command output uses one separate coalesced slot. The mailbox retains the actor ID beside the encoded
+frame, refuses an older actor frame after a newer one is pending, and lets a reliable close discard
+pending frames whose IDs are no newer than that close. An authoritative zero-ID empty resync clears
+the slot. `ClientCore` keeps its own watermark, so a delayed frame cannot reopen an actor after its
+close. Every newly adopted handshake resets that watermark because it may come from a restarted
+daemon with a fresh ID lifetime; reconnecting to the same daemon does not restart its counter.
 
 Recovery is per pane. When a client receives a patch it cannot apply, or a patch for a pane it has no
 base frame for, it sends `ProtocolMessage::RequestFull { pane }` and the daemon replies with that

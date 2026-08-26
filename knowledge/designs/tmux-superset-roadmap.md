@@ -38,20 +38,21 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-26
 
-The live tracker has 92 active groups, 663 classified active items, 63 closed groups, and two known
-differentials. Protocol v77 carries explicit command frame flags and independent sticky status in
-`ControlCommandGuard`, so parser replay stays at flags 1 while immediate command hooks, background
-callbacks, and all of their sourced descendants use flags 0. Protocol v78 adds typed source-read and
-completion events at tail tag 48. Matched parser and hook-source read errors now render raw after the
-source guard, and every depth-admitted source invocation consumes one hidden command number after its
-descendants. The strict twelve-step `smoke/source-file-control` differential is clean with no skips;
-the stored canonical summary remains unchanged until the final full strict and attached-client run.
+The live tracker has 91 active groups, 662 classified active items, 64 closed groups, and two known
+differentials. Protocol v79 adds actor identity to command-output frames and closes the TUI's local
+keyboard-navigation contract. Press and repeat keys use the effective daemon copy table, releases
+are inert, live `mode-keys` and custom bindings retarget the open output, and the TUI owns its search
+editor. Line and page movement, search plus `n`/`N`, selection-to-paste-buffer, and the stock
+vi/emacs exit distinction now match the pin in a 96-line local attached fixture. One exact content
+rectangle drives output painting and resize geometry while reserving the output header, footer or
+message row, and configured status block. Actor IDs and the client watermark prevent a late frame
+or close from replacing a newer output.
 
-This closure leaves hard-disconnect cancellation, invalid config bytes, source stdin transport,
-parser abort, sourced-hook cwd, deferred event-hook cwd and routing, missing hook producers, and TUI
-command-output navigation tracked under their existing groups. The generated tracker owns the next
-ease-ranked selection. Choose that slice after this milestone's commit and review instead of making
-the hard disconnect gap the implicit next task.
+This closure does not claim mouse behavior, an OS clipboard write, ordinary TUI pane copy-search
+editing, SSH transport, pixel parity, or the stored canonical summary. The 29 unsupported
+`window-copy` actions remain tracked under `copy-mode.action-fidelity`. The next slice is
+`config.startup-diagnostic-delivery`: retain startup config causes, deliver them once to the first
+eligible Control or attached client with pinned placement, and keep detached startup output silent.
 
 # Baseline captured 2026-08-22
 
@@ -574,9 +575,10 @@ assignment as absent, and `-v` still reports the selected branch. `-t` resolves 
 miss and no change to the invoking client cwd. `-v` preserves file and line order, inherits through
 nested sources, and stays suppressed for Control. Full tmux command, flag, and arity validation
 during parse remains under the parser, error-shape, and chain-abort groups. Command and Interactive
-transcript presentation and ordering are closed under `config.replayed-command-output`. The attached
-proof covers presentation and q dismissal only; line and page movement, search, selection and copy,
-custom tables, and mode-key selection remain under `clients.tui-command-output-navigation`.
+transcript presentation and ordering are closed under `config.replayed-command-output`. Protocol
+v79 closes the TUI output view's local keyboard contract: live copy tables, line and page movement,
+search editing and repetition, selection-to-paste-buffer, and vi/emacs exits. Mouse, OS clipboard,
+ordinary TUI pane copy-search editing, and the wider 29-action vocabulary stay outside that closure.
 Runtime `source-file` now treats the active default config like every other matched path: one
 invocation parses all matches in declared-path and glob order, then replays them in the same order.
 Declared default, after, and default files apply as `DAD`; a loud miss
@@ -722,6 +724,11 @@ permanent product decision has been recorded for them.
   depth-admitted invocation's descendants. Depth refusals and dispatch-time syntax, arity, and flag
   rejections consume none. Invalid UTF-8, source stdin transport, parser abort, hook cwd, deferred
   event hooks, and hard-disconnect queue cancellation retain separate gaps.
+- 2026-08-26: Protocol v79 added a nonzero actor ID to every real command-output frame and close,
+  with zero plus no viewport reserved for an authoritative no-output resync. The client watermark
+  rejects stale traffic. TUI search and resize state now belong to the actor, and the local attached
+  fixture closes keyboard navigation over a 96-line output on both mode-key tables. Startup config
+  cause delivery becomes the next ease-ranked slice.
 
 # Related
 

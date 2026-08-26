@@ -3555,7 +3555,7 @@ impl MuxClient {
                 ..
             }) => self.apply_terminal_patch(pane, patch),
             ProtocolMessage::Event(Event {
-                payload: EventPayload::CommandOutput { pane, viewport },
+                payload: EventPayload::CommandOutput { pane, viewport, .. },
                 ..
             }) => self.apply_command_output(pane, viewport),
             message => {

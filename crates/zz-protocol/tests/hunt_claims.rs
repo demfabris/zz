@@ -14,8 +14,26 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_seventy_eight() {
-    assert_eq!(PROTOCOL_VERSION, 78);
+fn protocol_version_on_this_commit_is_seventy_nine() {
+    assert_eq!(PROTOCOL_VERSION, 79);
+}
+
+#[test]
+fn command_output_keeps_event_tag_eleven_and_carries_its_output_id() {
+    let event = Event {
+        sequence: 0,
+        payload: EventPayload::CommandOutput {
+            pane: PaneId(3),
+            output_id: 7,
+            viewport: None,
+        },
+    };
+    let bytes = postcard::to_stdvec(&event).expect("encode command output");
+    assert_eq!(bytes, [0, 11, 3, 7, 0]);
+    assert_eq!(
+        postcard::from_bytes::<Event>(&bytes).expect("decode command output"),
+        event
+    );
 }
 
 #[test]
@@ -219,7 +237,7 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4e, 0x00, 0x00, 0x4e, 0x00, 0x00, 0x00, 0x00,
+            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4f, 0x00, 0x00, 0x4f, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00,
         ]
     );

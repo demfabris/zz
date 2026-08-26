@@ -2,14 +2,14 @@
 type: Design Plan
 title: TUI client - zz in a terminal, browsers included
 description: A second presentation backend that renders zz sessions in a raw TTY - cell blit for terminals, text views for agents, kitty-graphics CEF frames for browsers - turning the GUI into one of three faces of the daemon.
-status: Rungs 1 + 3 landed 2026-08-09 (chrome, sidebar v2, kitty bridge, CEF browser panes via provider seam — headless-smoked incl. a real Chromium frame over PTY) + frame transport v2 same day (t=f file medium probed at startup, zlib inline fallback, CEF damage seam, byte-debt pacing); rung 2 (agent panes) proposed
+status: Rungs 1 + 3 landed 2026-08-09 (chrome, sidebar v2, kitty bridge, CEF browser panes via provider seam, headless-smoked incl. a real Chromium frame over PTY) + frame transport v2 same day (t=f file medium probed at startup, zlib inline fallback, CEF damage seam, byte-debt pacing); command-output navigation landed 2026-08-26 with protocol v79; rung 2 (agent panes) proposed
 tags:
 - tui
 - client
 - browser
 - kitty-graphics
 - remote
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-26T00:00:00-03:00
 ---
 
 # Overview
@@ -120,6 +120,38 @@ compromise).
   workaround for cell-granularity mice).
 - zz's own VT already speaks the kitty keyboard protocol, so zz-in-zz gets full key
   fidelity; other terminals degrade to legacy encoding.
+
+# Command-output navigation, landed 2026-08-26
+
+The TUI now treats command output as a real daemon-owned view instead of a modal that only `q` could
+dismiss. Press and repeat keys travel through the daemon's effective `copy-mode` or `copy-mode-vi`
+table; releases remain local and inert. A running output view follows live `mode-keys` and custom
+binding changes. Stock emacs `q` and Escape cancel. Stock vi `q` cancels, while Escape clears the
+selection and leaves the view open.
+
+A copy-table `TerminalUiCommand::BeginSearch` opens the TUI's bounded search editor over the output.
+Text, Backspace, and paste update the daemon view. Enter submits by
+leaving edit mode, Escape closes the search, and `n`/`N` continue through the effective table. Line
+and page movement, selection, rectangle changes, and copy into a daemon paste buffer use the same
+terminal view actions as the GUI. This slice does not add search editing to ordinary TUI pane copy
+mode and does not claim an OS clipboard write.
+
+Protocol v79 adds an actor ID to the existing command-output event. The daemon gives every real
+output and its close one nonzero ID, while zero plus no viewport means an authoritative no-output
+resync. `ClientCore` rejects stale actor traffic with a watermark. The TUI ties its search editor,
+swallowed Enter or Escape state, and resize cache to that identity, preserving them across frames
+from the same output and clearing them for a replacement, close, or reconnect.
+
+One `command_output_content_rect` now owns the painted viewport and the
+`ResizeCommandOutput` rows, columns, and cell metrics. The rectangle spans the terminal width and
+leaves exactly one output-header row, one footer or message row, and the configured tmux status
+block. Delayed frames cannot reset local state or reintroduce stale geometry from an older actor.
+
+The local attached-client fixture creates 96 output lines and checks zz beside pinned tmux for line
+movement, page movement, search editing, `n`/`N`, selection-to-paste-buffer, live rebinding, and both
+mode-key tables. It reads terminal state and visible markers, not pixels. Mouse behavior, SSH
+transport, ordinary pane copy-search editing, the 29 unsupported window-copy actions, and the stored
+canonical summary remain outside this proof.
 
 # Known hard parts
 

@@ -204,7 +204,8 @@ pub struct ClientCore {
     full_pending: HashSet<PaneId>,
     prefix_armed: bool,
     command_prompt: Option<CommandPromptState>,
-    command_output: Option<(PaneId, TerminalViewport)>,
+    command_output: Option<(u64, PaneId, TerminalViewport)>,
+    command_output_watermark: u64,
     choose_tree: Option<ChooseTreeState>,
     choose_buffer: Option<ChooseBufferState>,
     display_panes: Option<DisplayPanesState>,
@@ -363,7 +364,14 @@ impl ClientCore {
     pub fn command_output(&self) -> Option<(PaneId, &TerminalViewport)> {
         self.command_output
             .as_ref()
-            .map(|(pane, viewport)| (*pane, viewport))
+            .map(|(_, pane, viewport)| (*pane, viewport))
+    }
+
+    #[must_use]
+    pub fn command_output_id(&self) -> Option<u64> {
+        self.command_output
+            .as_ref()
+            .map(|(output_id, _, _)| *output_id)
     }
 
     #[must_use]
@@ -404,6 +412,7 @@ impl ClientCore {
     ///
     /// Emits no events, for the same reason as [`Self::reset_session`].
     pub fn adopt_hello(&mut self, hello: ServerHello) {
+        self.command_output_watermark = 0;
         let ServerHello {
             protocol_version: _,
             server_id: _,
@@ -508,10 +517,11 @@ impl ClientCore {
                 self.command_prompt = state;
                 self.events.push_back(CoreEvent::CommandPromptChanged);
             }
-            EventPayload::CommandOutput { pane, viewport } => {
-                self.command_output = viewport.map(|viewport| (pane, viewport));
-                self.events.push_back(CoreEvent::CommandOutputChanged);
-            }
+            EventPayload::CommandOutput {
+                pane,
+                output_id,
+                viewport,
+            } => self.apply_command_output(pane, output_id, viewport),
             EventPayload::ChooseTree { state } => {
                 self.choose_tree = state;
                 self.events.push_back(CoreEvent::ChooseTreeChanged);
@@ -563,7 +573,7 @@ impl ClientCore {
                 if self
                     .command_output
                     .as_ref()
-                    .is_some_and(|(output_pane, _)| *output_pane == pane)
+                    .is_some_and(|(_, output_pane, _)| *output_pane == pane)
                 {
                     self.command_output = None;
                     self.events.push_back(CoreEvent::CommandOutputChanged);
@@ -766,6 +776,46 @@ impl ClientCore {
         }
     }
 
+    fn apply_command_output(
+        &mut self,
+        pane: PaneId,
+        output_id: u64,
+        viewport: Option<TerminalViewport>,
+    ) {
+        if output_id == 0 {
+            if viewport.is_none() {
+                self.command_output = None;
+                self.events.push_back(CoreEvent::CommandOutputChanged);
+            }
+            return;
+        }
+        if output_id < self.command_output_watermark {
+            return;
+        }
+
+        match viewport {
+            Some(viewport) if output_id > self.command_output_watermark => {
+                self.command_output_watermark = output_id;
+                self.command_output = Some((output_id, pane, viewport));
+                self.events.push_back(CoreEvent::CommandOutputChanged);
+            }
+            Some(viewport) if self.command_output_id() == Some(output_id) => {
+                self.command_output = Some((output_id, pane, viewport));
+                self.events.push_back(CoreEvent::CommandOutputChanged);
+            }
+            None if output_id > self.command_output_watermark => {
+                self.command_output_watermark = output_id;
+                self.command_output = None;
+                self.events.push_back(CoreEvent::CommandOutputChanged);
+            }
+            None if self.command_output_id() == Some(output_id) => {
+                self.command_output = None;
+                self.events.push_back(CoreEvent::CommandOutputChanged);
+            }
+            Some(_) | None => {}
+        }
+    }
+
     fn request_full(&mut self, pane: PaneId) {
         if self.full_pending.insert(pane) {
             self.outbound.push_back(Outbound::RequestFull(pane));
@@ -861,6 +911,24 @@ mod tests {
             mux_options: MuxOptions::default(),
             status: StatusLine::default(),
             key_tables: Vec::new(),
+        })
+    }
+
+    fn command_output_frame(pane: PaneId, output_id: u64, generation: u64) -> ProtocolMessage {
+        let mut viewport = TerminalViewport::blank(80, 24, zz_terminal::SessionStatus::Running);
+        viewport.generation = generation;
+        event(EventPayload::CommandOutput {
+            pane,
+            output_id,
+            viewport: Some(viewport),
+        })
+    }
+
+    fn command_output_close(pane: PaneId, output_id: u64) -> ProtocolMessage {
+        event(EventPayload::CommandOutput {
+            pane,
+            output_id,
+            viewport: None,
         })
     }
 
@@ -1105,6 +1173,114 @@ mod tests {
             snapshot: snapshot_with(&[pane]),
         });
         assert_eq!(core.agent_state(pane), None);
+    }
+
+    #[test]
+    fn command_output_actor_updates_replace_and_ignore_stale_traffic() {
+        let pane = PaneId(5);
+        let mut core = ClientCore::new();
+
+        core.handle_message(command_output_frame(pane, 10, 1));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), Some(10));
+        assert_eq!(
+            core.command_output()
+                .map(|(output_pane, viewport)| (output_pane, viewport.generation)),
+            Some((pane, 1))
+        );
+
+        core.handle_message(command_output_frame(pane, 10, 2));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(
+            core.command_output()
+                .map(|(output_pane, viewport)| (output_pane, viewport.generation)),
+            Some((pane, 2))
+        );
+
+        core.handle_message(command_output_frame(PaneId(4), 9, 3));
+        core.handle_message(command_output_close(pane, 9));
+        assert!(drain(&mut core).is_empty());
+        assert_eq!(core.command_output_id(), Some(10));
+
+        core.handle_message(command_output_frame(pane, 11, 2));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), Some(11));
+
+        core.handle_message(command_output_close(pane, 10));
+        assert!(drain(&mut core).is_empty());
+        assert_eq!(core.command_output_id(), Some(11));
+
+        core.handle_message(command_output_close(pane, 11));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), None);
+    }
+
+    #[test]
+    fn command_output_newer_close_and_zero_resync_prevent_resurrection() {
+        let pane = PaneId(5);
+        let mut core = ClientCore::new();
+
+        core.handle_message(command_output_frame(pane, 5, 1));
+        drain(&mut core);
+        core.handle_message(command_output_close(pane, 7));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), None);
+
+        core.handle_message(command_output_frame(pane, 6, 2));
+        core.handle_message(command_output_close(pane, 6));
+        core.handle_message(command_output_frame(pane, 7, 3));
+        assert!(drain(&mut core).is_empty());
+        assert_eq!(core.command_output_id(), None);
+
+        core.handle_message(command_output_frame(pane, 8, 4));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), Some(8));
+
+        core.handle_message(command_output_close(pane, 0));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), None);
+
+        core.handle_message(command_output_frame(pane, 8, 5));
+        assert!(drain(&mut core).is_empty());
+        assert_eq!(core.command_output_id(), None);
+
+        core.handle_message(command_output_frame(pane, 9, 6));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), Some(9));
+    }
+
+    #[test]
+    fn command_output_watermark_resets_with_the_connection() {
+        let pane = PaneId(5);
+        let mut core = ClientCore::new();
+
+        core.handle_message(command_output_frame(pane, 20, 1));
+        drain(&mut core);
+        core.handle_message(hello());
+        assert_eq!(drain(&mut core), vec![CoreEvent::HelloReceived]);
+        assert_eq!(core.command_output_id(), None);
+
+        core.handle_message(command_output_frame(pane, 1, 2));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), Some(1));
+    }
+
+    #[test]
+    fn command_output_watermark_resets_when_adopting_a_handshake() {
+        let pane = PaneId(5);
+        let mut core = ClientCore::new();
+
+        core.handle_message(command_output_frame(pane, 20, 1));
+        drain(&mut core);
+        let ProtocolMessage::ServerHello(hello) = hello() else {
+            unreachable!();
+        };
+        core.adopt_hello(hello);
+        assert_eq!(core.command_output_id(), Some(20));
+
+        core.handle_message(command_output_frame(pane, 1, 2));
+        assert_eq!(drain(&mut core), vec![CoreEvent::CommandOutputChanged]);
+        assert_eq!(core.command_output_id(), Some(1));
     }
 
     #[test]

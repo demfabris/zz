@@ -65,12 +65,15 @@ OUTER_SOCKET_NAME="zzao-$TOKEN"
 INNER_SESSION="attached"
 CHOOSER_SESSION="chooser-target"
 OUTER_SESSION="driver"
+INNER_WINDOW_TARGET="=$INNER_SESSION:0"
+INNER_PANE_TARGET="=$INNER_SESSION:0.0"
 SOURCE_CWD="$SCRATCH_DIR/client [literal]*? cwd"
 SOURCE_CONFIG_DIR="$SOURCE_CWD/config-$INNER_SESSION"
 SOURCE_DEPTH_DIR="$SCRATCH_DIR/source-depth"
 SOURCE_OUTPUT_DIR="$SCRATCH_DIR/o"
 SOURCE_OUTPUT_CHILD="$SOURCE_OUTPUT_DIR/c"
 SOURCE_OUTPUT_ROOT="$SOURCE_OUTPUT_DIR/r"
+SOURCE_OUTPUT_NAVIGATION="$SOURCE_OUTPUT_DIR/n"
 DAEMON_STDOUT="$SCRATCH_DIR/zz-daemon.stdout"
 DAEMON_STDERR="$SCRATCH_DIR/zz-daemon.stderr"
 ZZ_ATTACH="$SCRATCH_DIR/attach-zz"
@@ -88,6 +91,15 @@ printf 'display-message -p ATTACHED_CHILD_ONE\nlist-sessions -F "ATTACHED_CHILD_
   >"$SOURCE_OUTPUT_CHILD"
 printf 'display-message -p ATTACHED_ROOT_ONE\nsource-file -v %s\ndisplay-message -p ATTACHED_ROOT_TWO\n' \
   "$SOURCE_OUTPUT_CHILD" >"$SOURCE_OUTPUT_ROOT"
+for ((navigation_line = 0; navigation_line < 96; navigation_line++)); do
+  if [ "$navigation_line" -eq 35 ] || [ "$navigation_line" -eq 65 ] || \
+    [ "$navigation_line" -eq 85 ]; then
+    printf 'display-message -p "ATTACHED_NAV_%02d ATTACHED_NAV_MATCH"\n' \
+      "$navigation_line"
+  else
+    printf 'display-message -p ATTACHED_NAV_%02d\n' "$navigation_line"
+  fi
+done >"$SOURCE_OUTPUT_NAVIGATION"
 for ((depth_level = 1; depth_level <= 50; depth_level++)); do
   {
     printf 'set-option -g @attached_depth %s\n' "$depth_level"
@@ -338,6 +350,39 @@ wait_for_mode_state() {
   fixture_failure "tmux pane mode did not become $expected within 10 seconds; last state: ${LAST_MODE_STATE:-<empty>}"
 }
 
+wait_for_output_mode() {
+  local side="$1"
+  local table="$2"
+
+  if [ "$side" = "zz" ]; then
+    wait_for_client_state zz "$table"
+  else
+    wait_for_mode_state tmux copy-mode
+  fi
+}
+
+assert_output_mode_stays() {
+  local side="$1"
+  local table="$2"
+  local expected
+  local actual
+  local attempt
+
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    if [ "$side" = "zz" ]; then
+      expected="$INNER_SESSION|$table"
+      actual="$(side_command zz list-clients -F '#{client_session}|#{client_key_table}' 2>/dev/null || true)"
+    else
+      expected=1
+      actual="$(side_command tmux display-message -p -t "$INNER_PANE_TARGET" '#{pane_in_mode}' 2>/dev/null || true)"
+    fi
+    if [ "$actual" != "$expected" ]; then
+      fixture_failure "$side command-output mode changed during settle; expected $expected, got ${actual:-<empty>}"
+    fi
+    sleep 0.05
+  done
+}
+
 wait_for_visible_mode() {
   local side="$1"
   local expected="$2"
@@ -586,6 +631,7 @@ configure_side() {
   side_command "$side" bind-key -n F5 choose-tree -s -f 0 || return
   side_command "$side" bind-key -n F4 choose-buffer -f 0 || return
   side_command "$side" bind-key -n F3 source-file -v "$SOURCE_OUTPUT_ROOT" || return
+  side_command "$side" bind-key -n F2 source-file "$SOURCE_OUTPUT_NAVIGATION" || return
   side_command "$side" bind-key -N ZZLK1 -T attached-list a display-message unused || return
   side_command "$side" bind-key Q command-prompt -p ATTACHED_LIST_KEYS_PROMPT || return
   side_command "$side" bind-key R send-keys -l \
@@ -987,6 +1033,109 @@ probe_source_file_output() {
   wait_for_mode_state "$side" root
 }
 
+probe_command_output_navigation() {
+  local side="$1"
+  local original_mode_keys
+  local copied_buffer
+  local copied_text
+  local navigation_keys=()
+  local navigation_step
+
+  original_mode_keys="$(side_command "$side" show-window-options -gv mode-keys)"
+  side_command "$side" set-window-option -t "$INNER_WINDOW_TARGET" mode-keys vi ||
+    fixture_failure "$side could not select vi mode keys"
+  wait_for_side_output "$side" vi "vi mode-keys selection" \
+    show-window-options -v -t "$INNER_WINDOW_TARGET" mode-keys
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F2
+  wait_for_output_mode "$side" copy-mode-vi
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" g
+  wait_for_current_marker "$side" ATTACHED_NAV_00
+  for ((navigation_step = 0; navigation_step < 30; navigation_step++)); do
+    navigation_keys+=(j)
+  done
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" "${navigation_keys[@]}"
+  wait_for_current_marker_absent "$side" ATTACHED_NAV_00
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" g
+  wait_for_current_marker "$side" ATTACHED_NAV_00
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" C-f
+  wait_for_current_marker_absent "$side" ATTACHED_NAV_00
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
+  assert_output_mode_stays "$side" copy-mode-vi
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Space j j Escape
+  assert_output_mode_stays "$side" copy-mode-vi
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" g /
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" ATTACHED_NAV_CANCEL
+  wait_for_current_marker "$side" ATTACHED_NAV_CANCEL
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
+  wait_for_current_marker_absent "$side" ATTACHED_NAV_CANCEL
+  assert_output_mode_stays "$side" copy-mode-vi
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" /
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" ATTACHED_NAV_MATX
+  wait_for_current_marker "$side" ATTACHED_NAV_MATX
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" BSpace
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" CH
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_current_marker "$side" "ATTACHED_NAV_35 ATTACHED_NAV_MATCH"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" n
+  wait_for_current_marker "$side" "ATTACHED_NAV_65 ATTACHED_NAV_MATCH"
+  wait_for_current_marker_absent "$side" ATTACHED_NAV_35
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" N
+  wait_for_current_marker "$side" "ATTACHED_NAV_35 ATTACHED_NAV_MATCH"
+  wait_for_current_marker_absent "$side" ATTACHED_NAV_65
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Space j j Enter
+  wait_for_mode_state "$side" root
+  copied_buffer="$(side_command "$side" list-buffers -F '#{buffer_name}' | \
+    awk '$0 != "keep" { print; exit }')"
+  if [ -z "$copied_buffer" ]; then
+    fixture_failure "$side selection did not create a paste buffer"
+  fi
+  copied_text="$(side_command "$side" show-buffer -b "$copied_buffer")"
+  if ! grep -Fq -- ATTACHED_NAV_MATCH <<<"$copied_text"; then
+    fixture_failure "$side copied buffer did not contain the selected search match"
+  fi
+  side_command "$side" delete-buffer -b "$copied_buffer" ||
+    fixture_failure "$side could not remove its navigation paste buffer"
+  wait_for_side_output "$side" keep "navigation buffer cleanup" \
+    list-buffers -F '#{buffer_name}'
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F2
+  wait_for_output_mode "$side" copy-mode-vi
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" G
+  wait_for_current_marker "$side" ATTACHED_NAV_95
+  side_command "$side" bind-key -T copy-mode-vi q send-keys -X page-up ||
+    fixture_failure "$side could not install the live copy-mode-vi q binding"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_current_marker_absent "$side" ATTACHED_NAV_95
+  assert_output_mode_stays "$side" copy-mode-vi
+  side_command "$side" bind-key -T copy-mode-vi q send-keys -X cancel ||
+    fixture_failure "$side could not restore the copy-mode-vi q binding"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_mode_state "$side" root
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F2
+  wait_for_output_mode "$side" copy-mode-vi
+  side_command "$side" set-window-option -t "$INNER_WINDOW_TARGET" mode-keys emacs ||
+    fixture_failure "$side could not select emacs mode keys"
+  wait_for_side_output "$side" emacs "emacs mode-keys selection" \
+    show-window-options -v -t "$INNER_WINDOW_TARGET" mode-keys
+  wait_for_output_mode "$side" copy-mode
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
+  wait_for_mode_state "$side" root
+
+  side_command "$side" set-window-option -u -t "$INNER_WINDOW_TARGET" mode-keys ||
+    fixture_failure "$side could not restore inherited mode keys"
+  wait_for_side_output "$side" "" "mode-keys inheritance restoration" \
+    show-window-options -v -t "$INNER_WINDOW_TARGET" mode-keys
+  wait_for_side_output "$side" "$original_mode_keys" "effective mode-keys restoration" \
+    show-window-options -gv mode-keys
+}
+
 probe_list_keys_single() {
   local side="$1"
   local screen
@@ -1086,6 +1235,9 @@ probe_source_file_cwd zz
 probe_source_file_cwd tmux
 probe_source_file_output zz
 probe_source_file_output tmux
+probe_command_output_navigation zz
+probe_command_output_navigation tmux
+assert_buffer_parity keep
 probe_source_file_depth zz
 probe_source_file_depth tmux
 probe_detach_client_tty zz

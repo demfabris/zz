@@ -52,10 +52,11 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Forced stru
 show the latest parsed state during the alert. The pin's stale-timer bug remains a deliberate
 correctness divergence because zz cancels and identity-checks old timers.
 
-The 2026-08-26 canonical checkpoint covers 84 scenarios and 1,475 steps. Every ordinary row is
-clean. `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain their one
-documented GEO divergence with every other channel clean. The attached-client fixture and
-`compat/run.sh --check-summary` both pass.
+The canonical checkpoint produced by Alert commit `2e4ccf3b` covers 84 scenarios and 1,475 steps.
+Every ordinary row is clean. `known/known-main-preset-two-panes` and
+`known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
+clean. The attached-client fixture and `compat/run.sh --check-summary` both pass. The persisted
+artifacts have not been presented as a fresh full-suite run on the later `32bbd2f` handoff base.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its

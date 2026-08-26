@@ -849,7 +849,7 @@ from a `run-shell` job and diffs stdout, stderr, exit code, runtime errors, and 
 byte-for-byte. `source-file -`
 remains in the separate G6 streaming contract; it now refuses on stderr at rc 1.
 
-The focused eight-step `smoke/source-file-control` scenario separately preserves attached Control
+The focused nine-step `smoke/source-file-control` scenario separately preserves attached Control
 frame boundaries. It does not refresh the stored canonical row, which remains at three steps.
 Protocol v76 now emits one tail-tag-47 `SourcedCommandGuard` for each parser-owned
 replayed command that survives command-name resolution. An alias resolved to `source-file` before
@@ -864,7 +864,7 @@ scenario check prove root missing-path guard, then middle missing-path guard, th
 each exactly once. That closed cross-depth ordering with no production change when the scenario had
 six steps. The later return-status checks close the full client process-state matrix without making
 source-command diagnostics globally sticky. Direct runtime failures, parser-owned sourced runtime failures,
-nonruntime source failures, and typed source-read failures set retained retval 1. EOF and blank input
+nonruntime source failures, and typed OS or path source-read failures set retained retval 1. EOF and blank input
 return the current snapshot. Generic nonzero success and flags-1 parse or preparation failures do not
 set or change retval, so a fresh client remains at 0 while a prior sticky failure stays at 1. Actual
 self-detach exits 0, including when queued while another command is open. A Return captured while a
@@ -873,9 +873,27 @@ including detach. A Return observed while self-detach itself waits is discarded 
 `Detached` event arrives. Detaching another client, excluding the caller with
 `-s`, finding no victim, or using an alias that targets another client keeps the caller alive and
 preserves the queued Return; self-targeting aliases exit 0. The response `%end` precedes `%exit`.
-Runtime `if-shell` branches and hooks still execute through the sentinel replay client. A source
-reached through either path loses the original Control recipient, its child guards, and its sticky
-failure state. `control-mode.indirect-source-frames` owns that residue.
+
+Synchronous foreground shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`, and
+foreground `run-shell -C` now retain flags-1 framing through parser-owned replay. Per-client and
+per-thread capture publishes the containing command before each inserted command and an inserted
+source before its children. Output, diagnostics, runtime `client_failure`, and status stay on the
+command that produced them. Nested success and failure do not fold into the parent, intercept another
+thread, or leak into the next input command. An unsupported zz-only inserted command gets an empty
+success guard and later siblings continue, but it does not join `ConfigLoadReport`'s skipped summary.
+An unknown command in the child matches the pin's successful parent and source guards followed by
+`%config-error` without its own guard. Protocol v76 carries the closure without a version bump.
+
+Hooks still need flags-0 commands and child sources under `control-mode.hook-command-frames`.
+Shell-evaluated `if-shell -b` and `run-shell -bC` need asynchronous flags-0 frames under
+`control-mode.background-inserted-command-frames`. Immediate `if-shell -bF` stays on the synchronous
+flags-1 path. Foreground `run-shell -C` stays in this closure, while ordinary `run-shell -b` output
+remains under `control-mode.async-command-output`.
+The focused inserted-list matrix and cross-thread capture tests pass. Focused `source_file` tests
+pass 6 of 6 and replayed tests pass 5 of 5. A fresh debug build, strict daemon clippy, formatting,
+shell syntax, and diff checks pass. The strict nine-step `smoke/source-file-control` and 12-step
+`source-file-output` differentials have zero differences and no skips. The stored canonical
+`source-file-control` row remains unchanged at three steps.
 The asynchronous
 `run-shell` exit text itself is excluded from the slice because zz still emits it inside the completed
 response where tmux prints it unframed after `%end`; `control-mode.async-command-output` tracks that
@@ -890,9 +908,12 @@ The prose sniffers are pinned from both sides rather than retired:
 loader emits and `daemon_diagnostics_are_partitioned_between_config_and_source_channels`
 (`control_mode.rs`) keeps parser causes on `%config-error` while source misses become plain error
 frames. `route_config_source_errors` now marks grouped Control source diagnostics with the existing
-Error kind, and the Control client routes that kind without inspecting text. Matched child read
-failures such as invalid UTF-8, numeric OS errors, and colon-space paths use typed standalone Error
-events. No-match, glob, and depth diagnostics now travel inside their protocol v76 sourced guard.
+Error kind, and the Control client routes that kind without inspecting text. Matched child OS and
+path read failures such as numeric OS errors and colon-space paths use typed standalone Error events.
+Invalid UTF-8 config content is separate: pinned tmux accepts the measured lone-`0xff` file without a
+visible diagnostic, while zz emits `stream did not contain valid UTF-8` and status 1.
+`config.non-utf8-file-bytes` owns the byte matrix. No-match, glob, and depth diagnostics now travel
+inside their protocol v76 sourced guard.
 Both paths avoid prose classification. Config
 summaries and lexer-owned diagnostics remain Warning events, so the active
 `control-mode.diagnostic-typing` gap now contains only config identity. The known-family Warning
@@ -927,8 +948,9 @@ deeper replay; the then-six-step scenario and focused daemon regression prove th
 production change. Registered-client nested cwd rebasing is closed. The later focused eight-step
 scenario closes Control return status and detach precedence without changing the wire; the stored
 canonical row remains at three steps.
-Runtime `if-shell` and hook recursion remain outside that recipient path under
-`control-mode.indirect-source-frames`.
+Synchronous foreground inserted recursion now shares that flags-1 recipient path. Hook flags-0
+recursion remains under `control-mode.hook-command-frames`, and asynchronous inserted recursion
+remains under `control-mode.background-inserted-command-frames`.
 The nesting limit is closed for depth wording, count, and continuation. Counting the initial
 `source-file` as invocation 1, both sides run 50 concurrent source invocations and refuse invocation
 51 before any of its paths are matched or loaded: Command stderr at rc 1, the same lowercase text on
@@ -943,9 +965,10 @@ to `config.parser-edge-cases`. The refusal now appears inside the rejected neste
 flags-1 `%begin`/`%error` guard. Same-line replay grouping now matches the pin: synchronous
 invalid/runtime failures, depth refusal, and loud zero-file source errors drop later siblings from
 the same parser-owned source line while the next physical line runs. Matched sources do not
-propagate child runtime, parser, or read failures into the parent group; zz retains matched child
-read failures in `ConfigLoadReport`. Quiet zero-file misses, asynchronous commands, and unsupported
-capability gaps retain continuation. Replayed target and set-option runtime failures now keep their
+propagate child runtime, parser, or OS and path read failures into the parent group; zz retains those
+matched child failures in `ConfigLoadReport`. Quiet zero-file misses, asynchronous commands, and
+unsupported capability gaps retain continuation. Unsupported commands inside synchronous inserted
+lists do not join the report's skipped summary. Replayed target and set-option runtime failures keep their
 encounter order, use the invoking client's error channel, set the Command status or parser-owned
 Control status to 1, capitalize attached warnings, and continue later physical lines through an
 outer source. Control
@@ -962,8 +985,8 @@ pin's `glob(3)` contract for backslashes, dotfiles, repeated stars, malformed pa
 order.
 Replay transcript delivery closed on 2026-08-25. Each invocation parses every declared and globbed
 match before replay, appends its complete `-v` batch, replays parsed files in match order, then
-appends buffered command-name and parser diagnostics. Source no-match, glob, and read failures retain
-their existing error channels. A nested source inserts its own complete verbose, replay,
+appends buffered command-name and parser diagnostics. Source no-match, glob, and actual OS or path
+read failures retain their existing error channels. A nested source inserts its own complete verbose, replay,
 command-diagnostic frame at the parent command's replay position, so nested frames are depth-first.
 This is per-invocation batching, not a claim of physical verbose and replay interleaving. Command
 clients receive the transcript once on stdout. For valid successful replay and `-v` output,
@@ -2173,10 +2196,12 @@ corpus on 2026-08-20. The later source-file diagnostics wave fixed command-strea
 exit status for the file's own parser diagnostics. Replayed target and set-option runtime failures
 now use the invoking error channel and nonzero status as well. The 2026-08-25 replay-output closure
 added per-invocation verbose, replay, and buffered command-name or parser diagnostic batching plus one
-Command stdout transcript and one Interactive command-output view. Source no-match, glob, and read
-failures retain their existing error channels. First-diagnostic whole-file abort remains live in
-`config.parser-edge-cases`; TUI output-view navigation and indirect Control source frames remain
-under their named gaps.
+Command stdout transcript and one Interactive command-output view. Source no-match, glob, and actual
+OS or path read failures retain their existing error channels. Non-UTF-8 config content remains under
+`config.non-utf8-file-bytes`. First-diagnostic whole-file abort remains live in
+`config.parser-edge-cases`; TUI output-view navigation remains under
+`clients.tui-command-output-navigation`, while hook and background flags-0 frames remain under
+`control-mode.hook-command-frames` and `control-mode.background-inserted-command-frames`.
 
 # Risks
 

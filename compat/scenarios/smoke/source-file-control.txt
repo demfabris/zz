@@ -11,6 +11,7 @@ out: show-environment -g SOURCE_FILE_CONTROL_RUNTIME
 # A three-level source chain pins parent diagnostics before child replay. Each
 # surviving source command owns one flags-1 guard, including the leaf output.
 out: show-environment -g SOURCE_FILE_CONTROL_NESTED_QUEUE
+out: show-environment -g SOURCE_FILE_CONTROL_IF_SHELL
 # A second control client sources a 50-level chain so invocation 51 is loud.
 # Focused Control CLI coverage now proves the rejected command's own flags-1
 # %begin/%error guard. This differential step pins the wording count, the

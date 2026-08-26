@@ -91,14 +91,26 @@ askpass . and only refuses to open the GUI, pointing at the bundle instead.
 
 The `-C` front end owns direct flags-1 command frames, stdin and protocol ordering, deferred sourced
 guards, and the process exit code. Protocol v76 supplies one `SourcedCommandGuard` for each replayed
-command that survives command-name resolution. The writer emits those guards after the direct outer
-frame. Existing daemon preflight also guarantees root missing-path guard, then middle missing-path
-guard, then leaf output guard in a three-level replay, each exactly once. The focused nested queue
-regression and then-six-step differential closed that ordering with no production change.
+command that survives command-name resolution. The daemon now uses the same event for synchronous
+foreground shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`, and foreground
+`run-shell -C` reached during parser-owned replay. The writer closes the direct outer frame, then
+emits the containing command before each inserted command, and an inserted source before its child
+commands. Per-client and per-thread capture keeps nested trees isolated. Unknown child commands stay
+on `%config-error` without a guard. Unsupported zz-only inserted commands receive an empty success
+guard and continue, but do not enter `ConfigLoadReport`'s skipped summary. This closure reused v76
+without a new field or version.
+
+Hook commands still require flags-0 frames under `control-mode.hook-command-frames`.
+Shell-evaluated `if-shell -b` and `run-shell -bC` remain asynchronous flags 0 under
+`control-mode.background-inserted-command-frames`. Existing daemon preflight also guarantees root
+missing-path guard, then middle missing-path guard, then leaf output guard in a three-level replay,
+each exactly once.
 
 `ControlState::return_code` now follows the pin's long-lived retval contract. Direct runtime errors,
-sourced runtime errors, nonruntime source failures returned through `source-file`, and typed source-read
-failures set it to 1. Generic nonzero successes and flags-1 parse or preparation failures do not set
+sourced runtime errors, nonruntime source failures returned through `source-file`, and typed OS or
+path source-read failures set it to 1. Non-UTF-8 config content remains under
+`config.non-utf8-file-bytes`; the pinned lone-`0xff` case succeeds where zz currently emits a typed
+Error and status 1. Generic nonzero successes and flags-1 parse or preparation failures do not set
 or change it, so a fresh client stays at 0 while a prior sticky failure stays at 1. A blank line or EOF
 captures the current value when that Return enters the queue. A Return captured while a preceding
 non-detach command waits keeps that snapshot and precedes later queued stdin, including detach. A

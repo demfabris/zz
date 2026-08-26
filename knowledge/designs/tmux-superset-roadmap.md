@@ -464,15 +464,17 @@ parser errors remain `%config-error`. Protocol v76 now gives each parser-owned r
 survives command-name resolution a tail-tag-47 `SourcedCommandGuard`. An alias resolved to
 `source-file` before replay retains the same recursion path. Unknown or ambiguous command names and
 malformed alias names publish a located Warning that Control renders as `%config-error`, without a
-guard. Ordinary success and quiet all-miss use an empty flags-1 `%end`;
-a mixed hit and miss keeps the declared-path diagnostic inside `%end`; and all-miss, flag or arity
-failure, runtime failure, or depth refusal ends `%error`. Runtime failures alone set
-`client_failure`, and the Control writer defers guards FIFO until the direct outer frame closes.
-Matched read failures follow as typed standalone Error events, including invalid UTF-8, numeric OS
-errors, and colon-space paths. Config and lexer Warning prose remains under
-`control-mode.diagnostic-typing`. The existing loader preflights every declared path for one source
-command before recursion. A focused regression and the then-six-step Control differential prove
-root missing-path guard, then middle missing-path guard, then leaf output guard, each exactly once.
+guard. Ordinary success and quiet all-miss use an empty flags-1 `%end`; a mixed hit and miss keeps the
+declared-path diagnostic inside `%end`; and all-miss, flag or arity failure, runtime failure, or depth
+refusal ends `%error`. Runtime failures alone set `client_failure`, and the Control writer defers
+guards FIFO until the direct outer frame closes. Matched OS and path read failures follow as typed
+standalone Error events, including numeric OS errors and colon-space paths. Invalid UTF-8 config
+content remains under `config.non-utf8-file-bytes`: pinned tmux accepts the measured lone-`0xff`
+file without a visible diagnostic where zz emits a typed Error and status 1. Config and lexer
+Warning prose remains under `control-mode.diagnostic-typing`. The existing loader preflights every
+declared path for one source command before recursion. A focused regression and the then-six-step
+Control differential prove root missing-path guard, then middle missing-path guard, then leaf output
+guard, each exactly once.
 That closes `source-file.nested-control-queue` with no production change. The later
 `control-mode.source-file-exit-status` closure completes the long-lived Control matrix. Direct and
 parser-owned sourced runtime errors plus nonruntime source failures set retval 1. Generic nonzero successes and
@@ -481,12 +483,19 @@ prior sticky failure stays at 1. A blank line or EOF snapshots the current value
 while a preceding non-detach command waits precedes later queued stdin commands, including detach;
 a Return observed while self-detach itself waits is discarded on the caller's `Detached` event. Only
 a caller-targeted `Detached` event exits 0, so nonself and no-victim detach forms keep the loop alive.
-The command response closes before `%exit`. A focused eight-step differential passes without making
-every source or config diagnostic sticky. It does not refresh the stored canonical row, which
-remains at three steps.
-Runtime `if-shell` branches and hooks still execute through the sentinel replay client. A child
-source reached through either route loses the original Control recipient, its child guards, and its
-sticky failure state. `control-mode.indirect-source-frames` owns that residue.
+The command response closes before `%exit`.
+
+The synchronous inserted-list slice now retains flags-1 Control identity through foreground
+shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`, and foreground `run-shell -C`.
+Per-client and per-thread capture publishes the containing replay command before each inserted
+command, and an inserted source before its children. Output, failures, status, and nested ordering
+remain command-scoped without folding or leakage. An unsupported zz-only inserted command gets an
+empty success guard and later siblings continue, but it does not join `ConfigLoadReport`'s skipped
+summary. An unknown child command produces successful parent and source guards, then `%config-error`
+without its own guard, matching the pin. The closure reuses protocol v76. Hook commands remain
+flags 0 under `control-mode.hook-command-frames`; shell-evaluated `if-shell -b` and `run-shell -bC`
+remain asynchronous flags 0 under `control-mode.background-inserted-command-frames`; ordinary
+`run-shell -b` output remains under `control-mode.async-command-output`.
 The nesting limit is closed for guard
 placement, depth wording, count, and
 later-line continuation: both sides run 50 concurrent source invocations counting the initial
@@ -502,25 +511,29 @@ Same-line replay
 grouping is closed independently: synchronous invalid/runtime errors, depth refusal, and a loud
 zero-file source miss or glob error drop only later siblings on the same parser-owned source line,
 while later physical lines continue. Matched sources and asynchronous commands do not propagate
-child failures into their invoking line. The daemon retains a matched child read failure in the
-load report without using it to prune the parent group. Quiet zero-file misses succeed. In this
+child failures into their invoking line. The daemon retains a matched child OS or path read failure
+in the load report without using it to prune the parent group. Quiet zero-file misses succeed. In this
 slice zz-classified unsupported capability gaps changed from pruning later same-line siblings to
 skip-and-continue. That continuation is desirable for zz import capability gaps but remains
-pin-unproven because the corresponding commands are unsupported in zz. Replayed error delivery is
+pin-unproven because the corresponding commands are unsupported in zz. The synchronous inserted
+path shares the continuation policy but does not add its unsupported commands to the load report's
+skipped summary. Replayed error delivery is
 closed for the pinned target and set-option failures on Command, parser-owned Control, and attached
 clients. Successful output plus command-name and parser diagnostics share one per-invocation
 transcript. Each invocation
 appends its complete `-v` batch, replays every parsed match, then appends buffered command-name,
-and parser diagnostics. Source no-match, glob, and read failures retain their existing error channels.
+and parser diagnostics. Source no-match, glob, and actual OS or path read failures retain their
+existing error channels.
 A nested source inserts its own complete frame at the parent command's replay position, so nested
 frames are depth-first. This does not claim physical verbose and replay interleaving. Command clients
 receive the transcript once on stdout. For valid successful replay and `-v` output, Interactive
 clients open one command-output view without duplicate Info or Warning events. Parser diagnostics
 may still publish their existing Warning summary. Successful output leaves stderr empty and status
 zero. A runtime failure retains stderr and status 1 while stdout before and after it remains ordered.
-Cross-depth parser-owned Control ordering and return-versus-detach precedence are
-closed. Indirect Control frames, parser abort, and error shapes remain with their named groups; the
-same-line close does not cover exact matched-read text.
+Cross-depth parser-owned Control ordering, synchronous inserted flags-1 framing, and
+return-versus-detach precedence are closed. Hook and background flags-0 frames, config byte input,
+parser abort, and error shapes remain with their named groups; the same-line close does not cover
+exact matched-read text.
 Startup accounting is closed: one
 budget spans every startup root, the roots do not count, source commands 1 through 50 run, and later
 source commands retain their declaring file and line while runtime sequential sources stay

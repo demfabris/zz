@@ -25,6 +25,29 @@ printf "source-file middle-before-missing.conf '%s' middle-after-missing.conf\n"
     "$queue_dir/leaf.conf" >"$queue_dir/middle.conf"
 printf "source-file root-before-missing.conf '%s' root-after-missing.conf\n" \
     "$queue_dir/middle.conf" >"$queue_dir/root.conf"
+if_dir="$control_dir/if-shell"
+mkdir -p "$if_dir"
+printf '%s\n' 'display-message -p IF_CHILD' >"$if_dir/child.conf"
+printf '%s\n' 'display-message -p IF_LEAF' >"$if_dir/leaf.conf"
+printf "if-shell -F 1 'source-file %s'\n" \
+    "$if_dir/leaf.conf" >"$if_dir/middle.conf"
+printf '%s\n' \
+    'kill-session -t missing-if-shell-child' \
+    'display-message -p IF_CHILD_AFTER_ERROR' >"$if_dir/error-child.conf"
+{
+    printf '%s\n' "if-shell -F 1 'display-message -p IF_DIRECT'"
+    printf '%s\n' "if-shell -F 1 'kill-session -t missing-if-shell-direct'"
+    printf '%s\n' "run-shell -C 'display-message -p RUN_DIRECT'"
+    printf '%s\n' "run-shell -C 'kill-session -t missing-run-shell-direct'"
+    printf "run-shell -C 'source-file %s'\n" "$if_dir/child.conf"
+    printf "if-shell -bF 1 'source-file %s'\n" "$if_dir/child.conf"
+    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/child.conf"
+    printf "if-shell 'true' 'source-file %s'\n" "$if_dir/child.conf"
+    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/middle.conf"
+    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/error-child.conf"
+    printf "if-shell -F 1 'source-file %s'\n" "$if_dir/missing.conf"
+    printf '%s\n' 'display-message -p IF_ROOT_LATER'
+} >"$if_dir/root.conf"
 depth_dir="$control_dir/depth"
 mkdir -p "$depth_dir"
 printf '%s\n' 'set-option -g @leaf yes' >"$depth_dir/leaf.conf"
@@ -371,6 +394,53 @@ queue_transcript="$(
     ' | tr '\n' '~'
 )"
 main_client set-environment -g SOURCE_FILE_CONTROL_NESTED_QUEUE "$queue_transcript"
+
+if_raw="$control_dir/if-shell.raw"
+if_errors="$control_dir/if-shell.err"
+if_input="$control_dir/if-shell.in"
+: >"$if_raw"
+: >"$if_errors"
+rm -f -- "$if_input"
+mkfifo "$if_input"
+control_client <"$if_input" >"$if_raw" 2>"$if_errors" &
+control_pid=$!
+exec 3>"$if_input"
+printf "source-file '%s'\n" "$if_dir/root.conf" >&3
+wait_for_control_output_marker "$if_raw" IF_ROOT_LATER "$control_pid" if-shell
+printf '%s\n' 'detach-client' >&3
+exec 3>&-
+if wait_for_process "$control_pid" 200; then
+    if_status=0
+else
+    if_status=$?
+fi
+control_pid=''
+if [ "$if_status" -gt 1 ] || [ -s "$if_errors" ]; then
+    sed -n '1,120p' "$if_errors" >&2
+    exit 1
+fi
+if_transcript="$(
+    sed "s|$if_dir/||g" "$if_raw" | awk '
+        /^%begin [0-9]+ [0-9]+ 1$/ {
+            active = 1
+            print "%begin"
+            next
+        }
+        /^%end [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) print "%end"
+            active = 0
+            next
+        }
+        /^%error [0-9]+ [0-9]+ [0-9]+$/ {
+            if (active) print "%error"
+            active = 0
+            next
+        }
+        active { print }
+    ' | tr '\n' '~'
+)"
+main_client set-environment -g SOURCE_FILE_CONTROL_IF_SHELL \
+    "rc=$if_status transcript=$if_transcript"
 
 depth_raw="$control_dir/depth.raw"
 depth_errors="$control_dir/depth.err"

@@ -80,29 +80,49 @@ tracks that path.
 from the cwd in the client hello. Command and Interactive clients receive those diagnostics
 directly. Protocol v76 gives Control one `SourcedCommandGuard` for each parser-owned replay command
 that survives command-name resolution. An alias resolved to `source-file` before replay stays on
-this path. Unknown or ambiguous command names and malformed alias names
-publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary success
-and a quiet all-miss produce an empty flags-1 `%end` guard. A nested hit plus miss carries
-its declared-path diagnostic inside `%end`; an all-miss, flag or arity failure, runtime failure, or
-depth refusal ends `%error`. `client_failure` is separate from the terminator, so runtime failures
-set Control retval 1 while parse and source-command diagnostics can remain nonsticky. The Control
-writer defers guards FIFO until the direct outer frame closes. The existing
-loader preflights every declared path for one source command before recursion. A focused regression
-and the then-six-step Control differential prove the resulting root-miss guard, middle-miss guard,
-then leaf-output guard order, each exactly once; no production change was required. This closes
+this path. Unknown or ambiguous command names and malformed alias names publish a located Warning
+that Control renders as `%config-error`, without a guard. Ordinary success and a quiet all-miss
+produce an empty flags-1 `%end` guard. A nested hit plus miss carries its declared-path diagnostic
+inside `%end`; an all-miss, flag or arity failure, runtime failure, or depth refusal ends `%error`.
+`client_failure` is separate from the terminator, so runtime failures set Control retval 1 while
+parse and source-command diagnostics can remain nonsticky.
+
+Synchronous inserted lists reached during parser-owned Control replay now retain the same flags-1
+recipient. This covers foreground shell-evaluated `if-shell`, immediate `if-shell -F` including
+`-bF`, and foreground `run-shell -C`. Control closes the direct outer frame, then publishes the
+containing replay command before each inserted command. An inserted `source-file` guard precedes
+its sourced child guards. Success output, diagnostics, terminators, and `client_failure` remain on
+the command that produced them. Per-client and per-thread capture prevents nested frames from
+folding into a parent, intercepting another thread's event, or leaking into the next input command.
+The path reuses protocol v76 and adds no wire field or version.
+
+An unsupported zz-only command in an inserted list receives an empty success guard and later
+inserted siblings continue. It does not join `ConfigLoadReport`'s skipped summary, so existing
+unimplemented command and semantic groups still own reporting parity. An unknown command in a child
+file follows the pin: the parent and source guards succeed, then a `%config-error` Warning appears
+without its own command guard. Hook commands use flags 0 under
+`control-mode.hook-command-frames`. Shell-evaluated `if-shell -b` and `run-shell -bC` run later with
+flags 0 under `control-mode.background-inserted-command-frames`. Ordinary `run-shell -b` output
+remains under `control-mode.async-command-output`.
+
+The Control writer defers flags-1 guards FIFO until the direct outer frame closes. The loader
+preflights every declared path for one source command before recursion. A focused regression and
+the then-six-step Control differential prove the root-miss guard, middle-miss guard, then
+leaf-output guard order, each exactly once; no production change was required. This closes
 `source-file.nested-control-queue` for ordering only. The later
 `control-mode.source-file-exit-status` closure retains direct and parser-owned sourced runtime
-failures plus nonruntime source failures as retval 1. A Return captured while a preceding non-detach command waits
-keeps its arrival-time snapshot ahead of later queued stdin. A Return observed while self-detach waits
-is discarded when the caller's `Detached` event arrives. Nonself and no-victim detach commands keep
-the Control loop alive. A focused eight-step differential passes without making generic source or
-config diagnostics sticky. It does not refresh the stored canonical row, which remains at three
-steps. A runtime `if-shell` branch or hook that starts another
-`source-file` still runs through the sentinel replay client and loses the Control recipient.
-`control-mode.indirect-source-frames` owns those missing child guards and their failure state.
+failures plus nonruntime source failures as retval 1. A Return captured while a preceding non-detach
+command waits keeps its arrival-time snapshot ahead of later queued stdin. A Return observed while
+self-detach waits is discarded when the caller's `Detached` event arrives. Nonself and no-victim
+detach commands keep the Control loop alive.
 
-Matched child read failures follow their parent source guard as typed standalone Error events.
-Invalid UTF-8, numeric OS errors, and colon-space paths use that path without text classification.
+Matched child OS and path read failures follow their parent source guard as typed standalone Error
+events. Numeric OS errors and colon-space paths use that path without text classification. A pinned
+config containing only byte `0xff` behaves differently: direct Command and Control sources succeed
+without a visible diagnostic, and a synchronous `if-shell` source emits successful parent and
+source guards before later root commands run. zz currently rejects that byte during
+`read_to_string`, emits `stream did not contain valid UTF-8`, and returns status 1.
+`config.non-utf8-file-bytes` owns the byte-input matrix and fix.
 No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
 summaries and lexer-owned diagnostics remain generic Warning events
 behind the prose classifier in `control-mode.diagnostic-typing`. The known-family Warning fallback
@@ -117,8 +137,8 @@ physical lines. Both Control implementations place the refusal inside the reject
 command's own flags-1 `%begin`/`%error` guard. The closed nested queue proof covers its cross-depth
 placement without widening the depth slice. Same-line replay grouping now matches the pin: the refused
 source's later `;` siblings are dropped, the next physical line runs, and a matched parent source
-still runs its own same-line sibling. Matched child runtime, parser, and read failures do not prune
-that parent group; zz retains a child read failure in `ConfigLoadReport`. Exact diagnostic text,
+still runs its own same-line sibling. Matched child runtime, parser, and OS or path read failures do
+not prune that parent group; zz retains those child failures in `ConfigLoadReport`. Exact diagnostic text,
 channel placement, and exit semantics remain under their existing gaps. A malformed
 invocation at the refused depth is diagnosed as malformed rather than as depth on both sides,
 because the pin rejects it while parsing the containing file and never consults its depth guard, and
@@ -141,8 +161,9 @@ the client's final status retained at 1, and as capitalized attached warnings. L
 still run, and a containing `source-file` propagates the inner error and status without blocking
 inner or outer continuation. Unknown command names and malformed set-option syntax retain the
 existing file-prefixed parse-diagnostic path. Protocol v76 carries parser-owned runtime failures
-inside their own sourced guards. Runtime `if-shell` and hook recursion remains outside that Control
-recipient path. Successful stdout before and after a failure remains in the invocation transcript;
+inside their own sourced guards. Synchronous foreground inserted lists now use the same flags-1
+path. Hook and background inserted lists retain their flags-0 gaps. Successful stdout before and
+after a failure remains in the invocation transcript;
 the original stderr and status 1 remain separate. Clientless startup delivery stays separate.
 `source-file -n` runs the same lexer and condition evaluation, retains syntax diagnostics and
 optional verbose output, and applies neither parser environment assignments nor parsed commands.
@@ -161,7 +182,7 @@ command groups as `path:line: command`, preserves declared-path and glob order, 
 nested sources. Control clients suppress explicit and inherited verbose lines. Command clients get
 one stdout transcript, and Interactive clients open one command-output view. Each invocation emits
 its complete verbose batch, then replay output, then buffered command-name and parser diagnostics.
-Source no-match, glob, and read failures retain their existing error channels. A nested source
+Source no-match, glob, and actual OS or path read failures retain their existing error channels. A nested source
 inserts its own complete frame at the parent command's replay position, so recursion is depth-first.
 This is per-invocation batching, not a claim of physical verbose and replay interleaving. Valid
 successful replay and `-v` output produce no duplicate Info or Warning event; parser diagnostics may

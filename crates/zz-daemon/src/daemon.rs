@@ -2562,21 +2562,14 @@ impl PendingHookEvent {
         context: ExecutionContext,
         client: ClientId,
         client_name: Option<&str>,
-        snapshot: &MuxHookSnapshot,
     ) -> Self {
-        let mut variables = BTreeMap::from([
+        let variables = BTreeMap::from([
             ("hook".to_owned(), name.to_owned()),
             (
                 "hook_client".to_owned(),
                 client_name.map_or_else(|| format!("device-{}", client.0), str::to_owned),
             ),
         ]);
-        if let Some(session) = context.session {
-            variables.insert("hook_session".to_owned(), session.to_string());
-            if let Some(state) = snapshot.sessions.get(&session) {
-                variables.insert("hook_session_name".to_owned(), state.name.clone());
-            }
-        }
         Self {
             name,
             context,
@@ -6509,12 +6502,12 @@ impl Shared {
                 {
                     if let Some(clients) = inner.attached.get(session) {
                         for attached_client in clients {
+                            let client_name = client_format_name(&inner, *attached_client);
                             pending_hook_events.push(PendingHookEvent::client(
                                 "client-detached",
                                 before.session_context(*session),
                                 *attached_client,
-                                inner.client_names.get(attached_client).map(String::as_str),
-                                before,
+                                Some(client_name.as_str()),
                             ));
                         }
                     }
@@ -9397,12 +9390,12 @@ impl Shared {
             let inner = self.inner.lock();
             let hook_snapshot = MuxHookSnapshot::capture(&inner.engine);
             let hook_context = hook_snapshot.session_context(target_session);
+            let client_name = client_format_name(&inner, target_client);
             attach_events.push(PendingHookEvent::client(
                 "client-session-changed",
                 hook_context,
                 target_client,
-                inner.client_names.get(&target_client).map(String::as_str),
-                &hook_snapshot,
+                Some(client_name.as_str()),
             ));
         }
         self.refresh_control_output_taps();
@@ -10857,7 +10850,7 @@ impl Shared {
             )
         });
         let previous_session = client_attached_session(&inner, client);
-        let client_name = inner.client_names.get(&client).cloned();
+        let client_name = client_format_name(&inner, client);
         let previous_sessions = inner
             .attached
             .iter()
@@ -10908,6 +10901,9 @@ impl Shared {
         inner.client_activity.insert(client, activity);
         inner.client_activity_times.insert(client, now);
         inner.session_last_attached.insert(session, now);
+        if let Some(window) = client_focused_window_for_attachment(&inner, client) {
+            inner.window_latest_clients.insert(window, client);
+        }
         if let Some(output) = inner.control_outputs.get_mut(&client) {
             for pane in output.panes.values_mut() {
                 pane.pending.clear();
@@ -10976,16 +10972,14 @@ impl Shared {
                     "client-session-changed",
                     context.clone(),
                     client,
-                    client_name.as_deref(),
-                    &hook_snapshot_after,
+                    Some(client_name.as_str()),
                 ));
                 if previous_session.is_none() {
                     hook_events.push(PendingHookEvent::client(
                         "client-attached",
                         context,
                         client,
-                        client_name.as_deref(),
-                        &hook_snapshot_after,
+                        Some(client_name.as_str()),
                     ));
                 }
             }
@@ -11248,7 +11242,7 @@ impl Shared {
                 active_copy_mode_panes(&inner),
             )
         });
-        let client_name = inner.client_names.get(&client).cloned();
+        let client_name = client_format_name(&inner, client);
         let terminals = sessions
             .iter()
             .flat_map(|session| session_terminals(&inner, *session))
@@ -11264,6 +11258,8 @@ impl Shared {
             clients.remove(&client);
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
+        let client_active_events =
+            promote_window_latest_clients(&mut inner, client, event_hooks_enabled);
         if let Some(output) = inner.control_outputs.get_mut(&client) {
             for pane in output.panes.values_mut() {
                 pane.pending.clear();
@@ -11320,13 +11316,13 @@ impl Shared {
                 copy_modes_before,
                 &copy_modes_after,
             ));
+            events.extend(client_active_events);
             if let Some(session) = sessions.first() {
                 events.push(PendingHookEvent::client(
                     "client-detached",
                     hook_snapshot_before.session_context(*session),
                     client,
-                    client_name.as_deref(),
-                    hook_snapshot_before,
+                    Some(client_name.as_str()),
                 ));
             }
         }
@@ -11475,6 +11471,12 @@ impl Shared {
             )
         };
         if ignores_message_input {
+            if let InputMessage::ClientFocus { focused } = &input
+                && let Some((_, _, events)) =
+                    self.client_focus_report(client, kind, context, *focused, false)
+            {
+                self.run_event_hooks(events);
+            }
             if let InputMessage::Text { pane, text } = &input {
                 let matched = self.match_pending_committed_text(
                     client,
@@ -11793,10 +11795,28 @@ impl Shared {
                 }
                 InputMessage::ClientTerminalSize { columns, rows } => {
                     if columns > 0 && rows > 0 {
-                        self.inner
-                            .lock()
-                            .client_sizes
-                            .insert(client, (columns, rows));
+                        let hook_events = {
+                            let mut inner = self.inner.lock();
+                            inner.client_sizes.insert(client, (columns, rows));
+                            let mut hook_events = Vec::new();
+                            if kind == ClientKind::Interactive {
+                                if let Some(event) = set_current_window_latest_client(
+                                    &mut inner,
+                                    client,
+                                    !context.no_hooks,
+                                ) {
+                                    hook_events.push(event);
+                                }
+                                if !context.no_hooks
+                                    && let Some(event) =
+                                        client_hook_event(&inner, "client-resized", client)
+                                {
+                                    hook_events.push(event);
+                                }
+                            }
+                            hook_events
+                        };
+                        self.run_event_hooks(hook_events);
                     }
                 }
             }
@@ -12075,21 +12095,35 @@ impl Shared {
         }
     }
 
-    fn note_terminal_input(&self, client: ClientId, pane: PaneId) {
+    fn note_terminal_input(self: &Arc<Self>, client: ClientId, pane: PaneId) {
         self.note_terminal_input_accounting(client, pane, true);
     }
 
-    fn note_terminal_input_without_bell(&self, client: ClientId, pane: PaneId) {
+    fn note_terminal_input_without_bell(self: &Arc<Self>, client: ClientId, pane: PaneId) {
         self.note_terminal_input_accounting(client, pane, false);
     }
 
-    fn note_terminal_input_accounting(&self, client: ClientId, pane: PaneId, clear_bell: bool) {
-        let (resizes, layout_changed, refresh_activity_choosers) = {
+    fn note_terminal_input_accounting(
+        self: &Arc<Self>,
+        client: ClientId,
+        pane: PaneId,
+        clear_bell: bool,
+    ) {
+        let (resizes, layout_changed, refresh_activity_choosers, client_active) = {
             let mut inner = self.inner.lock();
             let refresh_activity_choosers = note_terminal_activity_locked(&mut inner, client, pane);
+            let client_active = (inner.client_kinds.get(&client) == Some(&ClientKind::Interactive))
+                .then(|| inner.engine.state.window_for_pane(pane))
+                .flatten()
+                .and_then(|window| set_window_latest_client(&mut inner, client, window, true));
             let (resizes, layout_changed) =
                 terminal_resizes_after_client_input(&mut inner, client, pane);
-            (resizes, layout_changed, refresh_activity_choosers)
+            (
+                resizes,
+                layout_changed,
+                refresh_activity_choosers,
+                client_active,
+            )
         };
         apply_terminal_resizes(resizes);
         let bell_cleared = clear_bell && self.clear_pane_bell(pane);
@@ -12098,6 +12132,50 @@ impl Shared {
         } else if refresh_activity_choosers {
             self.refresh_choose_trees();
         }
+        if let Some(event) = client_active {
+            self.run_event_hooks(vec![event]);
+        }
+    }
+
+    fn client_focus_report(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        focused: bool,
+        update_latest: bool,
+    ) -> Option<(bool, bool, Vec<PendingHookEvent>)> {
+        let mut inner = self.inner.lock();
+        client_attached_session(&inner, client)?;
+        inner.client_focused.insert(client, focused);
+        let mut hook_events = Vec::new();
+        if kind == ClientKind::Interactive {
+            if !context.no_hooks
+                && let Some(event) = client_hook_event(
+                    &inner,
+                    if focused {
+                        "client-focus-in"
+                    } else {
+                        "client-focus-out"
+                    },
+                    client,
+                )
+            {
+                hook_events.push(event);
+            }
+            if focused
+                && update_latest
+                && let Some(event) =
+                    set_current_window_latest_client(&mut inner, client, !context.no_hooks)
+            {
+                hook_events.push(event);
+            }
+        }
+        Some((
+            inner.client_flags.contains(client),
+            inner.engine.focus_events(),
+            hook_events,
+        ))
     }
 
     fn input_client_focus(
@@ -12107,17 +12185,12 @@ impl Shared {
         context: &mut ExecutionContext,
         focused: bool,
     ) -> Result<(), DaemonError> {
-        let (read_only, focus_events) = {
-            let mut inner = self.inner.lock();
-            if client_attached_session(&inner, client).is_none() {
-                return Ok(());
-            }
-            inner.client_focused.insert(client, focused);
-            (
-                inner.client_flags.contains(client),
-                inner.engine.focus_events(),
-            )
+        let Some((read_only, focus_events, hook_events)) =
+            self.client_focus_report(client, kind, context, focused, true)
+        else {
+            return Ok(());
         };
+        self.run_event_hooks(hook_events);
         if !focus_events {
             return Ok(());
         }
@@ -16005,6 +16078,12 @@ impl Shared {
     fn publish_snapshot_state(&self) {
         let (snapshots, appearance_updates) = {
             let mut inner = self.inner.lock();
+            let ServerState {
+                engine,
+                window_latest_clients,
+                ..
+            } = &mut *inner;
+            window_latest_clients.retain(|window, _| engine.state.windows.contains_key(window));
             let snapshot = inner.engine.state.snapshot();
             inner.last_published_mux_generation = snapshot.generation;
             let presence = snapshot_presence(&inner);
@@ -17647,9 +17726,11 @@ impl Shared {
         client: ClientId,
         color_scheme: TerminalColorScheme,
     ) {
-        let (appearance_changed, appearance_config_overrides) = {
+        let (appearance_changed, appearance_config_overrides, hook_event) = {
             let mut inner = self.inner.lock();
-            if !inner.subscribers.contains_key(&client) {
+            if !inner.subscribers.contains_key(&client)
+                || inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
+            {
                 return;
             }
             inner.client_color_schemes.insert(client, color_scheme);
@@ -17657,8 +17738,19 @@ impl Shared {
             (
                 inner.appearance.color_scheme != color_scheme,
                 inner.appearance_config_overrides.clone(),
+                client_hook_event(
+                    &inner,
+                    match color_scheme {
+                        TerminalColorScheme::Light => "client-light-theme",
+                        TerminalColorScheme::Dark => "client-dark-theme",
+                    },
+                    client,
+                ),
             )
         };
+        if let Some(event) = hook_event {
+            self.run_event_hooks(vec![event]);
+        }
         log::debug!(
             target: "zz_daemon::diagnostics::appearance",
             "recorded system color scheme client={client} scheme={} appearance_changed={appearance_changed}",
@@ -19835,6 +19927,7 @@ struct ServerState {
     client_activity_times: BTreeMap<ClientId, u64>,
     client_created_times: BTreeMap<ClientId, u64>,
     client_focused: BTreeMap<ClientId, bool>,
+    window_latest_clients: BTreeMap<WindowId, ClientId>,
     session_last_attached: BTreeMap<SessionId, u64>,
     activity_sequence: u64,
     deferred_event_hooks: Vec<PendingHookEvent>,
@@ -22873,22 +22966,7 @@ fn client_format_facts(
         .format_status_context(Some(session), Some(window), None);
     let tty = inner.client_ttys.get(&client).cloned().unwrap_or_default();
     let pid = inner.client_pids.get(&client).copied().unwrap_or_default();
-    let name = if tty.is_empty() {
-        inner
-            .client_names
-            .get(&client)
-            .filter(|name| !name.is_empty())
-            .cloned()
-            .unwrap_or_else(|| {
-                if pid == 0 {
-                    format!("device-{}", client.0)
-                } else {
-                    format!("client-{pid}")
-                }
-            })
-    } else {
-        tty.clone()
-    };
+    let name = client_format_name(inner, client);
     let default_key_table = inner.engine.key_table_for_session(session);
     let key_table = inner
         .key_engines
@@ -22959,6 +23037,29 @@ fn client_format_facts(
     }
 }
 
+fn client_format_name(inner: &ServerState, client: ClientId) -> String {
+    inner
+        .client_ttys
+        .get(&client)
+        .filter(|tty| !tty.is_empty())
+        .cloned()
+        .or_else(|| {
+            inner
+                .client_names
+                .get(&client)
+                .filter(|name| !name.is_empty())
+                .cloned()
+        })
+        .unwrap_or_else(|| {
+            let pid = inner.client_pids.get(&client).copied().unwrap_or_default();
+            if pid == 0 {
+                format!("device-{}", client.0)
+            } else {
+                format!("client-{pid}")
+            }
+        })
+}
+
 fn client_focused_window(
     inner: &ServerState,
     client: ClientId,
@@ -22976,6 +23077,110 @@ fn client_focused_window_for_attachment(inner: &ServerState, client: ClientId) -
     client_attached_session(inner, client)
         .and_then(|session| inner.engine.state.sessions.get(&session))
         .map(|session| client_focused_window(inner, client, session))
+}
+
+fn client_hook_event_for_window(
+    inner: &ServerState,
+    name: &'static str,
+    client: ClientId,
+    window: WindowId,
+) -> Option<PendingHookEvent> {
+    let session = client_attached_session(inner, client)?;
+    let window_state = inner.engine.state.windows.get(&window)?;
+    if window_state.session != session {
+        return None;
+    }
+    let pane = window_state.active_pane;
+    let client_name = client_format_name(inner, client);
+    Some(PendingHookEvent::client(
+        name,
+        ExecutionContext::new(Some(session), Some(window), Some(pane)),
+        client,
+        Some(client_name.as_str()),
+    ))
+}
+
+fn client_hook_event(
+    inner: &ServerState,
+    name: &'static str,
+    client: ClientId,
+) -> Option<PendingHookEvent> {
+    let window = client_focused_window_for_attachment(inner, client)?;
+    client_hook_event_for_window(inner, name, client, window)
+}
+
+fn set_window_latest_client(
+    inner: &mut ServerState,
+    client: ClientId,
+    window: WindowId,
+    event_hooks_enabled: bool,
+) -> Option<PendingHookEvent> {
+    let session = client_attached_session(inner, client)?;
+    if inner.engine.state.windows.get(&window)?.session != session {
+        return None;
+    }
+    if inner.window_latest_clients.insert(window, client) == Some(client) {
+        return None;
+    }
+    event_hooks_enabled
+        .then(|| client_hook_event_for_window(inner, "client-active", client, window))
+        .flatten()
+}
+
+fn set_current_window_latest_client(
+    inner: &mut ServerState,
+    client: ClientId,
+    event_hooks_enabled: bool,
+) -> Option<PendingHookEvent> {
+    let window = client_focused_window_for_attachment(inner, client)?;
+    set_window_latest_client(inner, client, window, event_hooks_enabled)
+}
+
+fn promote_window_latest_clients(
+    inner: &mut ServerState,
+    detached: ClientId,
+    event_hooks_enabled: bool,
+) -> Vec<PendingHookEvent> {
+    let windows = inner
+        .window_latest_clients
+        .iter()
+        .filter_map(|(window, client)| (*client == detached).then_some(*window))
+        .collect::<Vec<_>>();
+    let mut events = Vec::new();
+    for window in windows {
+        let survivor = inner
+            .engine
+            .state
+            .windows
+            .get(&window)
+            .and_then(|window_state| inner.attached.get(&window_state.session))
+            .into_iter()
+            .flatten()
+            .filter(|client| client_focused_window_for_attachment(inner, **client) == Some(window))
+            .copied()
+            .max_by_key(|client| {
+                (
+                    inner
+                        .client_activity
+                        .get(client)
+                        .copied()
+                        .unwrap_or_default(),
+                    Reverse(client.0),
+                )
+            });
+        if let Some(survivor) = survivor {
+            inner.window_latest_clients.insert(window, survivor);
+            if event_hooks_enabled
+                && let Some(event) =
+                    client_hook_event_for_window(inner, "client-active", survivor, window)
+            {
+                events.push(event);
+            }
+        } else {
+            inner.window_latest_clients.remove(&window);
+        }
+    }
+    events
 }
 
 fn client_input_pane(
@@ -35885,16 +36090,15 @@ mod tests {
             "client-session-changed",
             "client-detached",
         ] {
-            require(
-                PendingHookEvent::client(
-                    name,
-                    snapshot.session_context(session),
-                    ClientId(7),
-                    None,
-                    &snapshot,
-                ),
-                &["hook_client", "hook_session", "hook_session_name"],
+            let event = PendingHookEvent::client(
+                name,
+                snapshot.session_context(session),
+                ClientId(7),
+                None,
             );
+            require(event.clone(), &["hook_client"]);
+            assert!(!event.variables.contains_key("hook_session"));
+            assert!(!event.variables.contains_key("hook_session_name"));
         }
         for name in ["paste-buffer-changed", "paste-buffer-deleted"] {
             require(
@@ -35902,6 +36106,415 @@ mod tests {
                 &["hook_paste_buffer"],
             );
         }
+    }
+
+    fn install_client_event_log_hooks(
+        shared: &Arc<Shared>,
+        context: &mut ExecutionContext,
+        names: &[&str],
+    ) {
+        for name in names {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new(
+                        "set-hook",
+                        [
+                            "-g",
+                            *name,
+                            "display-message '#{hook}|#{hook_client}|#{session_id}|#{window_id}|#{pane_id}'",
+                        ],
+                    ),
+                )
+                .expect("install client event hook");
+        }
+    }
+
+    fn client_event_log(shared: &Shared) -> Vec<String> {
+        shared
+            .inner
+            .lock()
+            .message_log
+            .iter()
+            .map(|message| message.text.clone())
+            .collect()
+    }
+
+    #[test]
+    fn client_hook_name_matches_client_format_name_fallbacks() {
+        let shared = Arc::new(Shared::new(1));
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("macbook".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let mut inner = shared.inner.lock();
+
+        assert_eq!(client_format_name(&inner, client), "macbook");
+        inner.client_ttys.insert(client, String::new());
+        assert_eq!(client_format_name(&inner, client), "macbook");
+        inner.client_ttys.insert(client, "/dev/pts/40".to_owned());
+        assert_eq!(client_format_name(&inner, client), "/dev/pts/40");
+        inner.client_ttys.remove(&client);
+        inner.client_names.insert(client, String::new());
+        inner.client_pids.insert(client, 4242);
+        assert_eq!(client_format_name(&inner, client), "client-4242");
+        inner.client_pids.insert(client, 0);
+        assert_eq!(
+            client_format_name(&inner, client),
+            format!("device-{}", client.0)
+        );
+    }
+
+    #[test]
+    fn client_focus_and_activity_hooks_preserve_reports_order_and_latest_changes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "client-hooks", "focus");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("client hook window");
+        let (first, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("first-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("second-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_ttys.insert(first, "/dev/pts/41".to_owned());
+            inner.client_ttys.insert(second, "/dev/pts/42".to_owned());
+            inner.client_ttys.insert(control, "/dev/pts/43".to_owned());
+        }
+        shared.attach(first, session).expect("attach first client");
+        shared
+            .attach(second, session)
+            .expect("attach second client");
+        shared
+            .attach(control, session)
+            .expect("attach control client");
+        let mut hook_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("client hook context");
+        install_client_event_log_hooks(
+            &shared,
+            &mut hook_context,
+            &["client-focus-in", "client-focus-out", "client-active"],
+        );
+        let context_ids = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut hook_context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "#{session_id}|#{window_id}|#{pane_id}"],
+                ),
+            )
+            .expect("expand client hook context")
+            .output;
+        shared.inner.lock().message_log.clear();
+
+        for focused in [true, true, false] {
+            shared
+                .input(
+                    first,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    InputMessage::ClientFocus { focused },
+                )
+                .expect("report first client focus");
+        }
+        shared
+            .input(
+                control,
+                ClientKind::Control,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("report control focus");
+        shared.note_terminal_input(first, pane);
+        shared.note_terminal_input(second, pane);
+        shared.note_terminal_input(second, pane);
+        shared.note_terminal_input(control, pane);
+
+        assert_eq!(
+            client_event_log(&shared),
+            [
+                format!("client-focus-in|/dev/pts/41|{context_ids}"),
+                format!("client-active|/dev/pts/41|{context_ids}"),
+                format!("client-focus-in|/dev/pts/41|{context_ids}"),
+                format!("client-focus-out|/dev/pts/41|{context_ids}"),
+                format!("client-active|/dev/pts/42|{context_ids}"),
+            ]
+        );
+        assert_eq!(
+            shared.inner.lock().window_latest_clients.get(&window),
+            Some(&second)
+        );
+
+        let mut no_hooks = ExecutionContext::default();
+        no_hooks.no_hooks = true;
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut no_hooks,
+                InputMessage::ClientFocus { focused: true },
+            )
+            .expect("suppress client focus hooks");
+        assert_eq!(client_event_log(&shared).len(), 5);
+        assert_eq!(
+            shared.inner.lock().window_latest_clients.get(&window),
+            Some(&first)
+        );
+
+        let mut message_context =
+            ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+                .expect("message context");
+        shared
+            .execute(
+                first,
+                ClientKind::Interactive,
+                &mut message_context,
+                &CommandInvocation::new("display-message", ["-N", "-d", "5000", "ignore focus"]),
+            )
+            .expect("arm ignored focus input");
+        shared.inner.lock().message_log.clear();
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::ClientFocus { focused: false },
+            )
+            .expect("report ignored client focus");
+        assert_eq!(
+            client_event_log(&shared),
+            [format!("client-focus-out|/dev/pts/41|{context_ids}")]
+        );
+        let inner = shared.inner.lock();
+        assert!(inner.client_messages.contains_key(&first));
+        assert!(inner.message_ignore_keys.contains(&first));
+        assert_eq!(inner.window_latest_clients.get(&window), Some(&first));
+    }
+
+    #[test]
+    fn client_resize_and_theme_hooks_fire_for_every_interactive_report() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "client-reports", "reports");
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("reporter".to_owned()),
+            Some(TerminalColorScheme::Dark),
+            OutboundMailbox::new(),
+        );
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control-reporter".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        {
+            let mut inner = shared.inner.lock();
+            inner
+                .client_ttys
+                .insert(interactive, "/dev/pts/50".to_owned());
+            inner.client_ttys.insert(control, "/dev/pts/51".to_owned());
+        }
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive reporter");
+        shared
+            .attach(control, session)
+            .expect("attach control reporter");
+        let mut hook_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("client report context");
+        install_client_event_log_hooks(
+            &shared,
+            &mut hook_context,
+            &[
+                "client-active",
+                "client-resized",
+                "client-dark-theme",
+                "client-light-theme",
+            ],
+        );
+        let context_ids = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut hook_context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "#{session_id}|#{window_id}|#{pane_id}"],
+                ),
+            )
+            .expect("expand client report context")
+            .output;
+        shared.inner.lock().message_log.clear();
+
+        for (kind, client, columns, rows) in [
+            (ClientKind::Interactive, interactive, 120, 40),
+            (ClientKind::Interactive, interactive, 120, 40),
+            (ClientKind::Interactive, interactive, 0, 40),
+            (ClientKind::Control, control, 90, 30),
+        ] {
+            shared
+                .input(
+                    client,
+                    kind,
+                    &mut ExecutionContext::default(),
+                    InputMessage::ClientTerminalSize { columns, rows },
+                )
+                .expect("report client terminal size");
+        }
+        for color_scheme in [
+            TerminalColorScheme::Dark,
+            TerminalColorScheme::Dark,
+            TerminalColorScheme::Light,
+            TerminalColorScheme::Light,
+        ] {
+            shared.set_client_color_scheme(interactive, color_scheme);
+        }
+        shared.set_client_color_scheme(control, TerminalColorScheme::Dark);
+
+        assert_eq!(
+            client_event_log(&shared),
+            [
+                format!("client-active|/dev/pts/50|{context_ids}"),
+                format!("client-resized|/dev/pts/50|{context_ids}"),
+                format!("client-resized|/dev/pts/50|{context_ids}"),
+                format!("client-dark-theme|/dev/pts/50|{context_ids}"),
+                format!("client-dark-theme|/dev/pts/50|{context_ids}"),
+                format!("client-light-theme|/dev/pts/50|{context_ids}"),
+                format!("client-light-theme|/dev/pts/50|{context_ids}"),
+            ]
+        );
+        let inner = shared.inner.lock();
+        assert_eq!(inner.client_sizes.get(&interactive), Some(&(120, 40)));
+        assert_eq!(
+            inner.client_color_schemes.get(&interactive),
+            Some(&TerminalColorScheme::Light)
+        );
+        assert!(!inner.client_color_schemes.contains_key(&control));
+    }
+
+    #[test]
+    fn detaching_latest_client_promotes_a_surviving_control_client() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) =
+            output_view_session_fixture(&shared, "client-promotion", "promote");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .expect("promotion window");
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("surviving-control".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (departing, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("departing-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_ttys.insert(control, "/dev/pts/60".to_owned());
+            inner
+                .client_ttys
+                .insert(departing, "/dev/pts/61".to_owned());
+        }
+        shared
+            .attach(control, session)
+            .expect("attach control survivor");
+        shared
+            .attach(departing, session)
+            .expect("attach departing client");
+        let mut hook_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("promotion hook context");
+        install_client_event_log_hooks(
+            &shared,
+            &mut hook_context,
+            &["client-active", "client-detached"],
+        );
+        let context_ids = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut hook_context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "#{session_id}|#{window_id}|#{pane_id}"],
+                ),
+            )
+            .expect("expand promotion context")
+            .output;
+        shared.inner.lock().message_log.clear();
+
+        shared.detach(departing);
+
+        assert_eq!(
+            client_event_log(&shared),
+            [
+                format!("client-active|/dev/pts/60|{context_ids}"),
+                format!("client-detached|/dev/pts/61|{context_ids}"),
+            ]
+        );
+        assert_eq!(
+            shared.inner.lock().window_latest_clients.get(&window),
+            Some(&control)
+        );
+    }
+
+    #[test]
+    fn snapshot_publication_prunes_destroyed_latest_windows() {
+        let shared = Arc::new(Shared::new(1));
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("latest-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let destroyed = WindowId(u64::MAX);
+        shared
+            .inner
+            .lock()
+            .window_latest_clients
+            .insert(destroyed, client);
+
+        shared.publish_snapshot_state();
+
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .window_latest_clients
+                .contains_key(&destroyed)
+        );
     }
 
     #[test]

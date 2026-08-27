@@ -2269,7 +2269,7 @@ protocol v77. Background `if-shell -b` and `run-shell -bC` flags-0 frames closed
 bump. Hard disconnect after an immediate hook or source queue starts remains under
 `control-mode.disconnect-cancels-command-queue`. Protocol v78 later closed parser and hook-source raw
 read placement plus invisible completion command numbering. Invalid UTF-8, source stdin transport,
-parser abort, hook cwd, and deferred event hooks retain their named gaps.
+parser abort, and deferred event-hook cwd retain their named gaps.
 
 # Risks
 

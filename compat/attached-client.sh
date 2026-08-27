@@ -1618,6 +1618,129 @@ probe_client_context_formats() {
   wait_for_client_state "$side" root
 }
 
+probe_client_event_hooks() {
+  local side="$1"
+  local event_window="events-$side"
+  local event_attach="$SCRATCH_DIR/attach-$event_window"
+  local primary_target="=$OUTER_SESSION:$side"
+  local event_target="=$OUTER_SESSION:$event_window"
+  local primary_tty
+  local event_tty
+  local event_pid
+  local event_context
+  local primary_event
+  local event_active
+  local event_focus_out
+  local event_focus_in
+  local event_resized
+  local hook
+
+  write_attach "$side" "$event_attach"
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$event_window" 'sleep 600' ||
+    fixture_failure "$side could not create its client event window"
+  tmux_outer_command respawn-pane -k -t "$event_target" "$event_attach" ||
+    fixture_failure "$side could not attach its client event client"
+  wait_for_attached_client_count "$side" 2
+
+  primary_tty="$(tmux_outer_command display-message -p -t "$primary_target" '#{pane_tty}')"
+  event_tty="$(tmux_outer_command display-message -p -t "$event_target" '#{pane_tty}')"
+  event_pid="$(tmux_outer_command display-message -p -t "$event_target" '#{pane_pid}')"
+  if [[ "$primary_tty" != /dev/* || "$event_tty" != /dev/* ]] ||
+    ! [[ "$event_pid" =~ ^[0-9]+$ ]]; then
+    fixture_failure "$side outer panes did not expose client event identities"
+  fi
+  event_context="$(side_command "$side" display-message -p -c "$event_tty" \
+    '#{session_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_id}')" ||
+    fixture_failure "$side could not select its client event context"
+  event_context="${event_context//$'\r'/}"
+
+  primary_event="A|$primary_tty|$event_context||,"
+  event_active="A|$event_tty|$event_context||,"
+  event_focus_out="O|$event_tty|$event_context||,"
+  event_focus_in="I|$event_tty|$event_context||,"
+  event_resized="R|$event_tty|$event_context||,"
+
+  side_command "$side" set-option -g focus-events on ||
+    fixture_failure "$side could not enable client focus events"
+  side_command "$side" set-option -g @attached_event_hooks '' ||
+    fixture_failure "$side could not initialize its client event log"
+  side_command "$side" set-option -g @attached_event_keys '' ||
+    fixture_failure "$side could not initialize its client event key log"
+  side_command "$side" bind-key -n F12 set-option -agF @attached_event_keys \
+    'K|#{client_tty},' ||
+    fixture_failure "$side could not bind its client event input"
+  side_command "$side" set-hook -g client-active \
+    "set-option -agF @attached_event_hooks 'A|#{hook_client}|#{session_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_id}|#{hook_session}|#{hook_session_name},'" ||
+    fixture_failure "$side could not install client-active"
+  side_command "$side" set-hook -g client-focus-out \
+    "set-option -agF @attached_event_hooks 'O|#{hook_client}|#{session_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_id}|#{hook_session}|#{hook_session_name},'" ||
+    fixture_failure "$side could not install client-focus-out"
+  side_command "$side" set-hook -g client-focus-in \
+    "set-option -agF @attached_event_hooks 'I|#{hook_client}|#{session_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_id}|#{hook_session}|#{hook_session_name},'" ||
+    fixture_failure "$side could not install client-focus-in"
+  side_command "$side" set-hook -g client-resized \
+    "set-option -agF @attached_event_hooks 'R|#{hook_client}|#{session_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_id}|#{hook_session}|#{hook_session_name},'" ||
+    fixture_failure "$side could not install client-resized"
+
+  tmux_outer_command send-keys -t "$primary_target" F12
+  wait_for_side_output "$side" "K|$primary_tty," "primary client event input" \
+    show-options -gqv @attached_event_keys
+  side_command "$side" set-option -g @attached_event_hooks '' ||
+    fixture_failure "$side could not clear its client event baseline"
+  side_command "$side" set-option -g @attached_event_keys '' ||
+    fixture_failure "$side could not clear its client event key baseline"
+
+  tmux_outer_command send-keys -t "$event_target" F12
+  wait_for_side_output "$side" "$event_active" "client-active event" \
+    show-options -gqv @attached_event_hooks
+  wait_for_side_output "$side" "K|$event_tty," "active client input" \
+    show-options -gqv @attached_event_keys
+  tmux_outer_command send-keys -t "$event_target" F12
+  wait_for_side_output "$side" "K|$event_tty,K|$event_tty," \
+    "repeated active client input" show-options -gqv @attached_event_keys
+  tmux_outer_command send-keys -t "$primary_target" F12
+  wait_for_side_output "$side" "$event_active$primary_event" \
+    "deduplicated client-active events" show-options -gqv @attached_event_hooks
+
+  side_command "$side" set-option -g @attached_event_hooks '' ||
+    fixture_failure "$side could not clear its client focus event log"
+  tmux_outer_command send-keys -l -t "$event_target" $'\033[O'
+  wait_for_side_output "$side" "$event_focus_out" "client-focus-out event" \
+    show-options -gqv @attached_event_hooks
+  tmux_outer_command send-keys -l -t "$event_target" $'\033[I'
+  wait_for_side_output "$side" "$event_focus_out$event_focus_in$event_active" \
+    "client-focus-in event ordering" show-options -gqv @attached_event_hooks
+
+  tmux_outer_command send-keys -t "$primary_target" F12
+  wait_for_side_output "$side" "$event_focus_out$event_focus_in$event_active$primary_event" \
+    "client resize latest-client baseline" show-options -gqv @attached_event_hooks
+  side_command "$side" set-option -g @attached_event_hooks '' ||
+    fixture_failure "$side could not clear its client resize event log"
+  kill -WINCH "$event_pid"
+  wait_for_side_output "$side" "$event_active$event_resized" \
+    "client-resized event ordering" show-options -gqv @attached_event_hooks
+  kill -WINCH "$event_pid"
+  wait_for_side_output "$side" "$event_active$event_resized$event_resized" \
+    "repeated unchanged client-resized event" show-options -gqv @attached_event_hooks
+
+  for hook in client-active client-focus-out client-focus-in client-resized; do
+    side_command "$side" set-hook -gu "$hook" ||
+      fixture_failure "$side could not remove $hook"
+  done
+  side_command "$side" unbind-key -n F12 ||
+    fixture_failure "$side could not remove its client event input"
+  side_command "$side" set-option -gu @attached_event_hooks ||
+    fixture_failure "$side could not clear its client event log"
+  side_command "$side" set-option -gu @attached_event_keys ||
+    fixture_failure "$side could not clear its client event key log"
+  side_command "$side" set-option -gu focus-events ||
+    fixture_failure "$side could not restore client focus events"
+  tmux_outer_command kill-window -t "$event_target" ||
+    fixture_failure "$side could not remove its client event window"
+  wait_for_attached_client_count "$side" 1
+  wait_for_client_state "$side" root
+}
+
 probe_client_environment() {
   local side="$1"
   local session="environment-$side"
@@ -2087,6 +2210,8 @@ probe_attached_client_sizing zz
 probe_attached_client_sizing tmux
 probe_client_context_formats zz
 probe_client_context_formats tmux
+probe_client_event_hooks zz
+probe_client_event_hooks tmux
 probe_detach_client_tty zz
 probe_detach_client_tty tmux
 

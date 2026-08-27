@@ -278,34 +278,31 @@
       "reason": "The daemon can select and detach clients, but it has no typed client-exit action that asks the presentation process to exec a shell command."
     },
     {
-      "id": "clients.event-hooks",
-      "title": "Produce client lifecycle hooks",
+      "id": "clients.event-resize-context",
+      "title": "Defer client-resized until geometry settles",
       "decision": "adopt",
       "status": "open",
-      "priority": "next",
-      "ease": "medium",
+      "priority": "later",
+      "ease": "hard",
       "impact": [
         "scripts",
         "remote"
       ],
-      "owner": "daemon",
+      "owner": "protocol",
       "items": [
-        "hook:client-active",
-        "hook:client-dark-theme",
-        "hook:client-focus-in",
-        "hook:client-focus-out",
-        "hook:client-light-theme",
-        "hook:client-resized"
+        "semantic:client-resized-post-geometry-context"
       ],
       "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-tui/src/app.rs",
         "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
+        "file:compat/attached-client.sh"
       ],
       "acceptance": [
-        "Each retained client transition emits its hook once with the target client's format context."
+        "Changed and unchanged Interactive outer-resize reports each emit client-resized once after visible pane and window geometry has settled; a resulting client-active still precedes it, and Control refresh-client -C emits neither hook."
       ],
       "depends_on": [],
-      "reason": "Storage exists; the missing producers need shared client state and transition points."
+      "reason": "The TUI sends ClientTerminalSize before its deduplicated per-pane geometry messages, while the daemon currently runs client-resized from the first message. A changed resize can therefore expand old pane and window dimensions even though repeated unchanged reports must still fire."
     },
     {
       "id": "clients.interactive-refresh",
@@ -3006,6 +3003,19 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "The catalog accepts detach-client -t, and one no-wire daemon resolver now serves detach-client and switch-client. Explicit targets resolve exact attached client names, native device names, full tty paths, tty paths without /dev/, and one trailing-colon variant before any -s lookup. Without a selector, an attached Interactive or Control client selects itself; a Command client selects the best client on its origin pane's session, then falls back to the best client on the most recently active attached session. detach-client -s wins over -a and quietly does nothing when its source session is missing; -a detaches every attached peer except the resolved target, while bare detach selects only that client. A read-only client may detach only itself. Requested detach publishes the existing Requested reason without a by-client, while attach-session -d eviction retains Evicted; unregister cleanup remains unchanged. Local terminal surfaces always publish a discovered tty, so switch-client and detach-client retain their full-tty and /dev/-stripped aliases even outside nested tmux; remote clients still omit the host tty. The separate client-nested-v1 hello capability is emitted only when TMUX is nonempty and gates nested refusal together with an exact pane-tty match. Focused mux and daemon tests cover parsing, selector and source precedence, origin and fallback selection, aliases, read-only authorization, reasons, victim sets, and nested-marker lifecycle. The attached-client fixture obtains each real outer PTY, targets the client by that tty, and requires the attached client count to reach zero. For nested refusal it removes whitespace from the complete pane history and fixed pin text, snapshots the count of exact normalized substrings before each attempt, requires that count to increase afterward, and holds the attached count at one through a settle for both attach-session and new-session -A. It then proves env -u TMUX admits both paths and uses the retained root tty to detach only the forced nested client. The later clients.tty-basename-targeting closure aligned every supported client-selector caller and removed the display-panes basename widening. The later clients.local-control-terminal-facts closure extended only tty identity and nested intent to a local Control client whose stdin is a terminal. detach-client -E and parent-HUP exit actions remain separate open gaps."
+    },
+    {
+      "id": "clients.event-hooks",
+      "title": "Produce client lifecycle hooks",
+      "closed_on": "2026-08-27",
+      "evidence": [
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "The daemon now retains the latest attached client for each window and produces client-active, client-focus-in, client-focus-out, client-resized, client-light-theme, and client-dark-theme at their retained report boundaries. client-active fires only when the window's latest client changes; repeated focus, theme, and positive Interactive size reports each fire, even when the retained value is unchanged. Focus-in precedes a resulting active event, resize follows a resulting active event, focus-out never changes the latest client, and loss of the latest client promotes the remaining client with greatest activity before client-detached. Control clients do not originate focus, theme, resize, or input-driven active events, but an attached Control client can win loss promotion. Hooks remain clientless: hook_client identifies the reporter, client notifications expose no hook-specific session variables, copied session, window, and shared active-pane state supplies ordinary target formats, and ordinary client facts keep their independent selection rules. Per-client active-pane behavior remains under clients.active-pane. Focused daemon tests cover all six names, duplicate reports, ordering, suppression, Control exclusions, and loss promotion; the real two-client fixture proves the TUI-drivable active, focus, and resize sequence against pinned tmux without a protocol change. Post-geometry format timing for changed resize reports remains under clients.event-resize-context."
     },
     {
       "id": "clients.local-control-terminal-facts",

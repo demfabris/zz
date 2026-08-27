@@ -84,11 +84,17 @@ waits — they get the pin's clientless errors (scripts are faithful).
 `set-hook` / `show-hooks` shipped in wave 5c (`40ddd63`): full 68-name storage
 with pin scope, after-* + command-error + event hooks fire (events clientless
 like the pin), `@`-user hooks share the option slot. Ledgered: `-B` monitors
-are rejected. Ten names have no automatic producer: `after-queue`,
-`client-active`, `client-focus-in`, `client-focus-out`,
-`client-resized`, `client-light-theme`, `client-dark-theme`, `pane-focus-in`,
-`pane-focus-out`, and `pane-set-clipboard`. `window-layout-changed` single-fires
-where the pin double-fires on resize/select-layout.
+are rejected. The 2026-08-27 client hook slice added the six report-driven
+client producers. `client-active` fires only when the latest client changes;
+focus, theme, and positive Interactive size reports fire even when repeated.
+Control clients do not originate those reports but can win latest-client
+promotion after a detach. Changed TUI resizes send retained outer size before
+per-pane geometry, so `client-resized` can expand old pane and window dimensions;
+`clients.event-resize-context` owns moving that hook after geometry without losing
+unchanged-report duplicates. Four names still have no automatic producer:
+`after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`.
+`window-layout-changed` single-fires where the pin double-fires on
+resize/select-layout.
 
 The lock trio shipped in wave 5d-2 (`01096c2`) as storage + error parity:
 `lock-command` (default `lock -np`) and `lock-after-time` (default 0) store

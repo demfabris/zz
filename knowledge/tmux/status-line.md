@@ -215,7 +215,9 @@ reaches activity accounting. Text, Single, Incremental, and BackspaceExit prompt
 transition and stay open. Key prompts submit `FocusIn` or `FocusOut` and consume it; Numeric prompts
 submit their buffer without recording prompt history and pass it into ordinary focus accounting.
 Native chooser pane modes and read-only clients bypass the writable prequeue, so those modals and
-messages stay open. A FocusIn that changes both latest geometry and an activity-sorted chooser
+messages stay open. The `client-focus-in` or `client-focus-out` report hook still fires when
+`focus-events` is off; that option gates application focus forwarding and activity accounting, not
+the retained client report. A FocusIn that changes both latest geometry and an activity-sorted chooser
 publishes the snapshot and independently refreshes the chooser. Writable
 command-prompt consumed key or text input does not refresh activity. Committed text uses a bounded
 ordered queue per client; every entry records its pane and input lane. A press or repeat `Key` with

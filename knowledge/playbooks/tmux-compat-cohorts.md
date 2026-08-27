@@ -18,7 +18,8 @@ The Alert cohort completed in commit `2e4ccf3b9b6706e44215d74ca147643e6baa3d2e`.
 campaign branch then closed session cwd in
 `2468bfd8f1a11430a73b7066b022101b4048d981`, requested client flags in the next milestone, and
 retained-client sizing in the third milestone. The fourth milestone closed client-environment
-seeding and refresh with protocol v82. The fifth closes retained client formats with protocol v83.
+seeding and refresh with protocol v82. The fifth closed retained client formats with protocol v83,
+and the sixth closed the six client lifecycle hook producers without a protocol change.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -31,6 +32,13 @@ disconnect, future panes read updates, and existing processes keep their startup
 One shared retained client-fact record now serves list rows, ordinary and inserted commands, status
 recipients, and `display-message`; the attached fixture covers Interactive and Control empty
 behavior against the pin.
+Per-window latest-client retention now drives `client-active` only on ownership changes, while
+focus, theme, and positive Interactive size reports retain the pin's duplicate behavior. Hook
+replay stays clientless, `hook_client` names the reporter, and the reporter's copied session,
+window, and shared active pane supply ordinary target formats. Control clients originate none of
+those report hooks but remain eligible for promotion after the latest client leaves.
+Changed-resize post-geometry format timing remains a separate protocol-owned slice so the producer
+milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
@@ -48,7 +56,7 @@ Alert artifact. Sizing changed the attached fixture rather than the canonical sc
 | Phase | Tracker scope | Dependency | Exit proof |
 |---|---|---|---|
 | Alert | Closed alert groups | Complete | Focused daemon and terminal tests, pinned alert probes, one full debug attached-client fixture, tracker and knowledge updates |
-| Client foundation | `clients.event-hooks`; session cwd, requested flags, sizing, environment, and formats closed | Hook producers are unblocked | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
+| Client foundation | Session cwd, requested flags, sizing, environment, formats, and `clients.event-hooks` closed | Complete | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
 | Error contracts | `control-mode.async-copy-pipe-errors`, `mux.error-shapes`, `tracker.semantic-coverage` | Independent of Client foundation except where a proof names client context | Every changed claim gets a pinned differential or a focused test with a named tracker item, followed by one full debug attached-client fixture |
 | Copy behavior | `copy-mode.action-fidelity`, `copy-mode.command-fidelity`, `keys.copy-mode-binding-fidelity`, `keys.copy-mode-unsupported-default-actions`, `keys.copy-mode-prompt-defaults` | Command fidelity requires `clients.interactive-refresh`; prompt-backed defaults also require `prompt.command-fidelity` | Source-owned action and binding inventories, attached key-path probes, and one full debug attached-client fixture |
 
@@ -69,7 +77,7 @@ milestone per letter, never one combined commit.
 | 3 | Largest and smallest client sizing | Closed under `clients.attach-sizing` on 2026-08-27 | Complete | One-shot component-wise aggregation, manual freeze, global `ignore-size` fallback, Control ceilings, and default fallback; no wire change |
 | 4 | Client environment seeding and refresh | Closed under `clients.attach-environment` on 2026-08-27 | Complete | Protocol v82 plus one per-connection snapshot; exact and wildcard refresh semantics remain session scoped |
 | 5 | Client format facts | Closed under `clients.context-formats` on 2026-08-27 | Complete | Protocol v83 plus one retained-fact contract across list, status, Control, inserted, and targeted contexts |
-| 6 | Client lifecycle hook producers | `clients.event-hooks` | Hard | Prove target-client context and six transition boundaries without prescribing the storage shape |
+| 6 | Client lifecycle hook producers | Closed under `clients.event-hooks` on 2026-08-27 | Complete | Per-window latest ownership plus five report boundaries; no protocol change |
 | 7 | Interactive refresh decision | `clients.interactive-refresh` | Hard decision gate | Either justify and adopt the cross-client mode contract or keep it parked and reclassify dependent copy claims |
 | 8 | Async copy or pipe error delivery | `control-mode.async-copy-pipe-errors` | Medium | Probe first, then prove the measured daemon-to-Control delivery contract |
 | 9a | Daemon invalid-flag runtime contract | `semantic:tracker-daemon-invalid-flag-runtime` in `tracker.semantic-coverage` | Medium | Establish shared validation scaffolding without claiming later error-shape items |

@@ -63,7 +63,18 @@ Reproduce with [`bench/run.sh`](bench/run.sh) and [`bench/summarize.sh`](bench/s
 
 # Install
 
-macOS, Apple Silicon:
+One command on macOS (Apple Silicon) and Linux:
+
+```sh
+curl -fsSL https://zzmux.sh/install.sh | sh
+```
+
+It picks the route for the machine: the notarized app into `/Applications`
+with `zz` linked on your `PATH`, the `.deb` through apt where dpkg runs, and
+the release tarball under `~/.local` everywhere else. Add `-s -- --beta` for the
+newest beta, `--version 0.3.0` to pin one; rerun to upgrade.
+
+Or through a package manager. macOS, Apple Silicon:
 
 ```sh
 brew install --cask demfabris/zz/zz

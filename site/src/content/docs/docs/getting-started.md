@@ -13,7 +13,34 @@ covers the knobs and the build.
 
 ## Install
 
-Built artifacts live on the
+One command on macOS and Linux:
+
+```sh
+curl -fsSL https://zzmux.sh/install.sh | sh
+```
+
+The script reads the machine and picks the route. On macOS it downloads the
+notarized disk image, copies `zz.app` into `/Applications` (or `~/Applications`
+when that is not writable), and links `zz` onto your `PATH`. On Linux with dpkg
+and apt it installs the `.deb`, which needs root and is the route that carries
+the AppArmor profile Ubuntu 24.04+ wants. On any other Linux it unpacks the
+release tarball under `~/.local` with no root at all: `~/.local/bin/zz`,
+`~/.local/lib/zz`, and a desktop entry the launcher finds. Every download is
+checked against the release's `.sha256`.
+
+```sh
+curl -fsSL https://zzmux.sh/install.sh | sh -s -- --beta            # newest beta
+curl -fsSL https://zzmux.sh/install.sh | sh -s -- --version 0.3.0   # a specific release
+curl -fsSL https://zzmux.sh/install.sh | sh -s -- --prefix /opt/zz  # Linux: tarball, this prefix
+```
+
+Rerun the same command to upgrade. If Homebrew already manages your install the
+script says so and stops; use `brew upgrade` there. To remove a tarball install
+delete `lib/zz`, `bin/zz`, `share/applications/zz.desktop`, and the `zz` icons
+under `share/icons/hicolor` from the prefix; a `.deb` install goes with
+`sudo apt remove zz`.
+
+Package managers work too, and the raw artifacts live on the
 [releases page](https://github.com/demfabris/zz/releases). CI also builds every
 platform on every push, so the artifacts of a green run give you the tip of
 `main`.

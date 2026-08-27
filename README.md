@@ -75,6 +75,9 @@ AUR:
 paru zz-bin
 ```
 
+Betas ship to their own channel, `demfabris/zz/zz@beta` and `zz-beta-bin`, which
+stable releases also update. Each conflicts with its stable sibling, so pick one.
+
 Debian/Ubuntu 24.04+, from a release `.deb`:
 
 ```sh

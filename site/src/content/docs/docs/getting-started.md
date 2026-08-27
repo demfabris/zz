@@ -28,6 +28,9 @@ same install:
 brew install --cask demfabris/zz/zz
 ```
 
+Betas ship to `demfabris/zz/zz@beta`, which stable releases also update, so a
+beta install keeps upgrading through stables. It conflicts with `zz`: pick one.
+
 Intel Macs compile from source but nothing tests or ships them.
 
 ### Linux

@@ -97,9 +97,11 @@ interactive `notarytool store-credentials` setup.
 Pushing a `v*` tag runs the same sequence on `macos-15` and builds the Linux and Windows packages.
 The one-off squashed initial commit already declares `0.2.0-beta.1` and takes that tag directly.
 Afterward, `beta` advances the prerelease counter. The workflow publishes one GitHub release with
-every artifact. Stable tags also update the
-`demfabris/homebrew-zz` tap and AUR package; tags containing a hyphen are GitHub prereleases and
-skip both stable channels. Stable Homebrew users install with `brew install --cask demfabris/zz/zz`.
+every artifact, then updates the `demfabris/homebrew-zz` tap and the AUR by channel: a tag with a
+hyphen is a GitHub prerelease and renders only the beta channel (`zz@beta` cask, `zz-beta-bin`,
+pkgver with the hyphen stripped); a stable tag renders both channels, so beta users move up to it.
+Stable Homebrew users install with `brew install --cask demfabris/zz/zz`, beta users with
+`demfabris/zz/zz@beta`; the two casks conflict.
 Render the cask by hand with the same script the workflow uses:
 
 ```sh
@@ -226,7 +228,7 @@ What `bundle-cef` does, in order:
     `v0.2.0-beta.1` keeps valid Apple metadata while the app and release retain the full SemVer.
     The workflow loads the Developer ID identity and App Store Connect notary key into one throwaway
     default Keychain, runs the release script, and publishes all platform artifacts plus checksums to
-    the GitHub prerelease. Tags with a hyphen stay off the Homebrew tap and AUR.
+    the GitHub prerelease. Tags with a hyphen reach only the beta cask and AUR package.
     Repository secrets: `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`,
     `MACOS_SIGN_IDENTITY` (a SHA-1 fingerprint rather than the common name, which several Developer
     ID certificates for one team share), `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`,
@@ -248,7 +250,7 @@ What `bundle-cef` does, in order:
 | `.github/workflows/ci.yml` | Exercises `bundle-cef` on `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `.github/workflows/release.yml` | Tag-driven macOS, Linux, and Windows publication; prerelease channel gating |
 | `release.toml` + `scripts/release.sh` | Dry-run-first workspace SemVer bump, one release commit, annotated tag, and push |
-| `packaging/homebrew/zz.rb` + `scripts/render-cask.sh` | Cask template for the `demfabris/homebrew-zz` tap, and the renderer that fills in version and checksum |
+| `packaging/homebrew/zz.rb` + `scripts/render-cask.sh` | Cask template for the `demfabris/homebrew-zz` tap, and the renderer that fills in version and checksum and derives the `zz@beta` cask |
 | `scripts/package-appimage.sh` + `packaging/linux/` + `assets/linux/hicolor/` | Builds and validates the AppDir/AppImage around a Linux CEF bundle with desktop metadata and the complete icon set |
 | `packaging/arch/PKGBUILD` | Installs the validated Linux bundle, desktop entry, and icons into a native Pacman package |
 | `scripts/package-deb.sh` + `packaging/deb/` | Renders the Debian control from `dpkg-shlibdeps` output, adds the copyright file, AppArmor profile, and maintainer scripts, and validates the built `.deb` |

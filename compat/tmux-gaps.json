@@ -572,31 +572,6 @@
       "reason": "The normal parser path works; first-error transactionality plus the closing-quote boundary and these filesystem and account lookups remain."
     },
     {
-      "id": "control-mode.async-copy-pipe-errors",
-      "title": "Frame asynchronous copy-pipe errors for Control",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "client",
-      "items": [
-        "semantic:control-mode-copy-pipe-error-delivery"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz/src/control_mode.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "A pinned Control probe determines whether an asynchronous copy-pipe worker failure is silent, a %message notification, or command-associated output, and zz delivers that result without inventing an unsolicited command guard."
-      ],
-      "depends_on": [],
-      "reason": "A copy-pipe worker can fail after the input action finishes and carries no Control request identity. zz preserves Interactive error notification and keeps Control silent instead of emitting an unsolicited standalone begin/error block until the pin's asynchronous notification contract is measured."
-    },
-    {
       "id": "control-mode.diagnostic-typing",
       "title": "Type Control-mode config diagnostics",
       "decision": "adopt",
@@ -3205,6 +3180,19 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Protocol v81 appends EventPayload::ControlCommandOutput at tail tag 50. A targetless or invalid-target foreground run-shell from Control publishes its captured stdout and nonzero or signal diagnostic to that exact originating client after the direct flags-1 response closes; a peer Control client receives nothing. The Control writer emits the payload raw, preserves embedded LF and percent-prefixed text literally, appends one LF when the payload lacks it, and does not change retained retval, so a nonzero run-shell still exits 0 for a fresh Control client. Direct and sourced commands emit an empty successful guard before the raw payload, then continue later commands or same-line sourced siblings in their own guards. Foreground run-shell -C remains synchronous inside its command frame. A live resolved -t and ordinary run-shell -b follow tmux's pane-view intent, but zz uses its native per-Interactive command-output view for every attached viewer of that pane and emits neither raw Control text nor %pane-mode-changed; this is a deliberate GUI ownership divergence from tmux's shared pane view. Pinned tmux can crash its server when a foreground Control client disconnects while run-shell waits. zz treats that crash as out of scope, retains its server, and does not emulate the failure. Protocol framing, daemon routing, writer, serialized CLI, and sourced-order regressions pass. The strict 12-step smoke/source-file-control differential against pinned tmux d77c9dc6 has zero topology, geometry, format, output, or warning differences and no skips; the stored canonical row remains unchanged at three steps."
+    },
+    {
+      "id": "control-mode.async-copy-pipe-errors",
+      "title": "Frame asynchronous copy-pipe errors for Control",
+      "closed_on": "2026-08-27",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/control_mode.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/copy-mode.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Pinned tmux starts a copy-pipe job with JOB_NOWAIT and no update, completion, or free callback, so a later nonzero worker exit has no client notification path. The attached Control probe enters copy mode, selects a line, runs copy-pipe-and-cancel with a delayed exit 7, waits for the worker, and then proves pane_in_mode is zero while the transcript contains no %message, %error, copy-pipe diagnostic, or unsolicited command guard. zz already matched that Control contract: its worker Error event is addressed only to an Interactive invoker, or falls back to attached Interactive viewers when Control invoked the action, and never reaches the Control subscriber. The existing daemon test proves both routing branches and permit release. Interactive diagnostics remain an intentional native presentation difference. The full attached-client fixture passes against pinned tmux d77c9dc6 without a protocol or runtime change."
     },
     {
       "id": "control-mode.background-inserted-command-frames",

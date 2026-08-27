@@ -1618,6 +1618,57 @@ probe_client_context_formats() {
   wait_for_client_state "$side" root
 }
 
+probe_control_copy_pipe_error_delivery() {
+  local side="$1"
+  local probe_session="control-copy-$side"
+  local probe_pane
+  local output="$SCRATCH_DIR/control-copy-pipe-$side.out"
+  local error="$SCRATCH_DIR/control-copy-pipe-$side.err"
+  local worker_marker="$SCRATCH_DIR/control-copy-pipe-$side.worker"
+  local worker_command
+  local begin_count
+  local end_count
+
+  side_command "$side" new-session -d -s "$probe_session" "printf alpha; sleep 30" ||
+    fixture_failure "$side could not create its Control copy-pipe session"
+  probe_pane="$(side_command "$side" display-message -p -t "=$probe_session:" '#{pane_id}')" ||
+    fixture_failure "$side could not resolve its Control copy-pipe pane"
+  printf -v worker_command 'sleep 0.1; printf done > %q; exit 7' "$worker_marker"
+
+  if ! {
+    printf 'copy-mode -t %s\n' "$probe_pane"
+    printf 'send-keys -t %s -X select-line\n' "$probe_pane"
+    printf 'send-keys -t %s -X copy-pipe-and-cancel %q\n' \
+      "$probe_pane" "$worker_command"
+    sleep 1
+    printf 'display-message -p -t %s "ASYNC|#{pane_in_mode}"\n' "$probe_pane"
+  } | environment_side_command "$side" control -C attach-session \
+    -t "=$probe_session" >"$output" 2>"$error"; then
+    fixture_failure "$side Control copy-pipe probe failed: $(tr '\n' ' ' <"$error")"
+  fi
+  if ! grep -qx 'ASYNC|0' "$output"; then
+    fixture_failure "$side Control copy-pipe probe did not leave copy mode"
+  fi
+  if [ ! -f "$worker_marker" ] || [ "$(<"$worker_marker")" != 'done' ]; then
+    fixture_failure "$side Control copy-pipe worker did not reach its delayed failure"
+  fi
+  if grep -Eq '^%message |^%error |copy-pipe failed|exited unsuccessfully' "$output"; then
+    fixture_failure "$side exposed an asynchronous copy-pipe failure on Control"
+  fi
+  if [ -s "$error" ]; then
+    fixture_failure "$side Control copy-pipe probe wrote stderr: $(tr '\n' ' ' <"$error")"
+  fi
+  begin_count="$(grep -c '^%begin ' "$output" || true)"
+  end_count="$(grep -c '^%end ' "$output" || true)"
+  if [ "$begin_count" != 5 ] || [ "$end_count" != 5 ]; then
+    fixture_failure "$side Control copy-pipe probe emitted unexpected command guards"
+  fi
+  side_command "$side" kill-session -t "=$probe_session" ||
+    fixture_failure "$side could not clean up its Control copy-pipe session"
+  wait_for_attached_client_count "$side" 1
+  wait_for_client_state "$side" root
+}
+
 probe_client_event_hooks() {
   local side="$1"
   local event_window="events-$side"
@@ -2212,6 +2263,8 @@ probe_client_context_formats zz
 probe_client_context_formats tmux
 probe_client_event_hooks zz
 probe_client_event_hooks tmux
+probe_control_copy_pipe_error_delivery zz
+probe_control_copy_pipe_error_delivery tmux
 probe_detach_client_tty zz
 probe_detach_client_tty tmux
 

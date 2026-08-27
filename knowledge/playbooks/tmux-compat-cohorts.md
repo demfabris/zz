@@ -19,7 +19,8 @@ campaign branch then closed session cwd in
 `2468bfd8f1a11430a73b7066b022101b4048d981`, requested client flags in the next milestone, and
 retained-client sizing in the third milestone. The fourth milestone closed client-environment
 seeding and refresh with protocol v82. The fifth closed retained client formats with protocol v83,
-and the sixth closed the six client lifecycle hook producers without a protocol change.
+the sixth closed the six client lifecycle hook producers, and the seventh proved silent Control
+delivery for asynchronous copy-pipe failures. The last two needed no protocol change.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -57,7 +58,7 @@ Alert artifact. Sizing changed the attached fixture rather than the canonical sc
 |---|---|---|---|
 | Alert | Closed alert groups | Complete | Focused daemon and terminal tests, pinned alert probes, one full debug attached-client fixture, tracker and knowledge updates |
 | Client foundation | Session cwd, requested flags, sizing, environment, formats, and `clients.event-hooks` closed | Complete | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
-| Error contracts | `control-mode.async-copy-pipe-errors`, `mux.error-shapes`, `tracker.semantic-coverage` | Independent of Client foundation except where a proof names client context | Every changed claim gets a pinned differential or a focused test with a named tracker item, followed by one full debug attached-client fixture |
+| Error contracts | Async copy-pipe delivery closed; `mux.error-shapes` and `tracker.semantic-coverage` remain | Independent of Client foundation except where a proof names client context | Every changed claim gets a pinned differential or a focused test with a named tracker item, followed by one full debug attached-client fixture |
 | Copy behavior | `copy-mode.action-fidelity`, `copy-mode.command-fidelity`, `keys.copy-mode-binding-fidelity`, `keys.copy-mode-unsupported-default-actions`, `keys.copy-mode-prompt-defaults` | Command fidelity requires `clients.interactive-refresh`; prompt-backed defaults also require `prompt.command-fidelity` | Source-owned action and binding inventories, attached key-path probes, and one full debug attached-client fixture |
 
 These phases are navigation, not commit boundaries. One persistent goal and one milestone commit own
@@ -79,7 +80,7 @@ milestone per letter, never one combined commit.
 | 5 | Client format facts | Closed under `clients.context-formats` on 2026-08-27 | Complete | Protocol v83 plus one retained-fact contract across list, status, Control, inserted, and targeted contexts |
 | 6 | Client lifecycle hook producers | Closed under `clients.event-hooks` on 2026-08-27 | Complete | Per-window latest ownership plus five report boundaries; no protocol change |
 | 7 | Interactive refresh decision | `clients.interactive-refresh` | Hard decision gate | Either justify and adopt the cross-client mode contract or keep it parked and reclassify dependent copy claims |
-| 8 | Async copy or pipe error delivery | `control-mode.async-copy-pipe-errors` | Medium | Probe first, then prove the measured daemon-to-Control delivery contract |
+| 8 | Async copy or pipe error delivery | Closed under `control-mode.async-copy-pipe-errors` on 2026-08-27 | Complete | Pinned source plus a delayed exit-7 Control probe prove silent delivery and copy-mode cancellation |
 | 9a | Daemon invalid-flag runtime contract | `semantic:tracker-daemon-invalid-flag-runtime` in `tracker.semantic-coverage` | Medium | Establish shared validation scaffolding without claiming later error-shape items |
 | 9b | Arity and flag error shapes | The positional and shared error items in `mux.error-shapes` | Medium | One central validation path across the affected commands |
 | 9c | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |

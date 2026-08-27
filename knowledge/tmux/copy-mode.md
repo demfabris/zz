@@ -160,6 +160,12 @@ label in native chrome and freezes the copy revision, but the tracker keeps both
 until the project makes a product decision. Mouse pseudo-keys use the direct pointer route instead
 of `KeyEngine` bindings.
 
+Copy-pipe worker exit failures are silent on Control clients. Pinned tmux starts the worker without
+a completion callback, so a delayed nonzero exit produces no `%message`, `%error`, or extra command
+guard. zz matches that Control contract and still cancels copy mode. Its native Interactive client
+keeps the existing error notification, including when a Control action falls back to an attached
+Interactive viewer.
+
 # App-initiated clipboard writes (OSC 52)
 
 A program in the pane can reach the clipboard without copy mode: `"+y` in nvim, lazygit, a nested

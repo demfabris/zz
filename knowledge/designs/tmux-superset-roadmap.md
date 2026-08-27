@@ -84,6 +84,11 @@ status does not change Control retval. Foreground `run-shell -C` remains synchro
 and ordinary `run-shell -b` open zz's native per-Interactive command-output view for attached pane
 viewers without raw Control text or `%pane-mode-changed`, preserving deliberate GUI ownership.
 
+The later asynchronous copy-pipe slice needs no protocol or runtime change. Pinned tmux starts the
+worker without a completion callback, and a delayed exit-7 Control probe observes successful copy
+mode cancellation with no message, error frame, or extra command guard. zz keeps the same silent
+Control contract while retaining its native Interactive error notification.
+
 Protocol v80 closed `config.startup-diagnostic-delivery`. Startup parses all roots
 before replay, retains normalized root and nested read failures, parser diagnostics, unsupported and
 runtime failures, and successful `display-message -p` output, and discards list-style output. Root

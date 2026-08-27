@@ -490,6 +490,10 @@ pub enum MuxEffect {
     WindowSizeChanged {
         window: Option<WindowId>,
     },
+    ResizeWindowFromClients {
+        window: WindowId,
+        mode: WindowSize,
+    },
     TerminalKnobsChanged {
         window: Option<WindowId>,
         pane: Option<PaneId>,
@@ -1984,6 +1988,12 @@ impl MuxEngine {
     #[must_use]
     pub fn global_default_size(&self) -> &str {
         self.global_session_options.default_size.as_str()
+    }
+
+    #[must_use]
+    pub fn default_size_for_session(&self, session: SessionId) -> (u16, u16) {
+        parse_default_size(&self.session_knobs(session).default_size)
+            .unwrap_or(DEFAULT_WINDOW_EXTENT)
     }
 
     #[must_use]
@@ -5373,15 +5383,39 @@ impl MuxEngine {
                 .expect("window extent is clamped to u16")
                 .max(1)
         };
+        if options.has("-A") || options.has("-a") {
+            return Ok(Execution::effect(MuxEffect::ResizeWindowFromClients {
+                window,
+                mode: if options.has("-A") {
+                    WindowSize::Largest
+                } else {
+                    WindowSize::Smallest
+                },
+            }));
+        }
+        self.set_manual_window_extent(window, clamp(columns), clamp(rows))?;
+        Ok(Execution::effect(MuxEffect::WindowSizeChanged {
+            window: Some(window),
+        }))
+    }
+
+    pub fn set_manual_window_extent(
+        &mut self,
+        window: WindowId,
+        columns: u16,
+        rows: u16,
+    ) -> Result<(), ServerError> {
+        let changed_mode = self.window_size(window) != WindowSize::Manual;
         self.window_options.entry(window).or_default().insert(
             WindowOption::WindowSize,
             WindowSize::Manual.as_str().to_owned(),
         );
-        self.state
-            .resize_window(window, clamp(columns), clamp(rows))?;
-        Ok(Execution::effect(MuxEffect::WindowSizeChanged {
-            window: Some(window),
-        }))
+        let generation = self.state.generation();
+        self.state.resize_window(window, columns, rows)?;
+        if changed_mode && self.state.generation() == generation {
+            self.state.bump_generation();
+        }
+        Ok(())
     }
 
     pub fn set_pane_geometry(&mut self, pane: PaneId, columns: u16, rows: u16) -> bool {
@@ -5466,6 +5500,26 @@ impl MuxEngine {
         layout.resize(columns, rows);
         let geometry = layout.pane_geometry(pane)?;
         Some((geometry.sx, geometry.sy))
+    }
+
+    #[must_use]
+    pub fn window_extent_for_pane_geometry(
+        &self,
+        pane: PaneId,
+        columns: u16,
+        rows: u16,
+    ) -> Option<(u16, u16)> {
+        let window = self.state.window_for_pane(pane)?;
+        let window = self.state.windows.get(&window)?;
+        if let Some(zoomed) = window.zoomed_pane {
+            return (zoomed == pane).then_some((columns, rows));
+        }
+        let pane_geometry = window.layout.pane_geometry(pane)?;
+        let current = window.layout.extent();
+        Some((
+            implied_window_extent(columns, current.0, pane_geometry.sx),
+            implied_window_extent(rows, current.1, pane_geometry.sy),
+        ))
     }
 
     #[must_use]
@@ -29849,13 +29903,51 @@ mod tests {
             ),
             Err(ServerError::WindowNotFound(message)) if message == "missing"
         ));
-        for flag in ["-a", "-A"] {
-            assert!(matches!(
-                engine.execute(&mut context, &command("resize-window", &[flag])),
-                Err(ServerError::UnsupportedCommand(message))
-                    if message == format!("resize-window {flag}")
-            ));
-        }
+        let window = context.window.unwrap();
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("resize-window", &["-a"]))
+                .unwrap()
+                .effects,
+            [MuxEffect::ResizeWindowFromClients {
+                window,
+                mode: WindowSize::Smallest,
+            }]
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("resize-window", &["-Aa", "-R", "-x", "77", "-y", "17", "4"],),
+                )
+                .unwrap()
+                .effects,
+            [MuxEffect::ResizeWindowFromClients {
+                window,
+                mode: WindowSize::Largest,
+            }]
+        );
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("resize-window", &["-A", "-t", "missing", "bad"]),
+            ),
+            Err(ServerError::WindowNotFound(message)) if message == "missing"
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("resize-window", &["-A", "bad"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "adjustment invalid"
+        ));
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command("resize-window", &["-A", "-x", "bad"]),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "width invalid"
+        ));
     }
 
     #[test]

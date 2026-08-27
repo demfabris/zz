@@ -92,7 +92,7 @@ const CONTROL_SUBSCRIPTION_INTERVAL: Duration = Duration::from_secs(1);
 const CONTROL_CELL_WIDTH_PX: u32 = 8;
 const CONTROL_CELL_HEIGHT_PX: u32 = 18;
 const CONTROL_SIZE_MINIMUM: u16 = 1;
-const CONTROL_SIZE_MAXIMUM: u16 = 10_000;
+const WINDOW_SIZE_MAXIMUM: u16 = 10_000;
 const MAX_SOURCE_INVOCATIONS: usize = 50;
 const MAX_RELIABLE_MESSAGES: usize = 256;
 const MAX_KITTY_IMAGE_CHUNK_BYTES: usize = 1024 * 1024;
@@ -6276,6 +6276,23 @@ impl Shared {
                     MuxEffect::ModeKeysChanged { window } => {
                         retarget_copy_mode_tables(&mut inner, *window);
                     }
+                    MuxEffect::ResizeWindowFromClients { window, mode } => {
+                        let (columns, rows) = attached_client_window_extent(&inner, *window, *mode)
+                            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+                        let generation = inner.engine.state.generation();
+                        inner
+                            .engine
+                            .set_manual_window_extent(*window, columns, rows)?;
+                        snapshot_changed |= inner.engine.state.generation() != generation;
+                        let windows = BTreeSet::from([*window]);
+                        let panes = panes_for_windows(&inner, &windows);
+                        snapshot_changed |=
+                            write_back_terminal_geometries(&mut inner, &panes, false);
+                        for (terminal, geometry) in terminal_resizes_for_panes(&inner, &panes) {
+                            deferred_terminal_commands
+                                .push(DeferredTerminalCommand::Resize { terminal, geometry });
+                        }
+                    }
                     MuxEffect::AggressiveResizeChanged { window }
                     | MuxEffect::WindowSizeChanged { window } => {
                         let windows = window.map_or_else(
@@ -9486,6 +9503,7 @@ impl Shared {
     fn set_control_client_flags(&self, client: ClientId, flags: &str) {
         let event = {
             let mut inner = self.inner.lock();
+            inner.client_flags.apply(client, flags);
             if inner.client_kinds.get(&client) != Some(&ClientKind::Control) {
                 return;
             }
@@ -22535,6 +22553,116 @@ fn client_ignores_size(inner: &ServerState, client: ClientId) -> bool {
     inner.client_flags.get(client).ignore_size
 }
 
+fn unignored_attached_sizing_client_exists(inner: &ServerState) -> bool {
+    inner.attached.values().flatten().any(|client| {
+        matches!(
+            inner.client_kinds.get(client),
+            Some(ClientKind::Interactive | ClientKind::Control)
+        ) && !client_ignores_size(inner, *client)
+    })
+}
+
+fn client_is_sizing_candidate(
+    inner: &ServerState,
+    client: ClientId,
+    suppress_ignored: bool,
+) -> bool {
+    matches!(
+        inner.client_kinds.get(&client),
+        Some(ClientKind::Interactive | ClientKind::Control)
+    ) && (!suppress_ignored || !client_ignores_size(inner, client))
+}
+
+fn interactive_client_window_extent(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    window: WindowId,
+) -> Option<(u16, u16)> {
+    if let Some((columns, rows)) = inner.client_sizes.get(&client).copied() {
+        let status = inner.engine.status_formats_for_session(Some(session));
+        let status_rows = if status.enabled {
+            u16::from(status.lines).min(rows.saturating_sub(1))
+        } else {
+            0
+        };
+        return Some((columns.max(1), rows.saturating_sub(status_rows).max(1)));
+    }
+    let window_state = inner.engine.state.windows.get(&window)?;
+    std::iter::once(window_state.active_pane)
+        .chain(
+            window_state
+                .panes
+                .keys()
+                .copied()
+                .filter(|pane| *pane != window_state.active_pane),
+        )
+        .find_map(|pane| {
+            let geometry = inner.terminal_geometries.get(&pane)?.get(&client)?;
+            inner
+                .engine
+                .window_extent_for_pane_geometry(pane, geometry.columns, geometry.rows)
+        })
+}
+
+fn attached_client_window_extent(
+    inner: &ServerState,
+    window: WindowId,
+    mode: WindowSize,
+) -> Option<(u16, u16)> {
+    let window_state = inner.engine.state.windows.get(&window)?;
+    let session = window_state.session;
+    let suppress_ignored = unignored_attached_sizing_client_exists(inner);
+    let mut candidates = Vec::new();
+    let mut ceilings = Vec::new();
+    for client in inner.attached.get(&session).into_iter().flatten().copied() {
+        if !client_is_sizing_candidate(inner, client, suppress_ignored) {
+            continue;
+        }
+        let extent = match inner.client_kinds.get(&client) {
+            Some(ClientKind::Interactive) => {
+                interactive_client_window_extent(inner, client, session, window)
+            }
+            Some(ClientKind::Control) => {
+                let output = inner.control_outputs.get(&client);
+                if let Some(geometry) =
+                    output.and_then(|output| output.window_geometries.get(&window).copied())
+                {
+                    ceilings.push((geometry.columns, geometry.rows));
+                    Some((geometry.columns, geometry.rows))
+                } else {
+                    output
+                        .and_then(|output| output.geometry)
+                        .map(|geometry| (geometry.columns, geometry.rows))
+                }
+            }
+            Some(ClientKind::Command) | None => None,
+        };
+        if let Some(extent) = extent {
+            candidates.push(extent);
+        }
+    }
+    let mut extent = candidates.into_iter().reduce(|left, right| {
+        if mode == WindowSize::Smallest {
+            (left.0.min(right.0), left.1.min(right.1))
+        } else {
+            (left.0.max(right.0), left.1.max(right.1))
+        }
+    });
+    if extent.is_none() {
+        extent = Some(inner.engine.default_size_for_session(session));
+    }
+    let (mut columns, mut rows) = extent?;
+    for (ceiling_columns, ceiling_rows) in ceilings {
+        columns = columns.min(ceiling_columns);
+        rows = rows.min(ceiling_rows);
+    }
+    Some((
+        columns.clamp(1, WINDOW_SIZE_MAXIMUM),
+        rows.clamp(1, WINDOW_SIZE_MAXIMUM),
+    ))
+}
+
 fn control_client_geometry(
     inner: &ServerState,
     client: ClientId,
@@ -24217,10 +24345,12 @@ fn terminal_geometry_for_mode(
         return None;
     }
     let session = window_state.session;
+    let suppress_ignored = unignored_attached_sizing_client_exists(inner);
     let candidates = inner
         .attached
         .get(&session)?
         .iter()
+        .filter(|client| client_is_sizing_candidate(inner, **client, suppress_ignored))
         .filter(|client| {
             if aggressive {
                 client_focused_window_for_attachment(inner, **client) == Some(window)
@@ -24248,34 +24378,52 @@ fn terminal_geometry_for_mode(
             client.0,
         )
     })?;
-    if mode == WindowSize::Manual {
+    let mut geometry = if mode == WindowSize::Manual {
         let (columns, rows) = inner.engine.pane_geometry(pane)?;
-        return Some(TerminalGeometry {
+        TerminalGeometry {
             columns,
             rows,
             ..owner.1
-        });
-    }
-    if mode == WindowSize::Latest {
-        return Some(owner.1);
-    }
-    let first_geometry = candidates.first()?.1;
-    let mut columns = first_geometry.columns;
-    let mut rows = first_geometry.rows;
-    for (_, geometry) in &candidates[1..] {
-        if mode == WindowSize::Largest {
-            columns = columns.max(geometry.columns);
-            rows = rows.max(geometry.rows);
-        } else {
-            columns = columns.min(geometry.columns);
-            rows = rows.min(geometry.rows);
+        }
+    } else if mode == WindowSize::Latest {
+        owner.1
+    } else {
+        let first_geometry = candidates.first()?.1;
+        let mut columns = first_geometry.columns;
+        let mut rows = first_geometry.rows;
+        for (_, geometry) in &candidates[1..] {
+            if mode == WindowSize::Largest {
+                columns = columns.max(geometry.columns);
+                rows = rows.max(geometry.rows);
+            } else {
+                columns = columns.min(geometry.columns);
+                rows = rows.min(geometry.rows);
+            }
+        }
+        TerminalGeometry {
+            columns,
+            rows,
+            ..owner.1
+        }
+    };
+    if mode != WindowSize::Manual {
+        for (client, _) in &candidates {
+            let Some(ceiling) = inner
+                .control_outputs
+                .get(client)
+                .and_then(|output| output.window_geometries.get(&window))
+            else {
+                continue;
+            };
+            let (columns, rows) =
+                inner
+                    .engine
+                    .pane_geometry_at_window_extent(pane, ceiling.columns, ceiling.rows)?;
+            geometry.columns = geometry.columns.min(columns);
+            geometry.rows = geometry.rows.min(rows);
         }
     }
-    Some(TerminalGeometry {
-        columns,
-        rows,
-        ..owner.1
-    })
+    Some(geometry)
 }
 
 fn terminal_resize_for_pane(
@@ -25377,9 +25525,8 @@ fn parse_control_dimensions(value: &str, separator: char) -> Option<(u64, u64)> 
 }
 
 fn checked_control_geometry(columns: u64, rows: u64) -> Result<TerminalGeometry, ServerError> {
-    let in_range = |value| {
-        (u64::from(CONTROL_SIZE_MINIMUM)..=u64::from(CONTROL_SIZE_MAXIMUM)).contains(&value)
-    };
+    let in_range =
+        |value| (u64::from(CONTROL_SIZE_MINIMUM)..=u64::from(WINDOW_SIZE_MAXIMUM)).contains(&value);
     if !in_range(columns) || !in_range(rows) {
         return Err(ServerError::InvalidCommand(
             "size too small or too big".to_owned(),
@@ -57183,6 +57330,471 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(!inner.focused_windows.contains_key(&second));
         assert!(inner.subscribers.contains_key(&first));
         assert!(inner.subscribers.contains_key(&second));
+    }
+
+    #[test]
+    fn resize_window_from_attached_clients_filters_scope_and_freezes_manual_extent() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "attached-sizes", "target");
+        let (other_session, _, _) = output_view_session_fixture(&shared, "other-sizes", "other");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let other_window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_window_at(
+                session,
+                None,
+                Some("other-window".to_owned()),
+                PaneKind::Terminal,
+                false,
+            )
+            .unwrap()
+            .0;
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (second, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (unrelated, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (detached, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (command_client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        let (unrelated_control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        shared.attach(first, session).unwrap();
+        shared.attach(second, session).unwrap();
+        shared.attach(unrelated, other_session).unwrap();
+        shared.attach(unrelated_control, other_session).unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            inner
+                .attached
+                .entry(session)
+                .or_default()
+                .insert(command_client);
+            inner.client_sizes.insert(first, (101, 31));
+            inner.client_sizes.insert(second, (141, 21));
+            inner.client_sizes.insert(unrelated, (181, 51));
+            inner.client_sizes.insert(detached, (201, 61));
+            inner.client_sizes.insert(command_client, (251, 71));
+            inner.focused_windows.insert(second, other_window);
+        }
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-t", "attached-sizes", "status", "off"]),
+            )
+            .unwrap();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-window-option",
+                    ["-t", &window.to_string(), "aggressive-resize", "on"],
+                ),
+            )
+            .unwrap();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "attached-sizes", "default-size", "73x19"],
+                ),
+            )
+            .unwrap();
+
+        let resize = |flag: &str, context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new("resize-window", ["-t", &window.to_string(), flag]),
+                )
+                .unwrap();
+            shared.inner.lock().engine.pane_geometry(pane).unwrap()
+        };
+        assert_eq!(resize("-A", &mut context), (141, 31));
+        assert_eq!(
+            shared.inner.lock().engine.window_size(window),
+            WindowSize::Manual
+        );
+        assert_eq!(resize("-a", &mut context), (101, 21));
+
+        shared
+            .input(
+                first,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ClientTerminalSize {
+                    columns: 151,
+                    rows: 41,
+                },
+            )
+            .unwrap();
+        assert_eq!(resize("-A", &mut context), (151, 41));
+        shared
+            .input(
+                second,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 300,
+                    rows: 100,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            shared.inner.lock().engine.pane_geometry(pane),
+            Some((151, 41))
+        );
+
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_sizes.insert(first, (101, 31));
+            inner.client_sizes.insert(second, (141, 21));
+            inner.client_flags.apply(unrelated, "ignore-size");
+        }
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    ["-t", &second.0.to_string(), "-f", "ignore-size"],
+                ),
+            )
+            .unwrap();
+        assert!(client_ignores_size(&shared.inner.lock(), second));
+        assert_eq!(resize("-A", &mut context), (101, 31));
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    ["-t", &second.0.to_string(), "-f", "!ignore-size"],
+                ),
+            )
+            .unwrap();
+        shared.inner.lock().client_flags.apply(first, "ignore-size");
+        assert_eq!(resize("-A", &mut context), (141, 21));
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "refresh-client",
+                    ["-t", &second.0.to_string(), "-f", "ignore-size"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(resize("-A", &mut context), (73, 19));
+        shared
+            .inner
+            .lock()
+            .client_flags
+            .apply(unrelated_control, "ignore-size");
+        assert_eq!(resize("-A", &mut context), (141, 31));
+        assert_eq!(resize("-a", &mut context), (101, 21));
+    }
+
+    #[test]
+    fn attached_client_extents_clamp_retained_and_default_dimensions() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "extent-clamp", "target");
+        let (other_session, _, _) =
+            output_view_session_fixture(&shared, "extent-clamp-other", "other");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (second, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (projected, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (suppressor, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        for client in [first, second, projected] {
+            shared.attach(client, session).unwrap();
+        }
+        shared.attach(suppressor, other_session).unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_sizes.insert(first, (u16::MAX, 12_001));
+            inner.client_sizes.insert(second, (12_002, u16::MAX));
+            inner.terminal_geometries.entry(pane).or_default().insert(
+                projected,
+                TerminalGeometry {
+                    columns: u16::MAX,
+                    rows: u16::MAX,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            );
+        }
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-t", "extent-clamp", "status", "off"]),
+            )
+            .unwrap();
+        let resize = |flag: &str, context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new("resize-window", ["-t", &window.to_string(), flag]),
+                )
+                .unwrap();
+            shared.inner.lock().engine.pane_geometry(pane).unwrap()
+        };
+        assert_eq!(resize("-A", &mut context), (10_000, 10_000));
+        assert_eq!(resize("-a", &mut context), (10_000, 10_000));
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "extent-clamp", "default-size", "65000x64000"],
+                ),
+            )
+            .unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            for client in [first, second, projected] {
+                inner.client_flags.apply(client, "ignore-size");
+            }
+        }
+        assert_eq!(resize("-A", &mut context), (10_000, 10_000));
+        assert_eq!(resize("-a", &mut context), (10_000, 10_000));
+    }
+
+    #[test]
+    fn attached_client_extents_subtract_status_project_gui_and_clamp_control() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "extent-sources", "target");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let (outer, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (projected, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        shared.attach(outer, session).unwrap();
+        shared.attach(projected, session).unwrap();
+        shared.attach(control, session).unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_sizes.insert(outer, (200, 50));
+            inner.terminal_geometries.entry(pane).or_default().insert(
+                projected,
+                TerminalGeometry {
+                    columns: 180,
+                    rows: 60,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            );
+        }
+
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                interactive_client_window_extent(&inner, outer, session, window),
+                Some((200, 49))
+            );
+            assert_eq!(
+                interactive_client_window_extent(&inner, projected, session, window),
+                Some((180, 60))
+            );
+            assert_eq!(
+                attached_client_window_extent(&inner, window, WindowSize::Largest),
+                Some((200, 60))
+            );
+        }
+
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-t", "extent-sources", "status", "3"]),
+            )
+            .unwrap();
+        assert_eq!(
+            interactive_client_window_extent(&shared.inner.lock(), outer, session, window),
+            Some((200, 47))
+        );
+        shared.set_control_client_size(control, "210x40").unwrap();
+        assert_eq!(
+            attached_client_window_extent(&shared.inner.lock(), window, WindowSize::Largest),
+            Some((210, 60))
+        );
+        assert_eq!(
+            attached_client_window_extent(&shared.inner.lock(), window, WindowSize::Smallest),
+            Some((180, 40))
+        );
+
+        shared
+            .set_control_client_size(control, &format!("{window}:190x55"))
+            .unwrap();
+        assert_eq!(
+            attached_client_window_extent(&shared.inner.lock(), window, WindowSize::Largest),
+            Some((190, 55))
+        );
+        assert_eq!(
+            terminal_geometry_for_mode(&shared.inner.lock(), pane, false, WindowSize::Largest)
+                .map(|geometry| (geometry.columns, geometry.rows)),
+            Some((190, 55))
+        );
+        shared
+            .set_control_client_size(control, &format!("{window}:"))
+            .unwrap();
+        assert_eq!(
+            attached_client_window_extent(&shared.inner.lock(), window, WindowSize::Largest),
+            Some((210, 60))
+        );
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-t", "extent-sources", "status", "off"]),
+            )
+            .unwrap();
+        assert_eq!(
+            interactive_client_window_extent(&shared.inner.lock(), outer, session, window),
+            Some((200, 50))
+        );
+    }
+
+    #[test]
+    fn automatic_window_modes_share_the_global_ignore_size_fallback() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "dynamic-ignore", "target");
+        let (other_session, _, _) =
+            output_view_session_fixture(&shared, "dynamic-ignore-other", "other");
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let (first, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (second, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        shared.attach(first, session).unwrap();
+        shared.attach(second, session).unwrap();
+        shared.attach(control, other_session).unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        for (client, columns, rows) in [(first, 200, 30), (second, 100, 60)] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns,
+                        rows,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .unwrap();
+        }
+        shared.inner.lock().client_flags.apply(first, "ignore-size");
+        {
+            let inner = shared.inner.lock();
+            for mode in [
+                WindowSize::Latest,
+                WindowSize::Largest,
+                WindowSize::Smallest,
+            ] {
+                assert_eq!(
+                    terminal_geometry_for_mode(&inner, pane, false, mode)
+                        .map(|geometry| (geometry.columns, geometry.rows)),
+                    Some((100, 60))
+                );
+            }
+        }
+        shared
+            .inner
+            .lock()
+            .client_flags
+            .apply(second, "ignore-size");
+        assert_eq!(
+            terminal_geometry_for_mode(&shared.inner.lock(), pane, false, WindowSize::Largest),
+            None
+        );
+        shared
+            .inner
+            .lock()
+            .client_flags
+            .apply(control, "ignore-size");
+        let inner = shared.inner.lock();
+        assert_eq!(
+            terminal_geometry_for_mode(&inner, pane, false, WindowSize::Largest)
+                .map(|geometry| (geometry.columns, geometry.rows)),
+            Some((200, 60))
+        );
+        assert_eq!(
+            terminal_geometry_for_mode(&inner, pane, false, WindowSize::Smallest)
+                .map(|geometry| (geometry.columns, geometry.rows)),
+            Some((100, 30))
+        );
+        assert_eq!(
+            terminal_geometry_for_mode(&inner, pane, false, WindowSize::Latest)
+                .map(|geometry| (geometry.columns, geometry.rows)),
+            Some((100, 60))
+        );
     }
 
     #[test]

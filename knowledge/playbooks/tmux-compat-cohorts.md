@@ -16,28 +16,31 @@ acceptance contract, ends with one reviewed commit, and leaves later discoveries
 
 The Alert cohort completed in commit `2e4ccf3b9b6706e44215d74ca147643e6baa3d2e`. The dedicated
 campaign branch then closed session cwd in
-`2468bfd8f1a11430a73b7066b022101b4048d981` and requested client flags in the next milestone.
+`2468bfd8f1a11430a73b7066b022101b4048d981`, requested client flags in the next milestone, and
+retained-client sizing in the third milestone.
 
-`clients.attach-context` is now three bounded contracts. Session cwd and requested flags are closed;
-retained-client sizing is next. Sessions keep one internal cwd, and attached source loading prefers
-it. Clients keep requested flags through attach, switch, detach, and TUI reconnect without a wire or
-snapshot-schema change. `ignore-size` is available to the sizing slice. `active-pane` and
-`no-detach-on-destroy` are retained and reported, but their consumers remain explicit later gaps.
+`clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
+attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
+and TUI reconnect. `resize-window -A` and `-a` now aggregate retained client geometry once and
+freeze the result as manual sizing. None of the three slices changed the wire or snapshot schema.
+`active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
+explicit later gaps.
 
 The fresh 2026-08-27 checkpoint covers 84 scenarios and 1,475 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
-GEO divergence with every other channel clean. The attached-client fixture and
-`compat/run.sh --check-summary` both pass. The canonical summary SHA-256 is
+GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
+attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
+is
 `5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`.
-The full strict suite and attached fixture were rerun from the requested-flags worktree, not carried
-forward from the Alert artifact.
+The full strict suite was rerun from the requested-flags worktree, not carried forward from the
+Alert artifact. Sizing changed the attached fixture rather than the canonical scenario corpus.
 
 # Cohorts
 
 | Phase | Tracker scope | Dependency | Exit proof |
 |---|---|---|---|
 | Alert | Closed alert groups | Complete | Focused daemon and terminal tests, pinned alert probes, one full debug attached-client fixture, tracker and knowledge updates |
-| Client foundation | `clients.attach-sizing`, `clients.attach-environment`, `clients.context-formats`, `clients.event-hooks`; requested flags closed | Formats and hooks follow retained sizing; environment is independent but shares protocol files | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
+| Client foundation | `clients.attach-environment`, `clients.context-formats`, `clients.event-hooks`; session cwd, requested flags, and sizing closed | Formats and hooks are now unblocked; environment is independent but shares protocol files | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
 | Error contracts | `control-mode.async-copy-pipe-errors`, `mux.error-shapes`, `tracker.semantic-coverage` | Independent of Client foundation except where a proof names client context | Every changed claim gets a pinned differential or a focused test with a named tracker item, followed by one full debug attached-client fixture |
 | Copy behavior | `copy-mode.action-fidelity`, `copy-mode.command-fidelity`, `keys.copy-mode-binding-fidelity`, `keys.copy-mode-unsupported-default-actions`, `keys.copy-mode-prompt-defaults` | Command fidelity requires `clients.interactive-refresh`; prompt-backed defaults also require `prompt.command-fidelity` | Source-owned action and binding inventories, attached key-path probes, and one full debug attached-client fixture |
 
@@ -55,7 +58,7 @@ milestone per letter, never one combined commit.
 |---|---|---|---|---|
 | 1 | Session cwd and attached `source-file` cwd | Closed under `clients.attach-session-cwd` on 2026-08-26 | Complete | One internal session-state path; no client-environment or format vocabulary |
 | 2 | Requested client flags | Closed under `clients.attach-flags` on 2026-08-27 | Complete | One attach-state contract; establishes `ignore-size` |
-| 3 | Largest and smallest client sizing | `clients.attach-sizing`: `resize-window -A`, `resize-window -a`, and `semantic:resize-window-client-sizes` | Hard | Depends on retained sizes and `ignore-size`, but not environment or hooks |
+| 3 | Largest and smallest client sizing | Closed under `clients.attach-sizing` on 2026-08-27 | Complete | One-shot component-wise aggregation, manual freeze, global `ignore-size` fallback, Control ceilings, and default fallback; no wire change |
 | 4 | Client environment seeding and refresh | `clients.attach-environment` | Hard | Independent behavior, serialized because it changes the same handshake files |
 | 5 | Client format facts | `clients.context-formats` | Hard | Define one coherent retained-fact contract across list, status, Control, and targeted contexts |
 | 6 | Client lifecycle hook producers | `clients.event-hooks` | Hard | Prove target-client context and six transition boundaries without prescribing the storage shape |
@@ -74,14 +77,12 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-The next milestone owns slice 3 only. `clients.attach-sizing` is unblocked; do not pull client
-environments, formats, hooks, `active-pane`, or `no-detach-on-destroy` behavior into it.
-
-This tranche is not the whole active tracker. After slice 3 closes, regenerate the report and
-re-rank every active daily, script, remote, or silent-mismatch group before choosing slice 4. That
-audit must include attach-dependent work such as `buffers.client-file-context`, the three open
-`source-file.*-client-cwd` groups, `clients.detach-exec`, and `clients.parent-hup-exit`. Rows 4 and
-later are the current dependency forecast, not permission to skip a newly unblocked practical gate.
+Slice 3 is closed. Before choosing the next milestone, regenerate the report and re-rank every
+active daily, script, remote, or silent-mismatch group. That audit must include attach-dependent
+work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
+`clients.detach-exec`, and `clients.parent-hup-exit`. Rows 4 and later are a dependency forecast,
+not permission to skip a newly unblocked practical gate. Keep client environments, formats, hooks,
+`active-pane`, and `no-detach-on-destroy` as separate slices.
 
 # Four-seat Codex pipeline
 
@@ -165,23 +166,25 @@ Paste this prompt into the next session:
 Continue the tmux compatibility campaign in /Users/demfabris/dev/zz-tmux-compat on
 codex/tmux-compat. Preserve unrelated work and do not push.
 
-Verify that the requested-client-flags milestone is committed, `clients.attach-flags` is closed,
-and `clients.attach-sizing` is open with no dependency. Confirm the fresh checkpoint still reports
-84 scenarios, 1,475 steps, attached-client PASS, and only the two documented GEO rows.
+Verify that the session-cwd, requested-client-flags, and retained-client-sizing milestones are
+committed and their tracker groups are closed. Confirm the current checkpoint still reports 84
+scenarios, 1,475 steps, attached-client PASS, and only the two documented GEO rows.
 
-The next bounded slice is `clients.attach-sizing` only: `resize-window -A`, `resize-window -a`, and
-`semantic:resize-window-client-sizes`. It may consume retained client geometry and `ignore-size`.
-Do not implement client environments, context formats, event hooks, `active-pane`, or
-`no-detach-on-destroy` behavior.
+Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
+daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one
+acceptance contract after that audit. Do not combine client environment, context formats, event
+hooks, exit actions, `active-pane`, or `no-detach-on-destroy` behavior merely because they share
+client state.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
-source before editing. Use one coordinator and three Codex subagents to probe pinned tmux sizing,
-trace current retained geometry and resize ownership, and design the minimum differential proof.
-Freeze the contract before implementation and assign disjoint file ownership.
+source before editing. Use one coordinator and three Codex subagents to probe the selected
+pinned-tmux behavior, trace its current owners, and design the minimum differential proof. Freeze
+the contract before implementation and assign disjoint file ownership.
 
-Run focused tests, build a fresh debug binary, and run the full attached-client fixture. This slice
-starts from a fresh campaign checkpoint, so rerun the canonical strict differential only if the
-change invalidates that artifact or a new scenario joins the canonical corpus. Update the tracker
+Run focused tests, build a fresh debug binary, and run the full attached-client fixture when the
+slice touches attached clients. Rerun the canonical strict differential at the next campaign
+checkpoint, when a change invalidates the artifact, or when a new canonical scenario joins the
+corpus. Update the tracker
 and OKF documents, validate them, get an independent review, and commit one milestone. Continue the
 campaign goal into the next slice without pushing.
 ```

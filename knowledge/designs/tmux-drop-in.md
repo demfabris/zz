@@ -11,7 +11,7 @@ tags:
 - control-mode
 - roadmap
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Overview
@@ -140,8 +140,12 @@ activity chooses the oldest-created client. The selected client's attachment sup
 `client_session`; session, window, and pane
 facts stay on the target. An attached target without `-c` remains under `clients.context-formats`.
 This format-only fallback does not alter delivery, duration, printing routing or lifecycle, buffer
-paths, or Command-client selection. Session cwd has shipped; requested flag retention shipped
-2026-08-27. Retained sizing, environment refresh, and exit actions remain separate, while
+paths, or Command-client selection. Session cwd and requested flag retention have shipped. On
+2026-08-27, the team closed `clients.attach-sizing`: `resize-window -A` and `-a` aggregate the
+component-wise largest or smallest eligible attached-client sizes, select manual mode, freeze the
+chosen extent, follow the global `ignore-size` fallback, apply per-window Control ceilings, and use
+the session `default-size` when no eligible client contributes. zz and pinned tmux pass the full
+attached-client fixture. Environment refresh, detach exec, and parent-HUP exit remain separate;
 `active-pane` and `no-detach-on-destroy` consumers stay tracked. Binary
 streaming and process control require a separate design. Floating panes stay parked; linked windows and real socket interop stay permanently
 excluded; ACLs remain parked outside the practical alias gate.
@@ -239,9 +243,12 @@ ownership, client-relative `source-file` paths, script-visible capture/list beha
 attach-clear convergence, F6's attached harness, and F0's dispatcher collapse. The current alias
 tranche completed the F6 harness and now covers copy mode, choosers, prompts, buffers, prefix tables,
 and nested attach through real PTYs. The remaining current gaps live in
-[the divergence matrix](/tmux/divergences.md). Supported client-selector targeting and detach
-selection and session cwd have since shipped; the remaining attach work is split into requested
-flags, retained sizing, environment refresh, detach exec, and parent-HUP exit actions.
+[the divergence matrix](/tmux/divergences.md). Supported client-selector targeting, detach
+selection, session cwd, requested flags, and retained sizing have since shipped. The 2026-08-27
+sizing closure covers `resize-window -A` and `-a`, manual freeze, the global `ignore-size` fallback,
+per-window Control ceilings, session `default-size` fallback, and the full attached-client fixture.
+Environment refresh, detach exec, and parent-HUP exit remain open; `active-pane` and
+`no-detach-on-destroy` consumers keep separate tracker owners.
 
 This campaign closes items 3 through 6 from the live queue, then works through the
 remaining flag ledger. File-and-line anchors in this section refer to commit `57ae502`.

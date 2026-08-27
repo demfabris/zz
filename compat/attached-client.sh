@@ -246,15 +246,16 @@ trap 'exit 143' TERM
 write_attach() {
   local side="$1"
   local destination="$2"
+  local session="${3:-$INNER_SESSION}"
 
   printf '#!/usr/bin/env bash\n' >"$destination"
   printf 'cd -- %q\n' "$COMMAND_CWD" >>"$destination"
   if [ "$side" = "zz" ]; then
     printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -c %q -t %q\n' \
-      "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$ZZ_BIN" "$ZZ_SOCKET" "$SESSION_CWD" "=$INNER_SESSION" >>"$destination"
+      "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$ZZ_BIN" "$ZZ_SOCKET" "$SESSION_CWD" "=$session" >>"$destination"
   else
     printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -c %q -t %q\n' \
-      "$TMUX_HOME" "$TMUX_CONFIG_HOME" "$TMUX_BIN" "$INNER_SOCKET_NAME" "$SESSION_CWD" "=$INNER_SESSION" >>"$destination"
+      "$TMUX_HOME" "$TMUX_CONFIG_HOME" "$TMUX_BIN" "$INNER_SOCKET_NAME" "$SESSION_CWD" "=$session" >>"$destination"
   fi
   chmod +x "$destination"
 }
@@ -369,6 +370,42 @@ wait_for_attached_client_count() {
     sleep 0.05
   done
   fixture_failure "$side attached client count did not become $expected within 10 seconds; last count: ${count:-0}"
+}
+
+LAST_SESSION_CLIENT_SIZES=""
+wait_for_session_client_sizes() {
+  local side="$1"
+  local session="$2"
+  local expected="$3"
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    LAST_SESSION_CLIENT_SIZES="$(
+      side_command "$side" list-clients -t "=$session" \
+        -F '#{client_width}x#{client_height}' 2>/dev/null | sort -n || true
+    )"
+    if [ "$LAST_SESSION_CLIENT_SIZES" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side session $session client sizes did not become $expected within 10 seconds; last sizes: ${LAST_SESSION_CLIENT_SIZES:-<empty>}"
+}
+
+wait_for_outer_pane_size() {
+  local target="$1"
+  local expected="$2"
+  local attempt
+  local size
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    size="$(tmux_outer_command display-message -p -t "$target" '#{pane_width}x#{pane_height}' 2>/dev/null || true)"
+    if [ "$size" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "outer pane $target did not become $expected within 10 seconds; last size: ${size:-<empty>}"
 }
 
 assert_attached_client_count_stays() {
@@ -1449,6 +1486,155 @@ probe_requested_client_flags() {
   wait_for_requested_client_state "$side" "$INNER_SESSION|$read_only_flags"
 }
 
+probe_attached_client_sizing() {
+  local side="$1"
+  local decoy_session="sizing-decoy-$side"
+  local wide_window="sizing-$side-wide"
+  local decoy_window="sizing-$side-decoy"
+  local wide_attach="$SCRATCH_DIR/attach-$wide_window"
+  local decoy_attach="$SCRATCH_DIR/attach-$decoy_window"
+  local primary_target="=$OUTER_SESSION:$side"
+  local wide_target="=$OUTER_SESSION:$wide_window"
+  local decoy_target="=$OUTER_SESSION:$decoy_window"
+  local primary_tty
+  local wide_tty
+  local decoy_tty
+
+  respawn_attached_client "$side"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status off ||
+    fixture_failure "$side could not disable status for attached sizing"
+  side_command "$side" set-option -t "=$INNER_SESSION:" default-size 73x19 ||
+    fixture_failure "$side could not set the attached sizing default"
+  side_command "$side" new-session -d -s "$decoy_session" ||
+    fixture_failure "$side could not create its attached sizing decoy session"
+  side_command "$side" set-option -t "=$decoy_session:" status off ||
+    fixture_failure "$side could not disable its attached sizing decoy status"
+
+  write_attach "$side" "$wide_attach"
+  write_attach "$side" "$decoy_attach" "$decoy_session"
+
+  tmux_outer_command resize-window -t "$primary_target" -x 101 -y 31 ||
+    fixture_failure "$side could not size its primary attached client"
+  wait_for_outer_pane_size "$primary_target" 101x31
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" 101x31
+
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$wide_window" 'sleep 600' ||
+    fixture_failure "$side could not create its wide attached sizing window"
+  tmux_outer_command resize-window -t "$wide_target" -x 141 -y 21 ||
+    fixture_failure "$side could not size its wide attached client"
+  wait_for_outer_pane_size "$wide_target" 141x21
+  tmux_outer_command respawn-pane -k -t "$wide_target" "$wide_attach" ||
+    fixture_failure "$side could not attach its wide sizing client"
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" $'101x31\n141x21'
+
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$decoy_window" 'sleep 600' ||
+    fixture_failure "$side could not create its decoy attached sizing window"
+  tmux_outer_command resize-window -t "$decoy_target" -x 181 -y 51 ||
+    fixture_failure "$side could not size its decoy attached client"
+  wait_for_outer_pane_size "$decoy_target" 181x51
+  tmux_outer_command respawn-pane -k -t "$decoy_target" "$decoy_attach" ||
+    fixture_failure "$side could not attach its decoy sizing client"
+  wait_for_session_client_sizes "$side" "$decoy_session" 181x51
+
+  primary_tty="$(tmux_outer_command display-message -p -t "$primary_target" '#{pane_tty}')"
+  wide_tty="$(tmux_outer_command display-message -p -t "$wide_target" '#{pane_tty}')"
+  decoy_tty="$(tmux_outer_command display-message -p -t "$decoy_target" '#{pane_tty}')"
+  if [[ "$primary_tty" != /dev/* || "$wide_tty" != /dev/* || "$decoy_tty" != /dev/* ]]; then
+    fixture_failure "$side outer panes did not expose all attached sizing client ttys"
+  fi
+
+  side_command "$side" resize-window -A -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side resize-window -A failed"
+  wait_for_side_output "$side" 141x31 "componentwise largest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  side_command "$side" resizew -a -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side resizew -a failed"
+  wait_for_side_output "$side" 101x21 "componentwise smallest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  side_command "$side" resize-window -Aa -R -x 77 -y 17 \
+    -t "$INNER_WINDOW_TARGET" 4 ||
+    fixture_failure "$side combined attached sizing command failed"
+  wait_for_side_output "$side" 141x31 "combined largest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  wait_for_side_output "$side" manual "attached sizing manual mode" \
+    show-window-options -v -t "$INNER_WINDOW_TARGET" window-size
+
+  tmux_outer_command resize-window -t "$primary_target" -x 111 -y 35 ||
+    fixture_failure "$side could not resize its primary client during manual sizing"
+  tmux_outer_command resize-window -t "$wide_target" -x 151 -y 25 ||
+    fixture_failure "$side could not resize its wide client during manual sizing"
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" $'111x35\n151x25'
+  wait_for_side_output "$side" 141x31 "manual attached sizing freeze" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+
+  tmux_outer_command resize-window -t "$primary_target" -x 101 -y 31 ||
+    fixture_failure "$side could not restore its primary sizing client"
+  tmux_outer_command resize-window -t "$wide_target" -x 141 -y 21 ||
+    fixture_failure "$side could not restore its wide sizing client"
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" $'101x31\n141x21'
+
+  side_command "$side" refresh-client -t "$wide_tty" -f ignore-size ||
+    fixture_failure "$side could not ignore its wide sizing client"
+  side_command "$side" resize-window -A -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side mixed-ignore largest sizing failed"
+  wait_for_side_output "$side" 101x31 "mixed-ignore largest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  side_command "$side" resizew -a -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side mixed-ignore smallest sizing failed"
+  wait_for_side_output "$side" 101x31 "mixed-ignore smallest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+
+  side_command "$side" refresh-client -t "$primary_tty" -f ignore-size ||
+    fixture_failure "$side could not ignore its primary sizing client"
+  side_command "$side" resize-window -A -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side no-candidate largest sizing failed"
+  wait_for_side_output "$side" 73x19 "no-candidate largest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  side_command "$side" resizew -a -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side no-candidate smallest sizing failed"
+  wait_for_side_output "$side" 73x19 "no-candidate smallest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+
+  side_command "$side" refresh-client -t "$decoy_tty" -f ignore-size ||
+    fixture_failure "$side could not ignore its decoy sizing client"
+  side_command "$side" resize-window -A -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side all-ignore largest sizing failed"
+  wait_for_side_output "$side" 141x31 "all-ignore largest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+  side_command "$side" resizew -a -t "$INNER_WINDOW_TARGET" ||
+    fixture_failure "$side all-ignore smallest sizing failed"
+  wait_for_side_output "$side" 101x21 "all-ignore smallest attached sizing" \
+    display-message -p -t "$INNER_WINDOW_TARGET" '#{window_width}x#{window_height}'
+
+  side_command "$side" refresh-client -t "$primary_tty" -f '!ignore-size' ||
+    fixture_failure "$side could not restore its primary sizing flags"
+  side_command "$side" refresh-client -t "$wide_tty" -f '!ignore-size' ||
+    fixture_failure "$side could not restore its wide sizing flags"
+  side_command "$side" refresh-client -t "$decoy_tty" -f '!ignore-size' ||
+    fixture_failure "$side could not restore its decoy sizing flags"
+
+  tmux_outer_command kill-window -t "$wide_target" ||
+    fixture_failure "$side could not remove its wide attached sizing window"
+  wait_for_attached_client_count "$side" 1
+  tmux_outer_command kill-window -t "$decoy_target" ||
+    fixture_failure "$side could not remove its decoy attached sizing window"
+  wait_for_session_client_sizes "$side" "$decoy_session" ""
+  side_command "$side" kill-session -t "=$decoy_session" ||
+    fixture_failure "$side could not remove its attached sizing decoy session"
+
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status ||
+    fixture_failure "$side could not restore inherited status after attached sizing"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" default-size ||
+    fixture_failure "$side could not restore inherited default-size after attached sizing"
+  side_command "$side" set-window-option -u -t "$INNER_WINDOW_TARGET" window-size ||
+    fixture_failure "$side could not restore inherited window-size after attached sizing"
+  tmux_outer_command resize-window -t "$primary_target" -x 80 -y 24 ||
+    fixture_failure "$side could not restore its primary outer window size"
+  wait_for_outer_pane_size "$primary_target" 80x24
+  wait_for_session_client_sizes "$side" "$INNER_SESSION" 80x24
+  wait_for_client_state "$side" root
+}
+
 probe_detach_client_tty() {
   local side="$1"
   local client_tty
@@ -1535,6 +1721,8 @@ probe_source_file_depth zz
 probe_source_file_depth tmux
 probe_requested_client_flags zz
 probe_requested_client_flags tmux
+probe_attached_client_sizing zz
+probe_attached_client_sizing tmux
 probe_detach_client_tty zz
 probe_detach_client_tty tmux
 

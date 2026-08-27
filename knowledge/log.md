@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-08-27
+* **Update**: Closed clients.attach-sizing: resize-window -A/-a now aggregate retained attached-client geometry component-wise, honor tmux's global ignore-size fallback and Control refresh-client -C ceilings, fall back to default-size, clamp to 1..=10,000, and freeze the result in manual mode. The expanded multi-client attached differential passes against pinned tmux without a protocol or snapshot-schema change.
 * **Update**: Closed requested tmux client flags with typed daemon retention, exact attach and reconnect ordering, pinned differential coverage, and explicit follow-up gaps for sizing, per-client active panes, and destruction fallback.
 
 ## 2026-08-26

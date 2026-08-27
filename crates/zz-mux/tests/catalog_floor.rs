@@ -110,6 +110,30 @@ fn attaching_commands_accept_client_flag_values() {
 }
 
 #[test]
+fn resize_window_attached_size_flags_are_valueless_and_largest_wins() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &command("new-session", &["-d", "-s", "sizes"]),
+        )
+        .unwrap();
+    let window = context.window.unwrap();
+
+    assert_eq!(
+        engine
+            .execute(&mut context, &command("resizew", &["-aA"]))
+            .unwrap()
+            .effects,
+        [MuxEffect::ResizeWindowFromClients {
+            window,
+            mode: zz_mux::WindowSize::Largest,
+        }]
+    );
+}
+
+#[test]
 fn clustered_flags_reject_an_unknown_member() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();

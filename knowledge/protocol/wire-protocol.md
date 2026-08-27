@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v81)
+title: zz wire protocol (v83)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-26T00:00:00-03:00
+timestamp: 2026-08-27T00:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 82`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 83`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (82) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (83) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -73,7 +73,7 @@ fields in declaration order.
 
 | Variant | Fields | Purpose |
 |---------|--------|---------|
-| `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>`, `working_directory: Option<PathBuf>` (≤16 KiB), `environment: Vec<String>` (≤4,096 entries, ≤16,367 B each, ≤4 MiB total) | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane; eligible local endpoints publish an absolute UTF-8 cwd while SSH, unrepresentable, and oversized paths omit it. Local and SSH-forwarded connections publish a sorted and deduplicated UTF-8 process-environment snapshot; unrepresentable Unix names or values are omitted without substitution. Entries require a nonempty name and `=` separator, forbid NUL, and allow empty values or additional `=` bytes. Additive capability strings carry terminal identity and nested intent without changing this struct |
+| `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>`, `working_directory: Option<PathBuf>` (≤16 KiB), `environment: Vec<String>` (≤4,096 entries, ≤16,367 B each, ≤4 MiB total), `process_id: u32` | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane; eligible local endpoints publish an absolute UTF-8 cwd while SSH, unrepresentable, and oversized paths omit it. Local and SSH-forwarded connections publish a sorted and deduplicated UTF-8 process-environment snapshot; unrepresentable Unix names or values are omitted without substitution. Entries require a nonempty name and `=` separator, forbid NUL, and allow empty values or additional `=` bytes. `process_id` supplies `#{client_pid}` and uses zero when a caller cannot report one. Additive capability strings carry terminal identity and nested intent without changing this struct |
 | `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
 | `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation`, `prepared: bool` | tmux-style command from any client. Control sets `prepared` after the daemon freezes one alias layer; the daemon still runs authorization and ordinary dispatch validation |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code, stderr }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code. `stderr` (appended at v71) is populated for `source-file` diagnostics issued by a Command client since Wave E (2026-08-22) and stays empty for every other command; `Success` with a nonzero `exit_code` is a COMPLETED command, so `Error` stays reserved for dispatch, transport, and server failures |
@@ -533,9 +533,12 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 82`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 83`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v83 appends `ClientHello.process_id`. Each local or SSH-forwarded client reports its originating
+  process ID; the daemon retains the value for `#{client_pid}` and clears it with the connection.
+  A zero value remains the defined unavailable form.
 - v82 appends `ClientHello.environment`. Encoder and decoder enforce its count, per-entry, syntax,
   and aggregate bounds. The daemon keeps one immutable map per connection, removes it on
   unregister, and uses it for fresh-session, attach, native-attach, Control-attach, and selected
@@ -741,25 +744,25 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 82, client_instance_id: ClientInstanceId(0), kind: Interactive,
+`ClientHello { protocol_version: 83, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
-working_directory: None, environment: [] }` is 19 bytes on the wire: an 8-byte envelope over an
-11-byte postcard payload.
+working_directory: None, environment: [], process_id: 0 }` is 20 bytes on the wire: an 8-byte
+envelope over a 12-byte postcard payload.
 
 ```text
-byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17 18
-      0f 00 00 00  00     00      52 00         00 52 00 00 00 00 01 01 00 00 00
+byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17 18 19
+      10 00 00 00  00     00      53 00         00 53 00 00 00 00 01 01 00 00 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 15  Control        (= 82)
+      length = 16  Control        (= 83)
 ```
 
-- **length `15`** = `ENVELOPE_BYTES` (4) + payload (11); it counts the four envelope bytes, not itself.
-- **payload** `00 52 00 00 00 00 01 01 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x52` (= 82), `client_instance_id` as varint `00`, `kind`
+- **length `16`** = `ENVELOPE_BYTES` (4) + payload (12); it counts the four envelope bytes, not itself.
+- **payload** `00 53 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x53` (= 83), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` and `working_directory` as two `Option::None` tags (`00 00`), followed by the empty
-  environment sequence length (`00`). Postcard
+  environment sequence length (`00`), then `process_id` as the varint `00`. Postcard
   writes multi-byte integers as LEB128 varints, so the version is one byte here and two in the
   envelope, which is fixed-width LE. A real local interactive hello may carry the device's short
   hostname, capabilities, origin pane, working directory, and environment.
@@ -789,10 +792,11 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 82, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 83, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None,
-                       working_directory: Some("/home/demo"), environment: ["TERM=xterm-256color"] }
-server → ServerHello { protocol_version: 82, server_id, client_id: c11, client_instance_id: i1,
+                       working_directory: Some("/home/demo"), environment: ["TERM=xterm-256color"],
+                       process_id: 1234 }
+server → ServerHello { protocol_version: 83, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 82;
+pub const PROTOCOL_VERSION: u16 = 83;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1024,6 +1024,7 @@ pub struct ClientHello {
     pub working_directory: Option<PathBuf>,
     #[serde(deserialize_with = "deserialize_client_environment")]
     pub environment: Vec<String>,
+    pub process_id: u32,
 }
 
 impl fmt::Debug for ClientHello {
@@ -1039,6 +1040,7 @@ impl fmt::Debug for ClientHello {
             .field("origin", &self.origin)
             .field("working_directory", &self.working_directory)
             .field("environment_entries", &self.environment.len())
+            .field("process_id", &self.process_id)
             .finish()
     }
 }
@@ -3620,7 +3622,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 82);
+        assert_eq!(super::PROTOCOL_VERSION, 83);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

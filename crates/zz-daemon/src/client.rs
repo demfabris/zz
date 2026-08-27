@@ -1264,6 +1264,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
             .and_then(|pane| pane.parse().ok()),
         working_directory: client_working_directory(client_facts, || std::env::current_dir().ok()),
         environment: client_environment(),
+        process_id: std::process::id(),
     }))?;
     let hello = match reader.recv()? {
         ProtocolMessage::ServerHello(hello) => hello,

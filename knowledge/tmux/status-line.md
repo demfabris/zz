@@ -4,7 +4,7 @@ title: tmux status rows and format expansion
 description: The daemon expands tmux status formats per client; the TUI draws terminal rows while the GUI maps their semantic regions onto native widgets.
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
-timestamp: 2026-08-25T00:00:00-03:00
+timestamp: 2026-08-27T00:00:00-03:00
 ---
 
 # Overview
@@ -156,21 +156,22 @@ the [divergence matrix](/tmux/divergences.md#format-variables-that-remain-unback
 | Daemon buffer hook | `buffer_created`, `buffer_full`, `buffer_name`, `buffer_sample`, `buffer_size` |
 | Daemon superset hook (`DaemonFormatHooks::variable` answers before the pinned table, so neither name is in `FORMAT_VARIABLES` or the oracle diff) | `pane_kind` (`terminal`, `agent`, `browser`, `editor`, `picker` — what `list-panes -F` needs to find the agent), and every `@name` user option, read pane → the pane's window → session → global window → global session → server, the way tmux's `#{@name}` reads |
 | Pinned tmux default, enabled | `cursor_flag`, `wrap_flag` |
-| Per-client daemon hook (every status request carries the recipient's `ClientFormatFacts`) | `client_flags`, `client_height` and `client_width` (`0` without a stored size), `client_name`, `client_session`, `client_theme`, `client_uid`, `client_user` |
-| `list-clients`-only injection | `client_activity`, `client_key_table`, `client_last_session`, `client_readonly`, `session_last_attached` |
-| Pin-null without the missing client, mouse, or group context | `client_cell_height`, `client_cell_width`, `client_control_mode`, `client_discarded`, `client_pid`, `client_prefix`, `client_utf8`, `client_written`, `mouse_x`, `mouse_y`, `session_active`, `session_group_attached`, `session_group_many_attached`, `session_group_size`, `window_bigger` |
+| Per-client daemon hook (every attached client context carries one `ClientFormatFacts` record) | `client_activity`, `client_cell_height`, `client_cell_width`, `client_colours`, `client_control_mode`, `client_created`, `client_discarded`, `client_flags`, `client_height`, `client_key_table`, `client_last_session`, `client_name`, `client_pid`, `client_prefix`, `client_readonly`, `client_session`, `client_termfeatures`, `client_termname`, `client_termtype`, `client_theme`, `client_tty`, `client_uid`, `client_user`, `client_utf8`, `client_width`, `client_written` |
+| Daemon session-attachment hook | `session_last_attached` |
+| Pin-null without the missing mouse or group context | `mouse_x`, `mouse_y`, `session_active`, `session_group_attached`, `session_group_many_attached`, `session_group_size`, `window_bigger` |
 | Pinned inactive/default state | `alternate_on`, `alternate_saved_x`, `alternate_saved_y`, `bracket_paste_flag`, `cursor_blinking`, `cursor_shape`, `cursor_very_visible`, `cursor_x`, `cursor_y`, `history_all_bytes`, `history_bytes`, `history_size`, `insert_flag`, `keypad_cursor_flag`, `keypad_flag`, `mouse_all_flag`, `mouse_any_flag`, `mouse_button_flag`, `mouse_sgr_flag`, `mouse_standard_flag`, `mouse_utf8_flag`, `origin_flag`, `pane_floating_flag`, `pane_in_mode`, `pane_marked`, `pane_marked_set`, `pane_pb_progress`, `pane_unseen_changes`, `scroll_region_lower`, `scroll_region_upper`, `session_grouped`, `session_marked`, `sixel_support`, `synchronized_output_flag`, `window_cell_height`, `window_cell_width`, `window_marked_flag` |
-| Always unavailable (31; `client_termname` has an empty-valued seam) | `buffer_mode_format`, `client_colours`, `client_created`, `client_mode_format`, `client_termfeatures`, `client_termname`, `client_termtype`, `client_tty`, `cursor_character`, `cursor_colour`, `mouse_hyperlink`, `mouse_line`, `mouse_pane`, `mouse_status_line`, `mouse_status_range`, `mouse_word`, `pane_bg`, `pane_fg`, `pane_key_mode`, `pane_mode`, `pane_pb_state`, `pane_search_string`, `pane_tabs`, `session_group`, `session_group_attached_list`, `session_group_list`, `session_path`, `tree_mode_format`, `window_activity`, `window_offset_x`, `window_offset_y` |
+| Always unavailable (25) | `buffer_mode_format`, `client_mode_format`, `cursor_character`, `cursor_colour`, `mouse_hyperlink`, `mouse_line`, `mouse_pane`, `mouse_status_line`, `mouse_status_range`, `mouse_word`, `pane_bg`, `pane_fg`, `pane_key_mode`, `pane_mode`, `pane_pb_state`, `pane_search_string`, `pane_tabs`, `session_group`, `session_group_attached_list`, `session_group_list`, `session_path`, `tree_mode_format`, `window_activity`, `window_offset_x`, `window_offset_y` |
 
 Eligible local terminal surfaces and Command clients retain a tty internally for attached-client
 selection and nested-attach checks. Local Control retains the same identity only when stdin has a
-discoverable tty; piped stdin retains none. That state is not part of `ClientFormatFacts`, so it
-does not make `client_tty` available to list, status, title, or ordinary format expansion. The
-Control identity scope also does not add TERM or terminal-name facts. It publishes no implicit
-size; only explicit `refresh-client -C` state can supply Control geometry.
+discoverable tty; piped stdin retains none. The selected client's `ClientFormatFacts` exposes that
+value to list, status, title, ordinary, inserted, and `display-message` expansion. Protocol v82's
+environment snapshot supplies `TERM` when present. Control publishes no implicit size; only
+explicit `refresh-client -C` state can supply Control geometry, and terminal-only fields remain
+empty for piped Control.
 
-The `ClientFocus` shape introduced in protocol v73 drives activity and geometry ownership but does
-not retain a current focused boolean. `client_flags` therefore omits tmux's `focused` flag.
+The `ClientFocus` shape introduced in protocol v73 always retains the current focused boolean for
+`client_flags`. When `focus-events` is on, it also drives activity and FocusIn geometry ownership.
 
 `session_activity` retains Unix seconds and starts at the same timestamp as `session_created`.
 Successful same- or other-session selection and queued terminal input refresh it. Every attach also

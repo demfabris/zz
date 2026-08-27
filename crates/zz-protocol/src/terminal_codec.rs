@@ -2619,6 +2619,7 @@ mod tests {
                 origin: None,
                 working_directory: None,
                 environment: Vec::new(),
+                process_id: 13,
             });
             assert!(matches!(
                 encode_protocol_message(&message),
@@ -2648,6 +2649,7 @@ mod tests {
                 origin: None,
                 working_directory: Some(std::path::PathBuf::from("x".repeat(length))),
                 environment: Vec::new(),
+                process_id: 13,
             })
         };
         let boundary = hello_with_working_directory(MAX_CLIENT_WORKING_DIRECTORY_BYTES);
@@ -2693,6 +2695,7 @@ mod tests {
                 origin: None,
                 working_directory: None,
                 environment,
+                process_id: 13,
             })
         };
         let rejected = |environment| {
@@ -2757,9 +2760,11 @@ mod tests {
             origin: None,
             working_directory: None,
             environment: vec!["ZZ_SECRET=do-not-print".to_owned()],
+            process_id: 13,
         };
         let debug = format!("{hello:?}");
         assert!(debug.contains("environment_entries: 1"));
+        assert!(debug.contains("process_id: 13"));
         assert!(!debug.contains("ZZ_SECRET"));
         assert!(!debug.contains("do-not-print"));
     }
@@ -2900,6 +2905,7 @@ mod tests {
             origin: None,
             working_directory: Some(std::path::PathBuf::from("/tmp/client-fixture")),
             environment: Vec::new(),
+            process_id: 13,
         });
         let mut bytes = Vec::new();
         write_protocol_message(&mut bytes, &message).expect("write message");

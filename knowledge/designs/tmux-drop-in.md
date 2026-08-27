@@ -10,7 +10,7 @@ tags:
 - layout
 - control-mode
 - roadmap
-timestamp: 2026-08-26T00:00:00-03:00
+timestamp: 2026-08-27T00:00:00-03:00
 last_updated: 2026-08-27
 ---
 
@@ -138,9 +138,10 @@ collision precedence. Native aliases remain. Unsupported `command-prompt -t`, `s
 client when `-c` is absent, names a client attached to another session, or does not resolve. Equal
 activity chooses the oldest-created client. The selected client's attachment supplies
 `client_session`; session, window, and pane
-facts stay on the target. An attached target without `-c` remains under `clients.context-formats`.
-This format-only fallback does not alter delivery, duration, printing routing or lifecycle, buffer
-paths, or Command-client selection. Session cwd and requested flag retention have shipped. On
+facts stay on the target. Protocol v83 closes the attached-target case without `-c` and supplies the
+complete retained client fact record across list, status, ordinary, inserted, and Control contexts.
+This format selection does not alter delivery, duration, printing routing or lifecycle, or buffer
+paths. Session cwd and requested flag retention have shipped. On
 2026-08-27, the team closed `clients.attach-sizing`: `resize-window -A` and `-a` aggregate the
 component-wise largest or smallest eligible attached-client sizes, select manual mode, freeze the
 chosen extent, follow the global `ignore-size` fallback, apply per-window Control ceilings, and use

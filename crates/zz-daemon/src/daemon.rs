@@ -1337,6 +1337,8 @@ struct OutboundState {
     recycled_frames: Vec<Vec<u8>>,
     recycled_capacity: usize,
     queued_bytes: usize,
+    written_bytes: u64,
+    discarded_bytes: u64,
     closed: bool,
     writer_finished: bool,
 }
@@ -1488,6 +1490,16 @@ impl OutboundMailbox {
         recycle_outbound_frame(&mut state, frame);
     }
 
+    fn note_written(&self, bytes: usize) {
+        let mut state = self.state.lock();
+        state.written_bytes = state.written_bytes.saturating_add(bytes as u64);
+    }
+
+    fn stats(&self) -> (u64, u64) {
+        let state = self.state.lock();
+        (state.written_bytes, state.discarded_bytes)
+    }
+
     #[must_use]
     fn enqueue_reliable(&self, message: &ProtocolMessage) -> bool {
         let removed_pane = match message {
@@ -1558,7 +1570,7 @@ impl OutboundMailbox {
                 .take()
                 .expect("matching command output is pending");
             state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
-            recycle_outbound_frame(&mut state, pending.encoded);
+            discard_outbound_frame(&mut state, pending.encoded);
         }
         if state.reliable.len() >= MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
@@ -1946,7 +1958,7 @@ impl OutboundMailbox {
             },
         );
         if let Some(replaced) = replaced {
-            recycle_outbound_frame(&mut state, replaced.encoded);
+            discard_outbound_frame(&mut state, replaced.encoded);
         } else {
             state.terminal_order.push_back(pane);
         }
@@ -2005,7 +2017,7 @@ impl OutboundMailbox {
             .command_output
             .replace(PendingCommandOutput { output_id, encoded });
         if let Some(replaced) = replaced {
-            recycle_outbound_frame(&mut state, replaced.encoded);
+            discard_outbound_frame(&mut state, replaced.encoded);
         }
         drop(state);
         self.ready.notify_one();
@@ -2188,11 +2200,16 @@ fn recycle_outbound_frame(state: &mut OutboundState, mut frame: Vec<u8>) {
     state.recycled_frames.push(frame);
 }
 
+fn discard_outbound_frame(state: &mut OutboundState, frame: Vec<u8>) {
+    state.discarded_bytes = state.discarded_bytes.saturating_add(frame.len() as u64);
+    recycle_outbound_frame(state, frame);
+}
+
 fn clear_pending_agent(state: &mut OutboundState, pane: PaneId) {
     if let Some(queued) = state.agent.remove(&pane) {
         state.queued_bytes = state.queued_bytes.saturating_sub(queued.bytes);
         for (_, frame) in queued.frames {
-            recycle_outbound_frame(state, frame);
+            discard_outbound_frame(state, frame);
         }
     }
     state.agent_order.retain(|queued| *queued != pane);
@@ -2201,7 +2218,7 @@ fn clear_pending_agent(state: &mut OutboundState, pane: PaneId) {
 fn remove_pending_terminal(state: &mut OutboundState, pane: PaneId) {
     if let Some(pending) = state.terminals.remove(&pane) {
         state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
-        recycle_outbound_frame(state, pending.encoded);
+        discard_outbound_frame(state, pending.encoded);
     }
     state.terminal_order.retain(|queued| *queued != pane);
 }
@@ -2215,6 +2232,9 @@ fn reserve_outbound_bytes(state: &mut OutboundState, incoming: usize, replaced: 
 }
 
 fn close_outbound(state: &mut OutboundState) {
+    state.discarded_bytes = state
+        .discarded_bytes
+        .saturating_add(state.queued_bytes as u64);
     state.closed = true;
     state.reliable.clear();
     state.command_output = None;
@@ -3926,10 +3946,13 @@ impl Shared {
         inner.next_client_id = inner.next_client_id.saturating_add(1);
         inner.client_instances.insert(client, client_instance_id);
         inner.client_kinds.insert(client, kind);
+        let now = unix_timestamp();
         inner.activity_sequence = inner.activity_sequence.saturating_add(1);
         let activity = inner.activity_sequence;
         inner.client_activity.insert(client, activity);
-        inner.client_activity_times.insert(client, unix_timestamp());
+        inner.client_activity_times.insert(client, now);
+        inner.client_created_times.insert(client, now);
+        inner.client_focused.insert(client, true);
         if kind == ClientKind::Interactive && client_has_terminal {
             inner.client_terminals.insert(client);
         }
@@ -4185,6 +4208,9 @@ impl Shared {
             inner.client_origins.remove(&client);
             inner.client_activity.remove(&client);
             inner.client_activity_times.remove(&client);
+            inner.client_created_times.remove(&client);
+            inner.client_focused.remove(&client);
+            inner.client_pids.remove(&client);
             inner.last_sessions.remove(&client);
             inner.client_flags.clear(client);
             inner.control_outputs.remove(&client);
@@ -5042,7 +5068,7 @@ impl Shared {
                     );
                 }
             }
-            let mut facts = format_hook_facts(&inner);
+            let mut facts = format_hook_facts_for_client(&inner, client, context);
             if command_name == "display-message" {
                 let (target, target_client) = inner
                     .engine
@@ -5052,19 +5078,9 @@ impl Shared {
                     .as_deref()
                     .and_then(|target| resolve_display_message_client(&inner, target));
                 facts.client = target_session.and_then(|session| {
-                    let target_is_attached = inner
-                        .attached
-                        .get(&session)
-                        .is_some_and(|clients| !clients.is_empty());
-                    (target_client.is_some() || !target_is_attached)
-                        .then(|| {
-                            destination
-                                .filter(|client| {
-                                    client_attached_session(&inner, *client) == Some(session)
-                                })
-                                .or_else(|| best_display_message_format_client(&inner, session))
-                        })
-                        .flatten()
+                    destination
+                        .filter(|client| client_attached_session(&inner, *client) == Some(session))
+                        .or_else(|| best_display_message_format_client(&inner, session))
                         .and_then(|client| {
                             client_attached_session(&inner, client).map(|client_session| {
                                 client_format_facts(&inner, client, client_session)
@@ -8001,7 +8017,7 @@ impl Shared {
                 command_context.window,
                 command_context.pane,
             );
-            let facts = format_hook_facts(&inner);
+            let facts = format_hook_facts_for_client(&inner, client, &command_context);
             let command = parsed.positional.first().map(|command| {
                 if parsed.command_mode {
                     command_block_body(command).map_or_else(
@@ -8243,7 +8259,7 @@ impl Shared {
                 command_context.window,
                 command_context.pane,
             );
-            let facts = format_hook_facts(&inner);
+            let facts = format_hook_facts_for_client(&inner, client, &command_context);
             let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                 &facts,
                 command_context.format_variables(),
@@ -9155,8 +9171,14 @@ impl Shared {
                         .cmp(&inner.client_activity.get(left).copied().unwrap_or_default()),
                     Some(TmuxSortOrder::Creation) => left.0.cmp(&right.0),
                     Some(TmuxSortOrder::Name) => left_facts.name.cmp(&right_facts.name),
-                    Some(TmuxSortOrder::Size) => (left_facts.width, left_facts.height)
-                        .cmp(&(right_facts.width, right_facts.height)),
+                    Some(TmuxSortOrder::Size) => (
+                        left_facts.width.parse::<u16>().unwrap_or_default(),
+                        left_facts.height.parse::<u16>().unwrap_or_default(),
+                    )
+                        .cmp(&(
+                            right_facts.width.parse::<u16>().unwrap_or_default(),
+                            right_facts.height.parse::<u16>().unwrap_or_default(),
+                        )),
                     _ => std::cmp::Ordering::Equal,
                 };
                 ordering.then_with(|| left_facts.name.cmp(&right_facts.name))
@@ -9186,58 +9208,9 @@ impl Shared {
             );
             let mut client_facts = client_format_facts(&inner, client, session_id);
             client_facts.line = line;
-            let facts = FormatHookFacts {
-                client: Some(client_facts),
-                ..FormatHookFacts::default()
-            };
-            let mut variables = context.format_variables().cloned().unwrap_or_default();
-            variables.insert(
-                "client_activity".to_owned(),
-                inner
-                    .client_activity_times
-                    .get(&client)
-                    .copied()
-                    .unwrap_or_default()
-                    .to_string(),
-            );
-            variables.insert(
-                "client_flags".to_owned(),
-                format_client_flags(&inner, client),
-            );
-            variables.insert(
-                "client_key_table".to_owned(),
-                inner
-                    .key_engines
-                    .get(&client)
-                    .and_then(KeyEngine::active_table)
-                    .map_or_else(
-                        || inner.engine.key_table_for_session(session_id).clone(),
-                        str::to_owned,
-                    ),
-            );
-            variables.insert(
-                "client_last_session".to_owned(),
-                inner
-                    .last_sessions
-                    .get(&client)
-                    .and_then(|last| inner.engine.state.sessions.get(last))
-                    .map(|session| session.name.clone())
-                    .unwrap_or_default(),
-            );
-            variables.insert(
-                "client_readonly".to_owned(),
-                usize::from(inner.client_flags.contains(client)).to_string(),
-            );
-            variables.insert("client_session".to_owned(), session.name.clone());
-            variables.insert(
-                "session_last_attached".to_owned(),
-                inner
-                    .session_last_attached
-                    .get(&session_id)
-                    .copied()
-                    .unwrap_or_default()
-                    .to_string(),
-            );
+            let mut facts = format_hook_facts(&inner);
+            facts.client = Some(client_facts);
+            let variables = context.format_variables().cloned().unwrap_or_default();
             if let Some(filter) = parsed.value('f') {
                 let mut hooks =
                     DaemonFormatHooks::command_with_optional_variables(&facts, Some(&variables))
@@ -12134,13 +12107,20 @@ impl Shared {
         context: &mut ExecutionContext,
         focused: bool,
     ) -> Result<(), DaemonError> {
-        let read_only = {
-            let inner = self.inner.lock();
-            if !inner.engine.focus_events() || client_attached_session(&inner, client).is_none() {
+        let (read_only, focus_events) = {
+            let mut inner = self.inner.lock();
+            if client_attached_session(&inner, client).is_none() {
                 return Ok(());
             }
-            inner.client_flags.contains(client)
+            inner.client_focused.insert(client, focused);
+            (
+                inner.client_flags.contains(client),
+                inner.engine.focus_events(),
+            )
         };
+        if !focus_events {
+            return Ok(());
+        }
         if !read_only {
             self.dismiss_client_message(client);
         }
@@ -19839,6 +19819,7 @@ struct ServerState {
     active_color_scheme: TerminalColorScheme,
     client_color_schemes: BTreeMap<ClientId, TerminalColorScheme>,
     client_names: BTreeMap<ClientId, String>,
+    client_pids: BTreeMap<ClientId, u32>,
     client_instances: BTreeMap<ClientId, ClientInstanceId>,
     client_kinds: BTreeMap<ClientId, ClientKind>,
     client_terminals: BTreeSet<ClientId>,
@@ -19852,6 +19833,8 @@ struct ServerState {
     client_flags: ClientFlags,
     client_activity: BTreeMap<ClientId, u64>,
     client_activity_times: BTreeMap<ClientId, u64>,
+    client_created_times: BTreeMap<ClientId, u64>,
+    client_focused: BTreeMap<ClientId, bool>,
     session_last_attached: BTreeMap<SessionId, u64>,
     activity_sequence: u64,
     deferred_event_hooks: Vec<PendingHookEvent>,
@@ -22338,7 +22321,7 @@ fn best_client_on_session(inner: &ServerState, session: SessionId) -> Option<Cli
                     .get(client)
                     .copied()
                     .unwrap_or_default(),
-                client.0,
+                Reverse(client.0),
             )
         })
 }
@@ -22579,6 +22562,9 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     if client_attached_session(inner, client).is_some() {
         flags.push("attached".to_owned());
     }
+    if inner.client_focused.get(&client).copied().unwrap_or(true) {
+        flags.push("focused".to_owned());
+    }
     if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
         flags.push("control-mode".to_owned());
     }
@@ -22607,7 +22593,111 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     if requested.active_pane {
         flags.push("active-pane".to_owned());
     }
+    if client_uses_utf8(inner, client) {
+        flags.push("UTF-8".to_owned());
+    }
     flags.join(",")
+}
+
+fn client_environment_value<'a>(
+    inner: &'a ServerState,
+    client: ClientId,
+    name: &str,
+) -> Option<&'a str> {
+    inner
+        .client_environments
+        .get(&client)?
+        .get(name)
+        .map(String::as_str)
+}
+
+fn client_uses_utf8(inner: &ServerState, client: ClientId) -> bool {
+    if client_environment_value(inner, client, "TMUX").is_some_and(|value| !value.is_empty()) {
+        return true;
+    }
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|name| {
+            client_environment_value(inner, client, name).filter(|value| !value.is_empty())
+        })
+        .is_some_and(|locale| {
+            let locale = locale.to_ascii_lowercase();
+            locale.contains("utf-8") || locale.contains("utf8")
+        })
+}
+
+fn client_colour_count(inner: &ServerState, client: ClientId) -> Option<u32> {
+    if inner.client_kinds.get(&client) != Some(&ClientKind::Interactive)
+        || !inner.client_terminals.contains(&client)
+    {
+        return None;
+    }
+    let term = client_environment_value(inner, client, "TERM").unwrap_or_default();
+    let colour_term = client_environment_value(inner, client, "COLORTERM")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(colour_term.as_str(), "truecolor" | "24bit")
+        || term.to_ascii_lowercase().contains("truecolor")
+    {
+        Some(16_777_216)
+    } else if term.to_ascii_lowercase().contains("256color") {
+        Some(256)
+    } else if term == "dumb" {
+        Some(2)
+    } else {
+        Some(16)
+    }
+}
+
+fn client_term_features(inner: &ServerState, client: ClientId) -> String {
+    let Some(colours) = client_colour_count(inner, client) else {
+        return String::new();
+    };
+    let mut features = Vec::new();
+    if colours >= 256 {
+        features.push("256");
+    }
+    features.extend([
+        "bpaste",
+        "ccolour",
+        "clipboard",
+        "hyperlinks",
+        "cstyle",
+        "extkeys",
+        "focus",
+        "mouse",
+        "osc7",
+        "overline",
+    ]);
+    if colours == 16_777_216 {
+        features.push("RGB");
+    }
+    features.extend(["strikethrough", "sync", "title", "usstyle"]);
+    features.join(",")
+}
+
+fn client_format_geometry(
+    inner: &ServerState,
+    client: ClientId,
+    window: WindowId,
+) -> Option<TerminalGeometry> {
+    let pane = inner.engine.state.windows.get(&window)?.active_pane;
+    inner
+        .terminal_geometries
+        .get(&pane)
+        .and_then(|geometries| geometries.get(&client))
+        .copied()
+        .or_else(|| {
+            inner
+                .terminal_geometries
+                .values()
+                .find_map(|geometries| geometries.get(&client).copied())
+        })
+}
+
+fn client_format_time(time: Option<u64>) -> String {
+    time.filter(|time| *time != 0)
+        .map_or_else(String::new, |time| time.to_string())
 }
 
 fn client_ignores_size(inner: &ServerState, client: ClientId) -> bool {
@@ -22762,37 +22852,109 @@ fn client_format_facts(
 ) -> ClientFormatFacts {
     let session_state = &inner.engine.state.sessions[&session];
     let window = client_focused_window(inner, client, session_state);
-    let geometry = if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
-        control_client_geometry(inner, client, window)
+    let kind = inner.client_kinds.get(&client).copied();
+    let has_terminal =
+        kind == Some(ClientKind::Interactive) && inner.client_terminals.contains(&client);
+    let control_geometry = (kind == Some(ClientKind::Control))
+        .then(|| control_client_geometry(inner, client, window))
+        .flatten();
+    let terminal_geometry = has_terminal
+        .then(|| client_format_geometry(inner, client, window))
+        .flatten();
+    let retained_size = inner.client_sizes.get(&client).copied();
+    let width = if kind == Some(ClientKind::Control) {
+        control_geometry.map_or(80, |geometry| geometry.columns)
     } else {
-        None
+        retained_size.map_or(80, |size| size.0)
     };
-    let size = geometry
-        .map(|geometry| (geometry.columns, geometry.rows))
-        .or_else(|| inner.client_sizes.get(&client).copied());
+    let height = has_terminal.then(|| retained_size.map_or(24, |size| size.1));
     let format_context = inner
         .engine
         .format_status_context(Some(session), Some(window), None);
-    ClientFormatFacts {
-        name: inner
+    let tty = inner.client_ttys.get(&client).cloned().unwrap_or_default();
+    let pid = inner.client_pids.get(&client).copied().unwrap_or_default();
+    let name = if tty.is_empty() {
+        inner
             .client_names
             .get(&client)
+            .filter(|name| !name.is_empty())
             .cloned()
-            .unwrap_or_else(|| format!("device-{}", client.0)),
-        session: session_state.name.clone(),
-        width: size.map_or(0, |size| size.0),
-        height: size.map_or(0, |size| size.1),
-        termname: String::new(),
-        uid: format_context.uid,
-        user: format_context.user,
+            .unwrap_or_else(|| {
+                if pid == 0 {
+                    format!("device-{}", client.0)
+                } else {
+                    format!("client-{pid}")
+                }
+            })
+    } else {
+        tty.clone()
+    };
+    let default_key_table = inner.engine.key_table_for_session(session);
+    let key_table = inner
+        .key_engines
+        .get(&client)
+        .and_then(KeyEngine::active_table)
+        .unwrap_or(default_key_table.as_str())
+        .to_owned();
+    let prefix = usize::from(key_table != default_key_table).to_string();
+    let (written, discarded) = inner
+        .subscribers
+        .get(&client)
+        .map_or((0, 0), |subscriber| subscriber.stats());
+    let colours = client_colour_count(inner, client);
+    ClientFormatFacts {
+        activity: client_format_time(inner.client_activity_times.get(&client).copied()),
+        cell_height: terminal_geometry
+            .map_or_else(
+                || has_terminal.then_some(0),
+                |geometry| Some(geometry.cell_height_px),
+            )
+            .map_or_else(String::new, |height| height.to_string()),
+        cell_width: terminal_geometry
+            .map_or_else(
+                || has_terminal.then_some(0),
+                |geometry| Some(geometry.cell_width_px),
+            )
+            .map_or_else(String::new, |width| width.to_string()),
+        colours: colours.map_or_else(String::new, |colours| colours.to_string()),
+        control_mode: usize::from(kind == Some(ClientKind::Control)).to_string(),
+        created: client_format_time(inner.client_created_times.get(&client).copied()),
+        discarded: discarded.to_string(),
         flags: format_client_flags(inner, client),
+        height: height.map_or_else(String::new, |height| height.to_string()),
+        key_table,
+        last_session: inner
+            .last_sessions
+            .get(&client)
+            .and_then(|last| inner.engine.state.sessions.get(last))
+            .map(|session| session.name.clone())
+            .unwrap_or_default(),
+        name,
+        pid: if pid == 0 {
+            String::new()
+        } else {
+            pid.to_string()
+        },
+        prefix,
+        readonly: usize::from(inner.client_flags.contains(client)).to_string(),
+        session: session_state.name.clone(),
+        termfeatures: client_term_features(inner, client),
+        termname: client_environment_value(inner, client, "TERM")
+            .filter(|term| !term.is_empty())
+            .unwrap_or("unknown")
+            .to_owned(),
+        termtype: String::new(),
         theme: inner
             .client_color_schemes
             .get(&client)
-            .copied()
-            .unwrap_or_default()
-            .as_str()
-            .to_owned(),
+            .map(|scheme| scheme.as_str().to_owned())
+            .unwrap_or_default(),
+        tty,
+        uid: format_context.uid,
+        user: format_context.user,
+        utf8: usize::from(client_uses_utf8(inner, client)).to_string(),
+        width: width.to_string(),
+        written: written.to_string(),
         line: 0,
     }
 }
@@ -25072,6 +25234,7 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
                 })
                 .collect(),
         ),
+        session_last_attached: Arc::new(inner.session_last_attached.clone()),
         buffer: inner
             .paste_buffers
             .iter()
@@ -25079,6 +25242,20 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
             .map(buffer_format_facts),
         ..FormatHookFacts::default()
     }
+}
+
+fn format_hook_facts_for_client(
+    inner: &ServerState,
+    client: ClientId,
+    context: &ExecutionContext,
+) -> FormatHookFacts {
+    let mut facts = format_hook_facts(inner);
+    if !context.has_no_client() {
+        let client = context.replay_client().unwrap_or(client);
+        facts.client = client_attached_session(inner, client)
+            .map(|session| client_format_facts(inner, client, session));
+    }
+    facts
 }
 
 fn current_buffer_path_client(inner: &ServerState, invoking_client: ClientId) -> Option<ClientId> {
@@ -27203,6 +27380,7 @@ fn handle_connection<S: TransportStream>(
         if let Some(size) = client_size_fact(&hello.capabilities) {
             inner.client_sizes.insert(client, size);
         }
+        inner.client_pids.insert(client, hello.process_id);
         if let Some(working_directory) =
             client_working_directory_fact(hello.working_directory.as_deref())
         {
@@ -27615,6 +27793,7 @@ fn write_outbound(stream: &mut impl TransportStream, outbound: &OutboundMailbox)
             outbound.close();
             break;
         }
+        outbound.note_written(bytes);
         outbound.recycle_frame(frame);
     }
     let _ = stream.shutdown();
@@ -33341,13 +33520,19 @@ mod tests {
                     origin: None,
                     environment: Vec::new(),
                     working_directory: None,
+                    process_id: u32::try_from(index).expect("client index") + 100,
                 }),
             )
             .unwrap();
-            assert!(matches!(
-                zz_protocol::read_protocol_message(&mut client).unwrap(),
-                ProtocolMessage::ServerHello(_)
-            ));
+            let ProtocolMessage::ServerHello(hello) =
+                zz_protocol::read_protocol_message(&mut client).unwrap()
+            else {
+                panic!("missing server hello");
+            };
+            assert_eq!(
+                shared.inner.lock().client_pids.get(&hello.client_id),
+                Some(&(u32::try_from(index).expect("client index") + 100))
+            );
             let request_id = index as u64 + 41;
             zz_protocol::write_protocol_message(
                 &mut client,
@@ -33390,6 +33575,7 @@ mod tests {
             origin: None,
             environment: Vec::new(),
             working_directory: None,
+            process_id: 0,
         }))
         .unwrap();
         hello[6..8].copy_from_slice(&stale.to_le_bytes());
@@ -33434,6 +33620,7 @@ mod tests {
                 origin: None,
                 environment: Vec::new(),
                 working_directory: None,
+                process_id: 0,
             }),
         )
         .unwrap();
@@ -33486,6 +33673,7 @@ mod tests {
                     origin: None,
                     environment: Vec::new(),
                     working_directory: None,
+                    process_id: 0,
                 }),
             )
             .expect("hello");
@@ -36017,7 +36205,11 @@ mod tests {
             )
             .expect("list client flags")
             .output;
-        assert!(listed.contains("control:attached,control-mode,no-output,wait-exit,pause-after=2"));
+        assert!(
+            listed.contains(
+                "control:attached,focused,control-mode,no-output,wait-exit,pause-after=2"
+            )
+        );
         assert!(listed.contains("interactive:attached"));
         let messages = take_reliable_messages(&control_mailbox);
         assert!(messages.iter().any(|message| matches!(
@@ -36052,7 +36244,7 @@ mod tests {
             .expect("clear control flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), control),
-            "attached,control-mode"
+            "attached,focused,control-mode"
         );
     }
 
@@ -36206,7 +36398,7 @@ mod tests {
                 ],
             )
             .unwrap();
-        assert!(listed.output.contains("sized-control:120x60"));
+        assert!(listed.output.contains("sized-control:120x"));
 
         let override_value = format!("{window}:80x30");
         shared
@@ -36480,7 +36672,7 @@ mod tests {
         assert!(
             initial
                 .iter()
-                .any(|event| event.0 == "flags" && event.5 == "attached,control-mode")
+                .any(|event| event.0 == "flags" && event.5 == "attached,focused,control-mode")
         );
         assert!(
             initial
@@ -42783,6 +42975,39 @@ mod tests {
         }
         let format = "#{client_name}|#{client_session}|#{client_width}x#{client_height}|#{session_name}|#{pane_id}";
 
+        let implicit_output = shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "-t", &target_pane.to_string(), format],
+                ),
+            )
+            .expect("print with implicit target-session client facts");
+        assert_eq!(
+            implicit_output.output,
+            format!("same-client-two|target-session|88x22|target-session|{target_pane}")
+        );
+        shared.inner.lock().client_activity.insert(same, 100);
+        let tied_output = shared
+            .execute(
+                caller,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-message",
+                    ["-p", "-t", &target_pane.to_string(), format],
+                ),
+            )
+            .expect("print with tied target-session client activity");
+        assert_eq!(
+            tied_output.output,
+            format!("/dev/pts/7|target-session|101x31|target-session|{target_pane}")
+        );
+        shared.inner.lock().client_activity.insert(same, 20);
+
         let same_output = shared
             .execute(
                 caller,
@@ -42803,7 +43028,7 @@ mod tests {
             .expect("print with same-session client facts");
         assert_eq!(
             same_output.output,
-            format!("same-client-one|target-session|101x31|target-session|{target_pane}")
+            format!("/dev/pts/7|target-session|101x31|target-session|{target_pane}")
         );
 
         let partial_output = shared
@@ -61073,7 +61298,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .unwrap();
         assert_eq!(
             listed.output,
-            "zeta: z [0x0 ] (attached)\nalpha: A [0x0 ] (attached)"
+            "zeta: z [80x24 unknown] (attached,focused)\nalpha: A [80x24 unknown] (attached,focused)"
         );
 
         let sorted = shared
@@ -61130,7 +61355,226 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .unwrap();
-        assert_eq!(filtered.output, "list-clients:1:zeta:z:0x0:");
+        assert_eq!(filtered.output, "list-clients:1:zeta:z:80x24:unknown");
+    }
+
+    #[test]
+    fn client_context_formats_share_retained_facts_across_surfaces() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = switch_test_session(&shared, "format-client");
+        let (last_session, _, _) = switch_test_session(&shared, "format-last");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("desktop".to_owned()),
+            Some(TerminalColorScheme::Light),
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach client");
+        {
+            let mut state = mailbox.state.lock();
+            state.written_bytes = 1234;
+            state.discarded_bytes = 56;
+        }
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_pids.insert(client, 4242);
+            inner.client_ttys.insert(client, "/dev/pts/42".to_owned());
+            inner.client_sizes.insert(client, (132, 43));
+            inner.client_environments.insert(
+                client,
+                Arc::new(BTreeMap::from([
+                    ("COLORTERM".to_owned(), "truecolor".to_owned()),
+                    ("LANG".to_owned(), "en_US.UTF-8".to_owned()),
+                    ("TERM".to_owned(), "xterm-256color".to_owned()),
+                ])),
+            );
+            inner.client_activity_times.insert(client, 222);
+            inner.client_created_times.insert(client, 111);
+            inner.session_last_attached.insert(session, 333);
+            inner.last_sessions.insert(client, last_session);
+            inner.client_flags.apply(client, "read-only,active-pane");
+            inner
+                .key_engines
+                .entry(client)
+                .or_default()
+                .switch_table(Some("copy-mode".to_owned()));
+            inner.terminal_geometries.entry(pane).or_default().insert(
+                client,
+                TerminalGeometry {
+                    columns: 120,
+                    rows: 40,
+                    cell_width_px: 9,
+                    cell_height_px: 19,
+                },
+            );
+        }
+        let format = "#{client_activity}|#{client_cell_height}|#{client_cell_width}|#{client_colours}|#{client_control_mode}|#{client_created}|#{client_discarded}|#{client_flags}|#{client_height}|#{client_key_table}|#{client_last_session}|#{client_name}|#{client_pid}|#{client_prefix}|#{client_readonly}|#{client_session}|#{client_termfeatures}|#{client_termname}|#{client_termtype}|#{client_theme}|#{client_tty}|#{client_uid}|#{client_user}|#{client_utf8}|#{client_width}|#{client_written}|#{session_last_attached}";
+        let listed = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                &CommandInvocation::new(
+                    "list-clients",
+                    ["-f", "#{==:#{client_pid},4242}", "-F", format],
+                ),
+            )
+            .expect("list retained client facts")
+            .output;
+        let fields = listed.split('|').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 27);
+        assert_eq!(
+            &fields[..21],
+            [
+                "222",
+                "19",
+                "9",
+                "16777216",
+                "0",
+                "111",
+                "56",
+                "attached,focused,read-only,active-pane,UTF-8",
+                "43",
+                "copy-mode",
+                "format-last",
+                "/dev/pts/42",
+                "4242",
+                "1",
+                "1",
+                "format-client",
+                "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,overline,RGB,strikethrough,sync,title,usstyle",
+                "xterm-256color",
+                "",
+                "light",
+                "/dev/pts/42",
+            ]
+        );
+        let expected_identity =
+            shared
+                .inner
+                .lock()
+                .engine
+                .format_status_context(Some(session), Some(window), None);
+        assert_eq!(fields[21], expected_identity.uid);
+        assert_eq!(fields[22], expected_identity.user);
+        assert_eq!(&fields[23..], ["1", "132", "1234", "333"]);
+
+        let ordinary = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                &CommandInvocation::new(
+                    "list-panes",
+                    ["-t", "=format-client", "-F", "#{client_name}|#{client_pid}"],
+                ),
+            )
+            .expect("ordinary target client facts");
+        assert_eq!(ordinary.output, "/dev/pts/42|4242");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                &CommandInvocation::new(
+                    "run-shell",
+                    [
+                        "-C",
+                        "set-option -g @inserted-client-facts '#{client_name}|#{client_pid}'",
+                    ],
+                ),
+            )
+            .expect("inserted command client facts");
+        let inserted = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                &CommandInvocation::new("show-options", ["-gqv", "@inserted-client-facts"]),
+            )
+            .expect("show inserted command client facts");
+        assert_eq!(inserted.output, "/dev/pts/42|4242");
+
+        let mut status_request = {
+            let inner = shared.inner.lock();
+            status_request(
+                &inner,
+                client,
+                &inner.engine.state.snapshot(),
+                format_hook_facts(&inner),
+            )
+        };
+        status_request.formats.enabled = true;
+        status_request.formats.lines = 1;
+        status_request.formats.left = "#{client_pid}:#{client_tty}".to_owned();
+        status_request.formats.left_length = u16::MAX;
+        let status = StatusRenderer::default().render_initial(&status_request);
+        assert!(status.left.contains("4242:/dev/pts/42"), "{}", status.left);
+
+        let no_client = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                &CommandInvocation::new(
+                    "display-message",
+                    [
+                        "-p",
+                        "-t",
+                        "=format-client",
+                        "#{client_name}|#{session_last_attached}",
+                    ],
+                ),
+            )
+            .expect("clientless display context");
+        assert_eq!(no_client.output, "/dev/pts/42|333");
+
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            control_mailbox,
+        );
+        shared.attach(control, session).expect("attach control");
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut ExecutionContext::new(Some(session), Some(window), Some(pane)),
+                &CommandInvocation::new("refresh-client", ["-C", "91x31"]),
+            )
+            .expect("size control client");
+        let control_facts = {
+            let mut inner = shared.inner.lock();
+            inner.client_pids.insert(control, 4343);
+            inner.client_ttys.insert(control, "/dev/pts/43".to_owned());
+            inner.client_environments.insert(
+                control,
+                Arc::new(BTreeMap::from([
+                    ("LANG".to_owned(), "C.UTF-8".to_owned()),
+                    ("TERM".to_owned(), "xterm-256color".to_owned()),
+                ])),
+            );
+            client_format_facts(&inner, control, session)
+        };
+        assert_eq!(control_facts.cell_height, "");
+        assert_eq!(control_facts.cell_width, "");
+        assert_eq!(control_facts.colours, "");
+        assert_eq!(control_facts.control_mode, "1");
+        assert_eq!(control_facts.flags, "attached,focused,control-mode,UTF-8");
+        assert_eq!(control_facts.height, "");
+        assert_eq!(control_facts.name, "/dev/pts/43");
+        assert_eq!(control_facts.pid, "4343");
+        assert_eq!(control_facts.termfeatures, "");
+        assert_eq!(control_facts.termname, "xterm-256color");
+        assert_eq!(control_facts.termtype, "");
+        assert_eq!(control_facts.theme, "");
+        assert_eq!(control_facts.tty, "/dev/pts/43");
+        assert_eq!(control_facts.utf8, "1");
+        assert_eq!(control_facts.width, "91");
     }
 
     fn switch_test_session(shared: &Shared, name: &str) -> (SessionId, WindowId, PaneId) {
@@ -61166,7 +61610,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(shared.inner.lock().client_flags.contains(client));
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,read-only"
+            "attached,focused,read-only"
         );
 
         shared
@@ -61216,7 +61660,7 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         assert!(matches!(
             allowed,
-            CommandResponse::Success { output, .. } if output.contains("attached,read-only")
+            CommandResponse::Success { output, .. } if output.contains("attached,focused,read-only")
         ));
 
         shared
@@ -61261,7 +61705,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("attach with requested flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "attached,focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
         );
         assert!(client_ignores_size(&shared.inner.lock(), client));
 
@@ -61282,12 +61726,12 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.detach(client);
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
         );
         shared.attach(client, a).expect("plain reattach");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "attached,focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
         );
 
         shared
@@ -61308,7 +61752,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("clear mutable requested flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,read-only"
+            "attached,focused,read-only"
         );
         shared
             .execute(
@@ -61320,7 +61764,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("switch-client toggles read-only off");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached"
+            "attached,focused"
         );
 
         shared.unregister(client);
@@ -61360,7 +61804,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("control attach flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,control-mode,ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3,read-only,active-pane"
+            "attached,focused,control-mode,ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3,read-only,active-pane"
         );
 
         shared
@@ -61381,7 +61825,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("clear control flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,control-mode,read-only"
+            "attached,focused,control-mode,read-only"
         );
     }
 
@@ -61786,7 +62230,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(flags.active_pane);
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,ignore-size,active-pane"
+            "attached,focused,ignore-size,active-pane"
         );
     }
 
@@ -63658,7 +64102,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let fields = listed.split('|').collect::<Vec<_>>();
         assert_eq!(
             &fields[..5],
-            ["B", "A", "1", "attached,read-only", "prefix",]
+            ["B", "A", "1", "attached,focused,read-only", "prefix",]
         );
         assert!(fields[5].parse::<u64>().is_ok_and(|time| time > 0));
     }
@@ -70352,6 +70796,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 origin: None,
                 environment: Vec::new(),
                 working_directory: None,
+                process_id: 0,
             }),
         )
         .expect("send owner hello");
@@ -70426,6 +70871,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 origin: None,
                 environment: Vec::new(),
                 working_directory: None,
+                process_id: 0,
             }),
         )
         .expect("send hello");
@@ -70508,6 +70954,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 origin: None,
                 environment: Vec::new(),
                 working_directory: None,
+                process_id: 0,
             }),
         )
         .expect("send control hello");
@@ -70607,6 +71054,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 origin: None,
                 environment: Vec::new(),
                 working_directory: None,
+                process_id: 0,
             }),
         )
         .expect("send client hello");

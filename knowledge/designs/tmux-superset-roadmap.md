@@ -10,7 +10,7 @@ tags:
 - cli
 - fleet
 - native-superset
-timestamp: 2026-08-26T00:00:00-03:00
+timestamp: 2026-08-27T00:00:00-03:00
 last_updated: 2026-08-27
 last_updated_by: Codex
 ---
@@ -49,9 +49,9 @@ name or `device-<id>` fallback. Control clients receive no alert status message 
 so repeated BELs from one unvisited monitored pane still notify while that flag remains set.
 The attached PTY fixture replaces a 1,500 ms sticky message with a 5,000 ms alert, proves 1.8
 seconds of freeze, repeats the same-pane Bell, drains the pin's old timer for 5.2 seconds, and proves
-zero-duration persistence and input dismissal on zz and pinned tmux. Forced structural redraw may
-show the latest parsed state during the alert. The pin's stale-timer bug remains a deliberate
-correctness divergence because zz cancels and identity-checks old timers.
+zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary publication, repair
+requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
+bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
 The canonical checkpoint freshly rerun after session cwd and requested client flags covers 84
 scenarios and 1,475 steps.
@@ -70,6 +70,11 @@ SSH-forwarded clients now seed fresh sessions and refresh existing sessions thro
 follow the pinned selection and ordering rules. Existing processes keep their startup environment;
 future panes read the refreshed session map. Non-UTF-8 Unix entries remain under
 `clients.path-encoding` rather than being substituted.
+
+Protocol v83 appends `ClientHello.process_id` and closes `clients.context-formats`. The daemon builds
+one retained client-fact record for list rows, ordinary commands, foreground inserted commands,
+status recipients, and `display-message`. The attached fixture covers Interactive, status,
+bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -190,7 +195,7 @@ by dependency rather than raw ease.
 | 5 | Small state and format facts | Bare `list-keys` padding, `pane_dead_time`, `config_files`, client timestamps, missing hook producers with an existing event seam, and straightforward output formatting. | **Three pulls shipped.** The 2026-08-22 pull covered bare `list-keys`, explicit-startup `config_files`, and retained `pane_dead_time`. The 2026-08-24 pull added pin-ordered `show-options -H` hook rows and item-scoped `window-status-separator` expansion. The 2026-08-25 pull exposed retained session activity and corrected logical MRU ordering. |
 | 6 | Manual geometry | `resize-window` and `window-size manual` need a durable manual size plus clear precedence against per-client measurements. The command is small; the policy is not. | **Shipped 2026-08-22.** Absolute and relative practical forms, target/error precedence, manual formats, per-client precedence, and daemon PTY resize behavior are pinned. The later 2026-08-27 `clients.attach-sizing` slice closed client-derived `-A`/`-a`. |
 | 7 | Capture, chooser, prompt, and list fidelity | `capture-pane` routing/ranges, chooser formats, command-prompt chains, and exact `list-keys` rendering need attached-client and output fixtures. | **List and chooser presentation fidelity completed 2026-08-24.** The list selectors, positional key filter, stock repeat metadata, canonical Space spelling, and `-1` attached-client status route are pinned by a 46-step differential plus the attached fixture. Chooser static-filter fallback state now survives deltas, both clients show `filter: no matches`, and fully keyless lists omit the shortcut gutter; the attached fixture proves tree and buffer fallback on zz and tmux. Ordinary capture was extended 2026-08-23; trailing blank viewport rows and richer capture transports remain. |
-| 8 | Spawn and attach context | Attached cwd, client flags, sizes, environment refresh, client targeting, and exit actions cross different state owners. | **Ten bounded slices have shipped.** Protocol v72 carries a bounded local caller cwd and omits it over SSH; nested source replay preserves its selected base. The first 2026-08-25 targeting slice made `detach-client -t`, bare/`-a`/`-s` selection, requested-versus-evicted reasons, normal local TUI tty publication, and `switch-client -c` tty aliases exact without a wire change. The review repair kept tty publication unconditional and added `client-nested-v1` only for a nonempty `$TMUX`, so nested refusal requires both intent and a matching tty while `env -u TMUX` forces attach and `new-session -A` without weakening selectors. The fourth slice aligned every implemented attached-client selector on exact name, full tty, exactly one leading `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order collision precedence while retaining zz's native aliases. Sequential daemon tests passed 598/598, and focused tests, debug build, strict clippy, fmt, and scoped zz and pinned-tmux tty guards passed. At that checkpoint, unrelated nested-attach interleaving prevented a full-harness claim. Unsupported `command-prompt -t`, `show-messages -t`, `send-keys -c`, `suspend-client -t`, and inert `set-buffer -t` remain outside the closure. The fifth slice closes `display-message` client-format fallback for valid unattached targets: an absent `-c`, a destination attached to another session, or an unresolved `-c` selector uses the globally most-active attached client, with oldest-created tie precedence; that client's attachment supplies `client_session` while the target keeps session, window, and pane facts. Zero clients and missing targets stay empty. Sequential daemon tests pass 599/599, and focused and pinned fallback probes pass. One independent run completed the attached-client harness, but later current runs passed the scoped fallback probes and then failed at unrelated nested-attach terminal-query interleaving. The full harness is not stably green, and this close makes no canonical-suite claim. An attached target without `-c` stays under `clients.context-formats`. The sixth slice gives local Control stdin-only tty identity and a nonempty-`$TMUX` nested marker without size, implicit geometry, TERM/name formats, or a wire bump. Existing attach and `-A` refusal requires both facts; fresh creation still succeeds. Sequential daemon tests pass 600/600, and focused Control CLI tests pass 30/30. The attached differential covers `attach-session` and `new-session -A` refusal, a fresh `-A` miss, and piped stdin. The daemon unit matrix covers `new-session -Ad`; the attached harness does not. The reviewed fresh-marker harness is sound. This close also makes no canonical-suite claim. The seventh slice adds one internal cwd per session, selects compound attach targets before pane-context `-c` expansion, and makes attached source replay prefer the invoking client's session cwd. Focused tests and the full debug attached differential pass without a wire or snapshot-schema change. The eighth slice retains requested flags across attach, switch, detach, and successful TUI reconnect without a wire bump; its full debug attached differential and fresh canonical checkpoint pass. The ninth slice makes `resize-window -A` and `-a` one-shot, componentwise client aggregates that set a durable manual extent. Ignore-size uses the global unignored-client fallback, Control contributes only through explicit size overrides and imposes its per-window hard ceilings, empty target candidate sets use `default-size`, and final dimensions clamp to 10,000. Later client updates cannot move the manual extent. The expanded attached differential passes without a protocol or snapshot-schema change. The tenth slice adds protocol v82's bounded per-connection UTF-8 environment snapshot. Fresh session creation, existing attach, native attach, Control attach, and targeted switch now copy exact and wildcard-selected client values with tmux's missing, empty, hidden, `-A`, `-e`, `-E`, and `-T` rules. Session values survive client disconnect, future panes consume updates, and existing processes do not change. The full attached differential passes against the pin. Non-UTF-8 Unix client facts remain under `clients.path-encoding`. Detach exec, context formats, active-pane consumption, no-detach-on-destroy fallback, and parent-HUP exit actions retain their own groups. |
+| 8 | Spawn and attach context | Attached cwd, client flags, sizes, environment refresh, client targeting, and exit actions cross different state owners. | **Eleven bounded slices have shipped.** Protocol v72 carries caller cwd; later slices closed client targeting, nested intent, supported tty selectors, local Control identity, session cwd, requested flags, retained sizing, and protocol v82 environment refresh. Protocol v83 now closes `clients.context-formats`: one retained client-fact record covers list rows, ordinary and inserted commands, status recipients, and `display-message`, with pinned Interactive and Control empty behavior. The fresh attached-client differential passes against tmux `d77c9dc6`. `detach-client -E`, active-pane consumption, no-detach-on-destroy fallback, parent-HUP exit actions, non-UTF-8 path bytes, read-only/focus policy, interactive refresh, and client event hooks remain in separate groups. |
 | 9 | Interactive client behavior | Full `refresh-client`, `switch-mode`, mouse-targeted forms, pane marking, mode state, focus hooks, and client fanout cross daemon, protocol, TUI, and GUI ownership. | Implement only for named workloads. |
 | 10 | Binary streams and process control | `display-message -I`, `split-window -I`, buffer/source `-`, and lock execution require bounded transport, backpressure, cancellation, and process lifetime rules. | Separate design approval. |
 | 11 | tmux floating panes | `new-pane` and the parked `move-pane`/placement flags need a new mux-state model that is distinct from current native floating UI. | Park. |
@@ -397,9 +402,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    paths once through the shared daemon command hooks before home-directory handling and file I/O.
    Client selection supplies the target session, focused window, and active pane; aliases and unique
    prefixes retain the canonical command name, explicit item state wins, and replacement text is not
-   expanded again. `protocol.binary-streams`, `buffers.clipboard-write`,
-   `clients.context-formats`, and `buffers.client-file-context` retain the stream, clipboard,
-   client-fact, relative-path, attached-session, and remote transport work. The separate 29-step
+   expanded again. `protocol.binary-streams`, `buffers.clipboard-write`, and
+   `buffers.client-file-context` retain the stream, clipboard, relative-path, attached-session,
+   and remote transport work. The separate 29-step
    `native-prefix-isolation` fixture closes all 25 unique prefixes that native names had changed
    and checks ambiguous `list-commands` exit parity. The daemon authorizes one expanded alias
    invocation and dispatches that same value. Writable stored bindings resolve each command just
@@ -682,13 +687,14 @@ Byte-preserving non-UTF-8 Unix cwd transport remains separately visible under
 `clients.path-encoding` instead of making such a path a connection failure.
 
 Keep the remaining client work split by the state it needs. Session cwd, requested client flags,
-and attached resize aggregation have shipped. Environment seeding and refresh need a bounded
-client-environment snapshot of their own. `detach-client -E` and the
+attached resize aggregation, bounded UTF-8 environment seeding and refresh, and retained client
+format facts have shipped.
+`detach-client -E` and the
 parent-HUP trio (`attach-session -x`, attaching `new-session -X`, `detach-client -P`) need typed
 client exit actions and are not prerequisites for targeting or ordinary detach. Creation-time
 `new-session -e/-E` works without a wire change: explicit overlays persist and reach the first pane,
-while `-E` suppresses daemon-sourced update seeding. The accepted attach-side `new-session -E`
-cannot yet suppress reseeding because attach performs no client-environment reseed to begin with.
+while `-E` suppresses client-sourced update seeding. Existing-session `new-session -A -E` and
+`attach-session -E` now preserve the destination session environment.
 The separate `new-window`/`split-window` pane-local `-e` and empty-pane `-E` pair belongs to the
 daemon-owned spawn effect and has shipped.
 
@@ -858,6 +864,12 @@ permanent product decision has been recorded for them.
   persist in the session after disconnect; future panes see updates and existing processes do not.
   Non-UTF-8 Unix entries remain under `clients.path-encoding`. The full attached differential passes
   for zz and pinned tmux.
+- 2026-08-27: Protocol v83 closed `clients.context-formats`. `ClientHello.process_id` supplies the
+  last missing process fact. The daemon retains creation, activity, focus, flags, key table,
+  attachment, terminal, environment, geometry, and mailbox counters, then expands the same record
+  through list, ordinary command, foreground inserted-command, status, and display contexts.
+  Defined Interactive and Control empties match the pin. The full attached differential passes for
+  zz and pinned tmux, including an attached key binding and implicit `display-message` selection.
 
 # Related
 

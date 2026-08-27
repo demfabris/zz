@@ -1491,6 +1491,133 @@ run_control_environment_attach() {
   fi
 }
 
+validate_context_format_row() {
+  local side="$1"
+  local kind="$2"
+  local row="$3"
+  local expected_tty="${4:-}"
+  local activity cell_height cell_width colours control_mode created discarded flags
+  local height key_table last_session name pid prefix readonly session termfeatures
+  local termname termtype theme tty uid user utf8 width written last_attached
+
+  IFS='|' read -r activity cell_height cell_width colours control_mode created \
+    discarded flags height key_table last_session name pid prefix readonly session \
+    termfeatures termname termtype theme tty uid user utf8 width written last_attached <<<"$row"
+  for value in "$activity" "$created" "$discarded" "$pid" "$uid" "$written" \
+    "$last_attached"; do
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+      fixture_failure "$side $kind client context row has a nonnumeric retained fact: ${value:-<empty>}"
+    fi
+  done
+  if [ "$session" != "$INNER_SESSION" ] || [ "$key_table" != root ] || \
+    [ "$prefix" != 0 ] || [ "$readonly" != 0 ] || [ -z "$user" ] || \
+    [ -z "$termname" ]; then
+    fixture_failure "$side $kind client context row has incorrect common facts: $row"
+  fi
+  if [[ ",$flags," != *,attached,* ]] || [[ ",$flags," != *,focused,* ]]; then
+    fixture_failure "$side $kind client context row is missing attached focus flags: $flags"
+  fi
+  case "$kind" in
+  interactive)
+    if ! [[ "$cell_height" =~ ^[0-9]+$ ]] || ! [[ "$cell_width" =~ ^[0-9]+$ ]] || \
+      ! [[ "$colours" =~ ^[0-9]+$ ]] || [ "$control_mode" != 0 ] || \
+      [ "$height" != 24 ] || [ "$name" != "$expected_tty" ] || \
+      [ "$tty" != "$expected_tty" ] || [ "$width" != 80 ] || [ "$utf8" != 1 ]; then
+      fixture_failure "$side interactive client context row has incorrect terminal facts: $row"
+    fi
+    ;;
+  control)
+    if [ -n "$cell_height" ] || [ -n "$cell_width" ] || [ -n "$colours" ] || \
+      [ "$control_mode" != 1 ] || [ -n "$height" ] || [ -n "$termfeatures" ] || \
+      [ -n "$termtype" ] || [ -n "$theme" ] || [ -n "$tty" ] || \
+      [ "$width" != 91 ] || [[ "$name" != client-* ]] || \
+      [[ ",$flags," != *,control-mode,* ]]; then
+      fixture_failure "$side Control client context row has incorrect terminal facts: $row"
+    fi
+    ;;
+  esac
+}
+
+probe_client_context_formats() {
+  local side="$1"
+  local client_tty
+  local row
+  local stable
+  local selected
+  local no_client
+  local control_output="$SCRATCH_DIR/control-context-$side.out"
+  local control_error="$SCRATCH_DIR/control-context-$side.err"
+  local full_format='#{client_activity}|#{client_cell_height}|#{client_cell_width}|#{client_colours}|#{client_control_mode}|#{client_created}|#{client_discarded}|#{client_flags}|#{client_height}|#{client_key_table}|#{client_last_session}|#{client_name}|#{client_pid}|#{client_prefix}|#{client_readonly}|#{client_session}|#{client_termfeatures}|#{client_termname}|#{client_termtype}|#{client_theme}|#{client_tty}|#{client_uid}|#{client_user}|#{client_utf8}|#{client_width}|#{client_written}|#{session_last_attached}'
+  local stable_format='#{client_name}|#{client_pid}|#{client_tty}|#{client_session}|#{client_width}|#{client_height}|#{client_key_table}|#{client_prefix}|#{client_readonly}|#{client_control_mode}|#{client_termname}|#{client_utf8}'
+
+  client_tty="$(tmux_outer_command display-message -p -t "$OUTER_SESSION:$side" '#{pane_tty}')"
+  row="$(side_command "$side" list-clients -t "=$INNER_SESSION" -F "$full_format")" ||
+    fixture_failure "$side could not list retained client context facts"
+  row="${row//$'\r'/}"
+  if [ -z "$row" ] || [[ "$row" == *$'\n'* ]]; then
+    fixture_failure "$side did not produce exactly one Interactive client context row"
+  fi
+  validate_context_format_row "$side" interactive "$row" "$client_tty"
+
+  stable="$(side_command "$side" list-clients -t "=$INNER_SESSION" -F "$stable_format")" ||
+    fixture_failure "$side could not list stable client context facts"
+  selected="$(side_command "$side" display-message -p -c "$client_tty" \
+    -t "$INNER_PANE_TARGET" "$stable_format")" ||
+    fixture_failure "$side could not select explicit display-message client facts"
+  stable="${stable//$'\r'/}"
+  selected="${selected//$'\r'/}"
+  if [ "$selected" != "$stable" ]; then
+    fixture_failure "$side list and explicit display-message client facts differ: $stable != $selected"
+  fi
+
+  no_client="$(side_command "$side" display-message -p -t "$INNER_PANE_TARGET" \
+    '#{client_name}|#{session_last_attached}')" ||
+    fixture_failure "$side could not print a clientless attached target context"
+  no_client="${no_client//$'\r'/}"
+  if [ "${no_client%%|*}" != "$client_tty" ] || \
+    ! [[ "${no_client#*|}" =~ ^[0-9]+$ ]]; then
+    fixture_failure "$side did not select the attached client and retain session_last_attached: ${no_client:-<empty>}"
+  fi
+
+  side_command "$side" bind-key -n F12 run-shell -C \
+    "set-option -g @attached_context '$stable_format'" ||
+    fixture_failure "$side could not bind its ordinary client context probe"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F12
+  wait_for_side_output "$side" "$stable" "ordinary attached client context" \
+    show-options -gqv @attached_context
+  side_command "$side" unbind-key -n F12 ||
+    fixture_failure "$side could not remove its ordinary client context probe"
+  side_command "$side" set-option -gu @attached_context ||
+    fixture_failure "$side could not clear its ordinary client context result"
+
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-left \
+    "CTXSTATUS:#{client_pid}:#{client_tty}" ||
+    fixture_failure "$side could not set its status client context probe"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-left-length 80 ||
+    fixture_failure "$side could not widen its status client context probe"
+  wait_for_marker "$side" "CTXSTATUS:"
+  wait_for_marker "$side" "$client_tty"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left ||
+    fixture_failure "$side could not restore status-left"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left-length ||
+    fixture_failure "$side could not restore status-left-length"
+
+  if ! printf 'refresh-client -C 91x31 ; list-clients -f "#{client_control_mode}" -F "CTX|%s" ; detach-client\n' \
+    "$full_format" | environment_side_command "$side" control -C attach-session \
+      -t "=$INNER_SESSION" >"$control_output" 2>"$control_error"; then
+    fixture_failure "$side Control context probe failed: $(tr '\n' ' ' <"$control_error")"
+  fi
+  row="$(grep '^CTX|' "$control_output" | tail -1 || true)"
+  row="${row#CTX|}"
+  row="${row//$'\r'/}"
+  if [ -z "$row" ]; then
+    fixture_failure "$side Control context probe produced no row"
+  fi
+  validate_context_format_row "$side" control "$row"
+  wait_for_attached_client_count "$side" 1
+  wait_for_client_state "$side" root
+}
+
 probe_client_environment() {
   local side="$1"
   local session="environment-$side"
@@ -1958,6 +2085,8 @@ probe_requested_client_flags zz
 probe_requested_client_flags tmux
 probe_attached_client_sizing zz
 probe_attached_client_sizing tmux
+probe_client_context_formats zz
+probe_client_context_formats tmux
 probe_detach_client_tty zz
 probe_detach_client_tty tmux
 

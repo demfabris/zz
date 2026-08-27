@@ -221,6 +221,7 @@ impl Peer {
             origin: None,
             working_directory: None,
             environment: Vec::new(),
+            process_id: 0,
         }));
         assert!(
             matches!(peer.recv(), ProtocolMessage::ServerHello(_)),

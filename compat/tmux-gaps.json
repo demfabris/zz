@@ -251,56 +251,6 @@
       "reason": "The requested flag is retained and reported, but zz still has one window-global active pane while pinned tmux can select a pane per client and window."
     },
     {
-      "id": "clients.context-formats",
-      "title": "Back client format facts",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "medium",
-      "impact": [
-        "scripts",
-        "remote"
-      ],
-      "owner": "daemon",
-      "items": [
-        "format:client_activity",
-        "format:client_cell_height",
-        "format:client_cell_width",
-        "format:client_colours",
-        "format:client_control_mode",
-        "format:client_created",
-        "format:client_discarded",
-        "format:client_flags",
-        "format:client_height",
-        "format:client_key_table",
-        "format:client_last_session",
-        "format:client_name",
-        "format:client_pid",
-        "format:client_prefix",
-        "format:client_readonly",
-        "format:client_session",
-        "format:client_termfeatures",
-        "format:client_termname",
-        "format:client_termtype",
-        "format:client_theme",
-        "format:client_tty",
-        "format:client_uid",
-        "format:client_user",
-        "format:client_utf8",
-        "format:client_width",
-        "format:client_written",
-        "format:session_last_attached"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Client, status, and ordinary target contexts expose the pin's retained client facts with defined empty behavior."
-      ],
-      "depends_on": [],
-      "reason": "Several facts work only in list or recipient contexts and the rest lack retained client metadata."
-    },
-    {
       "id": "clients.detach-exec",
       "title": "Execute a command after detaching a client",
       "decision": "adopt",
@@ -3011,6 +2961,23 @@
       "resolution": "resize-window -A and -a now perform one-shot component-wise largest and smallest aggregation over eligible retained client geometry, with full target and numeric validation before sizing and -A winning when both flags are present. Interactive clients use retained outer terminal size minus their effective status rows, GUI clients fall back to projected full-window pane geometry, and Control clients count only after refresh-client -C; a per-window Control size overrides its global size and hard-clamps each aggregate dimension. Detached, unrelated-session, and Command clients do not count. Explicit ignore-size follows tmux's global fallback rule: ignored clients are excluded while any attached unignored client exists anywhere, then become eligible when every attached client is ignored. The same rule and Control ceilings now apply to automatic latest, largest, and smallest modes. No eligible target client uses the target session's effective default-size. Final dimensions clamp to 1 through 10000, and the command stores an immediate durable manual extent that later client changes cannot overwrite. The multi-client attached differential uses crossed rectangles to prove component-wise extrema, unrelated exclusion, numeric override, -A precedence, manual freeze, mixed and all-global ignore-size behavior, and default-size fallback against pinned tmux. Focused daemon tests cover Control ceilings, status subtraction, GUI projection, automatic modes, and size limits. The fixture also exposed and closed a pre-existing refresh-client -f seam so targeted Interactive clients now mutate common retained flags. The implementation uses one internal mux effect with no protocol, wire, client, or snapshot-schema change."
     },
     {
+      "id": "clients.context-formats",
+      "title": "Back client format facts",
+      "closed_on": "2026-08-27",
+      "evidence": [
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-protocol/src/terminal_codec.rs",
+        "resource:crates/zz-daemon/src/client.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/protocol/wire-protocol.md",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "Protocol v83 appends the originating process id to ClientHello and retains it with existing per-connection tty, environment, geometry, colour scheme, requested flags, focus, attachment, activity, and creation state. The daemon derives the pin's 26 client format facts plus session_last_attached from that retained state, the active key table, Control geometry, terminal cell metrics, and reliable-mailbox byte counters. Interactive clients expose tty, size, cell, colour, terminal-feature, theme, UTF-8, identity, and session values. Piped Control clients keep tmux's defined empty height, cell, colour, feature, type, theme, and tty fields while explicit refresh-client -C supplies width; terminal-backed Control can expose a retained tty. Unavailable terminal type remains empty, missing TERM becomes unknown, zero counters remain numeric, and clientless contexts retain only session facts. One shared client-fact selection path serves list-clients, ordinary commands, foreground inserted commands, status rendering, and display-message, including the highest-activity target-session client with oldest-created tie precedence when -c is absent. The real attached-client differential passes against pinned tmux d77c9dc6 for list, explicit and implicit display, an attached key binding through run-shell -C, status, Interactive empties, Control empties, and session_last_attached."
+    },
+    {
       "id": "clients.cwd-context",
       "title": "Carry the caller working directory",
       "closed_on": "2026-08-23",
@@ -3055,7 +3022,7 @@
         "resource:knowledge/tmux/commands.md",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "A local Control connection now publishes its bounded working directory plus client-tty-v1 only when stdin has a discoverable tty and client-nested-v1 only when TMUX is nonempty. It does not inspect terminal size, publish client-size-v1, send ClientTerminalSize, infer geometry, retain TERM or terminal-name facts, or expose its tty through ClientFormatFacts. Control geometry remains explicit refresh-client -C state. The established attach-session, new-session -A, and new-session -Ad refusal paths require both the nested marker and a tty that exactly matches a daemon pane when they would attach an existing session. A fresh new-session and a new-session -A miss still create and attach, while duplicate and validation errors keep their existing precedence. Piped Control stdin has no tty identity and is not nested-refused merely because TMUX is set. The change reuses the existing additive hello capability tokens and unregister cleanup, with no field, tag, or protocol-version change. The sequential daemon suite passed 600/600, the focused Control CLI suite passed 30/30, and debug build, strict clippy, and fmt passed. The complete attached-client differential passed for zz and pinned tmux, including terminal-backed Control refusal, fresh-session attachment, and piped-stdin non-refusal. Independent review found the fresh-marker harness sound. This closure makes no canonical-suite claim. Attach sizing later closed under clients.attach-sizing; clients.context-formats remains open."
+      "resolution": "A local Control connection now publishes its bounded working directory plus client-tty-v1 only when stdin has a discoverable tty and client-nested-v1 only when TMUX is nonempty. It does not inspect terminal size, publish client-size-v1, send ClientTerminalSize, infer geometry, retain TERM or terminal-name facts, or expose its tty through ClientFormatFacts. Control geometry remains explicit refresh-client -C state. The established attach-session, new-session -A, and new-session -Ad refusal paths require both the nested marker and a tty that exactly matches a daemon pane when they would attach an existing session. A fresh new-session and a new-session -A miss still create and attach, while duplicate and validation errors keep their existing precedence. Piped Control stdin has no tty identity and is not nested-refused merely because TMUX is set. The change reuses the existing additive hello capability tokens and unregister cleanup, with no field, tag, or protocol-version change. The sequential daemon suite passed 600/600, the focused Control CLI suite passed 30/30, and debug build, strict clippy, and fmt passed. The complete attached-client differential passed for zz and pinned tmux, including terminal-backed Control refusal, fresh-session attachment, and piped-stdin non-refusal. Independent review found the fresh-marker harness sound. This closure makes no canonical-suite claim. Attach sizing later closed under clients.attach-sizing. The protocol v83 clients.context-formats closure exposes retained Control facts and keeps piped-client tty and terminal-only values empty."
     },
     {
       "id": "clients.nested-attach-signal",
@@ -3390,7 +3357,7 @@
         "resource:knowledge/tmux/divergences.md",
         "scenario:compat/scenarios/display-message.txt"
       ],
-      "resolution": "The catalog accepts display-message -c, the mux preserves the destination selector independently from -t, and the daemon resolves it against attached clients by exact client name, device name, full tty, tty without /dev/, or one trailing-colon variant. A nonprinting command with a missing destination quietly does nothing. The pin's CANFAIL target state falls forward componentwise: a missing session leaves pane, window, and session facts empty; a resolved session with a missing window uses that session's current window and active pane; and a resolved window with a missing pane uses that window's active pane. Nonprinting calls stay quiet and successful, while -p expands the retained or empty context, including when -c also misses. Parse, arity, delay, and ambiguous-target failures retain their earlier precedence. Nonprinting Interactive messages, freeze, replacement, and sticky -N state belong to the destination client. Omitted -d inherits display-time from that client's attached session rather than the independent -t pane session; explicit -d overrides it. Control destinations receive only their message event, and read-only destinations can receive a message while read-only callers remain subject to command authorization. Format client facts use the destination only when it belongs to the independently retained pane target's session; otherwise an attached target session uses its best client. Printing returns through the caller, uses the same destination-or-fallback format facts, and never arms message state. An attached target session with no -c still supplies no client facts under clients.context-formats. The later display-message.unattached-session-client-fallback closure handles the distinct valid-unattached-target widening. Focused tests cover same-session and cross-session formats and durations, exact-name CANFAIL targets, missing and aliased clients, caller-versus-destination delivery, freeze, -N inheritance, Control, read-only, and printing. The strict 27-step scenario creates a second window, proves that a missing pane retains that distinct valid window, and covers the missing-window and missing-session clauses with and without -c. Bare mouse targets and relative or special target grammar remain separately tracked. The change adds no wire fields or protocol version."
+      "resolution": "The catalog accepts display-message -c, the mux preserves the destination selector independently from -t, and the daemon resolves it against attached clients by exact client name, device name, full tty, tty without /dev/, or one trailing-colon variant. A nonprinting command with a missing destination quietly does nothing. The pin's CANFAIL target state falls forward componentwise: a missing session leaves pane, window, and session facts empty; a resolved session with a missing window uses that session's current window and active pane; and a resolved window with a missing pane uses that window's active pane. Nonprinting calls stay quiet and successful, while -p expands the retained or empty context, including when -c also misses. Parse, arity, delay, and ambiguous-target failures retain their earlier precedence. Nonprinting Interactive messages, freeze, replacement, and sticky -N state belong to the destination client. Omitted -d inherits display-time from that client's attached session rather than the independent -t pane session; explicit -d overrides it. Control destinations receive only their message event, and read-only destinations can receive a message while read-only callers remain subject to command authorization. Format client facts use the destination only when it belongs to the independently retained pane target's session; otherwise an attached target session uses its best client. Printing returns through the caller, uses the same destination-or-fallback format facts, and never arms message state. At this checkpoint, an attached target session with no -c still supplied no client facts under clients.context-formats; the protocol v83 closure now selects that session's best client. The later display-message.unattached-session-client-fallback closure handles the distinct valid-unattached-target widening. Focused tests cover same-session and cross-session formats and durations, exact-name CANFAIL targets, missing and aliased clients, caller-versus-destination delivery, freeze, -N inheritance, Control, read-only, and printing. The strict 27-step scenario creates a second window, proves that a missing pane retains that distinct valid window, and covers the missing-window and missing-session clauses with and without -c. Bare mouse targets and relative or special target grammar remain separately tracked. The change adds no wire fields or protocol version."
     },
     {
       "id": "display-message.unattached-session-client-fallback",
@@ -3403,7 +3370,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "For a valid display-message target whose session has no attached clients, format expansion selects the globally most-active attached client when -c is absent, resolves to another session, or misses. Client activity orders candidates, and the oldest-created client wins an equal-activity tie. client_session comes from that selected client's actual attachment, while session, window, and pane facts remain scoped to the retained -t target. With zero attached clients, client facts stay empty; a missing target session leaves client, session, window, and pane facts empty through the existing CANFAIL path. An attached target session without -c still supplies no client facts and remains under clients.context-formats. The fallback changes only the display-message command-format hook. Delivery, duration selection, printing routing and lifecycle, buffer-path context, and Command-client selection are unchanged. Sequential zz-daemon tests pass 599/599. Focused daemon coverage proves global activity selection and zero-client behavior; scoped attached-client probes pass on zz and pinned tmux for absent, cross-session, and unresolved -c cases. The debug build, strict daemon clippy, and fmt pass. One independent run completed the attached-client harness, but later current runs passed the scoped fallback probes and then failed at unrelated nested-attach terminal-query interleaving. The full harness is not stably green, and this close makes no canonical-suite claim."
+      "resolution": "For a valid display-message target whose session has no attached clients, format expansion selects the globally most-active attached client when -c is absent, resolves to another session, or misses. Client activity orders candidates, and the oldest-created client wins an equal-activity tie. client_session comes from that selected client's actual attachment, while session, window, and pane facts remain scoped to the retained -t target. With zero attached clients, client facts stay empty; a missing target session leaves client, session, window, and pane facts empty through the existing CANFAIL path. At this checkpoint, an attached target session without -c still supplied no client facts under clients.context-formats; the protocol v83 closure now selects that session's best client. The fallback changes only the display-message command-format hook. Delivery, duration selection, printing routing and lifecycle, buffer-path context, and Command-client selection are unchanged. Sequential zz-daemon tests pass 599/599. Focused daemon coverage proves global activity selection and zero-client behavior; scoped attached-client probes pass on zz and pinned tmux for absent, cross-session, and unresolved -c cases. The debug build, strict daemon clippy, and fmt pass. One independent run completed the attached-client harness, but later current runs passed the scoped fallback probes and then failed at unrelated nested-attach terminal-query interleaving. The full harness is not stably green, and this close makes no canonical-suite claim."
     },
     {
       "id": "display-panes.gpui-escape-fallthrough",
@@ -3439,7 +3406,7 @@
         "resource:knowledge/tmux/divergences.md",
         "scenario:compat/scenarios/buffer-path-format.txt"
       ],
-      "resolution": "`load-buffer` and `save-buffer` now expand their positional path exactly once through the shared daemon command hooks before home-directory expansion and filesystem access. A resolvable `load-buffer -t` client supplies its attached session, focused window, and active pane; an unresolved target stays quiet and uses the most-recent mux context instead of the invoker. The targetless path selects the invoking attached client, the best client on the invoking command client's origin session, or the global best attached client before falling back to the most-recent mux context. Canonical names survive built-in aliases, unique prefixes, and one-layer user aliases, while explicit item state retains precedence and replacement text is not expanded again. `load-buffer` rejects a raw or format-produced `-` before I/O and preserves the empty-file no-op before buffer-name validation. `save-buffer` resolves the selected buffer before path expansion and the `-` check. Standard streams remain under `protocol.binary-streams`, `load-buffer -w` remains under `buffers.clipboard-write`, target-client format facts remain under `clients.context-formats`, and relative, attached-session, and remote file ownership remains under `buffers.client-file-context`."
+      "resolution": "`load-buffer` and `save-buffer` now expand their positional path exactly once through the shared daemon command hooks before home-directory expansion and filesystem access. A resolvable `load-buffer -t` client supplies its attached session, focused window, and active pane; an unresolved target stays quiet and uses the most-recent mux context instead of the invoker. The targetless path selects the invoking attached client, the best client on the invoking command client's origin session, or the global best attached client before falling back to the most-recent mux context. Canonical names survive built-in aliases, unique prefixes, and one-layer user aliases, while explicit item state retains precedence and replacement text is not expanded again. `load-buffer` rejects a raw or format-produced `-` before I/O and preserves the empty-file no-op before buffer-name validation. `save-buffer` resolves the selected buffer before path expansion and the `-` check. Standard streams remain under `protocol.binary-streams`, `load-buffer -w` remains under `buffers.clipboard-write`, target-client format facts later closed under `clients.context-formats`, while relative, attached-session, and remote file ownership remains under `buffers.client-file-context`."
     },
     {
       "id": "formats.command-argument-expansion",

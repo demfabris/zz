@@ -55,6 +55,7 @@ pub(crate) struct FormatHookFacts {
     pub(crate) terminals: Arc<BTreeMap<PaneId, Arc<TerminalSession>>>,
     pub(crate) pane_pipes: Arc<BTreeMap<PaneId, u32>>,
     pub(crate) session_attachments: Arc<BTreeMap<SessionId, (usize, String)>>,
+    pub(crate) session_last_attached: Arc<BTreeMap<SessionId, u64>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) message: Option<MessageFormatFacts>,
@@ -70,15 +71,32 @@ pub(crate) struct BufferFormatFacts {
 
 #[derive(Clone)]
 pub(crate) struct ClientFormatFacts {
+    pub(crate) activity: String,
+    pub(crate) cell_height: String,
+    pub(crate) cell_width: String,
+    pub(crate) colours: String,
+    pub(crate) control_mode: String,
+    pub(crate) created: String,
+    pub(crate) discarded: String,
+    pub(crate) flags: String,
+    pub(crate) height: String,
+    pub(crate) key_table: String,
+    pub(crate) last_session: String,
     pub(crate) name: String,
+    pub(crate) pid: String,
+    pub(crate) prefix: String,
+    pub(crate) readonly: String,
     pub(crate) session: String,
-    pub(crate) width: u16,
-    pub(crate) height: u16,
+    pub(crate) termfeatures: String,
     pub(crate) termname: String,
+    pub(crate) termtype: String,
+    pub(crate) theme: String,
+    pub(crate) tty: String,
     pub(crate) uid: String,
     pub(crate) user: String,
-    pub(crate) flags: String,
-    pub(crate) theme: String,
+    pub(crate) utf8: String,
+    pub(crate) width: String,
+    pub(crate) written: String,
     pub(crate) line: usize,
 }
 
@@ -677,15 +695,32 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "buffer_name" => Some(self.facts.buffer.as_ref()?.name.clone()),
             "buffer_sample" => Some(buffer_sample(&self.facts.buffer.as_ref()?.data)),
             "buffer_size" => Some(self.facts.buffer.as_ref()?.data.len().to_string()),
+            "client_activity" => Some(self.facts.client.as_ref()?.activity.clone()),
+            "client_cell_height" => Some(self.facts.client.as_ref()?.cell_height.clone()),
+            "client_cell_width" => Some(self.facts.client.as_ref()?.cell_width.clone()),
+            "client_colours" => Some(self.facts.client.as_ref()?.colours.clone()),
+            "client_control_mode" => Some(self.facts.client.as_ref()?.control_mode.clone()),
+            "client_created" => Some(self.facts.client.as_ref()?.created.clone()),
+            "client_discarded" => Some(self.facts.client.as_ref()?.discarded.clone()),
             "client_flags" => Some(self.facts.client.as_ref()?.flags.clone()),
-            "client_height" => Some(self.facts.client.as_ref()?.height.to_string()),
+            "client_height" => Some(self.facts.client.as_ref()?.height.clone()),
+            "client_key_table" => Some(self.facts.client.as_ref()?.key_table.clone()),
+            "client_last_session" => Some(self.facts.client.as_ref()?.last_session.clone()),
             "client_name" => Some(self.facts.client.as_ref()?.name.clone()),
+            "client_pid" => Some(self.facts.client.as_ref()?.pid.clone()),
+            "client_prefix" => Some(self.facts.client.as_ref()?.prefix.clone()),
+            "client_readonly" => Some(self.facts.client.as_ref()?.readonly.clone()),
             "client_session" => Some(self.facts.client.as_ref()?.session.clone()),
+            "client_termfeatures" => Some(self.facts.client.as_ref()?.termfeatures.clone()),
             "client_termname" => Some(self.facts.client.as_ref()?.termname.clone()),
+            "client_termtype" => Some(self.facts.client.as_ref()?.termtype.clone()),
             "client_theme" => Some(self.facts.client.as_ref()?.theme.clone()),
+            "client_tty" => Some(self.facts.client.as_ref()?.tty.clone()),
             "client_uid" => Some(self.facts.client.as_ref()?.uid.clone()),
             "client_user" => Some(self.facts.client.as_ref()?.user.clone()),
-            "client_width" => Some(self.facts.client.as_ref()?.width.to_string()),
+            "client_utf8" => Some(self.facts.client.as_ref()?.utf8.clone()),
+            "client_width" => Some(self.facts.client.as_ref()?.width.clone()),
+            "client_written" => Some(self.facts.client.as_ref()?.written.clone()),
             "line" => Some(self.facts.client.as_ref()?.line.to_string()),
             "message_number" => Some(self.facts.message.as_ref()?.number.to_string()),
             "message_text" => Some(self.facts.message.as_ref()?.text.clone()),
@@ -735,6 +770,13 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 }
                 .to_owned(),
             ),
+            "session_last_attached" => self
+                .facts
+                .session_last_attached
+                .get(&context.session_id.parse().ok()?)
+                .copied()
+                .filter(|time| *time != 0)
+                .map(|time| time.to_string()),
             _ => None,
         }
     }

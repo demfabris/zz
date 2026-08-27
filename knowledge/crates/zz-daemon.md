@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-08-26T00:00:00-03:00
+timestamp: 2026-08-27T00:00:00-03:00
 ---
 
 # Overview
@@ -350,9 +350,9 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   `window-size latest` takes the owner's complete geometry. Manual, largest, and smallest retain
   their fixed or aggregated rows and columns while taking the owner's cell metrics. Owner changes
   therefore resize every mode when cell metrics change.
-- **Client focus.** Protocol v73 focus notifications are events, not retained presence state. The
-  daemon consumes them for session and client activity, and FocusIn for geometry ownership, but does
-  not keep a current focused boolean for `client_flags`.
+- **Client focus.** Protocol v73 focus notifications update retained per-client focus state for
+  `#{client_flags}`. The daemon also consumes them for session and client activity, and FocusIn for
+  geometry ownership when `focus-events` is on.
 - **Aggressive window size.** The inherited window flag `aggressive-resize` defaults off. ON
   restricts geometry candidates to clients whose focused window contains the pane; OFF uses the
   ordinary viewer set. The separate `window-size` policy combines those candidates. Focus, attach,
@@ -371,6 +371,13 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   `switch-client -T` returns before refresh, while `-E` preserves the destination session map.
   Existing terminal processes keep their spawn environment; later panes consume the updated map.
   The UTF-8 wire omits unrepresentable Unix names or values instead of substituting them.
+- **Client formats.** Protocol v83 adds the originating process ID to the retained connection facts.
+  `client_format_facts` combines it with tty, environment, size, cell geometry, colour scheme,
+  requested flags, focus, attachment history, key-table state, timestamps, and mailbox counters.
+  `DaemonFormatHooks` uses the same record for `list-clients`, ordinary command expansion,
+  foreground inserted commands, per-recipient status and title rendering, and `display-message`.
+  `session_last_attached` stays session-scoped when no client exists. Control width comes from
+  `refresh-client -C`; fields that require an initialized terminal remain empty.
 - **Client selectors.** Every implemented tmux flag that selects an attached client reaches
   `find_attached_client_with_aliases`. The common matcher accepts an exact name, full tty, or tty
   after removing exactly one leading `/dev/` prefix, with exactly one optional trailing colon. It
@@ -379,12 +386,12 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   confirm, refresh, and lock also retain numeric `N` and `client-N` native aliases. Eligible local
   terminal surfaces and Command clients retain their tty internally. A local Control client does
   too only when stdin has a discoverable tty; remote clients and piped local Control omit it.
-  `ClientFormatFacts` does not expose the retained value as `#{client_tty}`.
+  `ClientFormatFacts` exposes the retained value as `#{client_tty}` when the selected client has one.
 - **Local Control identity.** `connect_control` publishes the bounded cwd, an stdin-only
   `client-tty-v1:` token when available, and `client-nested-v1` only for a nonempty `$TMUX`. It
   never samples terminal size, sends `client-size-v1:`, or emits `ClientTerminalSize`; explicit
-  `refresh-client -C` remains its only geometry path. TERM and terminal-name format facts remain
-  absent. The established `attach-session`, `new-session -A`, and `new-session -Ad` refusal paths
+  `refresh-client -C` remains its only geometry path. Protocol v82's environment snapshot supplies
+  `TERM` when present. The established `attach-session`, `new-session -A`, and `new-session -Ad` refusal paths
   require both the marker and an exact pane-tty match when they would attach an existing session.
   Fresh `new-session` and `new-session -A` misses still create and attach. Duplicate and validation
   errors retain their existing precedence. Registration and unregister already store and clear the
@@ -396,15 +403,13 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   other default-read failures and every explicit-root read failure become causes. List-style output
   is discarded. A successful physical multiline command uses its completion line in the retained
   location. A detached Command client remains silent and cannot drain the set.
-- **Display-message format client.** `best_display_message_format_client` first checks the retained
-  target session. When that valid session has no attached client, it widens to every attached client
-  and selects the highest `client_activity`, breaking an equal-activity tie with the oldest
-  `ClientId`. Absent, cross-session, and missing `-c` values all take that global path for an
-  unattached target. `client_format_facts` receives the selected client's actual attached session,
-  while the command keeps session, window, and pane facts on its `-t` target. Zero attached clients
-  and a missing target session produce empty client facts. An attached target without `-c` still
-  injects none under `clients.context-formats`. This helper does not select delivery, duration,
-  printing, buffer-path context, or Command-client context.
+- **Display-message format client.** `best_display_message_format_client` first selects the
+  highest-activity client attached to the retained target session. The oldest `ClientId` wins an
+  activity tie. An explicit `-c` client wins only when it belongs to that session. If the valid
+  target session has no client, the helper widens to every attached client with the same ordering.
+  `client_format_facts` receives the selected client's attachment, while session, window, and pane
+  facts stay on the `-t` target. Zero attached clients and a missing target session produce empty
+  client facts. This helper does not select delivery, duration, printing, or buffer-path context.
 - **Caller cwd.** Protocol v72 retains each local client's bounded absolute UTF-8 working directory
   when representable. Top-level relative `source-file` paths use that client fact after format
   expansion and before globbing; SSH clients omit it. Registered-client replay snapshots the selected

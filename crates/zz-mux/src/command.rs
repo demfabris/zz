@@ -1,9 +1,10 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
-    fmt::Write as _,
+    fmt::{self, Write as _},
     path::{Path, PathBuf},
     str::FromStr as _,
+    sync::Arc,
 };
 
 use zz_protocol::{
@@ -35,7 +36,7 @@ use crate::{
         SessionOptions, WindowOption, WindowOptions,
     },
     layout::PANE_MAXIMUM,
-    model::DEFAULT_WINDOW_EXTENT,
+    model::{DEFAULT_WINDOW_EXTENT, fnmatch},
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
         match_tmux_option, parse_tmux_option, tmux_option_is_hook, tmux_option_table_order,
@@ -191,7 +192,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ExecutionContext {
     pub session: Option<SessionId>,
     pub window: Option<WindowId>,
@@ -199,6 +200,7 @@ pub struct ExecutionContext {
     client_terminal: ClientTerminal,
     client_size: Option<(u16, u16)>,
     client_working_directory: Option<PathBuf>,
+    client_environment: Option<Arc<BTreeMap<String, String>>>,
     client_attached: bool,
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
     repeat_binding: bool,
@@ -206,6 +208,34 @@ pub struct ExecutionContext {
     control_command_target: Option<(ClientId, u8)>,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for ExecutionContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExecutionContext")
+            .field("session", &self.session)
+            .field("window", &self.window)
+            .field("pane", &self.pane)
+            .field("client_terminal", &self.client_terminal)
+            .field("client_size", &self.client_size)
+            .field("client_working_directory", &self.client_working_directory)
+            .field(
+                "client_environment_entries",
+                &self
+                    .client_environment
+                    .as_ref()
+                    .map(|environment| environment.len()),
+            )
+            .field("client_attached", &self.client_attached)
+            .field("client_attached_context", &self.client_attached_context)
+            .field("repeat_binding", &self.repeat_binding)
+            .field("replay_client", &self.replay_client)
+            .field("control_command_target", &self.control_command_target)
+            .field("no_hooks", &self.no_hooks)
+            .field("format_variables", &self.format_variables)
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -225,6 +255,7 @@ impl Default for ExecutionContext {
             client_terminal: ClientTerminal::Present,
             client_size: None,
             client_working_directory: None,
+            client_environment: Some(Arc::new(BTreeMap::new())),
             client_attached: true,
             client_attached_context: None,
             repeat_binding: false,
@@ -280,6 +311,7 @@ impl ExecutionContext {
 
     pub fn set_no_client(&mut self) {
         self.client_terminal = ClientTerminal::NoClient;
+        self.client_environment = None;
         self.client_attached = false;
         self.client_attached_context = None;
     }
@@ -327,6 +359,15 @@ impl ExecutionContext {
 
     pub fn set_client_working_directory(&mut self, working_directory: Option<PathBuf>) {
         self.client_working_directory = working_directory;
+    }
+
+    #[must_use]
+    pub fn client_environment(&self) -> Option<&BTreeMap<String, String>> {
+        self.client_environment.as_deref()
+    }
+
+    pub fn set_client_environment(&mut self, environment: Option<Arc<BTreeMap<String, String>>>) {
+        self.client_environment = environment;
     }
 
     #[must_use]
@@ -514,6 +555,7 @@ pub enum MuxEffect {
         detach_others: bool,
         read_only: bool,
         flags: Option<String>,
+        update_environment: bool,
     },
     Detach(DetachRequest),
     SourceFile {
@@ -2788,6 +2830,20 @@ impl MuxEngine {
         Ok(self.job_environment(Some(session)))
     }
 
+    pub fn update_session_environment_from_client(
+        &mut self,
+        session: SessionId,
+        client_environment: &BTreeMap<String, String>,
+    ) -> Result<(), ServerError> {
+        if !self.state.sessions.contains_key(&session) {
+            return Err(ServerError::MissingTarget(session.to_string()));
+        }
+        let patterns = self.update_environment_names_for_session(Some(session));
+        let environment = self.session_environments.entry(session).or_default();
+        apply_client_environment_update(environment, &patterns, client_environment);
+        Ok(())
+    }
+
     /// The environment a shell job inherits: the global overlay, then the
     /// session overlay when the job has one. Hidden entries and child-unset
     /// markers come through as `None` so the spawner removes them.
@@ -3202,6 +3258,7 @@ impl MuxEngine {
                     detach_others: options.has("-D"),
                     read_only: false,
                     flags: options.value("-f").map(str::to_owned),
+                    update_environment: !options.has("-E"),
                 }));
             }
         }
@@ -3241,7 +3298,12 @@ impl MuxEngine {
             self.state
                 .set_session_working_directory(session, session_working_directory)?;
         }
-        self.seed_session_environment(session, !options.has("-E"), environment);
+        self.seed_session_environment(
+            session,
+            !options.has("-E"),
+            context.client_environment(),
+            environment,
+        );
         let created = i64::try_from(self.format_now)
             .ok()
             .filter(|created| *created != 0);
@@ -3300,6 +3362,7 @@ impl MuxEngine {
                 detach_others: false,
                 read_only: false,
                 flags: options.value("-f").map(str::to_owned),
+                update_environment: false,
             });
         }
         Ok(Execution { output, effects })
@@ -3528,6 +3591,7 @@ impl MuxEngine {
             detach_others,
             read_only: options.has("-r"),
             flags: options.value("-f").map(str::to_owned),
+            update_environment: !options.has("-E"),
         }))
     }
 
@@ -8785,31 +8849,26 @@ impl MuxEngine {
             .flat_map(|array| array.values().map(String::as_str))
     }
 
+    fn update_environment_names_for_session(&self, session: Option<SessionId>) -> Vec<String> {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        self.array_option_readback(target, "update-environment", true)
+            .into_iter()
+            .flat_map(|(array, _)| array.values().cloned())
+            .collect()
+    }
+
     fn seed_session_environment(
         &mut self,
         session: SessionId,
         include_update_environment: bool,
+        client_environment: Option<&BTreeMap<String, String>>,
         overlays: Vec<(String, String)>,
     ) {
-        let mut environment = if include_update_environment {
-            self.update_environment_names()
-                .map(|name| {
-                    let value = self
-                        .global_environment
-                        .get(name)
-                        .and_then(|entry| entry.value.clone());
-                    (
-                        name.to_owned(),
-                        EnvironmentEntry {
-                            value,
-                            hidden: false,
-                        },
-                    )
-                })
-                .collect()
-        } else {
-            Environment::new()
-        };
+        let mut environment = Environment::new();
+        if include_update_environment && let Some(client_environment) = client_environment {
+            let patterns = self.update_environment_names_for_session(None);
+            apply_client_environment_update(&mut environment, &patterns, client_environment);
+        }
         for (name, value) in overlays {
             environment.insert(
                 name,
@@ -12070,6 +12129,39 @@ fn session_creation_environment(options: &Options) -> Vec<(String, String)> {
         .collect()
 }
 
+fn apply_client_environment_update(
+    environment: &mut Environment,
+    patterns: &[String],
+    client_environment: &BTreeMap<String, String>,
+) {
+    for pattern in patterns {
+        let matches = client_environment
+            .iter()
+            .filter(|(name, _)| fnmatch(pattern, name))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            environment
+                .entry(pattern.clone())
+                .and_modify(|entry| entry.value = None)
+                .or_insert(EnvironmentEntry {
+                    value: None,
+                    hidden: false,
+                });
+        } else {
+            for (name, value) in matches {
+                environment.insert(
+                    name,
+                    EnvironmentEntry {
+                        value: Some(value),
+                        hidden: false,
+                    },
+                );
+            }
+        }
+    }
+}
+
 fn pane_spawn_empty(options: &Options, command: Option<&[String]>) -> Result<bool, ServerError> {
     let empty_command = matches!(command, Some([value]) if value.is_empty());
     if options.has("-E") && command.is_some() && !empty_command {
@@ -13740,6 +13832,7 @@ mod tests {
                     detach_others: false,
                     read_only: false,
                     flags: None,
+                    update_environment: false,
                 },
                 MuxEffect::SnapshotChanged,
             ] if *created == pane && *attached == session
@@ -13881,6 +13974,7 @@ mod tests {
                     detach_others: false,
                     read_only: false,
                     flags: None,
+                    update_environment: true,
                 },
                 MuxEffect::SnapshotChanged,
             ] if *session == target
@@ -13934,6 +14028,7 @@ mod tests {
                     detach_others: false,
                     read_only: false,
                     flags: Some(flags),
+                    update_environment: true,
                 },
                 MuxEffect::SnapshotChanged,
             ] if *session == target && flags == "ignore-size"
@@ -14001,6 +14096,7 @@ mod tests {
                 detach_others: false,
                 read_only: false,
                 flags: Some("active-pane".to_owned()),
+                update_environment: true,
             }]
         );
 
@@ -14999,11 +15095,26 @@ mod tests {
                 detach_others: false,
                 read_only: false,
                 flags: None,
+                update_environment: true,
             }]
         );
         assert_eq!(context.session, Some(session));
         assert_eq!(context.pane, Some(pane));
         assert_eq!(engine.state.sessions.len(), 2);
+
+        let skips_update = engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-A", "-E", "-s", "work"]),
+            )
+            .expect("attach without environment update");
+        assert!(matches!(
+            skips_update.effects.as_slice(),
+            [MuxEffect::Attach {
+                update_environment: false,
+                ..
+            }]
+        ));
 
         let ignores_detach = engine
             .execute(
@@ -15018,6 +15129,7 @@ mod tests {
                 detach_others: false,
                 read_only: false,
                 flags: None,
+                update_environment: true,
             }]
         );
 
@@ -15034,6 +15146,7 @@ mod tests {
                 detach_others: true,
                 read_only: false,
                 flags: None,
+                update_environment: true,
             }]
         );
 
@@ -15067,8 +15180,12 @@ mod tests {
     #[test]
     fn new_session_environment_options_apply_only_on_creation() {
         let mut engine = MuxEngine::default();
-        engine.seed_global_environment([("DISPLAY", "client")]);
+        engine.seed_global_environment([("DISPLAY", "daemon")]);
         let mut context = ExecutionContext::default();
+        context.set_client_environment(Some(Arc::new(BTreeMap::from([(
+            "DISPLAY".to_owned(),
+            "client".to_owned(),
+        )]))));
 
         engine
             .execute(
@@ -15173,7 +15290,7 @@ mod tests {
             )
             .expect("existing session value");
         let sessions = engine.state.sessions.len();
-        engine
+        let attached = engine
             .execute(
                 &mut context,
                 &command(
@@ -15192,6 +15309,13 @@ mod tests {
                 ),
             )
             .expect("attach existing session");
+        assert!(matches!(
+            attached.effects.as_slice(),
+            [MuxEffect::Attach {
+                update_environment: false,
+                ..
+            }]
+        ));
         assert_eq!(engine.state.sessions.len(), sessions);
         assert_eq!(
             engine
@@ -15209,6 +15333,148 @@ mod tests {
                 &command("show-environment", &["-t", "seeded", "NEW"]),
             ),
             Err(ServerError::InvalidCommand(message)) if message == "unknown variable: NEW"
+        ));
+    }
+
+    #[test]
+    fn new_session_seeds_patterns_from_the_client_snapshot() {
+        let mut engine = MuxEngine::default();
+        engine.seed_global_environment([("EXACT", "daemon"), ("APP_DAEMON", "daemon")]);
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "update-environment", "EXACT APP_*"]),
+            )
+            .expect("global update patterns");
+        let snapshot = Arc::new(BTreeMap::from([
+            ("APP_ONE".to_owned(), "one".to_owned()),
+            ("APP_TWO".to_owned(), String::new()),
+            ("UNSELECTED".to_owned(), "client".to_owned()),
+        ]));
+        context.set_client_environment(Some(Arc::clone(&snapshot)));
+        let cloned = context.clone();
+        assert!(Arc::ptr_eq(
+            cloned.client_environment.as_ref().unwrap(),
+            &snapshot
+        ));
+        let debug = format!("{context:?}");
+        assert!(debug.contains("client_environment_entries: Some(3)"));
+        assert!(!debug.contains("APP_ONE"));
+        assert!(!debug.contains("\"one\""));
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "client"]),
+            )
+            .expect("client-backed session");
+        let session = context.session.unwrap();
+        let environment = &engine.session_environments[&session];
+        assert_eq!(environment["APP_ONE"].value.as_deref(), Some("one"));
+        assert_eq!(environment["APP_TWO"].value.as_deref(), Some(""));
+        assert_eq!(environment["EXACT"].value, None);
+        assert!(!environment.contains_key("APP_DAEMON"));
+        assert!(!environment.contains_key("UNSELECTED"));
+
+        let mut no_client = ExecutionContext::default();
+        no_client.set_no_client();
+        assert!(no_client.client_environment().is_none());
+        engine
+            .execute(
+                &mut no_client,
+                &command("new-session", &["-d", "-s", "clientless"]),
+            )
+            .expect("clientless session");
+        assert!(
+            engine.session_environments[&no_client.session.unwrap()].is_empty(),
+            "no client source differs from an empty client environment"
+        );
+    }
+
+    #[test]
+    fn client_environment_refresh_uses_session_patterns_and_marker_rules() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "update-environment", "GLOBAL_ONLY"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-E", "-s", "work"]),
+            )
+            .unwrap();
+        let session = context.session.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-t",
+                        "work",
+                        "update-environment",
+                        "EXACT WILD_* MISSING LITERAL* HIDDEN EMPTY_*",
+                    ],
+                ),
+            )
+            .unwrap();
+        for args in [
+            &["-t", "work", "UNSELECTED", "keep"][..],
+            &["-t", "work", "WILD_OLD", "old"][..],
+            &["-h", "-t", "work", "HIDDEN", "old"][..],
+            &["-h", "-t", "work", "MISSING", "old"][..],
+        ] {
+            engine
+                .execute(&mut context, &command("set-environment", args))
+                .unwrap();
+        }
+        let client_environment = BTreeMap::from([
+            ("EMPTY_ONE".to_owned(), String::new()),
+            ("EXACT".to_owned(), "new".to_owned()),
+            ("HIDDEN".to_owned(), "visible".to_owned()),
+            ("WILD_ONE".to_owned(), "one".to_owned()),
+            ("WILD_TWO".to_owned(), "two".to_owned()),
+        ]);
+
+        engine
+            .update_session_environment_from_client(session, &client_environment)
+            .unwrap();
+        let environment = &engine.session_environments[&session];
+        assert_eq!(environment["EXACT"].value.as_deref(), Some("new"));
+        assert_eq!(environment["WILD_ONE"].value.as_deref(), Some("one"));
+        assert_eq!(environment["WILD_TWO"].value.as_deref(), Some("two"));
+        assert_eq!(environment["WILD_OLD"].value.as_deref(), Some("old"));
+        assert_eq!(environment["EMPTY_ONE"].value.as_deref(), Some(""));
+        assert_eq!(environment["UNSELECTED"].value.as_deref(), Some("keep"));
+        assert_eq!(environment["MISSING"].value, None);
+        assert!(environment["MISSING"].hidden);
+        assert_eq!(environment["LITERAL*"].value, None);
+        assert!(!environment["LITERAL*"].hidden);
+        assert_eq!(environment["HIDDEN"].value.as_deref(), Some("visible"));
+        assert!(!environment["HIDDEN"].hidden);
+        assert!(!environment.contains_key("GLOBAL_ONLY"));
+
+        engine
+            .update_session_environment_from_client(session, &BTreeMap::new())
+            .unwrap();
+        let environment = &engine.session_environments[&session];
+        assert_eq!(environment["EXACT"].value, None);
+        assert_eq!(environment["WILD_*"].value, None);
+        assert_eq!(environment["WILD_ONE"].value.as_deref(), Some("one"));
+        assert_eq!(environment["WILD_TWO"].value.as_deref(), Some("two"));
+        assert_eq!(environment["EMPTY_ONE"].value.as_deref(), Some(""));
+        assert_eq!(environment["HIDDEN"].value, None);
+        assert!(!environment["HIDDEN"].hidden);
+        assert!(environment["MISSING"].hidden);
+
+        assert!(matches!(
+            engine.update_session_environment_from_client(SessionId(u64::MAX), &BTreeMap::new()),
+            Err(ServerError::MissingTarget(_))
         ));
     }
 
@@ -16427,8 +16693,23 @@ mod tests {
                 detach_others: true,
                 read_only: false,
                 flags: None,
+                update_environment: true,
             }]
         );
+
+        let skipped = engine
+            .execute(
+                &mut context,
+                &command("attach-session", &["-E", "-t", "shared"]),
+            )
+            .expect("attach without environment update");
+        assert!(matches!(
+            skipped.effects.as_slice(),
+            [MuxEffect::Attach {
+                update_environment: false,
+                ..
+            }]
+        ));
     }
 
     #[test]
@@ -27473,6 +27754,10 @@ mod tests {
             ("PHASE4D_EXTRA", "global"),
         ]);
         let mut context = ExecutionContext::default();
+        context.set_client_environment(Some(Arc::new(BTreeMap::from([
+            ("DISPLAY".to_owned(), ":7".to_owned()),
+            ("SSH_AUTH_SOCK".to_owned(), "/tmp/agent.sock".to_owned()),
+        ]))));
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
@@ -28158,6 +28443,10 @@ mod tests {
         let mut engine = MuxEngine::default();
         engine.seed_global_environment([("DISPLAY", ":7"), ("PHASE_C7", "seeded")]);
         let mut context = ExecutionContext::default();
+        context.set_client_environment(Some(Arc::new(BTreeMap::from([(
+            "PHASE_C7".to_owned(),
+            "seeded".to_owned(),
+        )]))));
         engine
             .execute(
                 &mut context,

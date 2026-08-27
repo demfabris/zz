@@ -80,6 +80,7 @@ fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretati
             detach_others: false,
             read_only: false,
             flags: Some("ignore-size,!active-pane".to_owned()),
+            update_environment: true,
         }]
     );
 }
@@ -1691,29 +1692,27 @@ fn next_and_previous_window_target_a_session_and_follow_alerts() {
 }
 
 #[test]
-fn attach_session_reports_the_client_flags_it_cannot_honor() {
+fn attach_session_reports_the_remaining_client_flag_it_cannot_honor() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
         .execute(&mut context, &command("new-session", &["-s", "work"]))
         .unwrap();
-    for flag in ["-x", "-E"] {
-        let error = engine
-            .execute(
-                &mut context,
-                &command("attach-session", &[flag, "-t", "work"]),
-            )
-            .unwrap_err();
-        assert!(
-            matches!(&error, ServerError::UnsupportedCommand(message)
-                if message == &format!("attach-session {flag}")),
-            "{error:?}"
-        );
-    }
+    let error = engine
+        .execute(
+            &mut context,
+            &command("attach-session", &["-x", "-t", "work"]),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(&error, ServerError::UnsupportedCommand(message)
+            if message == "attach-session -x"),
+        "{error:?}"
+    );
     engine
         .execute(
             &mut context,
-            &command("attach-session", &["-d", "-t", "work"]),
+            &command("attach-session", &["-dE", "-t", "work"]),
         )
         .unwrap();
 }

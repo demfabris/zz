@@ -54,7 +54,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | `lib.rs` | re-exports `Daemon`, `DaemonError`, `CommandClient`, `InteractiveClient`, `short_device_name`, `agent_send_reads_stdin`, `default_socket_path`, `default_mux_config`, `mux_config_candidates`, `mux_config_write_path`, `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon`, `daemon_identity_protocol_version`, `classify_local_connect_error`, `Endpoint`, `EndpointError`, `SshEndpoint`, `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper`, the `user_data` module, and (feature `agent`) the agent stream vocabulary a client deserializes against . `AgentStreamItem`, `AgentStreamPayload`, `AgentPrompt`, `AgentPromptOutcome`, `AgentSessionSummary`, `AgentSessionCapabilities`, and `AgentAuthMethod` | Crate root; the whole public API |
 | `daemon.rs` | `Daemon`, `DaemonError`, `agent_send_reads_stdin` | The server itself: local accept loop, `Shared`/`ServerState`, command execution, `OutboundMailbox` fan-out, terminal watching, attach/detach, input routing. It binds exactly one endpoint . the owner-only local socket |
 | `transport.rs` | `default_socket_path` | Platform IPC: wraps `interprocess` into `LocalListener`/`LocalStream`, per-platform endpoint paths, peer-credential capture |
-| `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), endpoint-scoped cwd/tty/size/nested hello facts, framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
+| `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), endpoint-scoped cwd/tty/size/nested/environment hello facts, framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
 | `paths.rs` | `default_mux_config`, `mux_config_candidates`, `mux_config_write_path` | Platform discovery of the zz-owned `zz/mux.conf` (the daemon sources this file and no external tmux config) |
 | `endpoint.rs` | `Endpoint`, `SshEndpoint`, `EndpointError` | Client-half endpoint abstraction: `unix://`/bare-path/`ssh://` URI parsing (a `quic://` string is rejected with a pointer at `ssh://`), the probe → auto-start → forward ssh sequence below, a managed `ssh -N -L` child with an RAII tunnel guard, and `EndpointError::ssh_reason` turning each failure into advice for the host row |
 | `askpass.rs` | `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper` | ssh's password and host-key prompts: the per-connect Unix socket the GUI answers on, the prompt classifier, and the helper mode `zz` re-enters when ssh runs it as `SSH_ASKPASS` |
@@ -326,7 +326,8 @@ really going away.
 
 A client that misses a frame asks for repair rather than waiting: `ProtocolMessage::RequestFull`
 runs `send_full`, which re-sends the pane's current viewport when that pane is still visible to the
-requester, and `ProtocolMessage::HistoryRequest` runs `send_history`, which pulls a clamped
+requester and no active message or prompt freezes terminal publication. Resync and popup viewport
+publication obey the same gate; retirement sends the latest full viewport. `ProtocolMessage::HistoryRequest` runs `send_history`, which pulls a clamped
 scrollback range off the terminal actor and answers with one self-contained `HistoryChunk`.
 
 There is one writer path: the writer thread streams every frame onto the one ordered stream, whether
@@ -363,6 +364,13 @@ interactive clients as the user has devices. Per-client maps carry the rest:
   computation serves every client.
 - **Presence.** `snapshot_presence` turns the attached set into `SessionViewer` rows carrying the
   device name from `ClientHello` (falling back to `device-{id}`) and that viewer's focused window.
+- **Client environment.** Protocol v82 stores one immutable `BTreeMap` snapshot per connection and
+  removes it on unregister. Fresh session creation, attach, native attach, Control attach, and
+  targeted switch pass the invoking or selected client's map into the mux's effective
+  `update-environment` update. Attach refresh follows target and terminal preflight. A table-only
+  `switch-client -T` returns before refresh, while `-E` preserves the destination session map.
+  Existing terminal processes keep their spawn environment; later panes consume the updated map.
+  The UTF-8 wire omits unrepresentable Unix names or values instead of substituting them.
 - **Client selectors.** Every implemented tmux flag that selects an attached client reaches
   `find_attached_client_with_aliases`. The common matcher accepts an exact name, full tty, or tty
   after removing exactly one leading `/dev/` prefix, with exactly one optional trailing colon. It

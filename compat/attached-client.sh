@@ -69,6 +69,14 @@ INNER_WINDOW_TARGET="=$INNER_SESSION:0"
 INNER_PANE_TARGET="=$INNER_SESSION:0.0"
 COMMAND_CWD="$SCRATCH_DIR/client [literal]*? cwd"
 SESSION_CWD="$SCRATCH_DIR/session [literal]*? cwd"
+ENV_SELECTED=ATTACHED_ENV_SELECTED
+ENV_MISSING=ATTACHED_ENV_MISSING
+ENV_EMPTY=ATTACHED_ENV_EMPTY
+ENV_GLOB_A=ATTACHED_ENV_GLOB_A
+ENV_GLOB_PATTERN='ATTACHED_ENV_GLOB_*'
+ENV_HIDDEN=ATTACHED_ENV_HIDDEN
+ENV_HIDDEN_KEEP=ATTACHED_ENV_HIDDEN_KEEP
+ENV_KEEP=ATTACHED_ENV_KEEP
 SOURCE_CONFIG_DIR="$SESSION_CWD/config-$INNER_SESSION"
 SOURCE_CONFIG_DECOY_DIR="$COMMAND_CWD/config-$INNER_SESSION"
 SOURCE_DEPTH_DIR="$SCRATCH_DIR/source-depth"
@@ -164,6 +172,73 @@ side_command() {
   esac
 }
 
+environment_side_command() {
+  local side="$1"
+  local environment="$2"
+  shift 2
+  local -a values=(
+    -u "$ENV_SELECTED"
+    -u "$ENV_MISSING"
+    -u "$ENV_EMPTY"
+    -u "$ENV_GLOB_A"
+    -u "$ENV_HIDDEN"
+    -u "$ENV_HIDDEN_KEEP"
+    -u "$ENV_KEEP"
+  )
+
+  case "$environment" in
+  seed)
+    values+=(
+      "$ENV_SELECTED=seed"
+      "$ENV_EMPTY="
+      "$ENV_GLOB_A=glob-a"
+      "$ENV_HIDDEN=seed-hidden"
+      "$ENV_KEEP=client-only"
+    )
+    ;;
+  control)
+    values+=(
+      "$ENV_SELECTED=control"
+      "$ENV_EMPTY="
+      "$ENV_GLOB_A=glob-a2"
+      "$ENV_HIDDEN=revealed"
+    )
+    ;;
+  changed)
+    values+=(
+      "$ENV_SELECTED=changed"
+      "$ENV_EMPTY="
+      "$ENV_GLOB_A=glob-changed"
+      "$ENV_HIDDEN=changed-hidden"
+    )
+    ;;
+  client-a)
+    values+=("$ENV_SELECTED=client-A")
+    ;;
+  external)
+    values+=("$ENV_SELECTED=external-caller")
+    ;;
+  missing) ;;
+  *) return 2 ;;
+  esac
+
+  case "$side" in
+  zz)
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL "${values[@]}" \
+      HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" TMUX_TMPDIR=/tmp \
+      "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
+    ;;
+  tmux)
+    env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
+      -u EDITOR -u VISUAL "${values[@]}" \
+      HOME="$TMUX_HOME" XDG_CONFIG_HOME="$TMUX_CONFIG_HOME" TMUX_TMPDIR=/tmp \
+      "$TMUX_BIN" -L "$INNER_SOCKET_NAME" "$@"
+    ;;
+  *) return 2 ;;
+  esac
+}
+
 capture_screen() {
   local side="$1"
   tmux_outer_command capture-pane -p -S - -t "=$OUTER_SESSION:$side"
@@ -247,15 +322,20 @@ write_attach() {
   local side="$1"
   local destination="$2"
   local session="${3:-$INNER_SESSION}"
+  local selected="${4:-root-client}"
 
   printf '#!/usr/bin/env bash\n' >"$destination"
   printf 'cd -- %q\n' "$COMMAND_CWD" >>"$destination"
   if [ "$side" = "zz" ]; then
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -c %q -t %q\n' \
-      "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$ZZ_BIN" "$ZZ_SOCKET" "$SESSION_CWD" "=$session" >>"$destination"
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL %q=%q %q= %q=%q %q=%q HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -c %q -t %q\n' \
+      "$ENV_SELECTED" "$selected" "$ENV_EMPTY" "$ENV_GLOB_A" root-glob \
+      "$ENV_HIDDEN" root-hidden "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$ZZ_BIN" \
+      "$ZZ_SOCKET" "$SESSION_CWD" "=$session" >>"$destination"
   else
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -c %q -t %q\n' \
-      "$TMUX_HOME" "$TMUX_CONFIG_HOME" "$TMUX_BIN" "$INNER_SOCKET_NAME" "$SESSION_CWD" "=$session" >>"$destination"
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL %q=%q %q= %q=%q %q=%q HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -c %q -t %q\n' \
+      "$ENV_SELECTED" "$selected" "$ENV_EMPTY" "$ENV_GLOB_A" root-glob \
+      "$ENV_HIDDEN" root-hidden "$TMUX_HOME" "$TMUX_CONFIG_HOME" "$TMUX_BIN" \
+      "$INNER_SOCKET_NAME" "$SESSION_CWD" "=$session" >>"$destination"
   fi
   chmod +x "$destination"
 }
@@ -1398,6 +1478,153 @@ probe_list_keys_single() {
   wait_for_pane_marker "$side" ATTACHED_LIST_KEYS_RESUMED
 }
 
+run_control_environment_attach() {
+  local side="$1"
+  local environment="$2"
+  local output="$SCRATCH_DIR/control-environment-$side.out"
+  local error="$SCRATCH_DIR/control-environment-$side.err"
+  shift 2
+
+  if ! printf 'detach-client\n' | environment_side_command \
+    "$side" "$environment" -C "$@" >"$output" 2>"$error"; then
+    fixture_failure "$side Control environment attachment failed: $(tr '\n' ' ' <"$error")"
+  fi
+}
+
+probe_client_environment() {
+  local side="$1"
+  local session="environment-$side"
+  local created_session="environment-created-$side"
+  local switch_session="environment-switch-$side"
+  local terminal_window="environment-terminal-$side"
+  local terminal_attach="$SCRATCH_DIR/attach-$terminal_window"
+  local terminal_target="=$OUTER_SESSION:$terminal_window"
+  local terminal_tty
+  local root_tty
+  local update_names="$ENV_SELECTED $ENV_MISSING $ENV_EMPTY $ENV_GLOB_PATTERN $ENV_HIDDEN"
+
+  side_command "$side" set-option -g update-environment "$update_names" ||
+    fixture_failure "$side could not set client environment selection"
+  environment_side_command "$side" seed new-session -d -s "$session" ||
+    fixture_failure "$side could not create a client-seeded session"
+  wait_for_side_output "$side" "$ENV_SELECTED=seed" "created client environment" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+  wait_for_side_output "$side" "$ENV_EMPTY=" "created empty client environment" \
+    show-environment -t "=$session" "$ENV_EMPTY"
+  wait_for_side_output "$side" "-$ENV_MISSING" "created missing client marker" \
+    show-environment -t "=$session" "$ENV_MISSING"
+  wait_for_side_output "$side" "$ENV_GLOB_A=glob-a" "created wildcard client environment" \
+    show-environment -t "=$session" "$ENV_GLOB_A"
+
+  side_command "$side" set-option -t "=$session:" update-environment "$update_names" ||
+    fixture_failure "$side could not set session client environment selection"
+  side_command "$side" set-environment -h -t "=$session" "$ENV_HIDDEN" hidden-before ||
+    fixture_failure "$side could not hide its selected environment value"
+  side_command "$side" set-environment -h -t "=$session" "$ENV_HIDDEN_KEEP" hidden-keep ||
+    fixture_failure "$side could not hide its unselected environment value"
+  run_control_environment_attach "$side" control attach-session -t "=$session"
+  wait_for_side_output "$side" "$ENV_SELECTED=control" "Control environment refresh" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+  wait_for_side_output "$side" "$ENV_HIDDEN=revealed" "selected hidden environment refresh" \
+    show-environment -t "=$session" "$ENV_HIDDEN"
+  wait_for_side_output "$side" "$ENV_HIDDEN_KEEP=hidden-keep" \
+    "unselected hidden environment retention" \
+    show-environment -h -t "=$session" "$ENV_HIDDEN_KEEP"
+
+  run_control_environment_attach "$side" missing attach-session -t "=$session"
+  wait_for_side_output "$side" "-$ENV_SELECTED" "missing selected client marker" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+  wait_for_side_output "$side" "-$ENV_EMPTY" "missing empty client marker" \
+    show-environment -t "=$session" "$ENV_EMPTY"
+  wait_for_side_output "$side" "-$ENV_GLOB_PATTERN" "missing wildcard literal marker" \
+    show-environment -t "=$session" "$ENV_GLOB_PATTERN"
+  wait_for_side_output "$side" "$ENV_GLOB_A=glob-a2" "retained wildcard expansion" \
+    show-environment -t "=$session" "$ENV_GLOB_A"
+  wait_for_side_output "$side" "$ENV_HIDDEN_KEEP=hidden-keep" \
+    "hidden environment retention after a missing refresh" \
+    show-environment -h -t "=$session" "$ENV_HIDDEN_KEEP"
+
+  side_command "$side" set-environment -t "=$session" "$ENV_SELECTED" before-E ||
+    fixture_failure "$side could not set its attach -E baseline"
+  run_control_environment_attach "$side" changed attach-session -E -t "=$session"
+  wait_for_side_output "$side" "$ENV_SELECTED=before-E" "attach -E environment preservation" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+
+  run_control_environment_attach "$side" client-a new-session -A -d -s "$session" \
+    -e "$ENV_SELECTED=explicit"
+  wait_for_side_output "$side" "$ENV_SELECTED=client-A" \
+    "existing new-session -A client refresh" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+  side_command "$side" set-environment -t "=$session" "$ENV_SELECTED" before-AE ||
+    fixture_failure "$side could not set its new-session -AE baseline"
+  run_control_environment_attach "$side" changed new-session -A -d -E -s "$session" \
+    -e "$ENV_SELECTED=ignored"
+  wait_for_side_output "$side" "$ENV_SELECTED=before-AE" \
+    "existing new-session -AE preservation" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+
+  environment_side_command "$side" client-a new-session -A -d -s "$created_session" \
+    -e "$ENV_SELECTED=explicit-new-A" ||
+    fixture_failure "$side could not create a missing new-session -A target"
+  wait_for_side_output "$side" "$ENV_SELECTED=explicit-new-A" \
+    "missing new-session -A creation environment" \
+    show-environment -t "=$created_session" "$ENV_SELECTED"
+
+  write_attach "$side" "$terminal_attach" "$session" terminal-value
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$terminal_window" \
+    "$terminal_attach" ||
+    fixture_failure "$side could not start its terminal environment client"
+  wait_for_side_output "$side" "$ENV_SELECTED=terminal-value" \
+    "terminal client environment refresh" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+  terminal_tty="$(tmux_outer_command display-message -p -t "$terminal_target" '#{pane_tty}')"
+  if [[ "$terminal_tty" != /dev/* ]]; then
+    fixture_failure "$side terminal environment client did not expose a tty"
+  fi
+  side_command "$side" detach-client -t "$terminal_tty" ||
+    fixture_failure "$side could not detach its terminal environment client"
+  tmux_outer_command kill-window -t "$terminal_target" ||
+    fixture_failure "$side could not remove its terminal environment window"
+  wait_for_side_output "$side" "$ENV_SELECTED=terminal-value" \
+    "session environment survives client disconnect" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+
+  environment_side_command "$side" missing new-session -d -E -s "$switch_session" ||
+    fixture_failure "$side could not create its switch environment destination"
+  side_command "$side" set-option -t "=$switch_session:" update-environment "$ENV_SELECTED" ||
+    fixture_failure "$side could not set its switch environment selection"
+  side_command "$side" set-environment -t "=$switch_session" "$ENV_SELECTED" before-switch ||
+    fixture_failure "$side could not set its switch environment baseline"
+  root_tty="$(tmux_outer_command display-message -p -t "=$OUTER_SESSION:$side" '#{pane_tty}')"
+  if [[ "$root_tty" != /dev/* ]]; then
+    fixture_failure "$side root environment client did not expose a tty"
+  fi
+  environment_side_command "$side" external switch-client -c "$root_tty" -t "=$session" ||
+    fixture_failure "$side targeted switch environment refresh failed"
+  wait_for_side_output "$side" "$ENV_SELECTED=root-client" \
+    "targeted switch client environment" \
+    show-environment -t "=$session" "$ENV_SELECTED"
+  environment_side_command "$side" external switch-client -E -c "$root_tty" \
+    -t "=$switch_session" ||
+    fixture_failure "$side targeted switch -E failed"
+  wait_for_side_output "$side" "$ENV_SELECTED=before-switch" \
+    "targeted switch -E environment preservation" \
+    show-environment -t "=$switch_session" "$ENV_SELECTED"
+  environment_side_command "$side" external switch-client -E -c "$root_tty" \
+    -t "=$INNER_SESSION" ||
+    fixture_failure "$side could not return its root client after environment switching"
+  wait_for_client_state "$side" root
+
+  side_command "$side" kill-session -t "=$session" ||
+    fixture_failure "$side could not remove its client environment session"
+  side_command "$side" kill-session -t "=$created_session" ||
+    fixture_failure "$side could not remove its created environment session"
+  side_command "$side" kill-session -t "=$switch_session" ||
+    fixture_failure "$side could not remove its switch environment session"
+  side_command "$side" set-option -gu update-environment ||
+    fixture_failure "$side could not restore update-environment"
+}
+
 run_requested_client_command() {
   local side="$1"
   shift
@@ -1655,12 +1882,18 @@ probe_detach_client_tty() {
   fi
 }
 
-zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
+ATTACHED_ENV_SELECTED=global-old \
+  ATTACHED_ENV_KEEP=global-old \
+  ATTACHED_ENV_MISSING=global-old \
+  zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 ZZ_PID=$!
 wait_for_socket
 
 zz_command new-session -d -c "$COMMAND_CWD" -s "$INNER_SESSION" || fixture_failure "could not create zz session"
-tmux_inner_start new-session -d -c "$COMMAND_CWD" -s "$INNER_SESSION" || fixture_failure "could not create tmux session"
+ATTACHED_ENV_SELECTED=global-old \
+  ATTACHED_ENV_KEEP=global-old \
+  ATTACHED_ENV_MISSING=global-old \
+  tmux_inner_start new-session -d -c "$COMMAND_CWD" -s "$INNER_SESSION" || fixture_failure "could not create tmux session"
 zz_command rename-window -t "$INNER_SESSION:0" main || fixture_failure "could not name zz window"
 tmux_inner_command rename-window -t "$INNER_SESSION:0" main || fixture_failure "could not name tmux window"
 zz_command new-session -d -s "$CHOOSER_SESSION" || fixture_failure "could not create zz chooser session"
@@ -1719,6 +1952,8 @@ probe_command_output_navigation tmux
 assert_buffer_parity keep
 probe_source_file_depth zz
 probe_source_file_depth tmux
+probe_client_environment zz
+probe_client_environment tmux
 probe_requested_client_flags zz
 probe_requested_client_flags tmux
 probe_attached_client_sizing zz

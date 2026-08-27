@@ -787,13 +787,13 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "attach-session",
         aliases: &["attach"],
         description: "Attach to a session",
-        usage: "[-dr] [-c working-directory] [-f flags] [-t target-session]",
+        usage: "[-dEr] [-c working-directory] [-f flags] [-t target-session]",
         options: &[
             CommandOptionSpec::flag("-d", "detach other clients"),
+            CommandOptionSpec::flag("-E", "do not update the session environment"),
             CommandOptionSpec::flag("-r", "attach read-only"),
             CommandOptionSpec::value("-c", FreeForm, "working directory for the session"),
             CommandOptionSpec::value("-t", Pane, "target session, window, or pane"),
-            CommandOptionSpec::unsupported_flag("-E"),
             CommandOptionSpec::value("-f", FreeForm, "client flags"),
             CommandOptionSpec::unsupported_flag("-x"),
         ],
@@ -2318,7 +2318,12 @@ mod tests {
         );
         assert_eq!(
             spec.usage,
-            "[-dr] [-c working-directory] [-f flags] [-t target-session]"
+            "[-dEr] [-c working-directory] [-f flags] [-t target-session]"
+        );
+        assert!(
+            spec.options
+                .iter()
+                .any(|option| option.name == "-E" && !option.unsupported)
         );
     }
 

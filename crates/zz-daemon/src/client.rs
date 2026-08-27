@@ -1,4 +1,6 @@
 use std::{
+    collections::BTreeMap,
+    ffi::OsString,
     fmt,
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -12,9 +14,11 @@ use parking_lot::Mutex;
 use zz_protocol::{
     AgentImage, AgentSessionOpKind, ClientHello, ClientInstanceId, ClientKind, CommandInvocation,
     CommandRequest, CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage,
-    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
-    PasteUploadPurpose, PreparedCommand, ProtocolMessage, ServerError, ServerHello,
-    encode_protocol_message_into, read_protocol_message_into,
+    MAX_CLIENT_ENVIRONMENT_BYTES, MAX_CLIENT_ENVIRONMENT_ENTRIES,
+    MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES,
+    MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId, PasteUploadPurpose, PreparedCommand,
+    ProtocolMessage, ServerError, ServerHello, encode_protocol_message_into,
+    read_protocol_message_into,
 };
 
 static CLIENT_INSTANCE_ID: OnceLock<ClientInstanceId> = OnceLock::new();
@@ -1112,6 +1116,55 @@ fn client_working_directory(
         })
 }
 
+fn client_environment() -> Vec<String> {
+    client_environment_with(std::env::vars_os())
+}
+
+fn client_environment_with<I, K, V>(environment: I) -> Vec<String>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: Into<OsString>,
+    V: Into<OsString>,
+{
+    let environment = environment
+        .into_iter()
+        .filter_map(|(name, value)| {
+            let name = name.into().into_string().ok()?;
+            let value = value.into().into_string().ok()?;
+            Some((name, value))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut snapshot = Vec::new();
+    let mut total_bytes = 0usize;
+    for (name, value) in environment {
+        if snapshot.len() == MAX_CLIENT_ENVIRONMENT_ENTRIES {
+            break;
+        }
+        if name.is_empty() || name.contains(['=', '\0']) || value.contains('\0') {
+            continue;
+        }
+        let Some(entry_bytes) = name
+            .len()
+            .checked_add(1)
+            .and_then(|length| length.checked_add(value.len()))
+        else {
+            continue;
+        };
+        if entry_bytes > MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES {
+            continue;
+        }
+        let Some(next_total_bytes) = total_bytes.checked_add(entry_bytes) else {
+            continue;
+        };
+        if next_total_bytes > MAX_CLIENT_ENVIRONMENT_BYTES {
+            continue;
+        }
+        snapshot.push(format!("{name}={value}"));
+        total_bytes = next_total_bytes;
+    }
+    snapshot
+}
+
 fn connect<T: Transport>(
     endpoint: &T::Endpoint,
     endpoint_display: impl fmt::Display,
@@ -1210,6 +1263,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
             .flatten()
             .and_then(|pane| pane.parse().ok()),
         working_directory: client_working_directory(client_facts, || std::env::current_dir().ok()),
+        environment: client_environment(),
     }))?;
     let hello = match reader.recv()? {
         ProtocolMessage::ServerHello(hello) => hello,
@@ -1241,13 +1295,16 @@ pub fn short_device_name() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{ffi::OsString, path::PathBuf};
 
-    use zz_protocol::{ClientHello, ClientKind, MAX_CLIENT_WORKING_DIRECTORY_BYTES};
+    use zz_protocol::{
+        ClientHello, ClientKind, MAX_CLIENT_ENVIRONMENT_BYTES, MAX_CLIENT_ENVIRONMENT_ENTRIES,
+        MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES,
+    };
 
     use super::{
-        CallerTtyScope, EndpointFactsScope, attach_session_command, client_working_directory,
-        startup_config_owner_capability, terminal_facts_capabilities,
+        CallerTtyScope, EndpointFactsScope, attach_session_command, client_environment_with,
+        client_working_directory, startup_config_owner_capability, terminal_facts_capabilities,
         terminal_facts_capabilities_with,
     };
 
@@ -1315,6 +1372,82 @@ mod tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn client_environment_is_sorted_deduplicated_and_bounded() {
+        let mut environment = (0..MAX_CLIENT_ENVIRONMENT_ENTRIES + 4)
+            .rev()
+            .map(|index| (format!("ZZ_{index:04}"), index.to_string()))
+            .collect::<Vec<_>>();
+        environment.extend([
+            (String::new(), "empty-name".to_owned()),
+            ("BAD=NAME".to_owned(), "value".to_owned()),
+            ("NUL_NAME\0".to_owned(), "value".to_owned()),
+            ("NUL_VALUE".to_owned(), "value\0".to_owned()),
+            ("ZZ_0000".to_owned(), "replacement".to_owned()),
+        ]);
+        let snapshot = client_environment_with(environment);
+        assert_eq!(snapshot.len(), MAX_CLIENT_ENVIRONMENT_ENTRIES);
+        assert_eq!(
+            snapshot.first().map(String::as_str),
+            Some("ZZ_0000=replacement")
+        );
+        assert_eq!(snapshot.last().map(String::as_str), Some("ZZ_4095=4095"));
+        assert!(snapshot.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn client_environment_skips_oversized_entries_and_caps_aggregate_deterministically() {
+        let environment = (0..300)
+            .map(|index| {
+                (
+                    format!("ZZ_{index:03}"),
+                    "x".repeat(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES - 7),
+                )
+            })
+            .chain([(
+                "ZZ_OVERSIZED".to_owned(),
+                "x".repeat(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES),
+            )])
+            .collect::<Vec<_>>();
+        let forward = client_environment_with(environment.clone());
+        let reverse = client_environment_with(environment.into_iter().rev());
+        assert_eq!(forward, reverse);
+        assert_eq!(
+            forward.len(),
+            MAX_CLIENT_ENVIRONMENT_BYTES / MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES
+        );
+        assert!(forward.iter().map(String::len).sum::<usize>() <= MAX_CLIENT_ENVIRONMENT_BYTES);
+        assert!(
+            forward
+                .iter()
+                .all(|entry| entry.len() <= MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES)
+        );
+        assert!(
+            !forward
+                .iter()
+                .any(|entry| entry.starts_with("ZZ_OVERSIZED="))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn client_environment_skips_non_utf8_os_strings() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let snapshot = client_environment_with([
+            (
+                OsString::from_vec(vec![b'Z', b'Z', b'_', 0xff]),
+                OsString::from("value"),
+            ),
+            (
+                OsString::from("ZZ_VALUE"),
+                OsString::from_vec(vec![b'v', 0xff]),
+            ),
+            (OsString::from("ZZ_VALID"), OsString::from("kept")),
+        ]);
+        assert_eq!(snapshot, ["ZZ_VALID=kept"]);
     }
 
     #[test]

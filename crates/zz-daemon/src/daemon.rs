@@ -4180,6 +4180,7 @@ impl Shared {
             inner.client_ttys.remove(&client);
             inner.client_sizes.remove(&client);
             inner.client_working_directories.remove(&client);
+            inner.client_environments.remove(&client);
             inner.published_mux_options.remove(&client);
             inner.client_origins.remove(&client);
             inner.client_activity.remove(&client);
@@ -5107,6 +5108,9 @@ impl Shared {
             context.set_client_working_directory(
                 inner.client_working_directories.get(&client).cloned(),
             );
+            if let Some(environment) = inner.client_environments.get(&client).cloned() {
+                context.set_client_environment(Some(environment));
+            }
             let previous_client_terminal = context_client_terminal(context);
             set_context_client_terminal(context, invoking_client_terminal);
             let execution = inner.engine.execute_without_alias_expansion(
@@ -6340,8 +6344,15 @@ impl Shared {
                         detach_others,
                         read_only,
                         flags,
+                        update_environment,
                     } => {
-                        attach = Some((*session, *detach_others, *read_only, flags.clone()));
+                        attach = Some((
+                            *session,
+                            *detach_others,
+                            *read_only,
+                            flags.clone(),
+                            *update_environment,
+                        ));
                     }
                     MuxEffect::Detach(request) => {
                         let target_client = resolve_client_target(
@@ -6564,13 +6575,21 @@ impl Shared {
                 }
             }
         }
-        if let Some((session, detach_others, read_only, flags)) = attach {
+        if let Some((session, detach_others, read_only, flags, update_environment)) = attach {
             self.set_requested_client_flags(client, flags.as_deref(), read_only);
             if invoking_client_terminal == ClientTerminal::Absent {
                 return Err(ServerError::InvalidCommand(
                     "open terminal failed: not a terminal".to_owned(),
                 )
                 .into());
+            }
+            if update_environment {
+                let mut inner = self.inner.lock();
+                if let Some(environment) = inner.client_environments.get(&client).cloned() {
+                    inner
+                        .engine
+                        .update_session_environment_from_client(session, &environment)?;
+                }
             }
             if invoking_client_terminal == ClientTerminal::Present {
                 let (mut snapshot, attach_hook_events) =
@@ -9391,6 +9410,14 @@ impl Shared {
         let preserve_repeat = context.repeat_binding();
         let same_session =
             client_attached_session(&self.inner.lock(), target_client) == Some(target_session);
+        if !parsed.has('E') {
+            let mut inner = self.inner.lock();
+            if let Some(environment) = inner.client_environments.get(&target_client).cloned() {
+                inner
+                    .engine
+                    .update_session_environment_from_client(target_session, &environment)?;
+            }
+        }
         let (snapshot, mut attach_events) =
             self.attach_collect_event_hooks(target_client, target_session, !context.no_hooks)?;
         if same_session && !context.no_hooks {
@@ -11118,6 +11145,14 @@ impl Shared {
             Some(window),
             Some(pane),
         ));
+        {
+            let mut inner = self.inner.lock();
+            if let Some(environment) = inner.client_environments.get(&client).cloned() {
+                inner
+                    .engine
+                    .update_session_environment_from_client(session, &environment)?;
+            }
+        }
         let snapshot = self.attach(client, session)?;
         Ok((session, snapshot))
     }
@@ -14553,15 +14588,19 @@ impl Shared {
                 .map(|confirm| confirm.state.clone());
             let session = client_attached_session(&inner, client);
             let view = TerminalViewId(client.0);
-            let viewports = session.map_or_else(Vec::new, |session| {
-                visible_terminal_panes(&inner, client, session)
-                    .into_iter()
-                    .filter_map(|pane| {
-                        terminal_viewport_for_pane(&inner, pane, view)
-                            .map(|(terminal, viewport)| (pane, terminal, (*viewport).clone()))
-                    })
-                    .collect()
-            });
+            let viewports = if client_terminal_publication_frozen(&inner, client) {
+                Vec::new()
+            } else {
+                session.map_or_else(Vec::new, |session| {
+                    visible_terminal_panes(&inner, client, session)
+                        .into_iter()
+                        .filter_map(|pane| {
+                            terminal_viewport_for_pane(&inner, pane, view)
+                                .map(|(terminal, viewport)| (pane, terminal, (*viewport).clone()))
+                        })
+                        .collect()
+                })
+            };
             (
                 snapshot,
                 viewports,
@@ -14609,7 +14648,9 @@ impl Shared {
                 let _ = outbound.replace_terminal(pane, &viewport);
             }
         }
-        if let Some((state, _terminal, viewport)) = popup {
+        if let Some((state, _terminal, viewport)) =
+            popup.filter(|_| !client_terminal_publication_frozen(&self.inner.lock(), client))
+        {
             let _ = outbound.replace_terminal_viewport(
                 state.pane,
                 Self::next_sequence(),
@@ -14649,6 +14690,9 @@ impl Shared {
     fn send_full(&self, client: ClientId, pane: PaneId, outbound: &OutboundMailbox) {
         let popup = {
             let inner = self.inner.lock();
+            if client_terminal_publication_frozen(&inner, client) {
+                return;
+            }
             inner.popups.get(&client).and_then(|popup| {
                 (popup.state.pane == pane).then(|| {
                     popup
@@ -15188,6 +15232,9 @@ impl Shared {
     ) {
         let (pane, subscriber) = {
             let inner = self.inner.lock();
+            if client_terminal_publication_frozen(&inner, client) {
+                return;
+            }
             let Some(popup) = inner.popups.get(&client) else {
                 return;
             };
@@ -17105,9 +17152,12 @@ impl Shared {
             let Some(outbound) = inner.subscribers.get(&client).cloned() else {
                 return;
             };
-            let panes = client_attached_session(&inner, client)
+            let mut panes = client_attached_session(&inner, client)
                 .map(|session| visible_terminal_panes(&inner, client, session))
                 .unwrap_or_default();
+            if let Some(pane) = inner.popups.get(&client).map(|popup| popup.state.pane) {
+                panes.insert(pane);
+            }
             (outbound, panes)
         };
         for pane in panes {
@@ -19796,6 +19846,7 @@ struct ServerState {
     client_ttys: BTreeMap<ClientId, String>,
     client_sizes: BTreeMap<ClientId, (u16, u16)>,
     client_working_directories: BTreeMap<ClientId, PathBuf>,
+    client_environments: BTreeMap<ClientId, Arc<BTreeMap<String, String>>>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
     client_flags: ClientFlags,
@@ -22246,6 +22297,16 @@ fn client_working_directory_fact(working_directory: Option<&Path>) -> Option<Pat
     working_directory
         .filter(|working_directory| working_directory.is_absolute())
         .map(Path::to_owned)
+}
+
+fn client_environment_fact(entries: &[String]) -> Arc<BTreeMap<String, String>> {
+    Arc::new(
+        entries
+            .iter()
+            .filter_map(|entry| entry.split_once('='))
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect(),
+    )
 }
 
 fn effective_mux_options(inner: &ServerState, client: ClientId) -> MuxOptions {
@@ -27149,6 +27210,9 @@ fn handle_connection<S: TransportStream>(
                 .client_working_directories
                 .insert(client, working_directory);
         }
+        inner
+            .client_environments
+            .insert(client, client_environment_fact(&hello.environment));
     }
     let mut registration = ClientRegistrationGuard::new(shared, client);
     log::debug!(
@@ -33275,6 +33339,7 @@ mod tests {
                     capabilities: Vec::new(),
                     color_scheme: None,
                     origin: None,
+                    environment: Vec::new(),
                     working_directory: None,
                 }),
             )
@@ -33323,6 +33388,7 @@ mod tests {
             capabilities: Vec::new(),
             color_scheme: None,
             origin: None,
+            environment: Vec::new(),
             working_directory: None,
         }))
         .unwrap();
@@ -33366,6 +33432,7 @@ mod tests {
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                environment: Vec::new(),
                 working_directory: None,
             }),
         )
@@ -33417,6 +33484,7 @@ mod tests {
                     capabilities: Vec::new(),
                     color_scheme: None,
                     origin: None,
+                    environment: Vec::new(),
                     working_directory: None,
                 }),
             )
@@ -35505,7 +35573,17 @@ mod tests {
                 ("paste-buffer-deleted", Some("named")),
             ]
         );
-        assert!(take_reliable_messages(&interactive_mailbox).is_empty());
+        assert!(
+            take_reliable_messages(&interactive_mailbox)
+                .iter()
+                .all(|message| !matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::PaneOutput { .. },
+                        ..
+                    })
+                ))
+        );
     }
 
     #[test]
@@ -35729,7 +35807,17 @@ mod tests {
                 )
             }));
         }
-        assert!(take_reliable_messages(&interactive_mailbox).is_empty());
+        let interactive_messages = take_reliable_messages(&interactive_mailbox);
+        assert!(
+            interactive_messages.iter().all(|message| !matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::PaneOutput { .. },
+                    ..
+                })
+            )),
+            "interactive client received control output: {interactive_messages:#?}"
+        );
     }
 
     #[test]
@@ -43653,6 +43741,8 @@ mod tests {
         drain_terminal_lane(&frozen_mailbox);
         drain_terminal_lane(&live_mailbox);
         shared.publish_terminal_for_pane(pane, frozen, TerminalFanout::Full, &viewport, &terminal);
+        shared.send_full(frozen, pane, &frozen_mailbox);
+        shared.send_resync(frozen, &frozen_mailbox);
         shared.publish_terminal_for_pane(pane, live, TerminalFanout::Full, &viewport, &terminal);
         assert!(frozen_mailbox.state.lock().terminals.is_empty());
         assert!(live_mailbox.state.lock().terminals.contains_key(&pane));
@@ -45883,6 +45973,22 @@ mod tests {
         assert_eq!(
             shared.inner.lock().client_sizes.get(&client),
             Some(&(132, 50))
+        );
+    }
+
+    #[test]
+    fn client_environment_entries_become_an_immutable_name_value_map() {
+        let environment = client_environment_fact(&[
+            "EMPTY=".to_owned(),
+            "EXACT=first".to_owned(),
+            "EXACT=last".to_owned(),
+            "VALUE=contains=equals".to_owned(),
+        ]);
+        assert_eq!(environment.get("EMPTY").map(String::as_str), Some(""));
+        assert_eq!(environment.get("EXACT").map(String::as_str), Some("last"));
+        assert_eq!(
+            environment.get("VALUE").map(String::as_str),
+            Some("contains=equals")
         );
     }
 
@@ -61372,6 +61478,288 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn attach_environment_refresh_runs_after_terminal_preflight_and_honors_dash_e() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, _) = switch_test_session(&shared, "target");
+        let mut setup = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut setup,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "target", "update-environment", "ATTACHED_ENV"],
+                ),
+            )
+            .expect("session update environment");
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut setup,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-t", "target", "ATTACHED_ENV", "before"],
+                ),
+            )
+            .expect("baseline session environment");
+        let original = shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut setup,
+                &CommandInvocation::new("new-window", ["-d", "-t", "target", "--", "sleep", "30"]),
+            )
+            .expect("original environment window");
+        let original_pane = original
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("original environment pane");
+        let (headless, _) = shared.register(
+            ClientKind::Interactive,
+            ClientInstanceId::default(),
+            Some("headless-environment".to_owned()),
+            None,
+            false,
+        );
+        shared.inner.lock().client_environments.insert(
+            headless,
+            client_environment_fact(&["ATTACHED_ENV=headless".to_owned()]),
+        );
+
+        assert!(matches!(
+            shared.execute(
+                headless,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("attach-session", ["-t", "target"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "open terminal failed: not a terminal"
+        ));
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .environment_for_session(session)
+                .unwrap()
+                .into_iter()
+                .find(|(name, _)| name == "ATTACHED_ENV"),
+            Some(("ATTACHED_ENV".to_owned(), Some("before".to_owned())))
+        );
+
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control-environment".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.inner.lock().client_environments.insert(
+            control,
+            client_environment_fact(&["ATTACHED_ENV=control".to_owned()]),
+        );
+        let mut control_context = ExecutionContext::default();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-t", "target"]),
+            )
+            .expect("control environment refresh");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .environment_for_session(session)
+                .unwrap()
+                .into_iter()
+                .find(|(name, _)| name == "ATTACHED_ENV"),
+            Some(("ATTACHED_ENV".to_owned(), Some("control".to_owned())))
+        );
+        assert!(
+            shared.inner.lock().terminal_spawns[&original_pane]
+                .env
+                .contains(&("ATTACHED_ENV".to_owned(), Some("before".to_owned())))
+        );
+        let future = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("new-window", ["-d", "-t", "target", "--", "sleep", "30"]),
+            )
+            .expect("refreshed environment window");
+        let future_pane = future
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .expect("refreshed environment pane");
+        assert!(
+            shared.inner.lock().terminal_spawns[&future_pane]
+                .env
+                .contains(&("ATTACHED_ENV".to_owned(), Some("control".to_owned())))
+        );
+        shared
+            .execute(
+                ClientId(90),
+                ClientKind::Command,
+                &mut setup,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-t", "target", "ATTACHED_ENV", "preserved"],
+                ),
+            )
+            .expect("preserved environment");
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-E", "-t", "target"]),
+            )
+            .expect("control attach without refresh");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .environment_for_session(session)
+                .unwrap()
+                .into_iter()
+                .find(|(name, _)| name == "ATTACHED_ENV"),
+            Some(("ATTACHED_ENV".to_owned(), Some("preserved".to_owned())))
+        );
+
+        shared.inner.lock().client_environments.insert(
+            control,
+            client_environment_fact(&["ATTACHED_ENV=native".to_owned()]),
+        );
+        shared
+            .attach_target(control, ClientKind::Control, &mut control_context, "target")
+            .expect("native attach environment refresh");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .environment_for_session(session)
+                .unwrap()
+                .into_iter()
+                .find(|(name, _)| name == "ATTACHED_ENV"),
+            Some(("ATTACHED_ENV".to_owned(), Some("native".to_owned())))
+        );
+    }
+
+    #[test]
+    fn targeted_switch_uses_the_selected_clients_environment() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (target, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("environment-target".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (caller, _) = shared.register(
+            ClientKind::Command,
+            ClientInstanceId::default(),
+            Some("environment-caller".to_owned()),
+            None,
+            false,
+        );
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_environments.insert(
+                target,
+                client_environment_fact(&["SWITCH_ENV=target".to_owned()]),
+            );
+            inner.client_environments.insert(
+                caller,
+                client_environment_fact(&["SWITCH_ENV=caller".to_owned()]),
+            );
+        }
+        shared.attach(target, a).expect("target attachment");
+        let mut caller_context = ExecutionContext::default();
+        shared
+            .execute(
+                caller,
+                ClientKind::Command,
+                &mut caller_context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-t", "B", "update-environment", "SWITCH_ENV"],
+                ),
+            )
+            .expect("switch destination environment option");
+        shared
+            .execute(
+                caller,
+                ClientKind::Command,
+                &mut caller_context,
+                &CommandInvocation::new("switch-client", ["-c", "environment-target", "-t", "B"]),
+            )
+            .expect("targeted switch");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), target),
+            Some(b)
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .environment_for_session(b)
+                .unwrap()
+                .into_iter()
+                .find(|(name, _)| name == "SWITCH_ENV"),
+            Some(("SWITCH_ENV".to_owned(), Some("target".to_owned())))
+        );
+
+        shared
+            .execute(
+                caller,
+                ClientKind::Command,
+                &mut caller_context,
+                &CommandInvocation::new("set-environment", ["-t", "B", "SWITCH_ENV", "preserved"]),
+            )
+            .expect("switch preserve baseline");
+        shared
+            .execute(
+                caller,
+                ClientKind::Command,
+                &mut caller_context,
+                &CommandInvocation::new(
+                    "switch-client",
+                    ["-E", "-c", "environment-target", "-t", "B"],
+                ),
+            )
+            .expect("targeted switch without refresh");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .environment_for_session(b)
+                .unwrap()
+                .into_iter()
+                .find(|(name, _)| name == "SWITCH_ENV"),
+            Some(("SWITCH_ENV".to_owned(), Some("preserved".to_owned())))
+        );
+    }
+
+    #[test]
     fn attached_fresh_new_session_applies_flags_after_terminal_materialization() {
         let shared = Arc::new(Shared::new(1));
         let (client, _) = shared.register_subscribed(
@@ -69962,6 +70350,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 capabilities: vec![ClientHello::STARTUP_CONFIG_OWNER_CAPABILITY.to_owned()],
                 color_scheme: None,
                 origin: None,
+                environment: Vec::new(),
                 working_directory: None,
             }),
         )
@@ -70035,6 +70424,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                environment: Vec::new(),
                 working_directory: None,
             }),
         )
@@ -70116,6 +70506,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                environment: Vec::new(),
                 working_directory: None,
             }),
         )
@@ -70214,6 +70605,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
+                environment: Vec::new(),
                 working_directory: None,
             }),
         )

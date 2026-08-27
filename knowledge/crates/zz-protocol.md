@@ -21,7 +21,7 @@ The crate is small and dependency-light: five dependencies, `postcard`, `serde`,
 `thiserror`, and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`, `PackedCell`, and
 friends that ride the terminal lane). It has no cargo features at all since v43 retired `compress` and its optional
 `zstd`. Because it encodes the wire format, **any encoding-affecting change requires bumping
-`PROTOCOL_VERSION`**, currently 81. See [the wire protocol](/protocol/wire-protocol.md).
+`PROTOCOL_VERSION`**, currently 82. See [the wire protocol](/protocol/wire-protocol.md).
 
 # What it exports
 
@@ -33,7 +33,7 @@ friends that ride the terminal lane). It has no cargo features at all since v43 
 | `framing` | `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, `ProtocolError` | [wire protocol](/protocol/wire-protocol.md) |
 | `id` | `ClientId`, `PaneId`, `SessionId`, `SplitId`, `WindowId` | [stable IDs](/protocol/ids.md) |
 | `key` | `Binding`, `KeyTables`, `KeyEngine`, `KeyDecision`, `canonical_key`, `input_key_name`, `input_typed_text`, `is_key_name`, `KeyEngine::handle_synthetic_any_with_repeat_metadata`, `KeyEngine::handle_transient_mode_synthetic_any` | [key tables](/tmux/key-tables.md) |
-| `message` | `ProtocolMessage`, `Event`, `EventPayload` including v81 `ControlCommandOutput`, v80 `StartupConfigCauses`, v79 command-output actor IDs, v77 `ControlCommandGuard`, and v78 `ControlSourceFile`, `ControlSourceFileEvent`, `InputMessage`, `ClientHello`, `ServerHello`, `ServerError` including v76 `CommandParse`, `ConfigOverrideEntry`, `MuxOptions`/`MuxOptionKey`/`MuxOptionValue`, `StatusLine`/`StatusPosition`, `CommandPromptType`/`CommandPromptMode`, `PROTOCOL_VERSION`, `NEW_SESSION_ATTACH_CAPABILITY`, the terminal-fact constants exposed through `ClientHello`, `SPLIT_RATIO_BASIS`, choose-tree / choose-buffer / display-panes types | [wire protocol](/protocol/wire-protocol.md) |
+| `message` | `ProtocolMessage`, `Event`, `EventPayload` including v81 `ControlCommandOutput`, v80 `StartupConfigCauses`, v79 command-output actor IDs, v77 `ControlCommandGuard`, and v78 `ControlSourceFile`, `ControlSourceFileEvent`, `InputMessage`, v82 `ClientHello.environment`, `ServerHello`, `ServerError` including v76 `CommandParse`, `ConfigOverrideEntry`, `MuxOptions`/`MuxOptionKey`/`MuxOptionValue`, `StatusLine`/`StatusPosition`, `CommandPromptType`/`CommandPromptMode`, `PROTOCOL_VERSION`, `NEW_SESSION_ATTACH_CAPABILITY`, the terminal-fact constants exposed through `ClientHello`, `SPLIT_RATIO_BASIS`, choose-tree / choose-buffer / display-panes types | [wire protocol](/protocol/wire-protocol.md) |
 | `snapshot` | `MuxSnapshot`, `SessionSnapshot`, `SessionViewer`, `WindowSnapshot`, `PaneSnapshot`, `LayoutNode`, `Axis`, `BrowserDescriptor`, `AgentDescriptor`, `AgentProvider`, `EditorDescriptor`, `PaneKindSnapshot` | [snapshots](/protocol/snapshots.md) |
 | `style` | `StyledSegment`, `TmuxAlign`, `TmuxAttributeState`, `TmuxAttributes`, `TmuxColour`, `TmuxDefaultType`, `TmuxList`, `TmuxRange`, `TmuxStyle`, `TmuxWidth`, and the style and colour parsers | [wire protocol](/protocol/wire-protocol.md) |
 | `terminal_codec` | `encode_protocol_message`, `decode_protocol_frame`, `read_protocol_message`, `write_protocol_message`, and their `_into` buffer-reusing variants | [packed terminal lanes](/protocol/terminal-lanes.md) |
@@ -66,10 +66,18 @@ and a frame's payload is now always exactly what the lane's encoder produced.
 
 `ClientHello` carries the protocol version, a `ClientKind`, an optional `device_name` (the client's
 short hostname, bounded at 256 bytes), a capability list, the client's color scheme, an optional
-`origin` pane (`$ZZ_PANE`) so untargeted CLI commands resolve against the invoking pane, and an
-optional 16 KiB `working_directory`. Local clients publish that path; SSH callers omit it because
+`origin` pane (`$ZZ_PANE`) so untargeted CLI commands resolve against the invoking pane, an
+optional 16 KiB `working_directory`, and protocol v82's bounded `environment` snapshot. Local
+clients publish that path; SSH callers omit it because
 their local path has no meaning on the daemon host. A local cwd that is not UTF-8 or exceeds the
-bound is omitted instead of preventing the client from connecting.
+bound is omitted instead of preventing the client from connecting. Both local and SSH-forwarded
+connections carry their UTF-8-representable process environment because command execution happens
+on the daemon host. Unrepresentable Unix names or values are omitted without substitution and
+remain tracked with non-UTF-8 client paths.
+The snapshot admits at most 4,096 valid `NAME=VALUE` entries, 16,367 bytes per entry, and 4 MiB in
+aggregate. Names must be nonempty and contain neither `=` nor NUL; values may be empty or contain
+additional `=` bytes. The client sorts and deduplicates before sending, while encoder and decoder
+enforce the same limits. Debug output reports only the entry count.
 `ServerHello` answers with the assigned `ClientId`, the daemon's own capabilities, resolved
 appearance plus provenance, the effective `MuxOptions`, the rendered status line, and
 `key_tables` (every live table, refreshed later by `KeyTablesChanged`). Both capability
@@ -123,6 +131,10 @@ foreground shell output to one Control client after that command's guard. The pa
 flags or status bit; `control_mode.rs` owns LF termination, literal percent-prefixed lines, and the
 rule that this event does not change Control retval.
 
+Protocol v82 appends `ClientHello.environment`. The daemon retains one immutable snapshot for the
+connection and removes it on unregister. Fresh session creation, attach, native attach, Control
+attach, and selected-client switch use it to apply tmux's effective `update-environment` rules.
+
 `MuxSnapshot` carries two per-recipient fields the daemon stamps for each subscriber:
 `focused_window`, that client's own window focus, and `SessionSnapshot::viewers`, a
 `Vec<SessionViewer>` of device name, focused window, and an `is_self` flag.
@@ -137,7 +149,7 @@ or names a window that no longer exists, so removing a focused window needs no s
 | `crates/zz-protocol/src/catalog.rs` | Canonical command names, aliases, descriptions, accepted options, and completion value kinds |
 | `crates/zz-protocol/src/framing.rs` | Length-prefixed envelope, `Lane` tag, reserved flags byte, version check, `ProtocolError`, control-lane `encode/decode/read/write` |
 | `crates/zz-protocol/src/key.rs` | Shared `KeyTables`/`KeyEngine` model, default pane and overlay tables, key folding, typed-text precedence, bind/unbind, synthetic `Any` dispatch with repeat and transient-mode handling, and snapshots |
-| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 81`, `MAX_BROWSER_KEY_REPEAT = 9,999`, the three startup-cause limits, `ProtocolMessage` (including the request-correlated command-prepare tail, `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `CommandRequest.prepared` plus typed prepared-command results, bounded client working-directory context, durable chooser static-filter fallback state, `MuxOptionKey`/`MuxOptions` (seventeen keys, including the three agent adapter options and the v71 `Mouse`/`EscapeTime`/`Prefix2` tail), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including v81 `ControlCommandOutput` at tail tag 50, v80 `StartupConfigCauses` at tail tag 49, the v79 `CommandOutput.output_id` field on stable tag 11, v77 `ControlCommandGuard` at tail tag 47 with command-frame flags and independent sticky status, v78 `ControlSourceFile` at tail tag 48 with typed raw-read and invisible-completion events, `TimedClientMessage` with its v71 `message_id`, `TimedClientMessageCleared`, `PrefixCancelled`, `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` plus `AgentGitSummary` and their validation, `InputMessage` (including `CancelPrefix`, `ClientTerminalSize`, and v73 `ClientFocus`), `ServerError::CommandParse` with its v76 tail tag 12, hello/command/error/UI-state types, and their byte bounds |
+| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 82`, `MAX_BROWSER_KEY_REPEAT = 9,999`, the client-environment and startup-cause limits, `ProtocolMessage` (including the request-correlated command-prepare tail, `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `CommandRequest.prepared` plus typed prepared-command results, bounded client working-directory and environment context, durable chooser static-filter fallback state, `MuxOptionKey`/`MuxOptions` (seventeen keys, including the three agent adapter options and the v71 `Mouse`/`EscapeTime`/`Prefix2` tail), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including v81 `ControlCommandOutput` at tail tag 50, v80 `StartupConfigCauses` at tail tag 49, the v79 `CommandOutput.output_id` field on stable tag 11, v77 `ControlCommandGuard` at tail tag 47 with command-frame flags and independent sticky status, v78 `ControlSourceFile` at tail tag 48 with typed raw-read and invisible-completion events, `TimedClientMessage` with its v71 `message_id`, `TimedClientMessageCleared`, `PrefixCancelled`, `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` plus `AgentGitSummary` and their validation, `InputMessage` (including `CancelPrefix`, `ClientTerminalSize`, and v73 `ClientFocus`), `ServerError::CommandParse` with its v76 tail tag 12, hello/command/error/UI-state types, and their byte bounds |
 | `crates/zz-protocol/src/id.rs` | The `stable_id!` macro and the five sigil-prefixed `u64` newtype IDs |
 | `crates/zz-protocol/src/terminal_codec.rs` | Terminal-lane packer/unpacker for viewports and patches, plus lane-selecting encode/decode entrypoints and validation |
 | `crates/zz-protocol/src/snapshot.rs` | `MuxSnapshot` and the session/window/pane/layout tree it carries, including automatic-rename and retained-dead metadata, plus per-client window focus and `SessionViewer` presence |

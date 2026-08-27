@@ -11,8 +11,10 @@ use zz_terminal::{
 };
 
 use crate::message::{
-    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES,
-    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
+    MAX_CLIENT_ENVIRONMENT_BYTES, MAX_CLIENT_ENVIRONMENT_ENTRIES,
+    MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_KITTY_IMAGE_BYTES,
+    MAX_KITTY_IMAGE_CHUNK_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
+    MAX_STARTUP_CONFIG_CAUSES_BYTES, client_environment_is_valid,
 };
 use crate::{
     AgentSessionOpKind, BrowserCommand, Event, EventPayload, MAX_AGENT_IMAGE_FORMAT_BYTES,
@@ -299,6 +301,13 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
         }) {
             return Err(ProtocolError::InvalidClientHello(format!(
                 "working directory must be at most {MAX_CLIENT_WORKING_DIRECTORY_BYTES} bytes"
+            )));
+        }
+        if !client_environment_is_valid(&hello.environment) {
+            return Err(ProtocolError::InvalidClientHello(format!(
+                "environment must contain at most {MAX_CLIENT_ENVIRONMENT_ENTRIES} valid \
+                 NAME=VALUE entries of at most {MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES} bytes each \
+                 and {MAX_CLIENT_ENVIRONMENT_BYTES} bytes total"
             )));
         }
     }
@@ -2609,6 +2618,7 @@ mod tests {
                 color_scheme: Some(zz_terminal::TerminalColorScheme::Dark),
                 origin: None,
                 working_directory: None,
+                environment: Vec::new(),
             });
             assert!(matches!(
                 encode_protocol_message(&message),
@@ -2637,6 +2647,7 @@ mod tests {
                 color_scheme: None,
                 origin: None,
                 working_directory: Some(std::path::PathBuf::from("x".repeat(length))),
+                environment: Vec::new(),
             })
         };
         let boundary = hello_with_working_directory(MAX_CLIENT_WORKING_DIRECTORY_BYTES);
@@ -2659,6 +2670,98 @@ mod tests {
             decode_protocol_frame(&frame),
             Err(ProtocolError::Decode(_))
         ));
+    }
+
+    #[test]
+    fn client_hello_environment_enforces_count_item_aggregate_and_syntax_bounds() {
+        assert_eq!(MAX_CLIENT_ENVIRONMENT_ENTRIES, 4096);
+        assert_eq!(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, 16_367);
+        assert_eq!(MAX_CLIENT_ENVIRONMENT_BYTES, 4 * 1024 * 1024);
+
+        let entry = |length: usize| {
+            assert!(length >= 2);
+            format!("N={}", "x".repeat(length - 2))
+        };
+        let message = |environment| {
+            ProtocolMessage::ClientHello(crate::ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                client_instance_id: crate::ClientInstanceId(13),
+                kind: crate::ClientKind::Command,
+                device_name: None,
+                capabilities: Vec::new(),
+                color_scheme: None,
+                origin: None,
+                working_directory: None,
+                environment,
+            })
+        };
+        let rejected = |environment| {
+            let invalid = message(environment);
+            assert!(matches!(
+                encode_protocol_message(&invalid),
+                Err(ProtocolError::InvalidClientHello(_))
+            ));
+            let payload = postcard::to_stdvec(&invalid).expect("serialize invalid environment");
+            let frame = crate::framing::encode_enveloped(Lane::Control, &payload)
+                .expect("envelope invalid environment");
+            assert!(matches!(
+                decode_protocol_frame(&frame),
+                Err(ProtocolError::Decode(_))
+            ));
+        };
+
+        rejected(vec!["N=".to_owned(); MAX_CLIENT_ENVIRONMENT_ENTRIES + 1]);
+        rejected(vec![entry(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES + 1)]);
+        for malformed in ["", "NAME", "=value", "NA\0ME=value", "NAME=va\0lue"] {
+            rejected(vec![malformed.to_owned()]);
+        }
+
+        let count_boundary = message(vec!["N=".to_owned(); MAX_CLIENT_ENVIRONMENT_ENTRIES]);
+        let frame = encode_protocol_message(&count_boundary).expect("encode count boundary");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode count boundary"),
+            count_boundary
+        );
+
+        let full_entries = MAX_CLIENT_ENVIRONMENT_BYTES / MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES;
+        let remainder = MAX_CLIENT_ENVIRONMENT_BYTES % MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES;
+        let mut environment = vec![entry(MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES); full_entries];
+        environment.push(entry(remainder));
+        let aggregate_boundary = message(environment.clone());
+        let frame =
+            encode_protocol_message(&aggregate_boundary).expect("encode aggregate boundary");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode aggregate boundary"),
+            aggregate_boundary
+        );
+        environment.push("N=x".to_owned());
+        rejected(environment);
+
+        let equals_in_value = message(vec!["TOKEN=left=right".to_owned()]);
+        let frame = encode_protocol_message(&equals_in_value).expect("encode equals in value");
+        assert_eq!(
+            decode_protocol_frame(&frame).expect("decode equals in value"),
+            equals_in_value
+        );
+    }
+
+    #[test]
+    fn client_hello_debug_omits_environment_contents() {
+        let hello = crate::ClientHello {
+            protocol_version: PROTOCOL_VERSION,
+            client_instance_id: crate::ClientInstanceId(13),
+            kind: crate::ClientKind::Command,
+            device_name: None,
+            capabilities: Vec::new(),
+            color_scheme: None,
+            origin: None,
+            working_directory: None,
+            environment: vec!["ZZ_SECRET=do-not-print".to_owned()],
+        };
+        let debug = format!("{hello:?}");
+        assert!(debug.contains("environment_entries: 1"));
+        assert!(!debug.contains("ZZ_SECRET"));
+        assert!(!debug.contains("do-not-print"));
     }
 
     #[test]
@@ -2796,6 +2899,7 @@ mod tests {
             color_scheme: None,
             origin: None,
             working_directory: Some(std::path::PathBuf::from("/tmp/client-fixture")),
+            environment: Vec::new(),
         });
         let mut bytes = Vec::new();
         write_protocol_message(&mut bytes, &message).expect("write message");

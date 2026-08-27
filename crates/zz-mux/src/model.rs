@@ -3636,7 +3636,7 @@ struct GlobClassCharacter {
     escaped: bool,
 }
 
-fn fnmatch(pattern: &str, value: &str) -> bool {
+pub(crate) fn fnmatch(pattern: &str, value: &str) -> bool {
     let Some(tokens) = glob_tokens(pattern) else {
         return false;
     };

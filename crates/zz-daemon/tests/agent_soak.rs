@@ -220,6 +220,7 @@ impl Peer {
             color_scheme: None,
             origin: None,
             working_directory: None,
+            environment: Vec::new(),
         }));
         assert!(
             matches!(peer.recv(), ProtocolMessage::ServerHello(_)),

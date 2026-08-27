@@ -105,6 +105,7 @@ fn attaching_commands_accept_client_flag_values() {
             detach_others: false,
             read_only: false,
             flags: Some("ignore-size".to_owned()),
+            update_environment: true,
         }]
     );
 }

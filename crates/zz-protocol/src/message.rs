@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 81;
+pub const PROTOCOL_VERSION: u16 = 82;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -40,6 +40,9 @@ pub const MAX_AGENT_SEND_BYTES: usize = 1024 * 1024;
 /// Longest path or human-readable message carried by a GUI request or its reply.
 pub const MAX_GUI_TEXT_BYTES: usize = 64 * 1024;
 pub const MAX_CLIENT_WORKING_DIRECTORY_BYTES: usize = 16 * 1024;
+pub const MAX_CLIENT_ENVIRONMENT_ENTRIES: usize = 4096;
+pub const MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES: usize = 16_367;
+pub const MAX_CLIENT_ENVIRONMENT_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_STARTUP_CONFIG_CAUSES: usize = 1024;
 pub const MAX_STARTUP_CONFIG_CAUSE_BYTES: usize = 64 * 1024;
 pub const MAX_STARTUP_CONFIG_CAUSES_BYTES: usize = 1024 * 1024;
@@ -877,7 +880,134 @@ where
     )
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct BoundedClientEnvironmentEntry(String);
+
+impl<'de> Deserialize<'de> for BoundedClientEnvironmentEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ClientEnvironmentEntryVisitor;
+
+        impl<'de> Visitor<'de> for ClientEnvironmentEntryVisitor {
+            type Value = BoundedClientEnvironmentEntry;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "a NAME=VALUE environment entry no longer than \
+                     {MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES} bytes"
+                )
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_str(value)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if !client_environment_entry_is_valid(value) {
+                    return Err(E::custom("invalid client environment entry"));
+                }
+                Ok(BoundedClientEnvironmentEntry(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if !client_environment_entry_is_valid(&value) {
+                    return Err(E::custom("invalid client environment entry"));
+                }
+                Ok(BoundedClientEnvironmentEntry(value))
+            }
+        }
+
+        deserializer.deserialize_str(ClientEnvironmentEntryVisitor)
+    }
+}
+
+fn client_environment_entry_is_valid(entry: &str) -> bool {
+    entry.len() <= MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES
+        && !entry.contains('\0')
+        && entry
+            .split_once('=')
+            .is_some_and(|(name, _)| !name.is_empty())
+}
+
+pub(crate) fn client_environment_is_valid(environment: &[String]) -> bool {
+    environment.len() <= MAX_CLIENT_ENVIRONMENT_ENTRIES
+        && environment
+            .iter()
+            .all(|entry| client_environment_entry_is_valid(entry))
+        && environment
+            .iter()
+            .try_fold(0usize, |total, entry| total.checked_add(entry.len()))
+            .is_some_and(|total| total <= MAX_CLIENT_ENVIRONMENT_BYTES)
+}
+
+fn deserialize_client_environment<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct ClientEnvironmentVisitor;
+
+    impl<'de> Visitor<'de> for ClientEnvironmentVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                formatter,
+                "at most {MAX_CLIENT_ENVIRONMENT_ENTRIES} environment entries totaling at most \
+                 {MAX_CLIENT_ENVIRONMENT_BYTES} bytes"
+            )
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let hint = sequence.size_hint();
+            if hint.is_some_and(|length| length > MAX_CLIENT_ENVIRONMENT_ENTRIES) {
+                return Err(A::Error::invalid_length(
+                    hint.unwrap_or(MAX_CLIENT_ENVIRONMENT_ENTRIES.saturating_add(1)),
+                    &self,
+                ));
+            }
+            let mut environment =
+                Vec::with_capacity(hint.unwrap_or(0).min(MAX_CLIENT_ENVIRONMENT_ENTRIES));
+            let mut total_bytes = 0usize;
+            while environment.len() < MAX_CLIENT_ENVIRONMENT_ENTRIES {
+                let Some(entry) = sequence.next_element::<BoundedClientEnvironmentEntry>()? else {
+                    return Ok(environment);
+                };
+                total_bytes = total_bytes
+                    .checked_add(entry.0.len())
+                    .ok_or_else(|| A::Error::invalid_length(usize::MAX, &self))?;
+                if total_bytes > MAX_CLIENT_ENVIRONMENT_BYTES {
+                    return Err(A::Error::invalid_length(total_bytes, &self));
+                }
+                environment.push(entry.0);
+            }
+            if sequence.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                return Err(A::Error::invalid_length(
+                    MAX_CLIENT_ENVIRONMENT_ENTRIES.saturating_add(1),
+                    &self,
+                ));
+            }
+            Ok(environment)
+        }
+    }
+
+    deserializer.deserialize_seq(ClientEnvironmentVisitor)
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientHello {
     pub protocol_version: u16,
     pub client_instance_id: ClientInstanceId,
@@ -892,6 +1022,25 @@ pub struct ClientHello {
     pub origin: Option<PaneId>,
     #[serde(deserialize_with = "deserialize_client_working_directory")]
     pub working_directory: Option<PathBuf>,
+    #[serde(deserialize_with = "deserialize_client_environment")]
+    pub environment: Vec<String>,
+}
+
+impl fmt::Debug for ClientHello {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClientHello")
+            .field("protocol_version", &self.protocol_version)
+            .field("client_instance_id", &self.client_instance_id)
+            .field("kind", &self.kind)
+            .field("device_name", &self.device_name)
+            .field("capabilities", &self.capabilities)
+            .field("color_scheme", &self.color_scheme)
+            .field("origin", &self.origin)
+            .field("working_directory", &self.working_directory)
+            .field("environment_entries", &self.environment.len())
+            .finish()
+    }
 }
 
 impl ClientHello {
@@ -3471,7 +3620,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 81);
+        assert_eq!(super::PROTOCOL_VERSION, 82);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_eighty_one() {
-    assert_eq!(PROTOCOL_VERSION, 81);
+fn protocol_version_on_this_commit_is_eighty_two() {
+    assert_eq!(PROTOCOL_VERSION, 82);
 }
 
 #[test]
@@ -256,13 +256,14 @@ fn dark_interactive_hello_encodes_version_and_instance_id_as_varints() {
         color_scheme: Some(TerminalColorScheme::Dark),
         origin: None,
         working_directory: None,
+        environment: Vec::new(),
     }))
     .expect("encode hello");
     assert_eq!(
         frame,
         [
-            0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x51, 0x00, 0x00, 0x51, 0x00, 0x00, 0x00, 0x00,
-            0x01, 0x01, 0x00, 0x00,
+            0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x52, 0x00, 0x00, 0x52, 0x00, 0x00, 0x00, 0x00,
+            0x01, 0x01, 0x00, 0x00, 0x00,
         ]
     );
 }

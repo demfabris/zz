@@ -67,8 +67,10 @@ CHOOSER_SESSION="chooser-target"
 OUTER_SESSION="driver"
 INNER_WINDOW_TARGET="=$INNER_SESSION:0"
 INNER_PANE_TARGET="=$INNER_SESSION:0.0"
-SOURCE_CWD="$SCRATCH_DIR/client [literal]*? cwd"
-SOURCE_CONFIG_DIR="$SOURCE_CWD/config-$INNER_SESSION"
+COMMAND_CWD="$SCRATCH_DIR/client [literal]*? cwd"
+SESSION_CWD="$SCRATCH_DIR/session [literal]*? cwd"
+SOURCE_CONFIG_DIR="$SESSION_CWD/config-$INNER_SESSION"
+SOURCE_CONFIG_DECOY_DIR="$COMMAND_CWD/config-$INNER_SESSION"
 SOURCE_DEPTH_DIR="$SCRATCH_DIR/source-depth"
 SOURCE_OUTPUT_DIR="$SCRATCH_DIR/o"
 SOURCE_OUTPUT_CHILD="$SOURCE_OUTPUT_DIR/c"
@@ -81,10 +83,14 @@ TMUX_ATTACH="$SCRATCH_DIR/attach-tmux"
 ZZ_PID=""
 
 mkdir -p "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$TMUX_HOME" "$TMUX_CONFIG_HOME" \
-  "$OUTER_HOME" "$OUTER_CONFIG_HOME" "$SOURCE_CONFIG_DIR" "$SOURCE_DEPTH_DIR" \
-  "$SOURCE_OUTPUT_DIR"
+  "$OUTER_HOME" "$OUTER_CONFIG_HOME" "$SOURCE_CONFIG_DIR" \
+  "$SOURCE_CONFIG_DECOY_DIR" "$SOURCE_DEPTH_DIR" "$SOURCE_OUTPUT_DIR"
 printf 'set-option -g @attached_source_order glob-first\n' >"$SOURCE_CONFIG_DIR/10.conf"
 printf 'set-option -g @attached_source_order glob-second\n' >"$SOURCE_CONFIG_DIR/20.conf"
+printf 'set-option -g @attached_source_order client-decoy-first\n' \
+  >"$SOURCE_CONFIG_DECOY_DIR/10.conf"
+printf 'set-option -g @attached_source_order client-decoy-second\n' \
+  >"$SOURCE_CONFIG_DECOY_DIR/20.conf"
 
 printf 'set-option -g @attached_depth_leaf yes\n' >"$SOURCE_DEPTH_DIR/leaf.conf"
 printf 'display-message -p ATTACHED_CHILD_ONE\nlist-sessions -F "ATTACHED_CHILD_LIST_#{session_name}"\n' \
@@ -242,13 +248,13 @@ write_attach() {
   local destination="$2"
 
   printf '#!/usr/bin/env bash\n' >"$destination"
-  printf 'cd -- %q\n' "$SOURCE_CWD" >>"$destination"
+  printf 'cd -- %q\n' "$COMMAND_CWD" >>"$destination"
   if [ "$side" = "zz" ]; then
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -t %q\n' \
-      "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$ZZ_BIN" "$ZZ_SOCKET" "$INNER_SESSION" >>"$destination"
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q --socket %q attach-session -c %q -t %q\n' \
+      "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$ZZ_BIN" "$ZZ_SOCKET" "$SESSION_CWD" "=$INNER_SESSION" >>"$destination"
   else
-    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -t %q\n' \
-      "$TMUX_HOME" "$TMUX_CONFIG_HOME" "$TMUX_BIN" "$INNER_SOCKET_NAME" "$INNER_SESSION" >>"$destination"
+    printf 'exec env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE -u EDITOR -u VISUAL HOME=%q XDG_CONFIG_HOME=%q TMUX_TMPDIR=/tmp %q -L %q attach-session -c %q -t %q\n' \
+      "$TMUX_HOME" "$TMUX_CONFIG_HOME" "$TMUX_BIN" "$INNER_SOCKET_NAME" "$SESSION_CWD" "=$INNER_SESSION" >>"$destination"
   fi
   chmod +x "$destination"
 }
@@ -1321,8 +1327,8 @@ zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
 ZZ_PID=$!
 wait_for_socket
 
-zz_command new-session -d -c "$SOURCE_CWD" -s "$INNER_SESSION" || fixture_failure "could not create zz session"
-tmux_inner_start new-session -d -c "$SOURCE_CWD" -s "$INNER_SESSION" || fixture_failure "could not create tmux session"
+zz_command new-session -d -c "$COMMAND_CWD" -s "$INNER_SESSION" || fixture_failure "could not create zz session"
+tmux_inner_start new-session -d -c "$COMMAND_CWD" -s "$INNER_SESSION" || fixture_failure "could not create tmux session"
 zz_command rename-window -t "$INNER_SESSION:0" main || fixture_failure "could not name zz window"
 tmux_inner_command rename-window -t "$INNER_SESSION:0" main || fixture_failure "could not name tmux window"
 zz_command new-session -d -s "$CHOOSER_SESSION" || fixture_failure "could not create zz chooser session"

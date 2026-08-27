@@ -95,8 +95,7 @@ const TMUX_USAGE: &str = concat!(
     "            [-S socket-path] [-T features] [command [flags]]"
 );
 #[cfg(not(target_os = "ios"))]
-const NATIVE_ATTACH_USAGE: &str =
-    "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dr] [session]";
+const NATIVE_ATTACH_USAGE: &str = "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dr] [-c working-directory] [session]";
 #[cfg(not(target_os = "ios"))]
 const NATIVE_APP_USAGE: &str = "zz: usage: zz app";
 #[cfg(not(target_os = "ios"))]
@@ -116,6 +115,7 @@ struct NativeAttachArguments {
     restart_daemon: bool,
     detach_others: bool,
     read_only: bool,
+    working_directory: Option<String>,
     session: Option<String>,
 }
 
@@ -926,6 +926,20 @@ fn run_command_mode(
             eprintln!("zz: --restart-daemon is only supported for the local daemon");
             return Some(ExitCode::FAILURE);
         }
+        let attach_command = options.working_directory.as_ref().map(|working_directory| {
+            let mut args = Vec::new();
+            if options.detach_others {
+                args.push("-d".to_owned());
+            }
+            if options.read_only {
+                args.push("-r".to_owned());
+            }
+            args.extend(["-c".to_owned(), working_directory.clone()]);
+            if let Some(session) = &options.session {
+                args.extend(["-t".to_owned(), session.clone()]);
+            }
+            CommandInvocation::new("attach-session", args)
+        });
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
             host: host.map(str::to_owned),
@@ -948,7 +962,11 @@ fn run_command_mode(
         if let Some(PreparedCliCommandChain { client, .. }) = prepared.take() {
             drop(client);
         }
-        return Some(match zz_tui::run(request) {
+        let result = match attach_command {
+            Some(command) => zz_tui::run_new_session(request, [command]),
+            None => zz_tui::run(request),
+        };
+        return Some(match result {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("{error}");
@@ -1298,6 +1316,7 @@ fn parse_native_attach_arguments(
     let mut restart_daemon = false;
     let mut detach_others = false;
     let mut read_only = false;
+    let mut working_directory = None;
     let mut target = None;
     let mut positional = None;
     let mut arguments = arguments.into_iter();
@@ -1336,12 +1355,14 @@ fn parse_native_attach_arguments(
                             ))
                         })?
                     };
-                    if option == 't' {
-                        target = Some(value);
-                    } else {
-                        return Err(NativeAttachArgumentError::Command(
-                            ServerError::UnsupportedCommand(format!("attach-session {name}")),
-                        ));
+                    match option {
+                        't' => target = Some(value),
+                        'c' => working_directory = Some(value),
+                        _ => {
+                            return Err(NativeAttachArgumentError::Command(
+                                ServerError::UnsupportedCommand(format!("attach-session {name}")),
+                            ));
+                        }
                     }
                     break;
                 }
@@ -1367,6 +1388,7 @@ fn parse_native_attach_arguments(
         restart_daemon,
         detach_others,
         read_only,
+        working_directory,
         session: target.or(positional),
     })
 }
@@ -2418,6 +2440,7 @@ mod tests {
         assert!(target.detach_others);
         assert!(target.restart_daemon);
         assert!(!target.read_only);
+        assert_eq!(target.working_directory, None);
         assert_eq!(target.session.as_deref(), Some("work"));
 
         let positional =
@@ -2431,6 +2454,12 @@ mod tests {
         assert!(read_only.detach_others);
         assert!(read_only.read_only);
         assert_eq!(read_only.session.as_deref(), Some("work"));
+
+        let cwd = parse_native_attach_arguments(["-dc/tmp/work", "-t", "work"].map(str::to_owned))
+            .unwrap();
+        assert!(cwd.detach_others);
+        assert_eq!(cwd.working_directory.as_deref(), Some("/tmp/work"));
+        assert_eq!(cwd.session.as_deref(), Some("work"));
 
         assert!(matches!(
             parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),

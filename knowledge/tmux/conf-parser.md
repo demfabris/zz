@@ -79,9 +79,11 @@ replay and sentinel-client reloads pass no source base, so startup remains under
 `source-file.event-hook-client-cwd`. A hook raised by an ordinary sourced command also starts from
 the sentinel replay client, outside this recursion base; `source-file.sourced-hook-client-cwd`
 tracks that path.
-`clients.attach-context` still owns the attached case where the session cwd differs
-from the cwd in the client hello. Command and Interactive clients receive those diagnostics
-directly. Protocol v77 gives Control one
+For an attached client, the daemon now prefers the invoking client's retained session cwd over the
+process cwd in its hello. `attach-session -c` selects a compound target's window and pane, then
+mutates that session cwd after pane-context format expansion. `source-file -t` remains only the
+format and replay target. Command and Interactive
+clients receive those diagnostics directly. Protocol v77 gives Control one
 `ControlCommandGuard { output, error, sticky_failure, flags }` for each parser-owned replay command
 that survives command-name resolution. An alias resolved to `source-file` before replay stays on
 this path. Unknown or ambiguous command names and malformed alias names publish a located Warning

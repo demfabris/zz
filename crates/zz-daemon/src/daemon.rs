@@ -6659,6 +6659,7 @@ impl Shared {
         let source_client = replay_client.unwrap_or(client);
         let (
             source_kind,
+            source_session_working_directory,
             source_client_working_directory,
             source_client_registered,
             source_client_terminal,
@@ -6674,6 +6675,9 @@ impl Shared {
                     .copied()
                     .unwrap_or(kind)
             };
+            let source_session_working_directory = client_attached_session(&inner, source_client)
+                .and_then(|session| inner.engine.state.session_working_directory(session))
+                .map(Path::to_owned);
             let source_client_terminal = if context.has_no_client() {
                 ClientTerminal::NoClient
             } else if replay_client.is_some() && registered {
@@ -6683,6 +6687,7 @@ impl Shared {
             };
             (
                 source_kind,
+                source_session_working_directory,
                 inner
                     .client_working_directories
                     .get(&source_client)
@@ -6692,7 +6697,8 @@ impl Shared {
             )
         };
         let source_working_directory = (reload_config || !source_files.is_empty()).then(|| {
-            source_client_working_directory
+            source_session_working_directory
+                .or(source_client_working_directory)
                 .or_else(|| context.client_working_directory().map(Path::to_owned))
                 .or_else(home_directory)
                 .unwrap_or_else(|| PathBuf::from("/"))
@@ -36615,6 +36621,135 @@ mod tests {
 
         assert_eq!(read_global_option(&shared, "@nested-replay-started"), "yes");
         assert_eq!(read_global_option(&shared, "@nested-client-base"), "root");
+    }
+
+    #[test]
+    fn attached_source_file_uses_selected_session_cwd() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let command_cwd = directory.path().join("command cwd [literal]*? with spaces");
+        let session_cwd = directory.path().join("session cwd [literal]*? with spaces");
+        let target_cwd = directory.path().join("target cwd [literal]*? with spaces");
+        for cwd in [&command_cwd, &session_cwd, &target_cwd] {
+            fs::create_dir_all(cwd).expect("source cwd");
+        }
+        fs::write(
+            command_cwd.join("relative.conf"),
+            "set-option -g @attached-source-base command-decoy\n",
+        )
+        .expect("command cwd decoy");
+        fs::write(
+            session_cwd.join("relative.conf"),
+            "set-option -g @attached-source-base session-selected\n",
+        )
+        .expect("session cwd source");
+        fs::write(
+            target_cwd.join("relative.conf"),
+            "set-option -g @attached-source-base target-decoy\n",
+        )
+        .expect("source target decoy");
+
+        let shared = Arc::new(Shared::new(48));
+        let command = ClientId(7);
+        let mut command_context = ExecutionContext::default();
+        command_context.set_client_working_directory(Some(command_cwd.clone()));
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-c",
+                        command_cwd.to_str().expect("utf-8 command cwd"),
+                        "-s",
+                        "attached-source",
+                    ],
+                ),
+            )
+            .expect("attached source session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-c",
+                        target_cwd.to_str().expect("utf-8 target cwd"),
+                        "-s",
+                        "source-target",
+                    ],
+                ),
+            )
+            .expect("source target session");
+
+        let mailbox = OutboundMailbox::new();
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        shared
+            .inner
+            .lock()
+            .client_working_directories
+            .insert(interactive, command_cwd.clone());
+        let mut interactive_context = ExecutionContext::default();
+        shared
+            .execute(
+                interactive,
+                ClientKind::Interactive,
+                &mut interactive_context,
+                &CommandInvocation::new(
+                    "attach-session",
+                    [
+                        "-c",
+                        session_cwd.to_str().expect("utf-8 session cwd"),
+                        "-t",
+                        "=attached-source",
+                    ],
+                ),
+            )
+            .expect("attach with selected session cwd");
+        take_reliable_messages(&mailbox);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.client_working_directories.get(&interactive),
+                Some(&command_cwd)
+            );
+            let session = inner
+                .engine
+                .state
+                .resolve_session(Some("=attached-source"), None)
+                .expect("attached source session id");
+            assert_eq!(
+                inner.engine.state.session_working_directory(session),
+                Some(session_cwd.as_path())
+            );
+        }
+
+        let response = shared.execute_command_request(
+            interactive,
+            ClientKind::Interactive,
+            &mut interactive_context,
+            1,
+            &CommandInvocation::new("source-file", ["-t", "=source-target:0.0", "relative.conf"]),
+        );
+        assert_eq!(
+            response,
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            read_global_option(&shared, "@attached-source-base"),
+            "session-selected"
+        );
     }
 
     #[test]

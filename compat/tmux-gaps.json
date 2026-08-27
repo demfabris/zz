@@ -100,9 +100,7 @@
       "acceptance": [
         "Relative load-buffer and save-buffer paths use the pin's invoking command-client cwd or attached session cwd, and remote clients move bytes without assuming a shared daemon filesystem."
       ],
-      "depends_on": [
-        "clients.attach-context"
-      ],
+      "depends_on": [],
       "reason": "zz expands and accesses buffer paths in the persistent daemon, while tmux routes file access through the invoking client and selects that client's command cwd or attached session cwd."
     },
     {
@@ -224,40 +222,6 @@
       "reason": "zz uses native chooser surfaces and the sidebar instead of tmux mode screens."
     },
     {
-      "id": "clients.attach-context",
-      "title": "Complete attach cwd, flags, and sizing",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "hard",
-      "impact": [
-        "daily",
-        "scripts",
-        "remote"
-      ],
-      "owner": "protocol",
-      "items": [
-        "flag:attach-session:-c",
-        "flag:attach-session:-f",
-        "flag:new-session:-f",
-        "flag:resize-window:-A",
-        "flag:resize-window:-a",
-        "protocol:client-attach-context",
-        "semantic:resize-window-client-sizes",
-        "semantic:source-file-attached-session-cwd"
-      ],
-      "evidence": [
-        "resource:knowledge/designs/tmux-superset-roadmap.md",
-        "resource:knowledge/tmux/divergences.md",
-        "file:compat/attached-client.sh"
-      ],
-      "acceptance": [
-        "Attach and attaching new-session carry client flags, attach -c updates the selected session cwd in target context, resize-window -A/-a consume retained client sizes, and attached-client tests exercise the same facts."
-      ],
-      "depends_on": [],
-      "reason": "The command-client cwd slice established the protocol pattern, but attached session cwd, client flags, and multi-client sizing still need durable state. Environment refresh, exit actions, and client targeting are tracked independently."
-    },
-    {
       "id": "clients.attach-environment",
       "title": "Seed and refresh client environments",
       "decision": "adopt",
@@ -283,6 +247,66 @@
       ],
       "depends_on": [],
       "reason": "zz seeds sessions from the daemon environment and retains no per-client environment, so creation and attach-time refresh cannot yet follow the invoking client."
+    },
+    {
+      "id": "clients.attach-flags",
+      "title": "Retain requested client flags across attachment",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "protocol",
+      "items": [
+        "flag:attach-session:-f",
+        "flag:new-session:-f",
+        "protocol:client-attach-context"
+      ],
+      "evidence": [
+        "resource:knowledge/designs/tmux-superset-roadmap.md",
+        "resource:knowledge/tmux/divergences.md",
+        "file:compat/attached-client.sh"
+      ],
+      "acceptance": [
+        "Attach and attaching new-session retain the requested client flags and make ignore-size available to the later retained-client sizing slice."
+      ],
+      "depends_on": [],
+      "reason": "Requested client flags need durable per-client attachment state, but they do not need session cwd or size aggregation to be implemented and proved."
+    },
+    {
+      "id": "clients.attach-sizing",
+      "title": "Aggregate retained attached-client sizes",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "flag:resize-window:-A",
+        "flag:resize-window:-a",
+        "semantic:resize-window-client-sizes"
+      ],
+      "evidence": [
+        "resource:knowledge/designs/tmux-superset-roadmap.md",
+        "resource:knowledge/tmux/divergences.md",
+        "file:compat/attached-client.sh"
+      ],
+      "acceptance": [
+        "resize-window -A and -a aggregate the retained largest and smallest eligible attached-client sizes while honoring ignore-size from requested client flags."
+      ],
+      "depends_on": [
+        "clients.attach-flags"
+      ],
+      "reason": "The daemon retains client sizes, but resize-window does not aggregate them and cannot exclude ignore-size clients until requested flags are durable."
     },
     {
       "id": "clients.context-formats",
@@ -332,7 +356,8 @@
         "Client, status, and ordinary target contexts expose the pin's retained client facts with defined empty behavior."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "Several facts work only in list or recipient contexts and the rest lack retained client metadata."
     },
@@ -391,7 +416,8 @@
         "Each retained client transition emits its hook once with the target client's format context."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "Storage exists; the missing producers need shared client state and transition points."
     },
@@ -421,7 +447,8 @@
         "A named workload justifies a cross-client mode and redraw contract, then attached-client tests pin it."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "Mode state and redraw ownership span the daemon, protocol, TUI, and GUI."
     },
@@ -808,7 +835,8 @@
         "display-message -a lists every defined variable and its current target-context value in the pin's order and output shape; unsupported variable families remain owned by their existing format gaps."
       ],
       "depends_on": [
-        "clients.attach-context",
+        "clients.attach-flags",
+        "clients.attach-sizing",
         "formats.mouse-context",
         "formats.pane-process",
         "formats.pane-runtime",
@@ -1091,7 +1119,8 @@
         "Session active and working path have target-aware expansion from the shared attached-client context."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "Both values depend on the attached client's selected session and working directory."
     },
@@ -1201,7 +1230,8 @@
         "Window activity timestamps and each client's viewport offsets expand in the correct target context."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "The data exists in separate state paths but is not retained as target-aware format input."
     },
@@ -1254,7 +1284,8 @@
         "Each pane transition emits once with a defined client when multiple clients view the pane."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "Focus is per client and clipboard changes cross client ownership."
     },
@@ -1305,7 +1336,8 @@
         "Job tests pin clean inherited state, TERM-family synthesis, and status-job overlays."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "Jobs still inherit daemon-only state and omit terminal identity variables."
     },
@@ -1921,7 +1953,8 @@
         "The daemon retains job and terminal capability records with target-aware output matching the pin."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "zz does not retain tmux's TTY capability and job-message model."
     },
@@ -1952,7 +1985,8 @@
         "A normalized mouse record reaches bound commands without changing direct GUI mouse behavior."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "These flags depend on the input event that invoked the command."
     },
@@ -2406,7 +2440,8 @@
         "Pane input, style, title, mark, and clear-mark controls have target-aware state and format tests."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-flags",
+        "clients.attach-sizing"
       ],
       "reason": "Several flags need client input and marked-pane state that the mux does not retain."
     },
@@ -2646,7 +2681,7 @@
         "Client convergence and differential tests pin cell geometry during measurement, zoom, and manual policy transitions."
       ],
       "depends_on": [
-        "clients.attach-context"
+        "clients.attach-sizing"
       ],
       "reason": "These mismatches occur where client measurements meet durable mux geometry."
     },
@@ -2709,9 +2744,7 @@
       "acceptance": [
         "An event hook that sources a relative path selects the same current or best attached client and session cwd as the pin, including when another client caused the event."
       ],
-      "depends_on": [
-        "clients.attach-context"
-      ],
+      "depends_on": [],
       "reason": "tmux dynamically selects a current or best attached client for event-hook replay, while zz runs deferred event hooks through its sentinel client; exact session-cwd selection belongs in the shared attach context first."
     },
     {
@@ -2974,6 +3007,23 @@
       "resolution": "Protocol v72 appends a durable filter_no_matches bit to both chooser states. A full daemon rebuild sets it only when an explicit static -f filter produced no rows and the chooser restored its unfiltered rows; a matching filter or no filter clears it, while incremental search and selection deltas preserve it. TUI and GUI render the native status `filter: no matches` without replacing the selectable fallback rows. The GUI reserves its 46px shortcut cell for every rendered row only when at least one rendered row has a nonempty key, and removes the cell for a fully keyless list, matching the TUI's list-level gutter decision. The real attached-client fixture requires the status independently on the current tree and buffer chooser screens for both zz and pinned tmux. Native layout differences remain under choosers.native-presentation, while key vocabulary remains under choosers.command-flags."
     },
     {
+      "id": "clients.attach-session-cwd",
+      "title": "Retain session cwd across attachment",
+      "closed_on": "2026-08-26",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/lib.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags remain open under clients.attach-flags, retained-client sizing remains under clients.attach-sizing, and session_path remains under formats.session-runtime."
+    },
+    {
       "id": "clients.cwd-context",
       "title": "Carry the caller working directory",
       "closed_on": "2026-08-23",
@@ -2985,7 +3035,7 @@
         "file:compat/attached-client.sh",
         "scenario:compat/scenarios/source-file-format.txt"
       ],
-      "resolution": "Protocol v72 carries a bounded cwd only for local endpoints; top-level command-client source-file resolves after -F and before globbing, with attached session-cwd selection retained in clients.attach-context."
+      "resolution": "Protocol v72 carries a bounded cwd only for local endpoints; top-level command-client source-file resolves after -F and before globbing. Exact attached session-cwd selection later closed under clients.attach-session-cwd."
     },
     {
       "id": "clients.detach-targeting",
@@ -3018,7 +3068,7 @@
         "resource:knowledge/tmux/commands.md",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "A local Control connection now publishes its bounded working directory plus client-tty-v1 only when stdin has a discoverable tty and client-nested-v1 only when TMUX is nonempty. It does not inspect terminal size, publish client-size-v1, send ClientTerminalSize, infer geometry, retain TERM or terminal-name facts, or expose its tty through ClientFormatFacts. Control geometry remains explicit refresh-client -C state. The established attach-session, new-session -A, and new-session -Ad refusal paths require both the nested marker and a tty that exactly matches a daemon pane when they would attach an existing session. A fresh new-session and a new-session -A miss still create and attach, while duplicate and validation errors keep their existing precedence. Piped Control stdin has no tty identity and is not nested-refused merely because TMUX is set. The change reuses the existing additive hello capability tokens and unregister cleanup, with no field, tag, or protocol-version change. The sequential daemon suite passed 600/600, the focused Control CLI suite passed 30/30, and debug build, strict clippy, and fmt passed. The complete attached-client differential passed for zz and pinned tmux, including terminal-backed Control refusal, fresh-session attachment, and piped-stdin non-refusal. Independent review found the fresh-marker harness sound. This closure makes no canonical-suite claim. Broader attach sizing remains open under clients.attach-context, and clients.context-formats remains open."
+      "resolution": "A local Control connection now publishes its bounded working directory plus client-tty-v1 only when stdin has a discoverable tty and client-nested-v1 only when TMUX is nonempty. It does not inspect terminal size, publish client-size-v1, send ClientTerminalSize, infer geometry, retain TERM or terminal-name facts, or expose its tty through ClientFormatFacts. Control geometry remains explicit refresh-client -C state. The established attach-session, new-session -A, and new-session -Ad refusal paths require both the nested marker and a tty that exactly matches a daemon pane when they would attach an existing session. A fresh new-session and a new-session -A miss still create and attach, while duplicate and validation errors keep their existing precedence. Piped Control stdin has no tty identity and is not nested-refused merely because TMUX is set. The change reuses the existing additive hello capability tokens and unregister cleanup, with no field, tag, or protocol-version change. The sequential daemon suite passed 600/600, the focused Control CLI suite passed 30/30, and debug build, strict clippy, and fmt passed. The complete attached-client differential passed for zz and pinned tmux, including terminal-backed Control refusal, fresh-session attachment, and piped-stdin non-refusal. Independent review found the fresh-marker harness sound. This closure makes no canonical-suite claim. Broader attach sizing remains open under clients.attach-sizing, and clients.context-formats remains open."
     },
     {
       "id": "clients.nested-attach-signal",
@@ -3755,7 +3805,7 @@
         "scenario:compat/scenarios/source-file-format.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "A source-file invocation from any registered real client now snapshots the same daemon-local base chosen for its top-level paths and carries that immutable base through every replay recursion. Relative nested paths use resolve_source_path with the existing cwd glob quoting even after an ordinary sourced command executes through the sentinel replay client and clears the mutable ExecutionContext cwd. At this checkpoint, sourcing the active default zz/mux.conf took the daemon's native reload branch and forwarded the same captured base. The later source-file.default-config-multi-file-order closure removed that runtime special case, so the same file now enters the ordinary source loader with the captured base. Direct zz-native reload-config later gained the same registered-client base under source-file.reload-config-client-cwd; startup remains clientless under source-file.startup-client-cwd. The pinned differential runs an ordinary command before the nested source and supplies a containing-file decoy; the CLI regressions repeat that shape from a caller cwd containing spaces and glob metacharacters, including the then-active default reload branch with a second decoy beside mux.conf. Deferred event hooks retain their sentinel-client gap under source-file.event-hook-client-cwd, hooks raised by sourced ordinary commands retain their replay-client gap under source-file.sourced-hook-client-cwd, and clients.attach-context still owns exact attached session-cwd selection when the attached client's advertised cwd differs. The later config.replayed-command-output closure preserves successful Command and attached output through this direct recursion as depth-first invocation frames. Parser-owned Control framing closed under control-mode.sourced-command-frames and source-file.nested-control-queue. The later control-mode.indirect-source-frames closure covers synchronous foreground inserted recursion. At this checkpoint immediate-hook and background-callback flags-0 framing remained open under control-mode.hook-command-frames and control-mode.background-inserted-command-frames. Later closures closed both groups. Hook cwd still remains under source-file.sourced-hook-client-cwd."
+      "resolution": "A source-file invocation from any registered real client now snapshots the same daemon-local base chosen for its top-level paths and carries that immutable base through every replay recursion. Relative nested paths use resolve_source_path with the existing cwd glob quoting even after an ordinary sourced command executes through the sentinel replay client and clears the mutable ExecutionContext cwd. At this checkpoint, sourcing the active default zz/mux.conf took the daemon's native reload branch and forwarded the same captured base. The later source-file.default-config-multi-file-order closure removed that runtime special case, so the same file now enters the ordinary source loader with the captured base. Direct zz-native reload-config later gained the same registered-client base under source-file.reload-config-client-cwd; startup remains clientless under source-file.startup-client-cwd. The pinned differential runs an ordinary command before the nested source and supplies a containing-file decoy; the CLI regressions repeat that shape from a caller cwd containing spaces and glob metacharacters, including the then-active default reload branch with a second decoy beside mux.conf. Deferred event hooks retain their sentinel-client gap under source-file.event-hook-client-cwd, and hooks raised by sourced ordinary commands retain their replay-client gap under source-file.sourced-hook-client-cwd. Exact attached session-cwd selection later closed under clients.attach-session-cwd. The later config.replayed-command-output closure preserves successful Command and attached output through this direct recursion as depth-first invocation frames. Parser-owned Control framing closed under control-mode.sourced-command-frames and source-file.nested-control-queue. The later control-mode.indirect-source-frames closure covers synchronous foreground inserted recursion. At this checkpoint immediate-hook and background-callback flags-0 framing remained open under control-mode.hook-command-frames and control-mode.background-inserted-command-frames. Later closures closed both groups. Hook cwd still remains under source-file.sourced-hook-client-cwd."
     },
     {
       "id": "source-file.nested-control-queue",

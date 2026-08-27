@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-26
 
-The live tracker has 88 active groups, 659 classified active items, 68 closed groups, and two known
+The live tracker has 89 active groups, 657 classified active items, 69 closed groups, and two known
 differentials. The full Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 ordinary incremental TTY freeze, and full-viewport thaw. Each eligible attached Interactive client
@@ -177,7 +177,7 @@ by dependency rather than raw ease.
 | 5 | Small state and format facts | Bare `list-keys` padding, `pane_dead_time`, `config_files`, client timestamps, missing hook producers with an existing event seam, and straightforward output formatting. | **Three pulls shipped.** The 2026-08-22 pull covered bare `list-keys`, explicit-startup `config_files`, and retained `pane_dead_time`. The 2026-08-24 pull added pin-ordered `show-options -H` hook rows and item-scoped `window-status-separator` expansion. The 2026-08-25 pull exposed retained session activity and corrected logical MRU ordering. |
 | 6 | Manual geometry | `resize-window` and `window-size manual` need a durable manual size plus clear precedence against per-client measurements. The command is small; the policy is not. | **Shipped 2026-08-22.** Absolute and relative practical forms, target/error precedence, manual formats, per-client precedence, and daemon PTY resize behavior are pinned. Client-derived `-A`/`-a` remain loud. |
 | 7 | Capture, chooser, prompt, and list fidelity | `capture-pane` routing/ranges, chooser formats, command-prompt chains, and exact `list-keys` rendering need attached-client and output fixtures. | **List and chooser presentation fidelity completed 2026-08-24.** The list selectors, positional key filter, stock repeat metadata, canonical Space spelling, and `-1` attached-client status route are pinned by a 46-step differential plus the attached fixture. Chooser static-filter fallback state now survives deltas, both clients show `filter: no matches`, and fully keyless lists omit the shortcut gutter; the attached fixture proves tree and buffer fallback on zz and tmux. Ordinary capture was extended 2026-08-23; trailing blank viewport rows and richer capture transports remain. |
-| 8 | Spawn and attach context | Attached cwd, client flags, sizes, environment refresh, client targeting, and exit actions cross different state owners. | **Six bounded slices have shipped.** Protocol v72 carries a bounded local caller cwd and omits it over SSH; nested source replay preserves its selected base. The first 2026-08-25 targeting slice made `detach-client -t`, bare/`-a`/`-s` selection, requested-versus-evicted reasons, normal local TUI tty publication, and `switch-client -c` tty aliases exact without a wire change. The review repair kept tty publication unconditional and added `client-nested-v1` only for a nonempty `$TMUX`, so nested refusal requires both intent and a matching tty while `env -u TMUX` forces attach and `new-session -A` without weakening selectors. The fourth slice aligned every implemented attached-client selector on exact name, full tty, exactly one leading `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order collision precedence while retaining zz's native aliases. Sequential daemon tests passed 598/598, and focused tests, debug build, strict clippy, fmt, and scoped zz and pinned-tmux tty guards passed. At that checkpoint, unrelated nested-attach interleaving prevented a full-harness claim. Unsupported `command-prompt -t`, `show-messages -t`, `send-keys -c`, `suspend-client -t`, and inert `set-buffer -t` remain outside the closure. The fifth slice closes `display-message` client-format fallback for valid unattached targets: an absent `-c`, a destination attached to another session, or an unresolved `-c` selector uses the globally most-active attached client, with oldest-created tie precedence; that client's attachment supplies `client_session` while the target keeps session, window, and pane facts. Zero clients and missing targets stay empty. Sequential daemon tests pass 599/599, and focused and pinned fallback probes pass. One independent run completed the attached-client harness, but later current runs passed the scoped fallback probes and then failed at unrelated nested-attach terminal-query interleaving. The full harness is not stably green, and this close makes no canonical-suite claim. An attached target without `-c` stays under `clients.context-formats`. The sixth slice gives local Control stdin-only tty identity and a nonempty-`$TMUX` nested marker without size, implicit geometry, TERM/name formats, or a wire bump. Existing attach and `-A` refusal requires both facts; fresh creation still succeeds. Sequential daemon tests pass 600/600, and focused Control CLI tests pass 30/30. The attached differential covers `attach-session` and `new-session -A` refusal, a fresh `-A` miss, and piped stdin. The daemon unit matrix covers `new-session -Ad`; the attached harness does not. The reviewed fresh-marker harness is sound. This close also makes no canonical-suite claim. The tracker separates remaining attach cwd/flags/sizing, client-environment reseeding, detach exec, context formats, and parent-HUP exit actions instead of blocking all of them on one aggregate. |
+| 8 | Spawn and attach context | Attached cwd, client flags, sizes, environment refresh, client targeting, and exit actions cross different state owners. | **Seven bounded slices have shipped.** Protocol v72 carries a bounded local caller cwd and omits it over SSH; nested source replay preserves its selected base. The first 2026-08-25 targeting slice made `detach-client -t`, bare/`-a`/`-s` selection, requested-versus-evicted reasons, normal local TUI tty publication, and `switch-client -c` tty aliases exact without a wire change. The review repair kept tty publication unconditional and added `client-nested-v1` only for a nonempty `$TMUX`, so nested refusal requires both intent and a matching tty while `env -u TMUX` forces attach and `new-session -A` without weakening selectors. The fourth slice aligned every implemented attached-client selector on exact name, full tty, exactly one leading `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order collision precedence while retaining zz's native aliases. Sequential daemon tests passed 598/598, and focused tests, debug build, strict clippy, fmt, and scoped zz and pinned-tmux tty guards passed. At that checkpoint, unrelated nested-attach interleaving prevented a full-harness claim. Unsupported `command-prompt -t`, `show-messages -t`, `send-keys -c`, `suspend-client -t`, and inert `set-buffer -t` remain outside the closure. The fifth slice closes `display-message` client-format fallback for valid unattached targets: an absent `-c`, a destination attached to another session, or an unresolved `-c` selector uses the globally most-active attached client, with oldest-created tie precedence; that client's attachment supplies `client_session` while the target keeps session, window, and pane facts. Zero clients and missing targets stay empty. Sequential daemon tests pass 599/599, and focused and pinned fallback probes pass. One independent run completed the attached-client harness, but later current runs passed the scoped fallback probes and then failed at unrelated nested-attach terminal-query interleaving. The full harness is not stably green, and this close makes no canonical-suite claim. An attached target without `-c` stays under `clients.context-formats`. The sixth slice gives local Control stdin-only tty identity and a nonempty-`$TMUX` nested marker without size, implicit geometry, TERM/name formats, or a wire bump. Existing attach and `-A` refusal requires both facts; fresh creation still succeeds. Sequential daemon tests pass 600/600, and focused Control CLI tests pass 30/30. The attached differential covers `attach-session` and `new-session -A` refusal, a fresh `-A` miss, and piped stdin. The daemon unit matrix covers `new-session -Ad`; the attached harness does not. The reviewed fresh-marker harness is sound. This close also makes no canonical-suite claim. The seventh slice adds one internal cwd per session, selects compound attach targets before pane-context `-c` expansion, and makes attached source replay prefer the invoking client's session cwd. Focused tests and the full debug attached differential pass without a wire or snapshot-schema change. The tracker separates requested flags from retained sizing; client-environment reseeding, detach exec, context formats, and parent-HUP exit actions retain their own groups. |
 | 9 | Interactive client behavior | Full `refresh-client`, `switch-mode`, mouse-targeted forms, pane marking, mode state, focus hooks, and client fanout cross daemon, protocol, TUI, and GUI ownership. | Implement only for named workloads. |
 | 10 | Binary streams and process control | `display-message -I`, `split-window -I`, buffer/source `-`, and lock execution require bounded transport, backpressure, cancellation, and process lifetime rules. | Separate design approval. |
 | 11 | tmux floating panes | `new-pane` and the parked `move-pane`/placement flags need a new mux-state model that is distinct from current native floating UI. | Park. |
@@ -220,8 +220,9 @@ The first eight ease ranks have shipped at least one evidence-driven slice:
   selected by native reload; retained panes expose `pane_dead_time` and clear it on revive/respawn.
 - `session_activity` now exposes retained Unix seconds initialized from session creation and refreshed
   by the shared attach and terminal-input funnels. `S/t` and `list-sessions -O activity` use a
-  separate logical counter, preserving deterministic same-second MRU order. Client-derived
-  `session_active` and `session_path` remain in the shared attach-context tranche. Every attach now
+  separate logical counter, preserving deterministic same-second MRU order. Sessions now retain an
+  internal cwd, while the client-derived `session_active` and public `session_path` format facts
+  remain under `formats.session-runtime`. Every attach now
   advances latest geometry independently of `focus-events`; enabled FocusIn uses the same owner
   seam. Read-only rejected native input updates activity and latest geometry without clearing bells,
   while writable chooser input counts once, advances latest geometry, and preserves bells. Chooser
@@ -467,15 +468,17 @@ supported:
   exact rows and deterministic root/prefix ordering. The 2026-08-24 extension closes positional
   filtering plus `-1`/`-O`/`-r`, while keeping only tmux's non-total comparator ties as a bounded
   accepted divergence.
-- `source-file` client-relative path resolution. **Complete for unattached command clients:**
+- `source-file` client-relative path resolution. **Complete for registered clients:**
   protocol v72 retains one local caller cwd, SSH omits it, and CLI coverage separates caller and
   daemon cwd. The daemon now keeps that selected base through nested replay, including after an
   ordinary sourced command clears the mutable context cwd and when runtime `source-file` loads the
   active default `zz/mux.conf` through the ordinary path. A direct zz-native `reload-config` carries
-  the same selected base for registered clients. Attached-client coverage pins the normal
-  case where client and session cwd agree; exact session-cwd selection when they differ remains under
-  `clients.attach-context`. Hooks raised by sourced ordinary commands, deferred event hooks, and
-  initial startup replay retain separate gaps.
+  the same selected base for registered clients. The 2026-08-26 session-cwd slice retains one cwd
+  per session, selects compound `attach-session` targets before pane-context `-c` expansion, and makes attached source selection
+  prefer the invoking client's session cwd. The full attached-client fixture separates command cwd
+  from session cwd with decoys, and a focused daemon test adds a third `source-file -t` target cwd
+  decoy. Hooks raised by sourced ordinary commands, deferred event hooks, and initial startup replay
+  retain separate gaps.
 - command-prompt only where a real automation uses it.
 - exact exit, stdout, and stderr on the published workload.
 
@@ -494,10 +497,13 @@ the next nested source's cwd. Sourcing the active default config through the ord
 forwards the same snapshot. A direct zz-native `reload-config` forwards that snapshot for registered
 clients. Startup keeps its separate clientless bootstrap gap. CLI coverage pins literal cwd glob
 metacharacters, glob order, declared-path order, quiet continuation, and declared missing-file
-diagnostics independently of the daemon cwd. Attached-client coverage pins those behaviors when the
-client and session cwd agree, while exact tmux session-cwd selection when they differ remains in
-`clients.attach-context`. Deferred event-hook client selection remains under
-`source-file.event-hook-client-cwd`, which depends on that attach context. Startup configuration
+diagnostics independently of the daemon cwd. The `clients.attach-session-cwd` slice closed on
+2026-08-26: each session retains a cwd seeded from explicit `new-session -c`, its attached source
+session, or caller cwd; `attach-session -c` selects a resolved compound target's window and pane,
+then expands and stores before terminal validation; attached `source-file` and `reload-config` prefer the invoking client's session
+cwd while `source-file -t` remains a separate target. This uses internal state without a protocol or
+snapshot-schema change. Deferred event-hook client selection remains under
+`source-file.event-hook-client-cwd`. Startup configuration
 still runs before the launching client registers, so `source-file.startup-client-cwd` tracks tmux's
 initial `cfg_client` cwd rule. `source-file.sourced-hook-client-cwd` tracks hooks raised by ordinary
 replayed commands because those commands still use `ClientId::MAX`. The Unix POSIX glob
@@ -637,8 +643,9 @@ matching daemon restart.
 Byte-preserving non-UTF-8 Unix cwd transport remains separately visible under
 `clients.path-encoding` instead of making such a path a connection failure.
 
-Keep the remaining client work split by the state it actually needs. Attached cwd, requested client
-flags, and resize aggregation can extend the existing cwd/size facts. Environment seeding and
+Keep the remaining client work split by the state it needs. Session cwd has shipped. Requested
+client flags establish `ignore-size`, then resize aggregation can consume the retained size facts.
+Environment seeding and
 refresh need a bounded client-environment snapshot of their own. `detach-client -E` and the
 parent-HUP trio (`attach-session -x`, attaching `new-session -X`, `detach-client -P`) need typed
 client exit actions and are not prerequisites for targeting or ordinary detach. Creation-time
@@ -662,9 +669,9 @@ Two small-looking flags are not mux-only work:
   terminal API has no atomic action for the operation. It needs a terminal-owned action and result
   contract, not another layout branch.
 
-The remaining attach work is three bounded contracts: cwd/flags/sizing, environment refresh, and
-client exit actions. Reuse existing facts within each contract, but do not make one an artificial
-dependency of the others.
+The remaining attach work is three bounded contracts: requested flags plus retained sizing,
+environment refresh, and client exit actions. Reuse existing facts within each contract, but do not
+make one an artificial dependency of the others.
 
 ## Milestone 5: decide whether streams earn their cost
 

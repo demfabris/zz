@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use zz_protocol::{
@@ -249,6 +249,7 @@ pub struct Window {
 pub struct Session {
     pub id: SessionId,
     pub name: String,
+    working_directory: Option<PathBuf>,
     pub created: Option<i64>,
     pub activity: Option<i64>,
     pub sort_created: u64,
@@ -352,6 +353,30 @@ impl MuxState {
         SessionId(self.next_session_id)
     }
 
+    #[must_use]
+    pub fn session_working_directory(&self, session: SessionId) -> Option<&Path> {
+        self.sessions
+            .get(&session)
+            .and_then(|session| session.working_directory.as_deref())
+    }
+
+    pub fn set_session_working_directory(
+        &mut self,
+        session: SessionId,
+        working_directory: PathBuf,
+    ) -> Result<bool, ServerError> {
+        let state = self
+            .sessions
+            .get_mut(&session)
+            .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
+        if state.working_directory.as_ref() == Some(&working_directory) {
+            return Ok(false);
+        }
+        state.working_directory = Some(working_directory);
+        self.bump_generation();
+        Ok(true)
+    }
+
     pub fn create_session(
         &mut self,
         name: impl Into<String>,
@@ -423,6 +448,7 @@ impl MuxState {
             Session {
                 id: session_id,
                 name,
+                working_directory: None,
                 created: None,
                 activity: None,
                 sort_created: created,
@@ -4232,6 +4258,43 @@ mod tests {
                         && projected.bottom.abs_diff(predicted.bottom) <= tolerance
                 })
             })
+    }
+
+    #[test]
+    fn session_working_directory_changes_generation_only_when_value_changes() {
+        let mut state = MuxState::default();
+        let (session, _, _) = state.create_session("main").unwrap();
+        let created_generation = state.generation();
+
+        assert_eq!(state.session_working_directory(session), None);
+        assert!(
+            state
+                .set_session_working_directory(session, PathBuf::from("/first"))
+                .unwrap()
+        );
+        assert_eq!(
+            state.session_working_directory(session),
+            Some(Path::new("/first"))
+        );
+        assert_eq!(state.generation(), created_generation + 1);
+
+        assert!(
+            !state
+                .set_session_working_directory(session, PathBuf::from("/first"))
+                .unwrap()
+        );
+        assert_eq!(state.generation(), created_generation + 1);
+
+        assert!(
+            state
+                .set_session_working_directory(session, PathBuf::from("/second"))
+                .unwrap()
+        );
+        assert_eq!(
+            state.session_working_directory(session),
+            Some(Path::new("/second"))
+        );
+        assert_eq!(state.generation(), created_generation + 2);
     }
 
     #[test]

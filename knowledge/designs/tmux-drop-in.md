@@ -140,8 +140,8 @@ activity chooses the oldest-created client. The selected client's attachment sup
 `client_session`; session, window, and pane
 facts stay on the target. An attached target without `-c` remains under `clients.context-formats`.
 This format-only fallback does not alter delivery, duration, printing routing or lifecycle, buffer
-paths, or Command-client selection. Attached cwd/flags/sizing, environment refresh, and exit actions
-are tracked separately. Binary
+paths, or Command-client selection. Session cwd has shipped; requested flags, retained sizing,
+environment refresh, and exit actions are tracked separately. Binary
 streaming and process control require a separate design. Floating panes stay parked; linked windows and real socket interop stay permanently
 excluded; ACLs remain parked outside the practical alias gate.
 
@@ -239,8 +239,8 @@ attach-clear convergence, F6's attached harness, and F0's dispatcher collapse. T
 tranche completed the F6 harness and now covers copy mode, choosers, prompts, buffers, prefix tables,
 and nested attach through real PTYs. The remaining current gaps live in
 [the divergence matrix](/tmux/divergences.md). Supported client-selector targeting and detach
-selection have since shipped; the remaining attach work is split into cwd/flags/sizing, environment refresh, detach exec,
-and parent-HUP exit actions.
+selection and session cwd have since shipped; the remaining attach work is split into requested
+flags, retained sizing, environment refresh, detach exec, and parent-HUP exit actions.
 
 This campaign closes items 3 through 6 from the live queue, then works through the
 remaining flag ledger. File-and-line anchors in this section refer to commit `57ae502`.
@@ -961,8 +961,8 @@ client-daemon skew before either event path can mix.
 
 Protocol v72 later closed the top-level relative-path residue with a bounded local caller cwd,
 glob-escaped cwd prefix, and declared-path diagnostics. The generated tracker keeps the related
-residues separate: attached commands still use the client's process cwd instead of the session cwd;
-deferred event hooks can still lose the current client used for cwd selection; startup replay starts
+residues separate: deferred event hooks can still lose the current client used for cwd selection;
+startup replay starts
 before the launching client registers; zz still applies valid commands after parser diagnostics
 instead of aborting the whole file at the first cause; and non-UTF-8 cwd bytes are omitted rather
 than preserved. Registered-client nested replay now carries the top-level selected base through each
@@ -970,8 +970,10 @@ recursive load. A sourced ordinary command still uses `ClientId::MAX`, but clear
 context cwd no longer changes the next nested source base. Sourcing the active default `zz/mux.conf`
 forwards the snapshot through the ordinary runtime loader. A direct zz-native `reload-config`
 forwards the same snapshot for registered clients. Startup keeps its separate clientless bootstrap
-gap. Exact attached session-cwd selection
-remains in `clients.attach-context`; the deferred event-hook and startup cases remain under
+gap. The 2026-08-26 `clients.attach-session-cwd` slice adds one internal cwd per session, selects
+compound `attach-session` targets before pane-context `-c` expansion, and selects attached source paths from the invoking client's session
+cwd. The full attached differential separates command cwd from session cwd; a focused daemon test
+adds a third `source-file -t` target directory. The deferred event-hook and startup cases remain under
 `source-file.event-hook-client-cwd` and `source-file.startup-client-cwd`. Hooks raised by ordinary
 sourced commands also start from `ClientId::MAX`; `source-file.sourced-hook-client-cwd` owns that
 client-identity path. Nested loud no-match and glob errors now use

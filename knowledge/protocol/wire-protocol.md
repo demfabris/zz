@@ -603,9 +603,10 @@ now validate on both encode and decode.
   For a registered client, the daemon snapshots that selected base and carries it through nested
   replay, including when runtime `source-file` loads the active default `zz/mux.conf` as an ordinary
   matched path. A direct `reload-config` carries the same base through its separate native reset
-  path. Startup and other sentinel-client reloads keep their clientless base. Exact attached
-  session-cwd selection remains under `clients.attach-context`; deferred
-  event hooks and clientless startup replay remain under `source-file.event-hook-client-cwd` and
+  path. Startup and other sentinel-client reloads keep their clientless base. The later
+  `clients.attach-session-cwd` slice added an internal per-session cwd and made attached source
+  selection prefer it without changing the wire. Deferred event hooks and clientless startup
+  replay remain under `source-file.event-hook-client-cwd` and
   `source-file.startup-client-cwd`. Hooks raised by sourced ordinary commands remain under
   `source-file.sourced-hook-client-cwd` because those commands still use the sentinel replay client.
   This replay change uses daemon-local state and does not add a protocol field.

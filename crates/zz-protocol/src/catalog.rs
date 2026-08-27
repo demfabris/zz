@@ -787,12 +787,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "attach-session",
         aliases: &["attach"],
         description: "Attach to a session",
-        usage: "[-dr] [-t target-session]",
+        usage: "[-dr] [-c working-directory] [-t target-session]",
         options: &[
             CommandOptionSpec::flag("-d", "detach other clients"),
             CommandOptionSpec::flag("-r", "attach read-only"),
-            CommandOptionSpec::value("-t", Session, "target session"),
-            CommandOptionSpec::unsupported_value("-c"),
+            CommandOptionSpec::value("-c", FreeForm, "working directory for the session"),
+            CommandOptionSpec::value("-t", Pane, "target session, window, or pane"),
             CommandOptionSpec::unsupported_flag("-E"),
             CommandOptionSpec::unsupported_value("-f"),
             CommandOptionSpec::unsupported_flag("-x"),
@@ -2293,6 +2293,32 @@ mod tests {
                 ("-l", false),
                 ("-t", true),
             ])
+        );
+    }
+
+    #[test]
+    fn attach_session_working_directory_is_supported_and_advertised() {
+        let spec = command_spec("attach-session").unwrap();
+        let working_directory = spec
+            .options
+            .iter()
+            .find(|option| option.name == "-c")
+            .unwrap();
+
+        assert_eq!(working_directory.value, Some(CommandValueKind::FreeForm));
+        assert!(!working_directory.unsupported);
+        assert!(working_directory.completable);
+        assert_eq!(
+            spec.options
+                .iter()
+                .find(|option| option.name == "-t")
+                .unwrap()
+                .value,
+            Some(CommandValueKind::Pane)
+        );
+        assert_eq!(
+            spec.usage,
+            "[-dr] [-c working-directory] [-t target-session]"
         );
     }
 

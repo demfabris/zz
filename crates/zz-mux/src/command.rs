@@ -2933,7 +2933,7 @@ impl MuxEngine {
             "list-sessions" => self.list_sessions(context, &command.args, hooks)?,
             "rename-session" => self.rename_session(context, &command.args, hooks)?,
             "kill-session" => self.kill_session(context, &command.args, hooks)?,
-            "attach-session" => self.attach_session(context, &command.args)?,
+            "attach-session" => self.attach_session(context, &command.args, hooks)?,
             "has-session" => self.has_session(context, &command.args)?,
             "detach-client" => self.detach_client(context, &command.args)?,
             "list-clients" | "refresh-client" | "show-messages" => {
@@ -3207,11 +3207,29 @@ impl MuxEngine {
             initial_window_extent(&options, self.global_default_size(), context.client_size())?;
         let (inherit_cwd_from, cwd) =
             spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
+        let session_working_directory = cwd
+            .as_deref()
+            .map(PathBuf::from)
+            .or_else(|| {
+                context
+                    .attached_client_context()
+                    .and_then(|(session, _, _)| session)
+                    .and_then(|session| {
+                        self.state
+                            .session_working_directory(session)
+                            .map(Path::to_owned)
+                    })
+            })
+            .or_else(|| context.client_working_directory().map(Path::to_owned));
         let environment = session_creation_environment(&options);
         let base_index = self.global_base_index;
         let (session, window, pane) = self
             .state
             .create_session_with_extent_at(name, extent, base_index)?;
+        if let Some(session_working_directory) = session_working_directory {
+            self.state
+                .set_session_working_directory(session, session_working_directory)?;
+        }
         self.seed_session_environment(session, !options.has("-E"), environment);
         let created = i64::try_from(self.format_now)
             .ok()
@@ -3453,6 +3471,7 @@ impl MuxEngine {
         &mut self,
         context: &mut ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("attach-session", args)?;
         reject_positionals("attach-session", &positional)?;
@@ -3460,17 +3479,39 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
         let detach_others = options.has("-d");
-        let session = self
-            .state
-            .resolve_session(options.value("-t"), context.session)?;
+        let active_session = context.session;
+        let (session, window, pane) = match options.value("-t") {
+            Some(target) if target.contains([':', '.']) => {
+                let pane = self.resolve_pane(Some(target), context.window, context.pane)?;
+                let window = self
+                    .state
+                    .window_for_pane(pane)
+                    .expect("resolved pane has a window");
+                (self.state.windows[&window].session, window, pane)
+            }
+            target => {
+                let session = self.state.resolve_session(target, context.session)?;
+                let window = session_active_window(&self.state, session)?;
+                let pane = window_active_pane(&self.state, window)?;
+                (session, window, pane)
+            }
+        };
+        if self.state.windows[&window].active_pane != pane {
+            self.state.select_pane(pane)?;
+            self.refresh_automatic_window_name_for_pane(pane, hooks);
+        }
+        if self.state.sessions[&session].active_window != window {
+            self.state.select_window(session, window)?;
+        }
+        let target = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        context.retarget(&target);
+        if let Some(working_directory) = options.value("-c") {
+            let working_directory =
+                self.expand_pane_format(working_directory, &target, active_session, hooks);
+            self.state
+                .set_session_working_directory(session, PathBuf::from(working_directory))?;
+        }
         require_client_terminal(context)?;
-        let window = session_active_window(&self.state, session)?;
-        let pane = window_active_pane(&self.state, window)?;
-        context.retarget(&ExecutionContext::new(
-            Some(session),
-            Some(window),
-            Some(pane),
-        ));
         Ok(Execution::effect(MuxEffect::Attach {
             session,
             detach_others,
@@ -13646,6 +13687,222 @@ mod tests {
                 MuxEffect::SnapshotChanged,
             ] if *created == pane && *attached == session
         ));
+    }
+
+    #[test]
+    fn new_session_working_directory_prefers_explicit_attached_then_caller() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        context.set_client_working_directory(Some(PathBuf::from("/caller")));
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "explicit", "-c", "/explicit"]),
+            )
+            .unwrap();
+        let explicit = context.session.unwrap();
+        assert_eq!(
+            engine.state.session_working_directory(explicit),
+            Some(Path::new("/explicit"))
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "attached"]),
+            )
+            .unwrap();
+        let attached = context.session.unwrap();
+        assert_eq!(
+            engine.state.session_working_directory(attached),
+            Some(Path::new("/explicit"))
+        );
+
+        context.set_client_attached(false);
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "caller"]),
+            )
+            .unwrap();
+        let caller = context.session.unwrap();
+        assert_eq!(
+            engine.state.session_working_directory(caller),
+            Some(Path::new("/caller"))
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "override", "-c", "/override"]),
+            )
+            .unwrap();
+        let overridden = context.session.unwrap();
+        assert_eq!(
+            engine.state.session_working_directory(overridden),
+            Some(Path::new("/override"))
+        );
+    }
+
+    #[test]
+    fn attach_session_working_directory_uses_target_context_and_isolation() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "source", "-c", "/source"]),
+            )
+            .unwrap();
+        let source = context.session.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "target", "-c", "/target"]),
+            )
+            .unwrap();
+        let target = context.session.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "=target:1", "-n", "selected"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-d", "-t", "=target:1.0"]),
+            )
+            .unwrap();
+        engine
+            .execute(&mut context, &command("attach-session", &["-t", "=source"]))
+            .unwrap();
+        let selected_pane = engine
+            .resolve_pane(Some("=target:1.1"), context.window, context.pane)
+            .unwrap();
+        let selected_window = engine.state.window_for_pane(selected_pane).unwrap();
+
+        let execution = engine
+            .execute(
+                &mut context,
+                &command(
+                    "attach-session",
+                    &[
+                        "-t",
+                        "=target:1.1",
+                        "-c",
+                        "/selected/#{session_name}-#{window_index}-#{pane_index}",
+                    ],
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(
+            engine.state.session_working_directory(source),
+            Some(Path::new("/source"))
+        );
+        assert_eq!(
+            engine.state.session_working_directory(target),
+            Some(Path::new("/selected/target-1-1"))
+        );
+        assert_eq!(
+            engine.state.sessions[&target].active_window,
+            selected_window
+        );
+        assert_eq!(
+            engine.state.windows[&selected_window].active_pane,
+            selected_pane
+        );
+        assert_eq!(context.window, Some(selected_window));
+        assert_eq!(context.pane, Some(selected_pane));
+        assert!(matches!(
+            execution.effects.as_slice(),
+            [
+                MuxEffect::Attach {
+                    session,
+                    detach_others: false,
+                    read_only: false,
+                },
+                MuxEffect::SnapshotChanged,
+            ] if *session == target
+        ));
+    }
+
+    #[test]
+    fn attach_session_working_directory_mutates_before_terminal_failure_only_after_resolution() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "target", "-c", "/original"]),
+            )
+            .unwrap();
+        let target = context.session.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "=target:1", "-n", "selected"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-d", "-t", "=target:1.0"]),
+            )
+            .unwrap();
+        let selected_pane = engine
+            .resolve_pane(Some("=target:1.1"), context.window, context.pane)
+            .unwrap();
+        let selected_window = engine.state.window_for_pane(selected_pane).unwrap();
+        context.set_client_terminal(false);
+        let generation = engine.state.generation();
+
+        let error = engine
+            .execute(
+                &mut context,
+                &command("attach-session", &["-t", "=target:1.1", "-c", "/changed"]),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ServerError::InvalidCommand(message)
+                if message == "open terminal failed: not a terminal"
+        ));
+        assert_eq!(
+            engine.state.session_working_directory(target),
+            Some(Path::new("/changed"))
+        );
+        assert_eq!(
+            engine.state.sessions[&target].active_window,
+            selected_window
+        );
+        assert_eq!(
+            engine.state.windows[&selected_window].active_pane,
+            selected_pane
+        );
+        assert_eq!(context.session, Some(target));
+        assert_eq!(context.window, Some(selected_window));
+        assert_eq!(context.pane, Some(selected_pane));
+        assert!(engine.state.generation() > generation);
+
+        let generation = engine.state.generation();
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command(
+                    "attach-session",
+                    &["-t", "=missing", "-c", "/missing"],
+                ),
+            ),
+            Err(ServerError::SessionNotFound(target)) if target == "missing"
+        ));
+        assert_eq!(
+            engine.state.session_working_directory(target),
+            Some(Path::new("/changed"))
+        );
+        assert_eq!(engine.state.generation(), generation);
     }
 
     #[test]

@@ -42,7 +42,7 @@ just compat-check
 ```
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
-and registry, asserts that all three named manifest tests still exist, then runs the full `zz-mux`
+and registry, asserts that all four named manifest tests still exist, then runs the full `zz-mux`
 library suite. Linux CI runs the same command after restoring the pinned tmux cache. A full
 `compat/run.sh` checks the oracle and tracker before executing scenarios.
 
@@ -113,11 +113,14 @@ prove a command's rule. The manifest therefore carries 12 `args-parse:` items. T
 `choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
 the whole command.
 
-Seven semantic gaps remain: runtime adoption of the inventoried argument rules, open-ended or
-dynamic context-format names, nonconstant format behavior, hook production, runtime behavior for
-shared bindings, consumer truth for names in option `BEHAVES`, and daemon runtime handling of invalid
-flags. `tracker.semantic-coverage` owns that work. Differential scenarios, attached-client fixtures,
-unit tests, and manual GUI checks remain the behavioral evidence.
+Six semantic gaps remain: runtime adoption of the inventoried argument rules, open-ended or dynamic
+context-format names, nonconstant format behavior, hook production, runtime behavior for shared
+bindings, and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns that
+work. Daemon invalid-flag coverage is now source-owned by `DAEMON_INVALID_FLAG_BEHAVES`. The manifest
+derives its complete 24-command pinned set from the live daemon spellings, and the daemon executes
+every absent alphanumeric short flag for every entry before the tracker accepts the roster.
+Differential scenarios, attached-client fixtures, unit tests, and manual GUI checks remain the
+behavioral evidence.
 
 Regenerate the readable report after changing the manifest:
 
@@ -146,8 +149,8 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The 2026-08-26 checkpoint contains
-84 scenarios and 1,475 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`compat/results/summary.md` is the persisted canonical artifact. The 2026-08-27 checkpoint contains
+85 scenarios and 1,478 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -185,15 +188,18 @@ startup `config_files`; both
 servers start with `-f /dev/null` so that fact is symmetric. `native-prefix-isolation` contributes
 29 steps: 28 byte-exact command-name queries plus one alias setup, without plugin-corpus
 dependencies.
+`smoke/daemon-invalid-flags` contributes three checks: it first removes any inherited sentinel,
+then proves representative daemon-dispatched flags reject before callbacks or buffer mutation, and
+finally requires the fixture to publish its clean marker.
 
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
-`5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`.
+`b631019e585fb3f1e2a3ec6b68bb8b8beb54e5272a7fc2e660aa270d13616439`.
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
-requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-26
+requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-27
 canonical checkpoint and exits before building or running either server. Linux CI first asserts that
 `compat/results/summary.md` is tracked, then runs
 the inventory and result check after checkout. A named partial run, a headless-only full run, a failed
@@ -281,7 +287,9 @@ independent review of the fresh-session marker.
 
 The alert-lifecycle probe uses fresh non-current monitored windows. It replaces a 1,500 ms sticky
 message with a 5,000 ms Bell alert, writes new terminal output behind it, and proves the current
-screen stays frozen for 1.8 seconds across the old deadline. F12 plus Enter then proves one key
+screen stays frozen for 1.8 seconds across the old deadline. One elapsed endpoint capture requires
+the alert to remain visible while the terminal marker remains hidden, so capture-pane process cost
+cannot stretch a poll-count clock past the alert expiry. F12 plus Enter then proves one key
 dismisses the alert, reaches the pane, and releases the latest viewport well before the alert's own
 expiry. The alert window remains unvisited with `#{window_bell_flag}` equal to 1. The probe rings
 that same pane again, sees a second Bell message, and repeats the 1.8-second freeze and dismissal

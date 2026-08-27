@@ -72,6 +72,7 @@
 | smoke/config-grammar | 15 | yes | 0 | yes | yes | yes |
 | smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
+| smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |
 | smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
 | smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |

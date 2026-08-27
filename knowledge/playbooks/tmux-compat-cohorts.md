@@ -20,7 +20,8 @@ campaign branch then closed session cwd in
 retained-client sizing in the third milestone. The fourth milestone closed client-environment
 seeding and refresh with protocol v82. The fifth closed retained client formats with protocol v83,
 the sixth closed the six client lifecycle hook producers, and the seventh proved silent Control
-delivery for asynchronous copy-pipe failures. The last two needed no protocol change.
+delivery for asynchronous copy-pipe failures. The eighth registered and executed the 24-command
+daemon invalid-flag runtime roster. The last three needed no protocol change.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -43,14 +44,15 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The fresh 2026-08-27 checkpoint covers 84 scenarios and 1,475 steps. Every ordinary row is clean.
+The fresh 2026-08-27 checkpoint covers 85 scenarios and 1,478 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`.
-The full strict suite was rerun from the requested-flags worktree, not carried forward from the
-Alert artifact. Sizing changed the attached fixture rather than the canonical scenario corpus.
+`b631019e585fb3f1e2a3ec6b68bb8b8beb54e5272a7fc2e660aa270d13616439`.
+The full strict suite was rerun after the daemon invalid-flag closure, not carried forward from an
+older artifact. The new three-step scenario clears inherited state before proving rejection and
+side-effect suppression.
 
 # Cohorts
 
@@ -81,7 +83,7 @@ milestone per letter, never one combined commit.
 | 6 | Client lifecycle hook producers | Closed under `clients.event-hooks` on 2026-08-27 | Complete | Per-window latest ownership plus five report boundaries; no protocol change |
 | 7 | Interactive refresh decision | `clients.interactive-refresh` | Hard decision gate | Either justify and adopt the cross-client mode contract or keep it parked and reclassify dependent copy claims |
 | 8 | Async copy or pipe error delivery | Closed under `control-mode.async-copy-pipe-errors` on 2026-08-27 | Complete | Pinned source plus a delayed exit-7 Control probe prove silent delivery and copy-mode cancellation |
-| 9a | Daemon invalid-flag runtime contract | `semantic:tracker-daemon-invalid-flag-runtime` in `tracker.semantic-coverage` | Medium | Establish shared validation scaffolding without claiming later error-shape items |
+| 9a | Daemon invalid-flag runtime contract | Closed under `tracker.daemon-invalid-flag-runtime` on 2026-08-27 | Complete | Source-owned 24-command roster plus production-dispatch proof; later error-shape items remain open |
 | 9b | Arity and flag error shapes | The positional and shared error items in `mux.error-shapes` | Medium | One central validation path across the affected commands |
 | 9c | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |
 | 10a-10f | `args_parse` runtime rules | Corresponding `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Six effective source rules, never all callback commands at once |
@@ -184,8 +186,8 @@ Continue the tmux compatibility campaign in /Users/demfabris/dev/zz-tmux-compat 
 codex/tmux-compat. Preserve unrelated work and do not push.
 
 Verify that the session-cwd, requested-client-flags, retained-client-sizing, and client-environment
-milestones are committed and their tracker groups are closed. Confirm the current checkpoint still reports 84
-scenarios, 1,475 steps, attached-client PASS, and only the two documented GEO rows.
+milestones are committed and their tracker groups are closed. Confirm the current checkpoint still reports 85
+scenarios, 1,478 steps, attached-client PASS, and only the two documented GEO rows.
 
 Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
 daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one

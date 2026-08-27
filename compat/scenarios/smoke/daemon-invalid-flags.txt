@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/daemon-invalid-flags.sh ~/daemon-invalid-flags.sh
+out: set-environment -gu DAEMON_INVALID_FLAGS
+run-shell 'sh ~/daemon-invalid-flags.sh'
+out: show-environment -g DAEMON_INVALID_FLAGS

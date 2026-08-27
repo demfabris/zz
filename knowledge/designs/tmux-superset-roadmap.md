@@ -53,16 +53,15 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after session cwd and requested client flags covers 84
-scenarios and 1,475 steps.
+The canonical checkpoint freshly rerun after daemon invalid-flag closure covers 85 scenarios and
+1,478 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
-canonical corpus and persisted summary SHA-256 remain unchanged from the requested-flags
-checkpoint: 84 scenarios, 1,475 steps, and
-`5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`. Requested flags, attached
-sizing, and client environments extend the attached fixture rather than adding canonical scenario
-rows.
+persisted summary SHA-256 is
+`b631019e585fb3f1e2a3ec6b68bb8b8beb54e5272a7fc2e660aa270d13616439`. Requested flags, attached
+sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
+adds one fail-closed three-step canonical scenario.
 
 Protocol v82 appends one bounded UTF-8 client-environment snapshot to `ClientHello`. Local and
 SSH-forwarded clients now seed fresh sessions and refresh existing sessions through the effective
@@ -436,7 +435,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
 
    `tracker.semantic-coverage` tracks runtime adoption of the six argument rules, open-ended or
    dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
-   option `BEHAVES` consumer truth, and daemon runtime invalid-flag handling.
+   and option `BEHAVES` consumer truth. Daemon invalid-flag coverage closed on 2026-08-27: the
+   source-owned roster reconciles all 24 pinned daemon-dispatched commands and a runtime test executes
+   every absent alphanumeric short flag for every entry before command-specific work.
    `knowledge/tmux/gaps.md` remains generated from the registry.
 
 Without this gate, easy compatibility fixes can land while the persisted proof quietly goes stale.

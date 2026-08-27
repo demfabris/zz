@@ -7,7 +7,8 @@ use std::{
 use serde::Deserialize;
 use zz_protocol::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, CommandArgsParseRule, CommandResolution,
-    DAEMON_COMMAND_SPECS, KeyTables, NATIVE_COMMAND_NAMES, canonical_key, resolve_command,
+    DAEMON_COMMAND_SPECS, DAEMON_INVALID_FLAG_BEHAVES, KeyTables, NATIVE_COMMAND_NAMES,
+    canonical_command, canonical_key, resolve_command,
 };
 
 use crate::{
@@ -592,6 +593,48 @@ fn args_parse_gaps_match_the_pinned_oracle() {
     assert_eq!(
         tracked_items, expected_items,
         "unverified args_parse rules and tracked items differ"
+    );
+}
+
+#[test]
+fn daemon_invalid_flag_runtime_inventory_matches_the_pin() {
+    let (oracle, items) = inventory();
+    let upstream = oracle
+        .commands
+        .iter()
+        .map(|command| (command.name.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    let expected = zz_protocol::CommandSpec::DAEMON_COMMAND_NAMES
+        .iter()
+        .map(|name| canonical_command(name))
+        .filter(|name| upstream.contains_key(name))
+        .collect::<BTreeSet<_>>();
+    let behaves = DAEMON_INVALID_FLAG_BEHAVES
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        behaves.len(),
+        DAEMON_INVALID_FLAG_BEHAVES.len(),
+        "daemon invalid-flag behavior inventory contains duplicates"
+    );
+    assert!(
+        behaves.is_subset(&expected),
+        "daemon invalid-flag behavior inventory contains a native or non-daemon command"
+    );
+    for name in &behaves {
+        assert!(
+            !upstream[name].flags.contains_key("-G"),
+            "daemon invalid-flag fixture flag is now valid for {name}"
+        );
+    }
+
+    let tracked = items.contains_key("semantic:tracker-daemon-invalid-flag-runtime");
+    assert_eq!(
+        tracked,
+        behaves != expected,
+        "daemon invalid-flag runtime inventory and tracker item disagree"
     );
 }
 

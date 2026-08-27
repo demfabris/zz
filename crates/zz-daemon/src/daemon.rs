@@ -47121,6 +47121,38 @@ mod tests {
     }
 
     #[test]
+    fn every_upstream_daemon_command_rejects_an_invalid_flag_before_effects() {
+        let shared = Arc::new(Shared::new(1));
+        for name in zz_protocol::DAEMON_INVALID_FLAG_BEHAVES {
+            let spec = zz_protocol::catalog_command_spec(name).expect("daemon command spec");
+            assert_eq!(spec.name, *name);
+            for flag in ('0'..='9').chain('A'..='Z').chain('a'..='z') {
+                let option = format!("-{flag}");
+                if spec.option(&option).is_some() {
+                    continue;
+                }
+
+                let error = shared
+                    .execute(
+                        ClientId(u64::MAX),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(*name, [option.as_str(), "invalid-flag-value"]),
+                    )
+                    .expect_err("invalid flag");
+                let DaemonError::Server(error) = error else {
+                    panic!("{name} {option} returned a non-server error: {error:?}");
+                };
+                assert!(error.is_command_parse(), "{name} {option}: {error:?}");
+                assert!(
+                    error.tmux_message().contains(&option),
+                    "{name} {option}: {error:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wait_for_matches_sticky_signal_gc_and_dispatch_precedence() {
         let shared = Arc::new(Shared::new(1));
         register_wait_clients(&shared, [1]);

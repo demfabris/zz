@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **86**. Classified items: **618**.
+Tracked gap groups: **86**. Classified items: **617**.
 
 - Status: open: 46, blocked: 19, accepted: 21.
 - Decision: adopt: 51, native: 15, park: 14, never: 6.
 - Priority: next: 3, later: 62, none: 21.
-- Closed history entries: 75.
-- Surface: command: 9, flag: 70, positional-min: 14, positional-max: 8, args-parse: 12, native-command: 21, option: 75, format: 74, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 102, presentation: 8, protocol: 2.
+- Closed history entries: 76.
+- Surface: command: 9, flag: 70, positional-min: 14, positional-max: 8, args-parse: 12, native-command: 21, option: 75, format: 74, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 101, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -1653,7 +1653,7 @@ Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `
 - Priority and ease: `next` / `medium`
 - Owner: `protocol`
 - User impact: scripts
-- Items: `args-parse:bind-key`, `args-parse:choose-buffer`, `args-parse:choose-tree`, `args-parse:command-prompt`, `args-parse:confirm-before`, `args-parse:display-menu`, `args-parse:display-panes`, `args-parse:if-shell`, `args-parse:run-shell`, `args-parse:set-hook`, `args-parse:set-option`, `args-parse:set-window-option`, `semantic:tracker-daemon-invalid-flag-runtime`, `semantic:tracker-hook-producer-partition`, `semantic:tracker-key-binding-behavior`, `semantic:tracker-nonconstant-format-behavior`, `semantic:tracker-open-context-format-vocabulary`, `semantic:tracker-option-consumer-registration`
+- Items: `args-parse:bind-key`, `args-parse:choose-buffer`, `args-parse:choose-tree`, `args-parse:command-prompt`, `args-parse:confirm-before`, `args-parse:display-menu`, `args-parse:display-panes`, `args-parse:if-shell`, `args-parse:run-shell`, `args-parse:set-hook`, `args-parse:set-option`, `args-parse:set-window-option`, `semantic:tracker-hook-producer-partition`, `semantic:tracker-key-binding-behavior`, `semantic:tracker-nonconstant-format-behavior`, `semantic:tracker-open-context-format-vocabulary`, `semantic:tracker-option-consumer-registration`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.py`
@@ -1662,7 +1662,7 @@ Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `
   - `resource:knowledge/playbooks/compat-harness.md`
 - Acceptance:
   - `Each args-parse item moves to COMMAND_ARGS_PARSE_BEHAVES after tests prove that the runtime parser applies its pinned rule.`
-  - `Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, option consumption, and daemon invalid-flag handling against the live manifest.`
+  - `Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest.`
 
 ## Known differential scenarios
 
@@ -1750,3 +1750,4 @@ Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `
 | `source-file.startup-depth-accounting` | 2026-08-24 | One startup accounting value now spans every explicit or discovered top-level configuration. The roots do not consume slots; source commands 1 through 50 run, command 51 and later retain the declaring file and line in their cause, quiet misses consume slots, and one command with many paths consumes one slot. Runtime sequential source commands remain unbounded, while the zz-native `reload-config` whole-root replay takes one fresh startup budget of its own so reloading a file lands the same state a fresh start would. Client delivery and placement of retained startup causes remain tracked under config.startup-diagnostic-delivery. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs` |
 | `source-file.tilde-semantics` | 2026-08-23 | source-file no longer rewrites a literal leading ~/ after parsing: parser-expanded leading tildes still arrive as absolute paths, top-level literal tildes pass through cwd resolution, and registered-client nested literal tildes use the stable invoking base closed under source-file.nested-client-cwd. Startup and deferred event-hook base selection remain active. The CLI regression pins the top-level choice against a metacharacter-bearing daemon HOME. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/scenarios/smoke/fixtures/source-file-tilde-decoy.conf`, `scenario:compat/scenarios/smoke/source-file-tilde.txt` |
 | `tracker.args-parse-inventory` | 2026-08-25 | Oracle schema 4 parses the pinned `args_parse` callback references and rejects callback bodies outside six recognized rules. It records 14 command-to-rule assignments from nine callbacks, including `display-menu` item groups, `run-shell -C`, and the `set-hook -B` specialization. The Rust catalog carries typed rules for the 12 implemented commands. The manifest gate requires every rule absent from `COMMAND_ARGS_PARSE_BEHAVES` to retain a command-specific `args-parse:` item; `choose-client` and `switch-mode` stay covered by their unimplemented command items. This closes discovery only. Runtime adoption remains open under `tracker.semantic-coverage`. | `resource:compat/tmux-oracle.py`, `resource:compat/tmux-tracker.py`, `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `resource:knowledge/playbooks/compat-harness.md` |
+| `tracker.daemon-invalid-flag-runtime` | 2026-08-27 | The source-owned DAEMON_INVALID_FLAG_BEHAVES roster covers all 24 canonical pinned tmux commands preempted by daemon dispatch. A manifest test derives the expected set from the pinned oracle and live daemon spellings, while a daemon test executes every absent alphanumeric short flag with a dummy following value for every roster entry through production dispatch and requires a command-parse failure that names the flag. The strict three-step fixture first clears any inherited sentinel, then uses -G as its pinned representative and requires exit 1, empty stdout, a command-and-flag diagnostic, and no buffer mutation across buffer, shell callback, branch callback, lock, and blocking command families. The seven daemon-native commands remain outside the pinned roster. Exact diagnostic wording, usage fallbacks, positional bounds, and callback argument rules retain their existing owners. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/check.sh`, `file:compat/scenarios/smoke/fixtures/daemon-invalid-flags.sh`, `scenario:compat/scenarios/smoke/daemon-invalid-flags.txt`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/tmux-compat.md` |

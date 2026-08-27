@@ -93,11 +93,13 @@ rendered command and repeat bit or requires a named `binding:` divergence.
 
 The gate does not prove that the runtime parser applies each inventoried `args_parse` rule,
 open-ended or dynamic context-format names, nonconstant format behavior, hook production, runtime
-behavior for shared bindings, consumer truth for option `BEHAVES`, or daemon runtime handling of
-invalid flags. `tracker.semantic-coverage` owns those seven blind spots. Its 12 `args-parse:` items
-name the implemented callback commands; `choose-client` and `switch-mode` remain covered by their
-unimplemented command items. Differential scenarios, attached-client fixtures, unit tests, and
-manual GUI checks supply behavioral evidence.
+behavior for shared bindings, or consumer truth for option `BEHAVES`.
+`tracker.semantic-coverage` owns those six blind spots. Its 12 `args-parse:` items name the
+implemented callback commands; `choose-client` and `switch-mode` remain covered by their
+unimplemented command items. Daemon invalid-flag coverage is source-owned: the gate derives its
+24-command roster from the pinned oracle and live daemon spellings, and the daemon tests every
+absent alphanumeric short flag through production dispatch. Differential scenarios, attached-client
+fixtures, unit tests, and manual GUI checks supply behavioral evidence.
 
 The [2026-08-22 CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
 preserves the measured baseline at commit `202f322`. Its counts describe that audit date. The

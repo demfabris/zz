@@ -266,6 +266,33 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "locks",
 ];
 
+pub static DAEMON_INVALID_FLAG_BEHAVES: &[&str] = &[
+    "capture-pane",
+    "clear-prompt-history",
+    "confirm-before",
+    "delete-buffer",
+    "display-menu",
+    "display-popup",
+    "if-shell",
+    "list-buffers",
+    "list-clients",
+    "load-buffer",
+    "lock-client",
+    "lock-server",
+    "lock-session",
+    "paste-buffer",
+    "pipe-pane",
+    "refresh-client",
+    "run-shell",
+    "save-buffer",
+    "set-buffer",
+    "show-buffer",
+    "show-messages",
+    "show-prompt-history",
+    "switch-client",
+    "wait-for",
+];
+
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "new-pane",
     "newp",

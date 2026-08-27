@@ -639,20 +639,21 @@ wait_for_current_marker_absent() {
   fixture_failure "$side current screen still showed $marker after 10 seconds"
 }
 
-assert_current_marker_absent_for() {
+assert_current_marker_absent_while_alert() {
   local side="$1"
   local marker="$2"
-  local attempts="$3"
-  local attempt
+  local alert_marker="$3"
+  local duration="$4"
   local screen
 
-  for ((attempt = 0; attempt < attempts; attempt++)); do
-    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
-    if grep -Fq -- "$marker" <<<"$screen"; then
-      fixture_failure "$side current screen exposed $marker while its alert was active"
-    fi
-    sleep 0.05
-  done
+  sleep "$duration"
+  screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+  if ! grep -Fq -- "$alert_marker" <<<"$screen"; then
+    fixture_failure "$side alert expired before the $duration second freeze checkpoint"
+  fi
+  if grep -Fq -- "$marker" <<<"$screen"; then
+    fixture_failure "$side current screen exposed $marker while its alert was active"
+  fi
 }
 
 wait_for_ordered_current_lines() {
@@ -919,7 +920,7 @@ probe_alert_message_lifecycle() {
   side_command "$side" send-keys -t "$INNER_PANE_TARGET" Enter ||
     fixture_failure "$side could not run its timed alert output"
   wait_for_pane_marker "$side" "$timed_marker"
-  assert_current_marker_absent_for "$side" "$timed_marker" 36
+  assert_current_marker_absent_while_alert "$side" "$timed_marker" "$alert_marker" 1.8
 
   ready_baseline="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
   tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F12 Enter
@@ -938,7 +939,7 @@ probe_alert_message_lifecycle() {
   side_command "$side" send-keys -t "$INNER_PANE_TARGET" Enter ||
     fixture_failure "$side could not run its repeated alert output"
   wait_for_pane_marker "$side" "$repeated_marker"
-  assert_current_marker_absent_for "$side" "$repeated_marker" 36
+  assert_current_marker_absent_while_alert "$side" "$repeated_marker" "$alert_marker" 1.8
 
   ready_baseline="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
   tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F12 Enter
@@ -958,7 +959,7 @@ probe_alert_message_lifecycle() {
   side_command "$side" send-keys -t "$INNER_PANE_TARGET" Enter ||
     fixture_failure "$side could not run its zero-duration alert output"
   wait_for_pane_marker "$side" "$zero_marker"
-  assert_current_marker_absent_for "$side" "$zero_marker" 8
+  assert_current_marker_absent_while_alert "$side" "$zero_marker" "$alert_marker" 0.4
 
   ready_baseline="$(pane_flattened_substring_count "$side" ATTACHED_TERMINAL_READY)"
   tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F12 Enter

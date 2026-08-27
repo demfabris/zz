@@ -422,10 +422,13 @@ pub(crate) enum InitialAttach {
         target: Option<String>,
         detach_others: bool,
         read_only: bool,
+        client_flags: Option<String>,
     },
     AlreadyAttached {
         session: zz_protocol::SessionId,
         messages: Vec<ProtocolMessage>,
+        read_only: bool,
+        client_flags: Option<String>,
     },
 }
 
@@ -439,35 +442,53 @@ pub(crate) fn run(
     fleet_hosts: Vec<HostEntry>,
     browser_provider: Option<Box<dyn BrowserFrameProvider>>,
 ) -> Result<(), String> {
-    let (attach_target, attach_flags, initial_messages, attempt) = match initial_attach {
-        InitialAttach::Request {
-            target,
-            detach_others,
-            read_only,
-        } => {
-            let attempt = if target.is_some() {
-                AttachAttempt::Explicit
-            } else {
-                AttachAttempt::Default
-            };
-            (
-                target.unwrap_or_default(),
-                Some((detach_others, read_only)),
-                Vec::new(),
-                attempt,
-            )
-        }
-        InitialAttach::AlreadyAttached { session, messages } => {
-            (session.to_string(), None, messages, AttachAttempt::Explicit)
-        }
-    };
+    let (attach_target, attach_request, read_only, client_flags, initial_messages, attempt) =
+        match initial_attach {
+            InitialAttach::Request {
+                target,
+                detach_others,
+                read_only,
+                client_flags,
+            } => {
+                let attempt = if target.is_some() {
+                    AttachAttempt::Explicit
+                } else {
+                    AttachAttempt::Default
+                };
+                (
+                    target.unwrap_or_default(),
+                    Some(detach_others),
+                    read_only,
+                    client_flags,
+                    Vec::new(),
+                    attempt,
+                )
+            }
+            InitialAttach::AlreadyAttached {
+                session,
+                messages,
+                read_only,
+                client_flags,
+            } => (
+                session.to_string(),
+                None,
+                read_only,
+                client_flags,
+                messages,
+                AttachAttempt::Explicit,
+            ),
+        };
     let size = TerminalSize::detect().map_err(|error| error.to_string())?;
-    let read_only = attach_flags.is_some_and(|(_, read_only)| read_only);
     let mut core = seeded_core(initial.server_hello().clone());
     let mut client = Arc::new(initial);
-    if let Some((detach_others, read_only)) = attach_flags {
+    if let Some(detach_others) = attach_request {
         client
-            .attach_session(attach_target.clone(), detach_others, read_only)
+            .attach_session(
+                attach_target.clone(),
+                detach_others,
+                read_only,
+                client_flags.as_deref(),
+            )
             .map_err(|error| error.to_string())?;
     }
 
@@ -486,7 +507,7 @@ pub(crate) fn run(
         local_endpoint,
         fleet_hosts,
     );
-    if attach_flags.is_some() {
+    if attach_request.is_some() {
         model.begin_client_focus_attach();
     }
     let mut renderer = Renderer::new();
@@ -666,7 +687,7 @@ pub(crate) fn run(
                     InputOutcome::SwitchHost(host) => {
                         let label = host.label.clone();
                         match prepare_host_switch(&endpoint, host, |target| {
-                            prepare_connection(target, String::new(), false)
+                            prepare_connection(target, String::new(), false, None)
                         }) {
                             Ok(HostSwitchDecision::Current) => {}
                             Err(error) => {
@@ -804,6 +825,7 @@ pub(crate) fn run(
                     &endpoint,
                     session.map_or_else(String::new, |session| session.to_string()),
                     read_only,
+                    client_flags.as_deref(),
                 ) else {
                     break Ok(TuiExit::ServerExitedUnexpectedly);
                 };
@@ -894,19 +916,14 @@ fn prepare_connection(
     endpoint: &Endpoint,
     attach_target: String,
     read_only: bool,
+    client_flags: Option<&str>,
 ) -> Result<PreparedConnection, String> {
     let client = connect(endpoint)?;
     let core = seeded_core(client.server_hello().clone());
     let client = Arc::new(client);
-    if read_only {
-        client
-            .attach_session(attach_target, false, true)
-            .map_err(|error| error.to_string())?;
-    } else {
-        client
-            .attach(attach_target)
-            .map_err(|error| error.to_string())?;
-    }
+    client
+        .attach_session(attach_target, false, read_only, client_flags)
+        .map_err(|error| error.to_string())?;
     Ok(PreparedConnection { client, core })
 }
 

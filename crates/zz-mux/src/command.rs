@@ -509,6 +509,7 @@ pub enum MuxEffect {
         session: SessionId,
         detach_others: bool,
         read_only: bool,
+        flags: Option<String>,
     },
     Detach(DetachRequest),
     SourceFile {
@@ -3179,7 +3180,6 @@ impl MuxEngine {
                 if context.has_no_client() {
                     return Ok(Execution::default());
                 }
-                require_client_terminal(context)?;
                 let window = session_active_window(&self.state, session)?;
                 let pane = window_active_pane(&self.state, window)?;
                 context.retarget(&ExecutionContext::new(
@@ -3191,6 +3191,7 @@ impl MuxEngine {
                     session,
                     detach_others: options.has("-D"),
                     read_only: false,
+                    flags: options.value("-f").map(str::to_owned),
                 }));
             }
         }
@@ -3288,6 +3289,7 @@ impl MuxEngine {
                 session,
                 detach_others: false,
                 read_only: false,
+                flags: options.value("-f").map(str::to_owned),
             });
         }
         Ok(Execution { output, effects })
@@ -3511,11 +3513,11 @@ impl MuxEngine {
             self.state
                 .set_session_working_directory(session, PathBuf::from(working_directory))?;
         }
-        require_client_terminal(context)?;
         Ok(Execution::effect(MuxEffect::Attach {
             session,
             detach_others,
             read_only: options.has("-r"),
+            flags: options.value("-f").map(str::to_owned),
         }))
     }
 
@@ -13683,6 +13685,7 @@ mod tests {
                     session: attached,
                     detach_others: false,
                     read_only: false,
+                    flags: None,
                 },
                 MuxEffect::SnapshotChanged,
             ] if *created == pane && *attached == session
@@ -13823,6 +13826,7 @@ mod tests {
                     session,
                     detach_others: false,
                     read_only: false,
+                    flags: None,
                 },
                 MuxEffect::SnapshotChanged,
             ] if *session == target
@@ -13830,7 +13834,7 @@ mod tests {
     }
 
     #[test]
-    fn attach_session_working_directory_mutates_before_terminal_failure_only_after_resolution() {
+    fn attach_session_working_directory_and_flags_follow_target_resolution() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -13859,16 +13863,26 @@ mod tests {
         context.set_client_terminal(false);
         let generation = engine.state.generation();
 
-        let error = engine
+        let execution = engine
             .execute(
                 &mut context,
-                &command("attach-session", &["-t", "=target:1.1", "-c", "/changed"]),
+                &command(
+                    "attach-session",
+                    &["-t", "=target:1.1", "-c", "/changed", "-f", "ignore-size"],
+                ),
             )
-            .unwrap_err();
+            .unwrap();
         assert!(matches!(
-            error,
-            ServerError::InvalidCommand(message)
-                if message == "open terminal failed: not a terminal"
+            execution.effects.as_slice(),
+            [
+                MuxEffect::Attach {
+                    session,
+                    detach_others: false,
+                    read_only: false,
+                    flags: Some(flags),
+                },
+                MuxEffect::SnapshotChanged,
+            ] if *session == target && flags == "ignore-size"
         ));
         assert_eq!(
             engine.state.session_working_directory(target),
@@ -13903,6 +13917,59 @@ mod tests {
             Some(Path::new("/changed"))
         );
         assert_eq!(engine.state.generation(), generation);
+    }
+
+    #[test]
+    fn attaching_commands_keep_only_the_last_requested_flag_mutation() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "target"]),
+            )
+            .unwrap();
+        let session = context.session.unwrap();
+
+        let attached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "attach-session",
+                    &["-t", "target", "-f", "ignore-size", "-f", "active-pane"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            attached.effects,
+            [MuxEffect::Attach {
+                session,
+                detach_others: false,
+                read_only: false,
+                flags: Some("active-pane".to_owned()),
+            }]
+        );
+
+        let created = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-s", "fresh", "-f", "read-only", "-f", "ignore-size"],
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            created.effects.as_slice(),
+            [
+                MuxEffect::PaneCreated { .. },
+                MuxEffect::Attach {
+                    flags: Some(flags),
+                    ..
+                },
+                MuxEffect::SnapshotChanged,
+            ] if flags == "ignore-size"
+        ));
     }
 
     #[test]
@@ -14010,20 +14077,26 @@ mod tests {
                 if message == "open terminal failed: not a terminal"
         ));
         assert!(matches!(
-            engine.execute(
-                &mut context,
-                &command("new-session", &["-A", "-d", "-s", "duplicate"]),
-            ),
-            Err(ServerError::InvalidCommand(message))
-                if message == "open terminal failed: not a terminal"
+            engine
+                .execute(
+                    &mut context,
+                    &command("new-session", &["-A", "-d", "-s", "duplicate"]),
+                )
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::Attach { .. }]
         ));
         assert!(matches!(
-            engine.execute(
-                &mut context,
-                &command("attach-session", &["-t", "duplicate"]),
-            ),
-            Err(ServerError::InvalidCommand(message))
-                if message == "open terminal failed: not a terminal"
+            engine
+                .execute(
+                    &mut context,
+                    &command("attach-session", &["-t", "duplicate"]),
+                )
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::Attach { .. }]
         ));
 
         engine
@@ -14871,6 +14944,7 @@ mod tests {
                 session,
                 detach_others: false,
                 read_only: false,
+                flags: None,
             }]
         );
         assert_eq!(context.session, Some(session));
@@ -14889,6 +14963,7 @@ mod tests {
                 session,
                 detach_others: false,
                 read_only: false,
+                flags: None,
             }]
         );
 
@@ -14904,6 +14979,7 @@ mod tests {
                 session,
                 detach_others: true,
                 read_only: false,
+                flags: None,
             }]
         );
 
@@ -16296,6 +16372,7 @@ mod tests {
                 session,
                 detach_others: true,
                 read_only: false,
+                flags: None,
             }]
         );
     }

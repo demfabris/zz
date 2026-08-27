@@ -738,7 +738,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_value("-t"),
             CommandOptionSpec::value("-e", FreeForm, "session environment"),
             CommandOptionSpec::value("-F", FreeForm, "output format"),
-            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::value("-f", FreeForm, "client flags"),
             CommandOptionSpec::value("-x", FreeForm, "initial width"),
             CommandOptionSpec::value("-y", FreeForm, "initial height"),
         ],
@@ -787,14 +787,14 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "attach-session",
         aliases: &["attach"],
         description: "Attach to a session",
-        usage: "[-dr] [-c working-directory] [-t target-session]",
+        usage: "[-dr] [-c working-directory] [-f flags] [-t target-session]",
         options: &[
             CommandOptionSpec::flag("-d", "detach other clients"),
             CommandOptionSpec::flag("-r", "attach read-only"),
             CommandOptionSpec::value("-c", FreeForm, "working directory for the session"),
             CommandOptionSpec::value("-t", Pane, "target session, window, or pane"),
             CommandOptionSpec::unsupported_flag("-E"),
-            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::value("-f", FreeForm, "client flags"),
             CommandOptionSpec::unsupported_flag("-x"),
         ],
         positionals: &[],
@@ -2318,8 +2318,23 @@ mod tests {
         );
         assert_eq!(
             spec.usage,
-            "[-dr] [-c working-directory] [-t target-session]"
+            "[-dr] [-c working-directory] [-f flags] [-t target-session]"
         );
+    }
+
+    #[test]
+    fn attaching_commands_accept_client_flags() {
+        for name in ["attach-session", "new-session"] {
+            let flags = command_spec(name)
+                .unwrap()
+                .options
+                .iter()
+                .find(|option| option.name == "-f")
+                .unwrap();
+            assert_eq!(flags.value, Some(CommandValueKind::FreeForm));
+            assert!(!flags.unsupported);
+            assert!(flags.completable);
+        }
     }
 
     #[test]

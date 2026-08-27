@@ -140,8 +140,9 @@ activity chooses the oldest-created client. The selected client's attachment sup
 `client_session`; session, window, and pane
 facts stay on the target. An attached target without `-c` remains under `clients.context-formats`.
 This format-only fallback does not alter delivery, duration, printing routing or lifecycle, buffer
-paths, or Command-client selection. Session cwd has shipped; requested flags, retained sizing,
-environment refresh, and exit actions are tracked separately. Binary
+paths, or Command-client selection. Session cwd has shipped; requested flag retention shipped
+2026-08-27. Retained sizing, environment refresh, and exit actions remain separate, while
+`active-pane` and `no-detach-on-destroy` consumers stay tracked. Binary
 streaming and process control require a separate design. Floating panes stay parked; linked windows and real socket interop stay permanently
 excluded; ACLs remain parked outside the practical alias gate.
 

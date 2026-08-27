@@ -95,7 +95,7 @@ const TMUX_USAGE: &str = concat!(
     "            [-S socket-path] [-T features] [command [flags]]"
 );
 #[cfg(not(target_os = "ios"))]
-const NATIVE_ATTACH_USAGE: &str = "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dr] [-c working-directory] [session]";
+const NATIVE_ATTACH_USAGE: &str = "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dr] [-c working-directory] [-f flags] [session]";
 #[cfg(not(target_os = "ios"))]
 const NATIVE_APP_USAGE: &str = "zz: usage: zz app";
 #[cfg(not(target_os = "ios"))]
@@ -115,6 +115,7 @@ struct NativeAttachArguments {
     restart_daemon: bool,
     detach_others: bool,
     read_only: bool,
+    client_flags: Option<String>,
     working_directory: Option<String>,
     session: Option<String>,
 }
@@ -868,6 +869,7 @@ fn run_command_mode(
             restart_daemon: false,
             detach_others: false,
             read_only: false,
+            client_flags: None,
         };
         let reconnect = |path: &Path, client_has_terminal| {
             connect_terminal_surface_client_with_config(
@@ -934,6 +936,9 @@ fn run_command_mode(
             if options.read_only {
                 args.push("-r".to_owned());
             }
+            if let Some(client_flags) = &options.client_flags {
+                args.extend(["-f".to_owned(), client_flags.clone()]);
+            }
             args.extend(["-c".to_owned(), working_directory.clone()]);
             if let Some(session) = &options.session {
                 args.extend(["-t".to_owned(), session.clone()]);
@@ -947,6 +952,7 @@ fn run_command_mode(
             restart_daemon: options.restart_daemon,
             detach_others: options.detach_others,
             read_only: options.read_only,
+            client_flags: options.client_flags,
         };
         let reconnect = |path: &Path, client_has_terminal| {
             connect_terminal_surface_client_with_config(
@@ -1316,6 +1322,7 @@ fn parse_native_attach_arguments(
     let mut restart_daemon = false;
     let mut detach_others = false;
     let mut read_only = false;
+    let mut client_flags = None;
     let mut working_directory = None;
     let mut target = None;
     let mut positional = None;
@@ -1358,11 +1365,8 @@ fn parse_native_attach_arguments(
                     match option {
                         't' => target = Some(value),
                         'c' => working_directory = Some(value),
-                        _ => {
-                            return Err(NativeAttachArgumentError::Command(
-                                ServerError::UnsupportedCommand(format!("attach-session {name}")),
-                            ));
-                        }
+                        'f' => client_flags = Some(value),
+                        _ => unreachable!(),
                     }
                     break;
                 }
@@ -1388,6 +1392,7 @@ fn parse_native_attach_arguments(
         restart_daemon,
         detach_others,
         read_only,
+        client_flags,
         working_directory,
         session: target.or(positional),
     })
@@ -2453,7 +2458,23 @@ mod tests {
             parse_native_attach_arguments(["-dr", "-t", "work"].map(str::to_owned)).unwrap();
         assert!(read_only.detach_others);
         assert!(read_only.read_only);
+        assert_eq!(read_only.client_flags, None);
         assert_eq!(read_only.session.as_deref(), Some("work"));
+
+        let flags = parse_native_attach_arguments(
+            [
+                "-f",
+                "ignore-size",
+                "-factive-pane,no-detach-on-destroy",
+                "work",
+            ]
+            .map(str::to_owned),
+        )
+        .unwrap();
+        assert_eq!(
+            flags.client_flags.as_deref(),
+            Some("active-pane,no-detach-on-destroy")
+        );
 
         let cwd = parse_native_attach_arguments(["-dc/tmp/work", "-t", "work"].map(str::to_owned))
             .unwrap();

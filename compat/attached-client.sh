@@ -290,6 +290,64 @@ wait_for_client_state() {
   fixture_failure "$side client state did not become $expected within 10 seconds; last state: ${LAST_CLIENT_STATE:-<empty>}"
 }
 
+requested_client_state() {
+  local side="$1"
+  local output
+  local session
+  local flags
+  local token
+  local requested=""
+  local -a tokens
+
+  output="$(side_command "$side" list-clients -F '#{client_session}|#{client_flags}' 2>/dev/null || true)"
+  if [ -z "$output" ] || [[ "$output" == *$'\n'* ]]; then
+    printf '%s\n' "$output"
+    return
+  fi
+  IFS='|' read -r session flags <<<"$output"
+  IFS=',' read -r -a tokens <<<"$flags"
+  for token in "${tokens[@]}"; do
+    case "$token" in
+    attached | focused | UTF-8) ;;
+    *)
+      requested="${requested:+$requested,}$token"
+      ;;
+    esac
+  done
+  printf '%s|%s\n' "$session" "$requested"
+}
+
+LAST_REQUESTED_CLIENT_STATE=""
+wait_for_requested_client_state() {
+  local side="$1"
+  local expected="$2"
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    LAST_REQUESTED_CLIENT_STATE="$(requested_client_state "$side")"
+    if [ "$LAST_REQUESTED_CLIENT_STATE" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side requested client state did not become $expected within 10 seconds; last state: ${LAST_REQUESTED_CLIENT_STATE:-<empty>}"
+}
+
+wait_for_session_name() {
+  local side="$1"
+  local expected="$2"
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if side_command "$side" list-sessions -F '#{session_name}' 2>/dev/null |
+      grep -Fxq -- "$expected"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side session $expected did not appear within 10 seconds"
+}
+
 attached_client_count() {
   local side="$1"
 
@@ -1303,6 +1361,94 @@ probe_list_keys_single() {
   wait_for_pane_marker "$side" ATTACHED_LIST_KEYS_RESUMED
 }
 
+run_requested_client_command() {
+  local side="$1"
+  shift
+
+  side_command "$side" bind-key -n F1 "$@" ||
+    fixture_failure "$side could not bind its requested-client command"
+  tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F1
+}
+
+respawn_attached_client() {
+  local side="$1"
+  local client_tty
+  local attach_script
+
+  client_tty="$(tmux_outer_command display-message -p -t "=$OUTER_SESSION:$side" '#{pane_tty}')"
+  if [[ "$client_tty" != /dev/* ]]; then
+    fixture_failure "$side outer pane did not expose a requested-flags client tty"
+  fi
+  side_command "$side" detach-client -t "$client_tty" ||
+    fixture_failure "$side could not detach its requested-flags client"
+  wait_for_attached_client_count "$side" 0
+
+  if [ "$side" = "zz" ]; then
+    attach_script="$ZZ_ATTACH"
+  else
+    attach_script="$TMUX_ATTACH"
+  fi
+  tmux_outer_command respawn-pane -k -t "=$OUTER_SESSION:$side" "$attach_script" ||
+    fixture_failure "$side could not respawn its requested-flags client"
+  wait_for_client_state "$side" root
+}
+
+probe_requested_client_flags() {
+  local side="$1"
+  local fresh_session="requested-flags-fresh"
+  local detached_session="requested-flags-detached"
+  local missing_session="z"
+  local full_flags="ignore-size,no-detach-on-destroy,read-only,active-pane"
+  local read_only_flags
+
+  wait_for_terminal_ready "$side"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|"
+
+  run_requested_client_command "$side" attach-session -f \
+    active-pane,ignore-size,no-detach-on-destroy,read-only,unknown -t "=$INNER_SESSION"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|$full_flags"
+
+  run_requested_client_command "$side" switch-client -t "=$CHOOSER_SESSION"
+  wait_for_requested_client_state "$side" "$CHOOSER_SESSION|$full_flags"
+  run_requested_client_command "$side" attach-session -t "=$INNER_SESSION"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|$full_flags"
+
+  run_requested_client_command "$side" attach-session -f '!ignore-size,!active-pane' \
+    -t "=$missing_session"
+  wait_for_current_marker "$side" "find session: $missing_session"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|$full_flags"
+
+  run_requested_client_command "$side" attach-session -f '!active-pane' -t "=$INNER_SESSION"
+  wait_for_requested_client_state "$side" \
+    "$INNER_SESSION|ignore-size,no-detach-on-destroy,read-only"
+
+  respawn_attached_client "$side"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|"
+
+  run_requested_client_command "$side" new-session -f ignore-size -s "$fresh_session"
+  wait_for_requested_client_state "$side" "$fresh_session|ignore-size"
+  run_requested_client_command "$side" attach-session -t "=$INNER_SESSION"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|ignore-size"
+
+  run_requested_client_command "$side" new-session -d -f active-pane -s "$detached_session"
+  wait_for_session_name "$side" "$detached_session"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|ignore-size"
+  side_command "$side" kill-session -t "=$detached_session" ||
+    fixture_failure "$side could not clean up its detached requested-flags session"
+  side_command "$side" kill-session -t "=$fresh_session" ||
+    fixture_failure "$side could not clean up its fresh requested-flags session"
+
+  run_requested_client_command "$side" attach-session -f '!ignore-size' -t "=$INNER_SESSION"
+  wait_for_requested_client_state "$side" "$INNER_SESSION|"
+  run_requested_client_command "$side" attach-session -r -t "=$INNER_SESSION"
+  if [ "$side" = "zz" ]; then
+    read_only_flags="read-only"
+  else
+    read_only_flags="ignore-size,read-only"
+  fi
+  wait_for_requested_client_state "$side" "$INNER_SESSION|$read_only_flags"
+}
+
 probe_detach_client_tty() {
   local side="$1"
   local client_tty
@@ -1387,6 +1533,8 @@ probe_command_output_navigation tmux
 assert_buffer_parity keep
 probe_source_file_depth zz
 probe_source_file_depth tmux
+probe_requested_client_flags zz
+probe_requested_client_flags tmux
 probe_detach_client_tty zz
 probe_detach_client_tty tmux
 

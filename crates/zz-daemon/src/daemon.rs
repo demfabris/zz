@@ -4185,7 +4185,7 @@ impl Shared {
             inner.client_activity.remove(&client);
             inner.client_activity_times.remove(&client);
             inner.last_sessions.remove(&client);
-            inner.read_only_clients.remove(&client);
+            inner.client_flags.clear(client);
             inner.control_outputs.remove(&client);
             inner.key_engines.remove(&client);
             inner.copy_sessions.remove(&client);
@@ -4422,8 +4422,7 @@ impl Shared {
                 .resolve_command_alias(command)
                 .into_command(command)?
         };
-        let blocked =
-            inner.read_only_clients.contains(&client) && !command_is_read_only_safe(&command);
+        let blocked = inner.client_flags.contains(client) && !command_is_read_only_safe(&command);
         Ok((command, blocked))
     }
 
@@ -5773,7 +5772,7 @@ impl Shared {
                             .cloned()
                             .ok_or(ServerError::PaneExited(*pane))?;
                         let caller_attached = client_is_attached_to_pane(&inner, client, *pane);
-                        if inner.read_only_clients.contains(&client) && !caller_attached {
+                        if inner.client_flags.contains(client) && !caller_attached {
                             return Err(ServerError::InvalidCommand(
                                 "client is read-only".to_owned(),
                             )
@@ -6323,7 +6322,10 @@ impl Shared {
                         session,
                         detach_others,
                         read_only,
-                    } => attach = Some((*session, *detach_others, *read_only)),
+                        flags,
+                    } => {
+                        attach = Some((*session, *detach_others, *read_only, flags.clone()));
+                    }
                     MuxEffect::Detach(request) => {
                         let target_client = resolve_client_target(
                             &inner,
@@ -6331,7 +6333,7 @@ impl Shared {
                             kind,
                             request.target_client.as_deref(),
                         )?;
-                        if inner.read_only_clients.contains(&client)
+                        if inner.client_flags.contains(client)
                             && (!matches!(request.scope, DetachScope::Client)
                                 || target_client != client)
                         {
@@ -6545,11 +6547,15 @@ impl Shared {
                 }
             }
         }
-        if let Some((session, detach_others, read_only)) = attach {
+        if let Some((session, detach_others, read_only, flags)) = attach {
+            self.set_requested_client_flags(client, flags.as_deref(), read_only);
+            if invoking_client_terminal == ClientTerminal::Absent {
+                return Err(ServerError::InvalidCommand(
+                    "open terminal failed: not a terminal".to_owned(),
+                )
+                .into());
+            }
             if invoking_client_terminal == ClientTerminal::Present {
-                if read_only {
-                    self.inner.lock().read_only_clients.insert(client);
-                }
                 let (mut snapshot, attach_hook_events) =
                     self.attach_collect_event_hooks(client, session, event_hooks_enabled)?;
                 self.refresh_control_output_taps();
@@ -9184,7 +9190,7 @@ impl Shared {
             );
             variables.insert(
                 "client_readonly".to_owned(),
-                usize::from(inner.read_only_clients.contains(&client)).to_string(),
+                usize::from(inner.client_flags.contains(client)).to_string(),
             );
             variables.insert("client_session".to_owned(), session.name.clone());
             variables.insert(
@@ -9278,8 +9284,8 @@ impl Shared {
         };
         if parsed.has('r') {
             let mut inner = self.inner.lock();
-            if !inner.read_only_clients.remove(&target_client) {
-                inner.read_only_clients.insert(target_client);
+            if !inner.client_flags.remove(target_client) {
+                inner.client_flags.insert(target_client);
             }
         }
         if let Some(table) = parsed.value('T') {
@@ -9490,6 +9496,45 @@ impl Shared {
                 let after = (output.wait_exit, output.pause_after_ms, output.no_output);
                 (before, after)
             };
+            (before != after).then(|| {
+                (
+                    inner.subscribers.get(&client).cloned(),
+                    EventPayload::ControlFlags {
+                        wait_exit: after.0,
+                        pause_after_ms: after.1,
+                        no_output: after.2,
+                    },
+                )
+            })
+        };
+        if let Some((Some(subscriber), payload)) = event {
+            Self::send_event(&subscriber, payload);
+        }
+    }
+
+    fn set_requested_client_flags(
+        &self,
+        client: ClientId,
+        requested: Option<&str>,
+        read_only: bool,
+    ) {
+        let event = {
+            let mut inner = self.inner.lock();
+            if let Some(requested) = requested {
+                inner.client_flags.apply(client, requested);
+            }
+            if read_only {
+                inner.client_flags.insert(client);
+            }
+            if inner.client_kinds.get(&client) != Some(&ClientKind::Control) {
+                return;
+            }
+            let output = inner.control_outputs.entry(client).or_default();
+            let before = (output.wait_exit, output.pause_after_ms, output.no_output);
+            if let Some(requested) = requested {
+                apply_control_client_flags(output, requested);
+            }
+            let after = (output.wait_exit, output.pause_after_ms, output.no_output);
             (before != after).then(|| {
                 (
                     inner.subscribers.get(&client).cloned(),
@@ -11204,7 +11249,6 @@ impl Shared {
         inner.client_terminal_input_sequences.remove(&client);
         inner.key_engines.remove(&client);
         inner.last_sessions.remove(&client);
-        inner.read_only_clients.remove(&client);
         inner.client_activity.remove(&client);
         inner.client_activity_times.remove(&client);
         let copy_session = inner
@@ -11318,7 +11362,7 @@ impl Shared {
             dismiss_display_panes,
         ) = {
             let mut inner = self.inner.lock();
-            let read_only = inner.read_only_clients.contains(&client);
+            let read_only = inner.client_flags.contains(client);
             let read_only_rejected = read_only && read_only_blocks_input(&input);
             let mouse_rejected = terminal_mouse_rejected(&inner, client, &input);
             let chooser_pane = inner
@@ -11390,7 +11434,7 @@ impl Shared {
             (
                 ignores_message_input,
                 inner.client_messages.contains_key(&client)
-                    && !inner.read_only_clients.contains(&client)
+                    && !inner.client_flags.contains(client)
                     && input_dismisses_client_message(&input),
                 early_input_activity,
                 read_only_rejected || mouse_rejected,
@@ -12042,7 +12086,7 @@ impl Shared {
             if !inner.engine.focus_events() || client_attached_session(&inner, client).is_none() {
                 return Ok(());
             }
-            inner.read_only_clients.contains(&client)
+            inner.client_flags.contains(client)
         };
         if !read_only {
             self.dismiss_client_message(client);
@@ -12411,7 +12455,7 @@ impl Shared {
                 inner.choose_trees.contains_key(&client),
                 inner.choose_buffers.contains_key(&client),
                 inner.display_panes.contains_key(&client),
-                inner.read_only_clients.contains(&client),
+                inner.client_flags.contains(client),
             )
         };
         if choose_tree || choose_buffer || display_panes {
@@ -12630,10 +12674,7 @@ impl Shared {
             let Some(chooser) = inner.choose_trees.get(&client) else {
                 return Ok(());
             };
-            (
-                chooser.source_pane,
-                inner.read_only_clients.contains(&client),
-            )
+            (chooser.source_pane, inner.client_flags.contains(client))
         };
         self.note_terminal_input_without_bell(client, source_pane);
         if read_only {
@@ -12725,10 +12766,7 @@ impl Shared {
             let Some(chooser) = inner.choose_buffers.get(&client) else {
                 return Ok(());
             };
-            (
-                chooser.source_pane,
-                inner.read_only_clients.contains(&client),
-            )
+            (chooser.source_pane, inner.client_flags.contains(client))
         };
         self.note_terminal_input_without_bell(client, source_pane);
         if read_only {
@@ -12883,7 +12921,7 @@ impl Shared {
             };
             (
                 overlay.source_pane,
-                inner.read_only_clients.contains(&client),
+                inner.client_flags.contains(client),
                 inner
                     .engine
                     .state
@@ -13170,7 +13208,7 @@ impl Shared {
         let mut output_truncated = false;
         let (read_only_commands, blocked) = {
             let mut inner = self.inner.lock();
-            if inner.read_only_clients.contains(&client) {
+            if inner.client_flags.contains(client) {
                 let commands = commands
                     .iter()
                     .map(|command| {
@@ -13490,7 +13528,7 @@ impl Shared {
         }
         let (read_only, read_only_pane) = {
             let inner = self.inner.lock();
-            let read_only = inner.read_only_clients.contains(&client);
+            let read_only = inner.client_flags.contains(client);
             (
                 read_only,
                 read_only
@@ -13800,7 +13838,7 @@ impl Shared {
         if kind != ClientKind::Interactive {
             return;
         }
-        if self.inner.lock().read_only_clients.contains(&client) {
+        if self.inner.lock().client_flags.contains(client) {
             return;
         }
         if !zz_protocol::paste_upload_extension_is_valid(&extension)
@@ -19650,6 +19688,72 @@ struct PendingCommittedText {
     suppressed_character: Option<char>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ClientFlagState {
+    read_only: bool,
+    ignore_size: bool,
+    active_pane: bool,
+    no_detach_on_destroy: bool,
+}
+
+impl ClientFlagState {
+    const fn is_empty(self) -> bool {
+        !self.read_only && !self.ignore_size && !self.active_pane && !self.no_detach_on_destroy
+    }
+}
+
+#[derive(Default)]
+struct ClientFlags(BTreeMap<ClientId, ClientFlagState>);
+
+impl ClientFlags {
+    fn contains(&self, client: ClientId) -> bool {
+        self.0.get(&client).is_some_and(|flags| flags.read_only)
+    }
+
+    fn insert(&mut self, client: ClientId) -> bool {
+        let flags = self.0.entry(client).or_default();
+        !std::mem::replace(&mut flags.read_only, true)
+    }
+
+    fn remove(&mut self, client: ClientId) -> bool {
+        let Some(flags) = self.0.get_mut(&client) else {
+            return false;
+        };
+        let removed = std::mem::take(&mut flags.read_only);
+        if flags.is_empty() {
+            self.0.remove(&client);
+        }
+        removed
+    }
+
+    fn clear(&mut self, client: ClientId) {
+        self.0.remove(&client);
+    }
+
+    fn get(&self, client: ClientId) -> ClientFlagState {
+        self.0.get(&client).copied().unwrap_or_default()
+    }
+
+    fn apply(&mut self, client: ClientId, requested: &str) {
+        for raw in requested.split(',') {
+            let (clear, flag) = raw
+                .strip_prefix('!')
+                .map_or((false, raw), |flag| (true, flag));
+            let state = self.0.entry(client).or_default();
+            match flag {
+                "read-only" if !clear => state.read_only = true,
+                "ignore-size" => state.ignore_size = !clear,
+                "active-pane" => state.active_pane = !clear,
+                "no-detach-on-destroy" => state.no_detach_on_destroy = !clear,
+                _ => {}
+            }
+            if state.is_empty() {
+                self.0.remove(&client);
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct ServerState {
     engine: MuxEngine,
@@ -19676,7 +19780,7 @@ struct ServerState {
     client_working_directories: BTreeMap<ClientId, PathBuf>,
     client_origins: BTreeMap<ClientId, PaneId>,
     last_sessions: BTreeMap<ClientId, SessionId>,
-    read_only_clients: BTreeSet<ClientId>,
+    client_flags: ClientFlags,
     client_activity: BTreeMap<ClientId, u64>,
     client_activity_times: BTreeMap<ClientId, u64>,
     session_last_attached: BTreeMap<SessionId, u64>,
@@ -22392,11 +22496,18 @@ fn nested_attach_refusal(inner: &ServerState, client: ClientId) -> Option<Server
 
 fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
     let mut flags = Vec::new();
+    let requested = inner.client_flags.get(client);
     if client_attached_session(inner, client).is_some() {
         flags.push("attached".to_owned());
     }
     if inner.client_kinds.get(&client) == Some(&ClientKind::Control) {
         flags.push("control-mode".to_owned());
+    }
+    if client_ignores_size(inner, client) {
+        flags.push("ignore-size".to_owned());
+    }
+    if requested.no_detach_on_destroy {
+        flags.push("no-detach-on-destroy".to_owned());
     }
     if inner.client_kinds.get(&client) == Some(&ClientKind::Control)
         && let Some(output) = inner.control_outputs.get(&client)
@@ -22411,10 +22522,17 @@ fn format_client_flags(inner: &ServerState, client: ClientId) -> String {
             flags.push(format!("pause-after={}", pause_after_ms / 1000));
         }
     }
-    if inner.read_only_clients.contains(&client) {
+    if requested.read_only {
         flags.push("read-only".to_owned());
     }
+    if requested.active_pane {
+        flags.push("active-pane".to_owned());
+    }
     flags.join(",")
+}
+
+fn client_ignores_size(inner: &ServerState, client: ClientId) -> bool {
+    inner.client_flags.get(client).ignore_size
 }
 
 fn control_client_geometry(
@@ -25417,19 +25535,56 @@ fn apply_control_client_flags(output: &mut ControlClientOutput, flags: &str) {
                 output.pause_after_ms = (!clear).then_some(0);
             }
             _ => {
-                let Some(seconds) = flag
-                    .strip_prefix("pause-after=")
-                    .and_then(|seconds| seconds.parse::<u64>().ok())
-                else {
+                let Some(value) = flag.strip_prefix("pause-after=") else {
                     continue;
                 };
-                let Some(milliseconds) = seconds.checked_mul(1000) else {
+                let Some(milliseconds) = parse_pause_after_milliseconds(value) else {
                     continue;
                 };
                 output.pause_after_ms = (!clear).then_some(milliseconds);
             }
         }
     }
+}
+
+fn parse_pause_after_milliseconds(value: &str) -> Option<u64> {
+    let mut bytes = value.bytes().skip_while(u8::is_ascii_whitespace).peekable();
+    let negative = match bytes.peek() {
+        Some(b'+') => {
+            bytes.next();
+            false
+        }
+        Some(b'-') => {
+            bytes.next();
+            true
+        }
+        _ => false,
+    };
+    let mut magnitude = 0_u64;
+    let mut overflow = false;
+    let mut parsed = false;
+    while let Some(byte) = bytes.next_if(u8::is_ascii_digit) {
+        parsed = true;
+        let digit = u64::from(byte - b'0');
+        match magnitude
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(digit))
+        {
+            Some(value) if !overflow => magnitude = value,
+            _ => {
+                magnitude = u64::MAX;
+                overflow = true;
+            }
+        }
+    }
+    if !parsed {
+        return None;
+    }
+    let mut seconds = magnitude as u32;
+    if negative && !overflow {
+        seconds = seconds.wrapping_neg();
+    }
+    Some(u64::from(seconds.wrapping_mul(1000)))
 }
 
 fn parse_buffer_command_args(
@@ -27132,12 +27287,11 @@ fn handle_connection<S: TransportStream>(
             | ProtocolMessage::AgentSessionOp { .. }
             | ProtocolMessage::AgentReplay { .. }
             | ProtocolMessage::AgentAcknowledgePromptRestore { .. }) => {
-                let read_only_blocked =
-                    !matches!(
-                        message,
-                        ProtocolMessage::AgentReplay { .. }
-                            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }
-                    ) && shared.inner.lock().read_only_clients.contains(&client);
+                let read_only_blocked = !matches!(
+                    message,
+                    ProtocolMessage::AgentReplay { .. }
+                        | ProtocolMessage::AgentAcknowledgePromptRestore { .. }
+                ) && shared.inner.lock().client_flags.contains(client);
                 if read_only_blocked {
                     let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
                         CommandResponse::Error {
@@ -29368,7 +29522,7 @@ mod tests {
 
         let read_only_sort = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             inner
                 .engine
                 .state
@@ -29394,7 +29548,7 @@ mod tests {
             let mut inner = shared.inner.lock();
             assert!(inner.engine.state.sessions[&first].sort_activity > read_only_sort);
             assert_ne!(inner.engine.state.sessions[&first].activity, Some(5));
-            inner.read_only_clients.remove(&client);
+            inner.client_flags.remove(client);
         }
 
         shared
@@ -30269,7 +30423,7 @@ mod tests {
         );
         let (original_name, activity) = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(first);
+            inner.client_flags.insert(first);
             (
                 inner.engine.state.sessions[&session].name.clone(),
                 inner.activity_sequence,
@@ -30800,7 +30954,7 @@ mod tests {
                 },
             )
             .expect("store writable geometry");
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         shared
             .input(
                 client,
@@ -30828,7 +30982,7 @@ mod tests {
             .expect("enable focus events");
         let mut modal_context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
             .expect("read-only modal context");
-        shared.inner.lock().read_only_clients.remove(&client);
+        shared.inner.lock().client_flags.remove(client);
         shared
             .execute(
                 client,
@@ -30850,7 +31004,7 @@ mod tests {
         drain_terminal_lane(&read_only_mailbox);
         let focus_out_before = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             assert!(inner.engine.state.set_pane_bell(pane, true));
             inner
                 .engine
@@ -30859,7 +31013,7 @@ mod tests {
                 .get_mut(&session)
                 .expect("focus session")
                 .activity = Some(-10);
-            assert!(inner.read_only_clients.contains(&client));
+            assert!(inner.client_flags.contains(client));
             assert_eq!(
                 inner.terminal_geometries[&pane][&client],
                 TerminalGeometry {
@@ -31464,7 +31618,7 @@ mod tests {
         };
         {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             inner.engine.mark_session_active_at(other, 1_700_000_020);
             inner
                 .engine
@@ -31560,7 +31714,7 @@ mod tests {
             .offset;
         let writable = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.remove(&client);
+            inner.client_flags.remove(client);
             assert!(inner.engine.state.set_pane_bell(pane, true));
             inner
                 .engine
@@ -31767,7 +31921,7 @@ mod tests {
 
         let read_only_before = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             assert!(inner.engine.state.set_pane_bell(pane, true));
             (
                 inner.activity_sequence,
@@ -31941,7 +32095,7 @@ mod tests {
             .expect("open prompt");
         let initial = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             assert!(inner.engine.state.set_pane_bell(pane, true));
             (
                 inner.activity_sequence,
@@ -32083,7 +32237,7 @@ mod tests {
 
         {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             assert!(inner.engine.state.set_pane_bell(pane, true));
         }
         let read_only_before = activity();
@@ -32336,7 +32490,7 @@ mod tests {
             assert!(!inner.suppressed_text.contains_key(&client));
         }
 
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         let read_only_before = activity();
         for input in [
             InputMessage::BrowserSurfaceText {
@@ -32501,7 +32655,7 @@ mod tests {
             .expect("open read-only chooser");
         {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             inner.engine.state.set_pane_bell(pane, true);
         }
         let read_only_chooser_before = activity();
@@ -32518,7 +32672,7 @@ mod tests {
             assert!(inner.choose_buffers.contains_key(&client));
             assert!(inner.engine.state.pane(pane).unwrap().bell);
             assert!(!inner.pending_committed_text.contains_key(&client));
-            inner.read_only_clients.remove(&client);
+            inner.client_flags.remove(client);
             inner.choose_buffers.remove(&client);
         }
 
@@ -32530,7 +32684,7 @@ mod tests {
                 &CommandInvocation::new("command-prompt", ["-p", "read-only"]),
             )
             .expect("open read-only prompt");
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         let read_only_prompt_before = activity();
         paired(&mut context, "z");
         assert_eq!(
@@ -32542,7 +32696,7 @@ mod tests {
             assert_eq!(inner.command_prompts[&client].input, "");
             assert!(inner.engine.state.pane(pane).unwrap().bell);
             assert!(!inner.pending_committed_text.contains_key(&client));
-            inner.read_only_clients.remove(&client);
+            inner.client_flags.remove(client);
             inner.command_prompts.remove(&client);
         }
 
@@ -32554,7 +32708,7 @@ mod tests {
                 &CommandInvocation::new("display-panes", ["-d", "0"]),
             )
             .expect("open read-only display-panes");
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         let read_only_display_before = activity();
         paired(&mut context, "z");
         assert_eq!(
@@ -35665,6 +35819,32 @@ mod tests {
             format_client_flags(&shared.inner.lock(), control),
             "attached,control-mode"
         );
+    }
+
+    #[test]
+    fn pause_after_uses_unsigned_scan_prefix_and_u32_wrap() {
+        let mut output = ControlClientOutput::default();
+
+        apply_control_client_flags(&mut output, "pause-after=+3suffix");
+        assert_eq!(output.pause_after_ms, Some(3000));
+
+        apply_control_client_flags(&mut output, "pause-after= \t4suffix");
+        assert_eq!(output.pause_after_ms, Some(4000));
+
+        apply_control_client_flags(&mut output, "pause-after=-1suffix");
+        assert_eq!(output.pause_after_ms, Some(4_294_966_296));
+
+        apply_control_client_flags(&mut output, "pause-after=4294967296suffix");
+        assert_eq!(output.pause_after_ms, Some(0));
+
+        apply_control_client_flags(&mut output, "pause-after=4294967295suffix");
+        assert_eq!(output.pause_after_ms, Some(4_294_966_296));
+
+        apply_control_client_flags(&mut output, "pause-after=18446744073709551616suffix");
+        assert_eq!(output.pause_after_ms, Some(4_294_966_296));
+
+        apply_control_client_flags(&mut output, "pause-after=-18446744073709551616suffix");
+        assert_eq!(output.pause_after_ms, Some(4_294_966_296));
     }
 
     #[test]
@@ -42696,7 +42876,7 @@ mod tests {
         }
 
         {
-            shared.inner.lock().read_only_clients.insert(same);
+            shared.inner.lock().client_flags.insert(same);
         }
         shared
             .execute(
@@ -42715,7 +42895,7 @@ mod tests {
         );
         let same_message = shared.inner.lock().client_messages[&same];
 
-        shared.inner.lock().read_only_clients.insert(caller);
+        shared.inner.lock().client_flags.insert(caller);
         let response = shared.execute_command_request(
             caller,
             ClientKind::Interactive,
@@ -43120,7 +43300,7 @@ mod tests {
         );
         assert!(!shared.inner.lock().client_messages.contains_key(&client));
 
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         shared
             .execute_key_commands(
                 client,
@@ -44135,7 +44315,7 @@ mod tests {
 
         let read_only_activity = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             inner.activity_sequence
         };
         shared
@@ -44415,7 +44595,7 @@ mod tests {
             )
             .expect("read-only message");
         let read_only_message = armed_client_message(&shared, client);
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         take_reliable_messages(&mailbox);
         for input in [
             InputMessage::Key {
@@ -44592,7 +44772,7 @@ mod tests {
             )
             .expect("read-only modal message");
         let read_only_message = armed_client_message(&shared, client);
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         take_reliable_messages(&mailbox);
         for input in [
             InputMessage::Text {
@@ -56714,7 +56894,7 @@ bind - split-window -v -c "#{pane_current_path}"
             Arc::clone(&theirs),
         );
         let (session, pane, _) = attached_message_fixture(&shared, "readonly", &[client, peer]);
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
             .expect("read-only context");
 
@@ -58442,7 +58622,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("open display overlay");
         let initial = {
             let mut inner = shared.inner.lock();
-            inner.read_only_clients.insert(client);
+            inner.client_flags.insert(client);
             assert!(inner.engine.state.set_pane_bell(pane, true));
             (
                 inner.activity_sequence,
@@ -60265,7 +60445,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("attach-session", ["-r", "-t", "A"]),
             )
             .expect("read-only attach");
-        assert!(shared.inner.lock().read_only_clients.contains(&client));
+        assert!(shared.inner.lock().client_flags.contains(client));
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
             "attached,read-only"
@@ -60329,7 +60509,285 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("switch-client", ["-r"]),
             )
             .expect("switch-client -r clears read-only");
-        assert!(!shared.inner.lock().read_only_clients.contains(&client));
+        assert!(!shared.inner.lock().client_flags.contains(client));
+    }
+
+    #[test]
+    fn requested_client_flags_mutate_in_tmux_order_and_survive_detach_and_switch() {
+        let shared = Arc::new(Shared::new(1));
+        let (a, _, _) = switch_test_session(&shared, "A");
+        let (b, _, _) = switch_test_session(&shared, "B");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("flags".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let mut context = ExecutionContext::default();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "attach-session",
+                    [
+                        "-t",
+                        "A",
+                        "-f",
+                        "read-only,ignore-size,active-pane,no-detach-on-destroy,no-output,wait-exit,pause-after=4,,Ignore-Size",
+                    ],
+                ),
+            )
+            .expect("attach with requested flags");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached,ignore-size,no-detach-on-destroy,read-only,active-pane"
+        );
+        assert!(client_ignores_size(&shared.inner.lock(), client));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("attach-session", ["-t", "B"]),
+            )
+            .expect("plain attach preserves flags");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(b)
+        );
+        assert!(client_ignores_size(&shared.inner.lock(), client));
+
+        shared.detach(client);
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "ignore-size,no-detach-on-destroy,read-only,active-pane"
+        );
+        shared.attach(client, a).expect("plain reattach");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached,ignore-size,no-detach-on-destroy,read-only,active-pane"
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "attach-session",
+                    [
+                        "-t",
+                        "A",
+                        "-f",
+                        "!read-only,!ignore-size,!active-pane,!no-detach-on-destroy",
+                    ],
+                ),
+            )
+            .expect("clear mutable requested flags");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached,read-only"
+        );
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("switch-client", ["-r"]),
+            )
+            .expect("switch-client toggles read-only off");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached"
+        );
+
+        shared.unregister(client);
+        assert_eq!(
+            shared.inner.lock().client_flags.get(client),
+            ClientFlagState::default()
+        );
+    }
+
+    #[test]
+    fn requested_control_flags_use_the_common_mutation_and_format_contract() {
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "control");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let mut context = ExecutionContext::default();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "attach-session",
+                    [
+                        "-t",
+                        "control",
+                        "-f",
+                        "ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3suffix,read-only,active-pane",
+                    ],
+                ),
+            )
+            .expect("control attach flags");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached,control-mode,ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3,read-only,active-pane"
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "attach-session",
+                    [
+                        "-t",
+                        "control",
+                        "-f",
+                        "!ignore-size,!no-detach-on-destroy,!no-output,!wait-exit,!pause-after,!active-pane",
+                    ],
+                ),
+            )
+            .expect("clear control flags");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached,control-mode,read-only"
+        );
+    }
+
+    #[test]
+    fn attach_flags_follow_resolution_and_precede_the_terminal_open_error() {
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "target");
+        let (client, _) = shared.register(
+            ClientKind::Interactive,
+            ClientInstanceId::default(),
+            Some("headless".to_owned()),
+            None,
+            false,
+        );
+        let mut context = ExecutionContext::default();
+
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "attach-session",
+                    ["-t", "missing", "-f", "ignore-size"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::SessionNotFound(target))) if target == "missing"
+        ));
+        assert!(!client_ignores_size(&shared.inner.lock(), client));
+
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "attach-session",
+                    ["-t", "target", "-c", "/changed", "-f", "ignore-size"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "open terminal failed: not a terminal"
+        ));
+        assert!(client_ignores_size(&shared.inner.lock(), client));
+        let target = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .sessions
+            .values()
+            .find(|session| session.name == "target")
+            .unwrap()
+            .id;
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .session_working_directory(target),
+            Some(Path::new("/changed"))
+        );
+
+        let sessions = shared.inner.lock().engine.state.sessions.len();
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-s", "fresh", "-f", "active-pane"],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "open terminal failed: not a terminal"
+        ));
+        assert_eq!(shared.inner.lock().engine.state.sessions.len(), sessions);
+        assert!(!shared.inner.lock().client_flags.get(client).active_pane);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-d", "-s", "detached", "-f", "active-pane"],
+                ),
+            )
+            .expect("detached creation ignores client flags");
+        assert!(!shared.inner.lock().client_flags.get(client).active_pane);
+    }
+
+    #[test]
+    fn attached_fresh_new_session_applies_flags_after_terminal_materialization() {
+        let shared = Arc::new(Shared::new(1));
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("fresh-flags".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let mut context = ExecutionContext::default();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-s", "fresh-flags", "-f", "ignore-size,active-pane"],
+                ),
+            )
+            .expect("create and attach with flags");
+        let flags = shared.inner.lock().client_flags.get(client);
+        assert!(flags.ignore_size);
+        assert!(flags.active_pane);
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), client),
+            "attached,ignore-size,active-pane"
+        );
     }
 
     #[test]
@@ -60344,7 +60802,7 @@ bind - split-window -v -c "#{pane_current_path}"
             OutboundMailbox::new(),
         );
         shared.attach(client, session).expect("attach viewer");
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
             .expect("view context");
 
@@ -60518,7 +60976,7 @@ bind - split-window -v -c "#{pane_current_path}"
             |viewport| viewport.title() == "focus-ready",
         );
 
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         shared
             .input(
                 client,
@@ -60537,7 +60995,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .is_some_and(|viewport| !viewport_text(&viewport).contains("FOCUS_BYTES:"))
         );
 
-        shared.inner.lock().read_only_clients.remove(&client);
+        shared.inner.lock().client_flags.remove(client);
         shared
             .input(
                 client,
@@ -60594,7 +61052,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let browser_target = browser.to_string();
         context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
             .expect("restore send context");
-        shared.inner.lock().read_only_clients.insert(client);
+        shared.inner.lock().client_flags.insert(client);
         take_reliable_messages(&mailbox);
 
         for (request_id, command) in [
@@ -61081,7 +61539,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ))
         );
 
-        shared.inner.lock().read_only_clients.remove(&client);
+        shared.inner.lock().client_flags.remove(client);
         shared
             .execute(
                 ClientId(u64::MAX),
@@ -61967,7 +62425,7 @@ bind - split-window -v -c "#{pane_current_path}"
             client_attached_session(&shared.inner.lock(), a_client),
             Some(a)
         );
-        assert!(shared.inner.lock().read_only_clients.contains(&a_client));
+        assert!(shared.inner.lock().client_flags.contains(a_client));
         shared
             .execute(
                 a_client,
@@ -61992,7 +62450,7 @@ bind - split-window -v -c "#{pane_current_path}"
             client_attached_session(&shared.inner.lock(), a_client),
             Some(m)
         );
-        assert!(!shared.inner.lock().read_only_clients.contains(&a_client));
+        assert!(!shared.inner.lock().client_flags.contains(a_client));
         shared
             .execute(
                 a_client,
@@ -62036,7 +62494,7 @@ bind - split-window -v -c "#{pane_current_path}"
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "invalid sort order"
         ));
-        assert!(shared.inner.lock().read_only_clients.contains(&a_client));
+        assert!(shared.inner.lock().client_flags.contains(a_client));
 
         for target in ["bogus", "bogus:"] {
             assert!(matches!(

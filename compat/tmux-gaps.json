@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "updated_on": "2026-08-26",
+  "updated_on": "2026-08-27",
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "gaps": [
     {
@@ -222,6 +222,35 @@
       "reason": "zz uses native chooser surfaces and the sidebar instead of tmux mode screens."
     },
     {
+      "id": "clients.active-pane",
+      "title": "Retain per-client active panes",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:per-client-active-pane"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-protocol/src/snapshot.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "file:compat/attached-client.sh"
+      ],
+      "acceptance": [
+        "A client carrying active-pane retains one pane selection per window, and selection, default command and input context, borders, cursor, viewport, and command output follow it without moving peer clients. Missing state falls back to the shared active pane, and pane teardown removes stale selections."
+      ],
+      "depends_on": [],
+      "reason": "The requested flag is retained and reported, but zz still has one window-global active pane while pinned tmux can select a pane per client and window."
+    },
+    {
       "id": "clients.attach-environment",
       "title": "Seed and refresh client environments",
       "decision": "adopt",
@@ -249,35 +278,6 @@
       "reason": "zz seeds sessions from the daemon environment and retains no per-client environment, so creation and attach-time refresh cannot yet follow the invoking client."
     },
     {
-      "id": "clients.attach-flags",
-      "title": "Retain requested client flags across attachment",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "hard",
-      "impact": [
-        "daily",
-        "remote",
-        "scripts"
-      ],
-      "owner": "protocol",
-      "items": [
-        "flag:attach-session:-f",
-        "flag:new-session:-f",
-        "protocol:client-attach-context"
-      ],
-      "evidence": [
-        "resource:knowledge/designs/tmux-superset-roadmap.md",
-        "resource:knowledge/tmux/divergences.md",
-        "file:compat/attached-client.sh"
-      ],
-      "acceptance": [
-        "Attach and attaching new-session retain the requested client flags and make ignore-size available to the later retained-client sizing slice."
-      ],
-      "depends_on": [],
-      "reason": "Requested client flags need durable per-client attachment state, but they do not need session cwd or size aggregation to be implemented and proved."
-    },
-    {
       "id": "clients.attach-sizing",
       "title": "Aggregate retained attached-client sizes",
       "decision": "adopt",
@@ -303,10 +303,8 @@
       "acceptance": [
         "resize-window -A and -a aggregate the retained largest and smallest eligible attached-client sizes while honoring ignore-size from requested client flags."
       ],
-      "depends_on": [
-        "clients.attach-flags"
-      ],
-      "reason": "The daemon retains client sizes, but resize-window does not aggregate them and cannot exclude ignore-size clients until requested flags are durable."
+      "depends_on": [],
+      "reason": "The daemon retains client sizes and ignore-size state, but resize-window does not aggregate the eligible clients."
     },
     {
       "id": "clients.context-formats",
@@ -356,7 +354,6 @@
         "Client, status, and ordinary target contexts expose the pin's retained client facts with defined empty behavior."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "Several facts work only in list or recipient contexts and the rest lack retained client metadata."
@@ -416,7 +413,6 @@
         "Each retained client transition emits its hook once with the target client's format context."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "Storage exists; the missing producers need shared client state and transition points."
@@ -447,10 +443,36 @@
         "A named workload justifies a cross-client mode and redraw contract, then attached-client tests pin it."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "Mode state and redraw ownership span the daemon, protocol, TUI, and GUI."
+    },
+    {
+      "id": "clients.no-detach-on-destroy",
+      "title": "Honor no-detach-on-destroy per client",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:no-detach-on-destroy-fallback"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "file:compat/attached-client.sh"
+      ],
+      "acceptance": [
+        "With detach-on-destroy on, a flagged client moves to the newest remaining session instead of exiting. With no-detached, its fallback applies only when no detached survivor exists. Unflagged clients keep the configured policy, and no remaining session still exits."
+      ],
+      "depends_on": [],
+      "reason": "The requested flag is retained and reported, but zz currently computes one session-destruction survivor policy for every client."
     },
     {
       "id": "clients.parent-hup-exit",
@@ -835,7 +857,6 @@
         "display-message -a lists every defined variable and its current target-context value in the pin's order and output shape; unsupported variable families remain owned by their existing format gaps."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing",
         "formats.mouse-context",
         "formats.pane-process",
@@ -1119,7 +1140,6 @@
         "Session active and working path have target-aware expansion from the shared attached-client context."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "Both values depend on the attached client's selected session and working directory."
@@ -1230,7 +1250,6 @@
         "Window activity timestamps and each client's viewport offsets expand in the correct target context."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "The data exists in separate state paths but is not retained as target-aware format input."
@@ -1284,7 +1303,6 @@
         "Each pane transition emits once with a defined client when multiple clients view the pane."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "Focus is per client and clipboard changes cross client ownership."
@@ -1336,7 +1354,6 @@
         "Job tests pin clean inherited state, TERM-family synthesis, and status-job overlays."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "Jobs still inherit daemon-only state and omit terminal identity variables."
@@ -1953,7 +1970,6 @@
         "The daemon retains job and terminal capability records with target-aware output matching the pin."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "zz does not retain tmux's TTY capability and job-message model."
@@ -1985,7 +2001,6 @@
         "A normalized mouse record reaches bound commands without changing direct GUI mouse behavior."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "These flags depend on the input event that invoked the command."
@@ -2440,7 +2455,6 @@
         "Pane input, style, title, mark, and clear-mark controls have target-aware state and format tests."
       ],
       "depends_on": [
-        "clients.attach-flags",
         "clients.attach-sizing"
       ],
       "reason": "Several flags need client input and marked-pane state that the mux does not retain."
@@ -3007,6 +3021,24 @@
       "resolution": "Protocol v72 appends a durable filter_no_matches bit to both chooser states. A full daemon rebuild sets it only when an explicit static -f filter produced no rows and the chooser restored its unfiltered rows; a matching filter or no filter clears it, while incremental search and selection deltas preserve it. TUI and GUI render the native status `filter: no matches` without replacing the selectable fallback rows. The GUI reserves its 46px shortcut cell for every rendered row only when at least one rendered row has a nonempty key, and removes the cell for a fully keyless list, matching the TUI's list-level gutter decision. The real attached-client fixture requires the status independently on the current tree and buffer chooser screens for both zz and pinned tmux. Native layout differences remain under choosers.native-presentation, while key vocabulary remains under choosers.command-flags."
     },
     {
+      "id": "clients.attach-flags",
+      "title": "Retain requested client flags across attachment",
+      "closed_on": "2026-08-27",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/client.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-tui/src/lib.rs",
+        "resource:crates/zz-tui/src/app.rs",
+        "resource:crates/zz/src/lib.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "attach-session -f and attaching new-session -f now retain the final comma-separated client-flag mutation string in typed daemon state. Common flags are read-only, ignore-size, active-pane, and no-detach-on-destroy; Control clients also apply no-output, wait-exit, and pause-after with the pin's unsigned numeric-prefix and wrapping behavior. Unknown and empty names are ignored, ! clears except that read-only cannot clear itself, repeated -f keeps the last argument, missing targets do not mutate, terminal-open failure retains an existing-target mutation, detached creation ignores flags, and successful -A follows the attach path. State survives session switches and detach, clears on client unregister or replacement, and exact native and TUI reconnect paths replay only the mutation actually applied by a successful attaching command. Protocol v81 and the wire schema are unchanged. The fresh debug attached-client differential passes against the pinned tmux binary, including the accepted zz divergence that -r adds only read-only rather than tmux's coupled ignore-size. Flag retention and client_flags reporting are closed; ignore-size consumption remains under clients.attach-sizing, active-pane behavior under clients.active-pane, and destruction fallback under clients.no-detach-on-destroy."
+    },
+    {
       "id": "clients.attach-session-cwd",
       "title": "Retain session cwd across attachment",
       "closed_on": "2026-08-26",
@@ -3021,7 +3053,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags remain open under clients.attach-flags, retained-client sizing remains under clients.attach-sizing, and session_path remains under formats.session-runtime."
+      "resolution": "Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags later closed under clients.attach-flags; retained-client sizing remains under clients.attach-sizing, and session_path remains under formats.session-runtime."
     },
     {
       "id": "clients.cwd-context",

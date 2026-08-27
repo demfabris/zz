@@ -81,16 +81,31 @@ fn send_prefix_rejects_unknown_flag_before_emitting_input() {
 }
 
 #[test]
-fn catalogued_unsupported_value_keeps_the_unsupported_error_shape() {
+fn attaching_commands_accept_client_flag_values() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
-    let error = engine
-        .execute(&mut context, &command("new-session", &["-f", "ignored"]))
-        .unwrap_err();
+    engine
+        .execute(
+            &mut context,
+            &command("new-session", &["-d", "-s", "flags"]),
+        )
+        .unwrap();
+    let session = context.session.unwrap();
 
     assert_eq!(
-        error,
-        ServerError::UnsupportedCommand("new-session -f".to_owned())
+        engine
+            .execute(
+                &mut context,
+                &command("attach-session", &["-t", "flags", "-f", "ignore-size"]),
+            )
+            .unwrap()
+            .effects,
+        [MuxEffect::Attach {
+            session,
+            detach_others: false,
+            read_only: false,
+            flags: Some("ignore-size".to_owned()),
+        }]
     );
 }
 

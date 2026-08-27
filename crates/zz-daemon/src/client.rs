@@ -108,6 +108,28 @@ pub struct CommandClient {
     _ssh_forward: Option<SshForward>,
 }
 
+fn attach_session_command(
+    session: String,
+    detach_others: bool,
+    read_only: bool,
+    client_flags: Option<&str>,
+) -> CommandInvocation {
+    let mut args = Vec::new();
+    if detach_others {
+        args.push("-d".to_owned());
+    }
+    if read_only {
+        args.push("-r".to_owned());
+    }
+    if let Some(client_flags) = client_flags {
+        args.extend(["-f".to_owned(), client_flags.to_owned()]);
+    }
+    if !session.is_empty() {
+        args.extend(["-t".to_owned(), session]);
+    }
+    CommandInvocation::new("attach-session", args)
+}
+
 impl CommandClient {
     pub fn connect(path: &Path) -> Result<Self, DaemonError> {
         let connected = connect::<LocalTransport>(
@@ -586,26 +608,32 @@ impl InteractiveClient {
         session: impl Into<String>,
         detach_others: bool,
         read_only: bool,
+        client_flags: Option<&str>,
     ) -> Result<(), DaemonError> {
         let session = session.into();
-        if !detach_others && !read_only {
+        if !detach_others && !read_only && client_flags.is_none() {
             return self.attach(session);
-        }
-        let mut args = Vec::new();
-        if detach_others {
-            args.push("-d".to_owned());
-        }
-        if read_only {
-            args.push("-r".to_owned());
-        }
-        if !session.is_empty() {
-            args.extend(["-t".to_owned(), session]);
         }
         self.send(&ProtocolMessage::CommandRequest(CommandRequest {
             request_id: 0,
-            command: CommandInvocation::new("attach-session", args),
+            command: attach_session_command(session, detach_others, read_only, client_flags),
             prepared: false,
         }))
+    }
+
+    pub fn request_attach_session(
+        &self,
+        session: impl Into<String>,
+        detach_others: bool,
+        read_only: bool,
+        client_flags: Option<&str>,
+    ) -> Result<u64, DaemonError> {
+        self.execute(attach_session_command(
+            session.into(),
+            detach_others,
+            read_only,
+            client_flags,
+        ))
     }
 
     pub fn detach(&self) -> Result<(), DaemonError> {
@@ -1218,10 +1246,26 @@ mod tests {
     use zz_protocol::{ClientHello, ClientKind, MAX_CLIENT_WORKING_DIRECTORY_BYTES};
 
     use super::{
-        CallerTtyScope, EndpointFactsScope, client_working_directory,
+        CallerTtyScope, EndpointFactsScope, attach_session_command, client_working_directory,
         startup_config_owner_capability, terminal_facts_capabilities,
         terminal_facts_capabilities_with,
     };
+
+    #[test]
+    fn attach_session_command_preserves_the_exact_requested_flag_mutation() {
+        assert_eq!(
+            attach_session_command(
+                "work".to_owned(),
+                true,
+                true,
+                Some("ignore-size,!active-pane"),
+            ),
+            zz_protocol::CommandInvocation::new(
+                "attach-session",
+                ["-d", "-r", "-f", "ignore-size,!active-pane", "-t", "work",],
+            )
+        );
+    }
 
     #[test]
     fn local_client_fact_scopes_publish_the_supplied_working_directory() {

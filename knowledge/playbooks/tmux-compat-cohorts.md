@@ -4,7 +4,7 @@ title: Running tmux compatibility cohorts
 description: A bounded, parallel workflow for closing the practical alias tmux=zz gap without letting new oracle findings extend one campaign forever.
 tags: [tmux, compatibility, campaign, workflow, agents]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 last_updated_by: Codex
 ---
 
@@ -14,35 +14,30 @@ Close the practical `alias tmux=zz` gate through bounded slices. Each slice star
 acceptance contract, ends with one reviewed commit, and leaves later discoveries in the
 [live tracker](/tmux/gaps.md).
 
-The Alert cohort completed implementation, proof, and documentation in commit
-`2e4ccf3b9b6706e44215d74ca147643e6baa3d2e`. The latest implementation commit before this handoff
-plan is `32bbd2f0e02292e112a98001cdc16753ad6f45ea`; verify that both commits remain ancestors of the
-current clean `main` before starting a new worktree.
+The Alert cohort completed in commit `2e4ccf3b9b6706e44215d74ca147643e6baa3d2e`. The dedicated
+campaign branch then closed session cwd in
+`2468bfd8f1a11430a73b7066b022101b4048d981` and requested client flags in the next milestone.
 
-The session-cwd slice closed on 2026-08-26. `clients.attach-context` was split into independent cwd,
-requested-flags, and retained-sizing groups; `clients.attach-session-cwd` is closed, while
-`clients.attach-flags` and `clients.attach-sizing` remain the next two slices. The implementation
-adds one internal cwd per session without a wire or snapshot-schema change, selects compound
-`attach-session` targets before cwd expansion, routes exact native `attach-session -c` through an
-Interactive attach, and makes attached `source-file` prefer the
-invoking client's session cwd. Its full debug attached-client fixture separates command cwd, session
-cwd with decoys and passes for zz and the pin. A focused daemon test adds a third
-`source-file -t` target cwd decoy.
+`clients.attach-context` is now three bounded contracts. Session cwd and requested flags are closed;
+retained-client sizing is next. Sessions keep one internal cwd, and attached source loading prefers
+it. Clients keep requested flags through attach, switch, detach, and TUI reconnect without a wire or
+snapshot-schema change. `ignore-size` is available to the sizing slice. `active-pane` and
+`no-detach-on-destroy` are retained and reported, but their consumers remain explicit later gaps.
 
-The persisted Alert checkpoint covers 84 scenarios and 1,475 steps. Every ordinary row is clean.
+The fresh 2026-08-27 checkpoint covers 84 scenarios and 1,475 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture and
 `compat/run.sh --check-summary` both pass. The canonical summary SHA-256 is
 `5de67222bc2ebb99c57963be14c865ddfdddc387da34ee32dd86962cef8336c9`.
-These artifacts were produced at the Alert commit; their presence is not proof that the full suite
-was freshly rerun on the later handoff base.
+The full strict suite and attached fixture were rerun from the requested-flags worktree, not carried
+forward from the Alert artifact.
 
 # Cohorts
 
 | Phase | Tracker scope | Dependency | Exit proof |
 |---|---|---|---|
 | Alert | Closed alert groups | Complete | Focused daemon and terminal tests, pinned alert probes, one full debug attached-client fixture, tracker and knowledge updates |
-| Client foundation | `clients.attach-flags`, `clients.attach-sizing`, `clients.attach-environment`, `clients.context-formats`, `clients.event-hooks` | Sizing follows retained flags; formats and hooks follow attach state; environment is independent but shares protocol files | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
+| Client foundation | `clients.attach-sizing`, `clients.attach-environment`, `clients.context-formats`, `clients.event-hooks`; requested flags closed | Formats and hooks follow retained sizing; environment is independent but shares protocol files | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
 | Error contracts | `control-mode.async-copy-pipe-errors`, `mux.error-shapes`, `tracker.semantic-coverage` | Independent of Client foundation except where a proof names client context | Every changed claim gets a pinned differential or a focused test with a named tracker item, followed by one full debug attached-client fixture |
 | Copy behavior | `copy-mode.action-fidelity`, `copy-mode.command-fidelity`, `keys.copy-mode-binding-fidelity`, `keys.copy-mode-unsupported-default-actions`, `keys.copy-mode-prompt-defaults` | Command fidelity requires `clients.interactive-refresh`; prompt-backed defaults also require `prompt.command-fidelity` | Source-owned action and binding inventories, attached key-path probes, and one full debug attached-client fixture |
 
@@ -59,7 +54,7 @@ milestone per letter, never one combined commit.
 | Order | Slice | Current tracker ownership | Relative effort | Why it is bounded |
 |---|---|---|---|---|
 | 1 | Session cwd and attached `source-file` cwd | Closed under `clients.attach-session-cwd` on 2026-08-26 | Complete | One internal session-state path; no client-environment or format vocabulary |
-| 2 | Requested client flags | `clients.attach-flags`: `attach-session -f`, `new-session -f`, and `protocol:client-attach-context` | Hard | One attach-state contract; establishes `ignore-size` |
+| 2 | Requested client flags | Closed under `clients.attach-flags` on 2026-08-27 | Complete | One attach-state contract; establishes `ignore-size` |
 | 3 | Largest and smallest client sizing | `clients.attach-sizing`: `resize-window -A`, `resize-window -a`, and `semantic:resize-window-client-sizes` | Hard | Depends on retained sizes and `ignore-size`, but not environment or hooks |
 | 4 | Client environment seeding and refresh | `clients.attach-environment` | Hard | Independent behavior, serialized because it changes the same handshake files |
 | 5 | Client format facts | `clients.context-formats` | Hard | Define one coherent retained-fact contract across list, status, Control, and targeted contexts |
@@ -79,8 +74,8 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-The next session owns slice 2 only. `clients.attach-flags` is already isolated in the live tracker;
-do not pull retained-client size aggregation into the same change.
+The next milestone owns slice 3 only. `clients.attach-sizing` is unblocked; do not pull client
+environments, formats, hooks, `active-pane`, or `no-detach-on-destroy` behavior into it.
 
 This tranche is not the whole active tracker. After slice 3 closes, regenerate the report and
 re-rank every active daily, script, remote, or silent-mismatch group before choosing slice 4. That
@@ -131,15 +126,16 @@ reject the implementation or proof, but it cannot expand the slice with unrelate
 
 # Goal boundary
 
-Create one persistent Codex goal per slice. Name the exact tracker items and exit proof in its
-objective. Complete that goal after the milestone commit and handoff, then start the next slice in a
-fresh session. Do not use one goal for a phase or the remaining tracker.
+By default, create one persistent Codex goal per slice and name its exact tracker items and exit
+proof. When Fabrico explicitly asks for the whole campaign to continue unattended, one campaign
+goal may span the practical exit gate. The slice boundary does not change: freeze, prove, review,
+document, and commit one milestone before starting the next one.
 
 # Milestone commits and worktree
 
 Commit each slice after code review, proof, tracker generation, and OKF validation pass. Stage exact
-paths or hunks because the shared checkout may contain unrelated work. Tell Fabrico before invoking
-`git commit` so he can touch the YubiKey. Do not push unless he asks.
+paths or hunks because the shared checkout may contain unrelated work. Ask before the first commit
+unless Fabrico has already authorized continuous campaign commits. Do not push unless he asks.
 
 Resolve the `codex/tmux-compat` branch and `/Users/demfabris/dev/zz-tmux-compat` path with read-only
 checks first. If both are absent, create the dedicated worktree from the current clean campaign base
@@ -166,47 +162,26 @@ surprise.
 Paste this prompt into the next session:
 
 ```text
-Start the next bounded tmux compatibility slice for /Users/demfabris/dev/zz.
+Continue the tmux compatibility campaign in /Users/demfabris/dev/zz-tmux-compat on
+codex/tmux-compat. Preserve unrelated work and do not push.
 
-First verify without editing that the checkout is clean and record both main and origin/main. If
-they differ, confirm that main contains origin/main; stop on a true divergence. Verify that both
-32bbd2f0e02292e112a98001cdc16753ad6f45ea and
-2e4ccf3b9b6706e44215d74ca147643e6baa3d2e are ancestors of main. Record the current main SHA as the
-handoff base. Verify that the two Alert groups are closed and that compat/run.sh --check-summary
-reports 84 scenarios, 1,475 steps, and attached-client PASS. Treat this as the persisted Alert
-checkpoint, not proof that the full suite was freshly rerun on the handoff base.
-Verify that `clients.attach-session-cwd` is closed and that `clients.attach-flags` and
-`clients.attach-sizing` are separate open groups with sizing depending on flags.
+Verify that the requested-client-flags milestone is committed, `clients.attach-flags` is closed,
+and `clients.attach-sizing` is open with no dependency. Confirm the fresh checkpoint still reports
+84 scenarios, 1,475 steps, attached-client PASS, and only the two documented GEO rows.
 
-Resolve the codex/tmux-compat branch and /Users/demfabris/dev/zz-tmux-compat path read-only. If both
-are absent, create that dedicated worktree and branch from the recorded main handoff base. If either
-exists, inspect and reuse it safely; do not overwrite it. Perform all remaining work in the dedicated
-worktree.
+The next bounded slice is `clients.attach-sizing` only: `resize-window -A`, `resize-window -a`, and
+`semantic:resize-window-client-sizes`. It may consume retained client geometry and `ignore-size`.
+Do not implement client environments, context formats, event hooks, `active-pane`, or
+`no-detach-on-destroy` behavior.
 
-Read AGENTS.md, knowledge/playbooks/tmux-compat-cohorts.md,
-knowledge/designs/tmux-superset-roadmap.md, compat/tmux-gaps.json, and the relevant cited source
-before editing.
+Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
+source before editing. Use one coordinator and three Codex subagents to probe pinned tmux sizing,
+trace current retained geometry and resize ownership, and design the minimum differential proof.
+Freeze the contract before implementation and assign disjoint file ownership.
 
-Create one persistent goal for the requested-client-flags slice only. It owns `attach-session -f`,
-`new-session -f`, and `protocol:client-attach-context` from `clients.attach-flags`. Do not implement
-`resize-window -A/-a`, size aggregation, client environments, client formats, hooks, or interactive
-refresh in this goal.
-
-Use one coordinator and three Codex subagents. Before implementation, have agents independently:
-1. probe pinned tmux commit d77c9dc6aa021e4bc61f0da128c591af695e6466 for `attach-session -f`
-   and `new-session -f`, including accepted values, precedence, and when flags become durable;
-2. trace current client registration and attachment state and propose the smallest retained-flags
-   model that exposes `ignore-size` to the next slice without implementing aggregation;
-3. audit existing tests and design the minimum non-vacuous differential proof for requested flags,
-   including reattach, attach failure, and client teardown boundaries.
-
-Freeze the acceptance contract after synthesis and assign disjoint file ownership. Use exact
-`-t =name` targets. Treat skips or reduced scenario counts as failures. Run focused tests while
-editing, then a fresh debug build, the full attached-client fixture, and the fresh canonical strict
-differential at slice close because this is the second slice after the persisted Alert checkpoint.
-Do not run a release build.
-
-Update compat/tmux-gaps.json, regenerate knowledge/tmux/gaps.md, update the relevant OKF documents,
-validate OKF, and get an independent Codex review. Close the slice with one milestone commit. Stop
-immediately before git commit and tell Fabrico the YubiKey touch is next. Do not push.
+Run focused tests, build a fresh debug binary, and run the full attached-client fixture. This slice
+starts from a fresh campaign checkpoint, so rerun the canonical strict differential only if the
+change invalidates that artifact or a new scenario joins the canonical corpus. Update the tracker
+and OKF documents, validate them, get an independent review, and commit one milestone. Continue the
+campaign goal into the next slice without pushing.
 ```

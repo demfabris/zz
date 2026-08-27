@@ -53,6 +53,38 @@ fn pane_size(engine: &MuxEngine, pane: PaneId) -> (u16, u16) {
 }
 
 #[test]
+fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretation() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &command("new-session", &["-d", "-s", "flags"]),
+        )
+        .unwrap();
+    let session = context.session.unwrap();
+
+    let execution = engine
+        .execute(
+            &mut context,
+            &command(
+                "attach-session",
+                &["-t", "flags", "-f", "ignore-size,!active-pane"],
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        execution.effects,
+        [MuxEffect::Attach {
+            session,
+            detach_others: false,
+            read_only: false,
+            flags: Some("ignore-size,!active-pane".to_owned()),
+        }]
+    );
+}
+
+#[test]
 fn catalog_covers_the_options_the_handlers_read() {
     assert_eq!(COMMAND_SPECS.len(), 76);
     for name in ["kill-session", "kill-window", "kill-pane"] {

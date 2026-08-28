@@ -421,6 +421,20 @@ struct PendingBrowser {
     allow_shared_texture: bool,
 }
 
+/// One pending browser resolved into the arguments of a `create_session`
+/// call, so the creation can run with the runtime detached.
+struct BrowserCreateSpec {
+    key: BrowserKey,
+    url: String,
+    profile: String,
+    viewport: Viewport,
+    page_zoom_factor: f64,
+    gpu_context: Option<BrowserGpuContext>,
+    allow_shared_texture: bool,
+    frame_rate_ceiling: i32,
+    watch_first_frame: bool,
+}
+
 /// How a browser pane routes its traffic through the ssh host it is attached to.
 #[derive(Clone, Debug)]
 pub(crate) struct EgressSpec {
@@ -578,6 +592,8 @@ pub struct BrowserController {
     pump_deadline: Option<Instant>,
     pump_generation: u64,
     queued_cef_work: Vec<CefWork>,
+    detached_runtime_phase: Option<RuntimePhase>,
+    deferred_runtime_signals: Vec<RuntimeSignal>,
     shutting_down: bool,
 }
 
@@ -628,6 +644,8 @@ impl BrowserController {
                     pump_deadline: None,
                     pump_generation: 0,
                     queued_cef_work: Vec::new(),
+                    detached_runtime_phase: None,
+                    deferred_runtime_signals: Vec::new(),
                     shutting_down: false,
                 };
                 if controller.runtime_phase() != Some(RuntimePhase::Uninitialized) {
@@ -659,6 +677,8 @@ impl BrowserController {
                 pump_deadline: None,
                 pump_generation: 0,
                 queued_cef_work: Vec::new(),
+                detached_runtime_phase: None,
+                deferred_runtime_signals: Vec::new(),
                 shutting_down: false,
             },
         }
@@ -889,7 +909,8 @@ impl BrowserController {
 
     #[must_use]
     pub(crate) fn runtime_phase(&self) -> Option<RuntimePhase> {
-        self.runtime.as_ref().map(BrowserRuntime::phase)
+        self.detached_runtime_phase
+            .or_else(|| self.runtime.as_ref().map(BrowserRuntime::phase))
     }
 
     fn frame_rate_ceiling(&self) -> i32 {
@@ -1713,9 +1734,10 @@ impl BrowserController {
 
     #[must_use]
     pub(crate) fn is_shutdown_complete(&self) -> bool {
-        self.runtime.as_ref().is_none_or(|runtime| {
-            matches!(runtime.phase(), RuntimePhase::Closed | RuntimePhase::Failed)
-        })
+        self.detached_runtime_phase.is_none()
+            && self.runtime.as_ref().is_none_or(|runtime| {
+                matches!(runtime.phase(), RuntimePhase::Closed | RuntimePhase::Failed)
+            })
     }
 
     pub(crate) fn log_diagnostic_snapshot(&self, reason: &str) {
@@ -1807,7 +1829,10 @@ impl BrowserController {
             .runtime
             .as_ref()
             .is_some_and(|runtime| runtime.active_data_operation_count() > 0);
-        if self.sessions.is_empty() && !data_operations_active {
+        if self.sessions.is_empty()
+            && !data_operations_active
+            && self.detached_runtime_phase.is_none()
+        {
             self.shutdown_runtime();
             return Task::ready(self.is_shutdown_complete());
         }
@@ -1846,7 +1871,10 @@ impl BrowserController {
                         .runtime
                         .as_ref()
                         .is_none_or(|runtime| runtime.active_data_operation_count() == 0);
-                    if sessions_closed && data_operations_finished {
+                    if sessions_closed
+                        && data_operations_finished
+                        && controller.detached_runtime_phase.is_none()
+                    {
                         controller.sessions.clear();
                         controller.shutdown_runtime();
                         return ShutdownProgress::Complete;
@@ -1882,6 +1910,10 @@ impl BrowserController {
     }
 
     fn handle_runtime_signal(&mut self, signal: RuntimeSignal, cx: &mut Context<Self>) {
+        if self.detached_runtime_phase.is_some() {
+            self.deferred_runtime_signals.push(signal);
+            return;
+        }
         match signal {
             RuntimeSignal::ScheduleMessagePump(delay_ms) => {
                 self.schedule_pump(delay_ms, cx);
@@ -1918,6 +1950,12 @@ impl BrowserController {
     }
 
     fn ensure_runtime_started(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(phase) = self.detached_runtime_phase {
+            return !matches!(
+                phase,
+                RuntimePhase::Closing | RuntimePhase::Closed | RuntimePhase::Failed
+            );
+        }
         let Some(phase) = self.runtime.as_ref().map(BrowserRuntime::phase) else {
             let message = self.runtime_unavailable_message();
             self.fail_pending_browsers(message.as_ref(), cx);
@@ -1926,27 +1964,69 @@ impl BrowserController {
         match phase {
             RuntimePhase::Initializing | RuntimePhase::Running => true,
             RuntimePhase::Uninitialized => {
-                let result = self
-                    .runtime
-                    .as_mut()
-                    .expect("runtime phase was read above")
-                    .start();
-                match result {
-                    Ok(()) => {
-                        self.schedule_pump(0, cx);
-                        true
-                    }
-                    Err(error) => {
-                        self.fail(error.to_string(), cx);
-                        false
-                    }
-                }
+                self.start_runtime(cx);
+                true
             }
             RuntimePhase::Closing | RuntimePhase::Closed | RuntimePhase::Failed => {
                 let message = self.runtime_unavailable_message();
                 self.fail_pending_browsers(message.as_ref(), cx);
                 false
             }
+        }
+    }
+
+    /// `cef::initialize` runs Chromium startup work on this thread, and that
+    /// work can service the GCD main queue: a gpui runnable drained there must
+    /// find the App borrow free or it panics with `RefCell already borrowed`.
+    /// So, like the pump calls, the runtime leaves the controller and
+    /// initializes at task top level, outside every borrow.
+    fn start_runtime(&mut self, cx: &mut Context<Self>) {
+        let Some(mut runtime) = self.detach_runtime(RuntimePhase::Initializing) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = runtime.start();
+            let mut payload = Some((runtime, result));
+            let updated = this.update(cx, |controller, cx| {
+                let (runtime, result) = payload
+                    .take()
+                    .expect("the reattach closure runs at most once");
+                controller.reattach_runtime(runtime);
+                if let Err(error) = result {
+                    controller.deferred_runtime_signals.clear();
+                    controller.fail(error.to_string(), cx);
+                } else {
+                    controller.replay_deferred_runtime_signals(cx);
+                    controller.schedule_pump(0, cx);
+                }
+            });
+            if updated.is_err()
+                && let Some((mut runtime, _)) = payload.take()
+                && let Err(error) = runtime.shutdown()
+            {
+                log::error!("failed to shut down CEF after losing the browser controller: {error}");
+            }
+        })
+        .detach();
+    }
+
+    /// Takes the runtime out of the controller for a borrow-free CEF call.
+    /// While it is out, [`Self::runtime_phase`] reports `phase` and runtime
+    /// signals are deferred until [`Self::reattach_runtime`].
+    fn detach_runtime(&mut self, phase: RuntimePhase) -> Option<BrowserRuntime> {
+        let runtime = self.runtime.take()?;
+        self.detached_runtime_phase = Some(phase);
+        Some(runtime)
+    }
+
+    fn reattach_runtime(&mut self, runtime: BrowserRuntime) {
+        self.runtime = Some(runtime);
+        self.detached_runtime_phase = None;
+    }
+
+    fn replay_deferred_runtime_signals(&mut self, cx: &mut Context<Self>) {
+        for signal in std::mem::take(&mut self.deferred_runtime_signals) {
+            self.handle_runtime_signal(signal, cx);
         }
     }
 
@@ -2061,8 +2141,13 @@ impl BrowserController {
         .interval()
     }
 
+    /// Like `cef::initialize`, `browser_host_create_browser_sync` runs
+    /// Chromium work that can service the GCD main queue, so the creation
+    /// calls happen with the runtime detached, outside the App borrow. The
+    /// in-flight entries stay in `pending_browsers`: an entry gone by
+    /// completion means the tab closed and the fresh browser is discarded.
     fn try_create_browsers(&mut self, cx: &mut Context<Self>) {
-        if self.shutting_down {
+        if self.shutting_down || self.detached_runtime_phase.is_some() {
             return;
         }
         let Some(runtime) = self.runtime.as_ref() else {
@@ -2071,12 +2156,22 @@ impl BrowserController {
         if runtime.phase() != RuntimePhase::Running {
             return;
         }
-        let pending = std::mem::take(&mut self.pending_browsers);
-        for (key, pending) in pending {
+        let keys: Vec<BrowserKey> = self.pending_browsers.keys().copied().collect();
+        let mut specs = Vec::new();
+        for key in keys {
             if self.sessions.contains_key(&key) {
-                self.pending_browsers.insert(key, pending);
                 continue;
             }
+            let Some(pending) = self.pending_browsers.get(&key) else {
+                continue;
+            };
+            let profile = pending.profile.clone();
+            let url = pending.url.clone();
+            let viewport = pending.viewport;
+            let page_zoom_factor = pending.page_zoom_factor;
+            let gpu_context = pending.gpu_context.clone();
+            let allow_shared_texture = pending.allow_shared_texture;
+            let has_egress = pending.egress.is_some();
             let proxy_port = pending.egress.as_ref().map(|egress| {
                 debug_assert_eq!(pending.profile, egress.composite_profile);
                 egress.socks_port
@@ -2084,19 +2179,17 @@ impl BrowserController {
 
             let context_ready = {
                 let runtime = self.runtime.as_mut().expect("runtime was checked above");
-                if pending.egress.is_some() {
-                    runtime.ensure_egress_profile_context(&pending.profile)
+                if has_egress {
+                    runtime.ensure_egress_profile_context(&profile)
                 } else {
-                    runtime.ensure_profile_context(&pending.profile)
+                    runtime.ensure_profile_context(&profile)
                 }
             };
             match context_ready {
                 Ok(true) => {}
-                Ok(false) => {
-                    self.pending_browsers.insert(key, pending);
-                    continue;
-                }
+                Ok(false) => continue,
                 Err(error) => {
+                    self.pending_browsers.remove(&key);
                     Self::fail_pane(key.0, error.to_string(), cx);
                     continue;
                 }
@@ -2106,20 +2199,12 @@ impl BrowserController {
                     .runtime
                     .as_mut()
                     .expect("runtime was checked above")
-                    .set_profile_proxy(&pending.profile, port)
+                    .set_profile_proxy(&profile, port)
             {
+                self.pending_browsers.remove(&key);
                 Self::fail_pane(key.0, error.to_string(), cx);
                 continue;
             }
-            let PendingBrowser {
-                url,
-                profile,
-                egress,
-                viewport,
-                page_zoom_factor,
-                gpu_context,
-                allow_shared_texture,
-            } = pending;
             let watch_first_frame = cfg!(target_os = "linux")
                 && allow_shared_texture
                 && self
@@ -2128,62 +2213,129 @@ impl BrowserController {
                     .is_some_and(BrowserRuntime::shared_texture_enabled);
             self.resolve_frame_rate_ceiling(cx);
             let frame_rate_ceiling = self.frame_rate_ceiling();
-            let result = self
-                .runtime
-                .as_mut()
-                .expect("runtime was checked above")
-                .create_session(
-                    &profile,
-                    &url,
-                    viewport,
-                    page_zoom_factor,
-                    Some(frame_rate_ceiling),
-                    gpu_context,
-                    allow_shared_texture,
-                );
-            match result {
-                Ok(session) => {
-                    match egress {
-                        Some(egress) => {
-                            self.browser_egress.insert(key, egress);
-                        }
-                        None => {
-                            self.browser_egress.remove(&key);
-                        }
-                    }
-                    let session_id = session.id();
-                    let events = session.events();
-                    let focused = self.focused_panes.contains(&key.0);
-                    session.set_focus(focused);
-                    session.set_frame_rate(effective_pane_frame_rate(
-                        frame_rate_ceiling,
-                        focused,
-                        self.wheel_decay_generations.contains_key(&key),
-                    ));
-                    self.sessions.insert(key, session);
-                    if watch_first_frame {
-                        self.first_frame_watchdogs
-                            .insert(key, FirstFrameWatchdog::new(session_id));
-                    }
-                    self.mark_browser_activity(key);
-                    cx.spawn(async move |this, cx| {
-                        while let Ok(event) = events.recv().await {
-                            if this
-                                .update(cx, |controller, cx| {
-                                    controller.handle_browser_event(event, cx);
-                                })
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                    })
-                    .detach();
+            specs.push(BrowserCreateSpec {
+                key,
+                url,
+                profile,
+                viewport,
+                page_zoom_factor,
+                gpu_context,
+                allow_shared_texture,
+                frame_rate_ceiling,
+                watch_first_frame,
+            });
+        }
+        if specs.is_empty() {
+            self.schedule_pump(0, cx);
+            return;
+        }
+        let Some(mut runtime) = self.detach_runtime(RuntimePhase::Running) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let created: Vec<_> = specs
+                .into_iter()
+                .map(|spec| {
+                    let result = runtime.create_session(
+                        &spec.profile,
+                        &spec.url,
+                        spec.viewport,
+                        spec.page_zoom_factor,
+                        Some(spec.frame_rate_ceiling),
+                        spec.gpu_context.clone(),
+                        spec.allow_shared_texture,
+                    );
+                    (spec, result)
+                })
+                .collect();
+            let mut payload = Some((runtime, created));
+            let updated = this.update(cx, |controller, cx| {
+                let (runtime, created) = payload
+                    .take()
+                    .expect("the reattach closure runs at most once");
+                controller.reattach_runtime(runtime);
+                for (spec, result) in created {
+                    controller.finish_browser_creation(&spec, result, cx);
                 }
-                Err(error) => Self::fail_pane(key.0, error.to_string(), cx),
+                controller.replay_deferred_runtime_signals(cx);
+                controller.try_create_browsers(cx);
+                controller.schedule_pump(0, cx);
+            });
+            if updated.is_err()
+                && let Some((mut runtime, _)) = payload.take()
+                && let Err(error) = runtime.shutdown()
+            {
+                log::error!("failed to shut down CEF after losing the browser controller: {error}");
+            }
+        })
+        .detach();
+    }
+
+    fn finish_browser_creation(
+        &mut self,
+        spec: &BrowserCreateSpec,
+        result: Result<BrowserSession, BrowserError>,
+        cx: &mut Context<Self>,
+    ) {
+        let key = spec.key;
+        let mut session = match result {
+            Ok(session) => session,
+            Err(error) => {
+                self.pending_browsers.remove(&key);
+                Self::fail_pane(key.0, error.to_string(), cx);
+                return;
+            }
+        };
+        if self.shutting_down
+            || self.sessions.contains_key(&key)
+            || !self.pending_browsers.contains_key(&key)
+        {
+            session.close(true);
+            return;
+        }
+        let pending = self
+            .pending_browsers
+            .remove(&key)
+            .expect("presence was checked above");
+        if pending.url != spec.url {
+            session.navigate(&pending.url);
+        }
+        match pending.egress {
+            Some(egress) => {
+                self.browser_egress.insert(key, egress);
+            }
+            None => {
+                self.browser_egress.remove(&key);
             }
         }
-        self.schedule_pump(0, cx);
+        let session_id = session.id();
+        let events = session.events();
+        let focused = self.focused_panes.contains(&key.0);
+        session.set_focus(focused);
+        session.set_frame_rate(effective_pane_frame_rate(
+            spec.frame_rate_ceiling,
+            focused,
+            self.wheel_decay_generations.contains_key(&key),
+        ));
+        self.sessions.insert(key, session);
+        if spec.watch_first_frame {
+            self.first_frame_watchdogs
+                .insert(key, FirstFrameWatchdog::new(session_id));
+        }
+        self.mark_browser_activity(key);
+        cx.spawn(async move |this, cx| {
+            while let Ok(event) = events.recv().await {
+                if this
+                    .update(cx, |controller, cx| {
+                        controller.handle_browser_event(event, cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn handle_browser_event(&mut self, event: BrowserEvent, cx: &mut Context<Self>) {

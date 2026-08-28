@@ -35,7 +35,7 @@ Subcommands are parsed by `run()` and `parse_bundle_options()` in `crates/zz-xta
 
 | OS | Backend called | Notes |
 | --- | --- | --- |
-| Linux | Cargo JSON artifact discovery + `cef::build_util::linux::bundle` | Builds the `zz` executable and its `zz_cli` launcher; `--release` supported |
+| Linux | Cargo JSON artifact discovery + `cef::build_util::linux::bundle` | Builds the `zz` executable and its `zz_cli` launcher; `--release` supported and additionally strips `libcef.so` (shipped with symbol tables upstream, 1.3 GB unstripped) |
 | Windows | local `bundle_windows` (not the upstream `win::build_bundle`) | `--release` supported |
 | macOS | Cargo JSON artifact discovery + `cef::build_util::mac::bundle` | Debug, `--release`, and named Cargo profiles are supported; the `profiling` profile forces native Ghostty to production `ReleaseFast`, then copies and UUID-validates app/helper dSYMs before the normal inside-out signing and verification |
 
@@ -93,7 +93,7 @@ download → verify → extract → wrapper-build → bundle path:
 On Windows, `zz.exe` is CEF's sandbox bootstrap executable, copied from the distribution's
 `bootstrap.exe`: it loads the `zz.dll` beside it (the name comes from its own) and calls the
 exported `RunWinMain` entry point. `xtask` builds that library with `cargo build --package zz
---lib`, so `--features` reaches it, then copies the CEF runtime, locales, `zz.dll`, and . when the
+--lib`, so `--features` reaches it, then copies the CEF runtime, `locales/en-US.pak`, `zz.dll`, and . when the
 profile emitted one . `zz.pdb` around it. Upstream's `cef::build_util::win::build_bundle` is not
 used: it hardcodes its cargo invocation and copies `zz.pdb` unconditionally, which no release
 profile emits.

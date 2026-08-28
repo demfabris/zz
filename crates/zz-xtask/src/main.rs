@@ -2,7 +2,7 @@ use std::{env, error::Error, fs, path::PathBuf, process::ExitCode};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::collections::HashMap;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::path::Path;
 #[cfg(target_os = "macos")]
 use std::{collections::BTreeSet, io};
@@ -33,6 +33,14 @@ const GHOSTTY_OPTIMIZE_ENV: &str = "LIBGHOSTTY_VT_SYS_OPTIMIZE";
 const GHOSTTY_RELEASE_FAST: &str = "ReleaseFast";
 #[cfg(target_os = "macos")]
 const MACOS_HELPER_NAME: &str = "zz_helper";
+#[cfg(target_os = "macos")]
+const MACOS_CEF_FRAMEWORK: &str = "Contents/Frameworks/Chromium Embedded Framework.framework";
+#[cfg(target_os = "macos")]
+const MACOS_CEF_LOCALE: &str = "en.lproj";
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+const CEF_LOCALES_DIR: &str = "locales";
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+const CEF_LOCALE: &str = "en-US.pak";
 #[cfg(target_os = "macos")]
 const MACOS_HELPER_SUFFIXES: [&str; 5] = [
     "Helper",
@@ -211,6 +219,10 @@ fn bundle_cef(args: &[String]) -> Result<(), Box<dyn Error>> {
             fs::remove_file(&previous)?;
         }
         let executable = cef::build_util::linux::bundle(&options.output, &target_path, APP_NAME)?;
+        prune_locales(&options.output.join(CEF_LOCALES_DIR), "pak", CEF_LOCALE)?;
+        if release {
+            strip_library(&options.output.join("libcef.so"))?;
+        }
         fs::copy(
             target_path.join(CLI_NAME),
             options.output.join(CLI_BUNDLE_NAME),
@@ -425,11 +437,13 @@ fn build_windows_library(release: bool, features: Option<&str>) -> Result<PathBu
 
 #[cfg(target_os = "windows")]
 fn bundle_windows(output: &Path, target_path: &Path) -> Result<PathBuf, Box<dyn Error>> {
-    const LOCALES: &str = "locales";
-
     let cef_dir = cef::sys::get_cef_dir().ok_or("CEF distribution path is unavailable")?;
     copy_directory_files(&cef_dir, output)?;
-    copy_directory_files(&cef_dir.join(LOCALES), &output.join(LOCALES))?;
+    copy_directory_files(
+        &cef_dir.join(CEF_LOCALES_DIR),
+        &output.join(CEF_LOCALES_DIR),
+    )?;
+    prune_locales(&output.join(CEF_LOCALES_DIR), "pak", CEF_LOCALE)?;
 
     let executable = output.join(format!("{APP_NAME}.exe"));
     fs::copy(cef_dir.join(WINDOWS_BOOTSTRAP_NAME), &executable)?;
@@ -546,6 +560,11 @@ fn build_macos_bundle(
             development_region: "English".to_owned(),
             version: product_version(env!("CARGO_PKG_VERSION")).parse()?,
         },
+    )?;
+    prune_locales(
+        &app.join(MACOS_CEF_FRAMEWORK).join("Resources"),
+        "lproj",
+        MACOS_CEF_LOCALE,
     )?;
     fs::copy(target_path.join(CLI_NAME), macos_cli_launcher(&app))?;
     if profile.is_named(PROFILING_PROFILE) {
@@ -764,6 +783,40 @@ fn macho_uuids(path: &Path) -> Result<BTreeSet<String>, Box<dyn Error>> {
         .collect())
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn prune_locales(directory: &Path, extension: &str, keep: &str) -> Result<(), Box<dyn Error>> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().is_none_or(|value| value != extension) || entry.file_name() == keep {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn strip_library(path: &Path) -> Result<(), Box<dyn Error>> {
+    let before = path.metadata()?.len();
+    let status = Command::new("strip").arg(path).status()?;
+    if !status.success() {
+        return Err(format!("strip failed for {} with {status}", path.display()).into());
+    }
+    let after = path.metadata()?.len();
+    println!(
+        "Stripped {}: {} MiB -> {} MiB",
+        path.display(),
+        before >> 20,
+        after >> 20
+    );
+    Ok(())
+}
+
 fn install_cef_notices(executable: &std::path::Path) -> Result<(), Box<dyn Error>> {
     let resources = bundle_root(executable);
     fs::create_dir_all(&resources)?;
@@ -781,7 +834,7 @@ fn install_cef_notices(executable: &std::path::Path) -> Result<(), Box<dyn Error
 #[cfg(target_os = "macos")]
 fn sign_macos_bundle(app: &Path) -> Result<(), Box<dyn Error>> {
     let identity = macos_local_signing_identity();
-    let framework = app.join("Contents/Frameworks/Chromium Embedded Framework.framework");
+    let framework = app.join(MACOS_CEF_FRAMEWORK);
     sign_macos_code(&framework, &identity)?;
     for helper in macos_helper_apps(app) {
         sign_macos_code(&helper, &identity)?;
@@ -1134,7 +1187,7 @@ fn platform_bundle_files(executable: &std::path::Path) -> Vec<PathBuf> {
 #[cfg(target_os = "macos")]
 fn platform_bundle_files(app: &std::path::Path) -> Vec<PathBuf> {
     let resources = bundle_root(app);
-    let framework = app.join("Contents/Frameworks/Chromium Embedded Framework.framework");
+    let framework = app.join(MACOS_CEF_FRAMEWORK);
     let mut required = vec![
         app.join("Contents/Info.plist"),
         app.join("Contents/MacOS/zz"),

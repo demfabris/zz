@@ -190,9 +190,14 @@ What `bundle-cef` does, in order:
    resources; macOS discovers Cargo's actual
    `zz`/`zz_helper`/`zz_cli` artifact paths for the selected profile and calls the public macOS
    `bundle` API. The platform backend copies CEF runtime, resources, locales, and helper/bootstrap
-   artifacts into `--output` (default `dist/zz`). The upstream bundlers know nothing about the
-   `PATH` launcher, so xtask copies it after their assembly step. macOS places it at
-   `Contents/MacOS/cli` before signing because the bundle signature covers that Mach-O file.
+   artifacts into `--output` (default `dist/zz`). xtask then prunes the ~220 CEF locales down to
+   the one zz uses (`en.lproj` on macOS, `locales/en-US.pak` elsewhere; ~50 MB of packs) and, on
+   Linux release bundles, runs `strip` over `libcef.so`: Spotify's Linux CEF builds ship it with
+   full symbol tables (1.3 GB; a stripped copy is a fraction of that), unlike the pre-stripped macOS
+   framework. Debug Linux bundles keep the symbols for readable CEF backtraces. The upstream
+   bundlers know nothing about the `PATH` launcher, so xtask copies it after their assembly step.
+   macOS places it at `Contents/MacOS/cli` before signing because the bundle signature covers that
+   Mach-O file.
 6. **macOS profiling symbols** . the named `profiling` Cargo profile inherits release optimization
    while retaining full DWARF. `install_macos_debug_symbols` copies `zz.dSYM` and
    `zz_helper.dSYM` beside `dist/zz-profile/zz.app` and requires each copied symbol bundle's

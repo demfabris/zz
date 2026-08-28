@@ -32,11 +32,11 @@ percentage is a ledger health metric, not a compatibility claim.
 
 | Fact | Current value |
 | --- | --- |
-| Worktree | `/Users/demfabris/dev/zz-tmux-compat` |
-| Branch | `codex/tmux-compat` |
+| Repository | `/Users/demfabris/dev/zz` |
+| Published branch | `origin/main` |
 | Audited campaign base | `1a0f59e8dd6b3885421afb38dad5e5a2ee824aec` |
-| Remote `main` | `4c5bd8cff538d81d0c124192678d9c006932ac5e` |
-| Local-only campaign commits | `151abce`, `aad3923`, `1a0f59e` |
+| Published delivery | Every milestone listed below and this tracker are on remote `main` |
+| Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
 | Pause point | Slice 10p, raw-TUI popup, has not started |
@@ -45,8 +45,9 @@ percentage is a ledger health metric, not a compatibility claim.
 | Known differentials | 2 registered geometry cases |
 
 The audited base was clean before this file was created. Resolve the commit containing the latest
-tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`. Always inspect the live
-worktree before acting because other agents may share it.
+tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and resolve live remote
+`main` with `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the
+live worktree before acting because other agents may share it.
 
 ### Progress calculation
 
@@ -100,18 +101,33 @@ old drop-in plan are not live status.
 When Fabrico asks to resume the campaign, begin here:
 
 ```sh
-cd /Users/demfabris/dev/zz-tmux-compat
+cd /Users/demfabris/dev/zz
 git status --short --branch
+git worktree list
+git fetch https://github.com/demfabris/zz.git main:refs/remotes/origin/main
 git rev-parse HEAD origin/main
+```
+
+Preserve unrelated changes in the standard checkout. If it is dirty or shared, create a fresh
+dedicated worktree from the verified `origin/main` instead of changing or committing those edits:
+
+```sh
+git worktree add -b codex/tmux-compat-next /Users/demfabris/dev/zz-tmux-compat origin/main
+cd /Users/demfabris/dev/zz-tmux-compat
+```
+
+If that path or branch already exists, inspect and reuse it safely rather than overwriting it. From
+the selected clean campaign worktree, run:
+
+```sh
 python3 compat/tmux-tracker.py check
 compat/run.sh --check-summary
 just compat-check
 ```
 
-Confirm the branch, preserve unrelated changes, and compare live output with the checkpoint above.
-If HEAD or tracker counts moved, update this file before implementing. Regenerate and re-rank the
-whole active registry before freezing a slice because a newly exposed daily, script, remote, or
-silent mismatch may outrank the forecast.
+Compare live output with the checkpoint above. If HEAD or tracker counts moved, update this file
+before implementing. Regenerate and re-rank the whole active registry before freezing a slice
+because a newly exposed daily, script, remote, or silent mismatch may outrank the forecast.
 
 Work one bounded milestone at a time:
 
@@ -198,9 +214,9 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10l | Source-owned hook-producer partition | `dd290e5` |
 | 10m | Default-key structure and bare `bind-key` mutation | `ff3347d` |
 | Main checkpoint | Campaign through 10m merged into remote `main` | `4c5bd8c` |
-| 10n | Raw-TUI confirmation rendering and input ownership | `151abce`, local only |
-| Count correction | Unsupported flag inventory corrected to 70 pairs across 20 commands | `aad3923`, local only |
-| 10o | Raw-TUI menu rendering, shared resolver, lifecycle, and attached proof | `1a0f59e`, local only |
+| 10n | Raw-TUI confirmation rendering and input ownership | `151abce` |
+| Count correction | Unsupported flag inventory corrected to 70 pairs across 20 commands | `aad3923` |
+| 10o | Raw-TUI menu rendering, shared resolver, lifecycle, and attached proof | `1a0f59e` |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -357,9 +373,9 @@ Long-tail work may remain after this gate. An unclassified daily-use surprise ma
 Update this tracker in the same milestone whenever the registry, accepted artifact, queue, branch,
 or delivery state changes:
 
-1. Replace the base-verification date, audited pre-update base, remote `main`, local-only commits,
-   pause state, and next slice. Do not try to embed the SHA of the commit that contains this file;
-   resolve it with `git log` and mirror it to issue #7 after the commit exists.
+1. Replace the base-verification date, audited pre-update base, repository/worktree state, delivery
+   state, pause state, and next slice. Do not try to embed the SHA of the commit that contains this
+   file; resolve it with `git log` and mirror it to issue #7 after the commit exists.
 2. Recompute the percentage from `compat/tmux-gaps.json`; update the numerator, denominator, active
    counts, status split, and known differential count.
 3. Add the completed milestone row with its exact tracker owner and commit.

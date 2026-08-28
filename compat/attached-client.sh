@@ -89,6 +89,10 @@ DAEMON_STDERR="$SCRATCH_DIR/zz-daemon.stderr"
 ZZ_ATTACH="$SCRATCH_DIR/attach-zz"
 TMUX_ATTACH="$SCRATCH_DIR/attach-tmux"
 ZZ_PID=""
+case "$(locale charmap 2>/dev/null || true)" in
+*UTF-8* | *UTF8*) EXPECTED_CLIENT_UTF8=1 ;;
+*) EXPECTED_CLIENT_UTF8=0 ;;
+esac
 
 mkdir -p "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$TMUX_HOME" "$TMUX_CONFIG_HOME" \
   "$OUTER_HOME" "$OUTER_CONFIG_HOME" "$SOURCE_CONFIG_DIR" \
@@ -707,6 +711,22 @@ wait_for_current_marker() {
     sleep 0.05
   done
   fixture_failure "$side current screen did not show $marker within 10 seconds"
+}
+
+wait_for_current_popup_title() {
+  local side="$1"
+  local title="$2"
+  local attempt
+  local screen
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+    if grep -Fq -- "┌─$title" <<<"$screen" || grep -Fq -- "lq$title" <<<"$screen"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side current screen did not show popup title $title within 10 seconds"
 }
 
 wait_for_current_marker_absent() {
@@ -1329,46 +1349,28 @@ finish_display_popup() {
   DISPLAY_POPUP_PID=""
 }
 
-resolve_popup_frame_geometry() {
+capture_popup_frame() {
   local side="$1"
   local title="$2"
+  local attempt
   local screen
-  local line
-  local prefix
-  local tail
-  local inside
   local frame
-  local row=0
-  local left=""
-  local top=""
-  local width=""
-  local bottom=""
 
-  screen="$(capture_current_screen "$side")" ||
-    fixture_failure "$side could not capture popup geometry for $title"
-  while IFS= read -r line; do
-    row=$((row + 1))
-    if [ -z "$top" ] && [[ "$line" == *"┌─$title"* ]]; then
-      prefix="${line%%"┌─$title"*}"
-      tail="${line:${#prefix}}"
-      inside="${tail%%┐*}"
-      left=${#prefix}
-      top=$row
-      width=$((${#inside} + 1))
-      continue
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+    if frame="$(awk -v title="$title" '
+      !inside && (index($0, "┌─" title) || index($0, "lq" title)) { inside = 1 }
+      inside { printf "%d:%s\n", NR, $0 }
+      inside && ((index($0, "└") && index($0, "┘")) ||
+        (index($0, "mqq") && index($0, "j"))) { found = 1; exit }
+      END { if (!found) exit 1 }
+    ' <<<"$screen")"; then
+      POPUP_FRAME="$frame"
+      return 0
     fi
-    if [ -n "$top" ]; then
-      frame="${line:left:width}"
-      if [[ "$frame" == └*┘ ]]; then
-        bottom=$row
-        break
-      fi
-    fi
-  done <<<"$screen"
-  if [ -z "$bottom" ]; then
-    fixture_failure "$side could not resolve popup frame geometry for $title"
-  fi
-  POPUP_FRAME_GEOMETRY="$left,$top,$width,$((bottom - top + 1))"
+    sleep 0.05
+  done
+  fixture_failure "$side could not resolve popup frame for $title"
 }
 
 probe_display_popup() {
@@ -1386,7 +1388,8 @@ probe_display_popup() {
   local popup_column
   local popup_row
   local mouse_sequence
-  local original_geometry
+  local original_frame
+  local updated_frame
 
   client_name="$(side_command "$side" list-clients -F '#{client_name}')"
   if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
@@ -1460,29 +1463,29 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   open_display_popup "$side" "$client_name" "$title" \
     -E -b single -x 9 -y 12 -w 38 -h 9 \
     /bin/bash -c \
-    'saved=$(stty -g); trap '\''stty "$saved"'\'' EXIT; stty raw -echo min 1 time 0; printf "POPUP_A_READY_%s\r\nPOPUP_A_BODY_%s\r\n" "$1" "$1"; key=$(dd bs=1 count=1 2>/dev/null); marker="POPUP_A_KEY_${1}_${key}"; printf "%s\r\n" "$marker"; printf "%s\n" "$marker" >"$2"' \
+    'saved=$(stty -g); cleanup_popup() { printf "\033[?1004l"; stty "$saved"; }; trap cleanup_popup EXIT; stty raw -echo min 1 time 0; printf "\033[?1004hPOPUP_A_READY_%s\r\nPOPUP_A_BODY_%s\r\n" "$1" "$1"; key=$(dd bs=1 count=1 2>/dev/null); marker="POPUP_A_KEY_${1}_${key}"; printf "%s\r\n" "$marker"; printf "%s\n" "$marker" >"$2"' \
     popup-a "$side" "$key_file"
   wait_for_popup_underlay_focus "$side" OUT 1
   wait_for_current_marker "$side" "POPUP_A_READY_$side"
   wait_for_current_marker "$side" "POPUP_A_BODY_$side"
-  wait_for_current_marker "$side" "┌─$title"
-  wait_for_current_marker "$side" "└────"
+  wait_for_current_popup_title "$side" "$title"
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
-  resolve_popup_frame_geometry "$side" "$title"
-  original_geometry="$POPUP_FRAME_GEOMETRY"
+  capture_popup_frame "$side" "$title"
+  original_frame="$POPUP_FRAME"
 
   updated_title="POPUP_A_TWO_$side"
   side_command "$side" display-popup -E -c "$client_name" \
     -x 2 -y 18 -w 24 -h 6 -T "$updated_title" \
     /bin/bash -c 'printf "POPUP_A_REPLACEMENT_WRONG\n"' ||
     fixture_failure "$side could not modify its live popup"
-  wait_for_current_marker "$side" "┌─$updated_title"
+  wait_for_current_popup_title "$side" "$updated_title"
   wait_for_current_marker "$side" "POPUP_A_BODY_$side"
   wait_for_current_marker_absent "$side" POPUP_A_REPLACEMENT_WRONG
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
-  resolve_popup_frame_geometry "$side" "$updated_title"
-  if [ "$POPUP_FRAME_GEOMETRY" != "$original_geometry" ]; then
-    fixture_failure "$side changed live popup geometry from $original_geometry to $POPUP_FRAME_GEOMETRY"
+  capture_popup_frame "$side" "$updated_title"
+  updated_frame="${POPUP_FRAME//$updated_title/$title}"
+  if [ "$updated_frame" != "$original_frame" ]; then
+    fixture_failure "$side changed its live popup frame"
   fi
 
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" $'\033[O\033[I'
@@ -1500,7 +1503,7 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   open_display_popup "$side" "$client_name" "$title" \
     -E -b single -x 12 -y 15 -w 36 -h 10 \
     /bin/bash -c \
-    'saved=$(stty -g); cleanup_popup() { printf "\033[?1000l\033[?1006l\033[?2004l"; stty "$saved"; }; trap cleanup_popup EXIT; stty raw -echo min 1 time 0; printf "\033[?1000h\033[?1006h\033[?2004hPOPUP_B_READY_%s\r\n" "$1"; expected=$'\''\033[200~popup-b\033[201~'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_PASTE_%s\r\n" "$1"; else printf "POPUP_B_INVALID_PASTE_%s\r\n" "$1"; exit 1; fi; expected=$'\''\033[<0;3;3M\033[<0;3;3m'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_MOUSE_%s_3_3\r\n" "$1"; else printf "POPUP_B_INVALID_MOUSE_%s\r\n" "$1"; exit 1; fi; expected=$'\''\033[<64;3;3M'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_SCROLL_%s_3_3\r\n" "$1"; else printf "POPUP_B_INVALID_SCROLL_%s\r\n" "$1"; exit 1; fi; dd bs=1 count=1 >/dev/null 2>&1' \
+    'saved=$(stty -g); cleanup_popup() { printf "\033[?1000l\033[?1006l\033[?1004l\033[?2004l"; stty "$saved"; }; trap cleanup_popup EXIT; stty raw -echo min 1 time 0; printf "\033[?1000h\033[?1006h\033[?1004h\033[?2004hPOPUP_B_READY_%s\r\n" "$1"; expected=$'\''\033[200~popup-b\033[201~'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_PASTE_%s\r\n" "$1"; else printf "POPUP_B_INVALID_PASTE_%s\r\n" "$1"; exit 1; fi; expected=$'\''\033[<0;3;3M\033[<0;3;3m'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_MOUSE_%s_3_3\r\n" "$1"; else printf "POPUP_B_INVALID_MOUSE_%s\r\n" "$1"; exit 1; fi; expected=$'\''\033[<64;3;3M'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_SCROLL_%s_3_3\r\n" "$1"; else printf "POPUP_B_INVALID_SCROLL_%s\r\n" "$1"; exit 1; fi; dd bs=1 count=1 >/dev/null 2>&1' \
     popup-b "$side"
   wait_for_popup_underlay_focus "$side" OUT 2
   wait_for_current_marker "$side" "POPUP_B_READY_$side"
@@ -1544,13 +1547,13 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
     -k -b single -x 16 -y 14 -w 32 -h 7 \
     /bin/bash -c 'printf "POPUP_C_DEAD_%s\n" "$1"' popup-c "$side"
   wait_for_popup_underlay_focus "$side" OUT 3
-  wait_for_current_marker "$side" "┌─$title"
+  wait_for_current_popup_title "$side" "$title"
   wait_for_current_marker "$side" "POPUP_C_DEAD_$side"
   if ! kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
     fixture_failure "$side did not retain its dead popup command"
   fi
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
-  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" $'\033[O\033[I'
   wait_for_current_marker_absent "$side" "$title"
   finish_display_popup "$side"
   wait_for_popup_underlay_focus "$side" IN 3
@@ -2225,7 +2228,8 @@ validate_context_format_row() {
     if ! [[ "$cell_height" =~ ^[0-9]+$ ]] || ! [[ "$cell_width" =~ ^[0-9]+$ ]] || \
       ! [[ "$colours" =~ ^[0-9]+$ ]] || [ "$control_mode" != 0 ] || \
       [ "$height" != 24 ] || [ "$name" != "$expected_tty" ] || \
-      [ "$tty" != "$expected_tty" ] || [ "$width" != 80 ] || [ "$utf8" != 1 ]; then
+      [ "$tty" != "$expected_tty" ] || [ "$width" != 80 ] || \
+      [ "$utf8" != "$EXPECTED_CLIENT_UTF8" ]; then
       fixture_failure "$side interactive client context row has incorrect terminal facts: $row"
     fi
     ;;

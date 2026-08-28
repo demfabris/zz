@@ -259,7 +259,8 @@ Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven co
 a pane-input sentinel to the attached fixture. Slice 10o adds bounded menu cases for a visible
 title, shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
 Enter, nonactivating paste, and pane-input isolation. Slice 10p adds three bounded popup cases for
-live modification, terminal input, dead retention, focus ownership, and pane-input isolation.
+live modification, terminal input, dead retention, live focus suppression, dead focus-close, and
+pane-input isolation.
 Focused resolver coverage pins exact raw-row-zero and all-disabled menu behavior. None adds a
 differential row, so the scenario count, step count, attached-client result, and digest stay
 unchanged.
@@ -512,14 +513,17 @@ command-output bases.
 
 The popup probe runs three cases against each attached client. Case A opens a bordered `-E` popup,
 modifies its title while requesting different geometry and a replacement command, then requires the
-original terminal body, job, and frame geometry to remain before a scratch marker proves `q` reached
-that popup. Case B requires bracketed paste, one physical SGR left-button press/release pair, and one
+original terminal body, job, and complete captured frame to remain before a scratch marker proves
+`q` reached that popup. Case B requires bracketed paste, one physical SGR left-button press/release pair, and one
 tracked wheel event to arrive at exact content-relative cell `3,3`; outer cursor coordinates keep
 the proof independent from native sidebar geometry and locale width rules. Case C retains a dead
 `-k` popup until a key closes it. Pinned tmux emits three internal underlay FocusOut/FocusIn pairs
-around those lifecycles, while zz emits none. Explicit external OUT/IN probes while the popups are
-live remain isolated from the underlay on both sides, and a final `z` must be the underlay's only
-ordinary byte, reported as decimal 122. The closure covers raw-TUI rendering, state, cleanup, and
+around those lifecycles, while zz emits none. Cases A and B enable application focus reporting;
+explicit external OUT/IN probes are swallowed by both live overlays, making `q` and bracketed paste
+the next application bytes while the underlay stays isolated. Case C uses FocusOut to close the
+dead `-k` popup. Unicode and C-locale ACS borders share the same full-frame proof, and the complete
+fixture passes under `LC_ALL=C`. A final `z` must be the
+underlay's only ordinary byte, reported as decimal 122. The closure covers raw-TUI rendering, state, cleanup, and
 bounded input ownership. Live resize, style refresh, context menu, border drag, popup-to-pane,
 popup Kitty images, and real mouse or status format facts remain outside it.
 

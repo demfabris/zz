@@ -1440,11 +1440,7 @@ fn send_focus(model: &mut Model, client: &InteractiveClient, focused: bool) -> R
             .pane_snapshot(pane)
             .map(|snapshot| (pane, &snapshot.kind))
     });
-    if let Some(input) = surface_focus_input(
-        model.popup.as_ref().map(|popup| popup.pane),
-        active_pane,
-        focused,
-    ) {
+    if let Some(input) = surface_focus_input(model.popup.as_ref(), active_pane, focused) {
         client
             .send_input(input)
             .map_err(|error| error.to_string())?;
@@ -1453,18 +1449,17 @@ fn send_focus(model: &mut Model, client: &InteractiveClient, focused: bool) -> R
 }
 
 fn surface_focus_input(
-    popup: Option<zz_protocol::PaneId>,
+    popup: Option<&zz_protocol::PopupState>,
     active_pane: Option<(zz_protocol::PaneId, &PaneKindSnapshot)>,
     focused: bool,
 ) -> Option<InputMessage> {
-    popup.map_or_else(
-        || pane_focus_input(active_pane, focused),
-        |_| {
-            Some(InputMessage::Popup {
-                action: PopupAction::TerminalView(TerminalViewAction::Focus(focused)),
-            })
-        },
-    )
+    match popup {
+        Some(popup) if popup.dead && popup.close_on_any_key => Some(InputMessage::Popup {
+            action: PopupAction::Close,
+        }),
+        Some(_) => None,
+        None => pane_focus_input(active_pane, focused),
+    }
 }
 
 fn pane_focus_input(
@@ -2843,7 +2838,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_events_forward_pane_focus_only_for_terminals() {
+    fn focus_events_skip_live_popups_close_dead_any_key_popups_and_forward_to_terminals() {
         assert_eq!(pane_focus_input(None, true), None);
         assert_eq!(
             pane_focus_input(
@@ -2865,12 +2860,21 @@ mod tests {
 
         assert_eq!(
             surface_focus_input(
-                Some(zz_protocol::PaneId(u64::MAX - 1)),
+                popup_model(PopupBorderLines::Single, false).popup.as_ref(),
                 Some((zz_protocol::PaneId(7), &PaneKindSnapshot::Terminal)),
                 false,
             ),
+            None
+        );
+
+        let mut dead = popup_model(PopupBorderLines::Single, false);
+        let popup = dead.popup.as_mut().unwrap();
+        popup.dead = true;
+        popup.close_on_any_key = true;
+        assert_eq!(
+            surface_focus_input(dead.popup.as_ref(), None, false),
             Some(InputMessage::Popup {
-                action: PopupAction::TerminalView(TerminalViewAction::Focus(false)),
+                action: PopupAction::Close,
             })
         );
     }

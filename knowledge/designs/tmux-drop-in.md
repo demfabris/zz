@@ -106,7 +106,8 @@ title, shortcut precedence, disabled and separator skipping, Escape, an unusable
 stay-open Enter, nonactivating paste, and pane-input isolation. Focused resolver coverage pins exact
 raw-row-zero and all-disabled boundary behavior. Slice 10p adds three bounded popup cases for live
 title modification without job or geometry replacement, bracketed paste plus exact content-relative
-mouse and wheel input, dead `-k` retention, focus ownership, and pane-input isolation. These attached
+mouse and wheel input, dead `-k` retention, live focus suppression, dead focus-close, and pane-input
+isolation. Focus-enabled popup applications and C-locale ACS frame capture harden those assertions. These attached
 cases add no differential row, so the stored artifact and digest remain unchanged.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.

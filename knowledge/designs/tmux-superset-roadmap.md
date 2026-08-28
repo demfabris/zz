@@ -75,8 +75,8 @@ shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing w
 Enter, nonactivating paste, and pane-input isolation without adding a differential row. Focused
 resolver coverage pins exact raw-row-zero and all-disabled boundary behavior. Popup presentation
 closed in slice 10p. Its attached A/B/C cases cover live title-only modification, bracketed paste,
-exact content-relative pointer and wheel input, dead `-k` retention, external focus ownership, and
-pane-input isolation. Six broader popup contracts remain under
+exact content-relative pointer and wheel input, dead `-k` retention, live external focus
+suppression, dead focus-close, and pane-input isolation. Six broader popup contracts remain under
 `display-popup.behavior-fidelity`, while broader menu behavior stays under
 `display-menu.behavior-fidelity`. Nonconstant formats, open context formats, and option consumers
 remain three independent discovery slices.
@@ -146,10 +146,10 @@ parser, readback, alias, and exact channel checks and finishes
 `ARGS_PARSE_CONFIRM_BEFORE=clean:19` on both servers. Nested bind and confirm failures are preflight
 parse errors. Reply and `-y` Enter-default paths have daemon and GPUI unit proof. Raw zz-tui now
 renders confirmations and handles their replies with unit and attached-client coverage. It also
-consumes the daemon-published menu descriptor and shares keyboard resolution with GPUI; popup state
-remains open. The nine broader menu behavior classes stay under
-`display-menu.behavior-fidelity`. Eager whole-file source construction and the broader replay-channel
-placement difference remain open.
+consumes the daemon-published menu and popup descriptors; menu keyboard resolution is shared with
+GPUI. The broader menu and popup behavior classes stay under `display-menu.behavior-fidelity` and
+`display-popup.behavior-fidelity`. Eager whole-file source construction and the broader
+replay-channel placement difference remain open.
 Stored `bind-key` and `set-hook` commands execute their constructed lists without another
 user-alias lookup. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks stay frozen after
 lexical construction. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed
@@ -1271,12 +1271,15 @@ permanent product decision has been recorded for them.
   zz-tui now retains popup descriptors and synthetic terminal frames, centres and clamps the
   published grid, renders every border family and style between the workspace and higher overlays,
   and purges popup caches across close, replacement, attachment change, and reconnect. Popup keys,
-  held-key lifecycles, paste, tracked content-relative pointer and wheel input, and external focus
-  resolve before chrome or pane input. The daemon mouse gate now admits tracked popup input when the
+  held-key lifecycles, paste, and tracked content-relative pointer and wheel input resolve before
+  chrome or pane input. External focus retains its client-state update, stays out of live popup
+  terminals, and closes a dead `-k` popup on FocusOut, matching the pin. The daemon mouse gate now admits tracked popup input when the
   global mouse option is off, and one decoded tracked wheel notch produces one application report.
   Attached cases A/B/C prove unchanged live job and geometry, exact click and wheel reports at cell
   `3,3`, dead `-k` retention, and a final decimal-122 underlay sentinel. Pinned tmux emits three
-  internal underlay focus pairs; zz emits none, while external focus stays popup-owned on both.
+  internal underlay focus pairs; zz emits none. Focus-reporting live popup applications prove
+  external focus is swallowed on both, the dead case proves FocusOut closes it, and the complete
+  fixture passes under `LC_ALL=C` with ACS borders.
   `display-popup.behavior-fidelity` retains resize, style, pointer-affordance, popup-to-pane, and
   Kitty-image work. The tracker now has 88 active groups, 594 classified active items, and 97 closed
   entries. The acceptance artifact remains 98 scenarios and 1,517 steps with attached-client

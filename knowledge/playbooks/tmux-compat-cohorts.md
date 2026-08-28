@@ -147,10 +147,13 @@ broader menu behavior classes remain under `display-menu.behavior-fidelity`.
 
 The twenty-eighth milestone closes slice 10p. Raw zz-tui now retains the daemon-published popup,
 centers and clamps its terminal viewport, renders its border, title, styles, and cursor, and gives it
-keyboard, paste, pointer, scroll, and focus ownership before every underlay input path. Popup close
+keyboard, paste, pointer, and scroll ownership before every underlay input path. External focus
+updates client state, stays out of live popup terminals, and closes a dead `-k` popup on FocusOut,
+matching the pin. Popup close
 and replacement remove the synthetic viewport and renderer caches before repainting the underlay.
 The attached fixture compares bordered update-in-place, bracketed paste and tracked mouse, retained
-dead popups, focus ownership, and a pane sentinel against pinned tmux. Broader resize, style,
+dead popups, live focus suppression, dead focus-close, and a pane sentinel against pinned tmux. The complete fixture also
+passes under `LC_ALL=C`, including ACS-border frame proof. Broader resize, style,
 context-menu, border-drag, popup-to-pane, and Kitty-image behavior remains under
 `display-popup.behavior-fidelity`.
 
@@ -186,7 +189,8 @@ The 10l and 10m milestones add no differential step. Slice 10n extends the attac
 confirmation cases and a pane sentinel without adding a scenario row, leaving the digest unchanged.
 Slice 10o adds the bounded menu cases without adding a scenario row, so the same digest remains.
 Slice 10p adds three popup cases and a pane sentinel to the attached fixture without adding a
-scenario row, so the same digest remains.
+scenario row, so the same digest remains. A post-close audit hardened the frame and focus assertions
+and ran the complete fixture successfully under `LC_ALL=C` without changing the stored corpus.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.

@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10P COMMITTED; RERANKING THE NEXT SLICE**
+> Campaign state: **SLICE 10Q FROZEN: PER-CLIENT NO-DETACH-ON-DESTROY FALLBACK**
 >
 > Tracker resolution progress: **63.8% (118 of 185 known groups)**
 >
-> Committed milestone base: **2026-08-28** at `587ce5487dfafabe8d6b1357c31bd2ae032f0b8b`
+> Committed milestone base: **2026-08-28** at `c909406fe0f45d638b0965020491e9abc50342c6`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Committed milestone base | `587ce5487dfafabe8d6b1357c31bd2ae032f0b8b` |
-| Delivery | Local `main` contains 10p; `origin/main` remains at `7cad19e` until an explicit push |
+| Committed milestone base | `c909406fe0f45d638b0965020491e9abc50342c6` |
+| Delivery | Local `main` contains 10p and its proof repair; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10p is committed; the live rerank has not frozen its successor |
+| Campaign point | Slice 10q is frozen to `clients.no-detach-on-destroy`; implementation has not started |
 | Live registry | 88 active groups, 594 active items, 97 closed records |
 | Active status | 47 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10p milestone commit descends from the verified `origin/main` base. Resolve the commit
+The 10p milestone and proof-repair commits descend from the verified `origin/main` base. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -168,8 +168,11 @@ The fresh strict-plus-attached 10p artifact is the current accepted checkpoint:
 
 `just compat --strict-geometry --attached-client` completed on the final 10p code and fixture tree.
 All 98 scenarios and 1,517 steps ran, the attached-client fixture passed, and the stored summary
-check confirmed the digest above. Focused package tests, workspace clippy, formatting, tracker and
-OKF validation, shell syntax, and diff checks also passed.
+check confirmed the digest above. A post-close repair then made the full-frame assertion work under
+`LC_ALL=C` and pinned live-popup focus suppression plus dead `-k` FocusOut closure. The complete
+attached fixture passed again under that locale. The repair did not change the differential corpus
+or digest. Focused package tests, affected clippy, formatting, tracker and OKF validation, shell
+syntax, and diff checks also passed.
 
 This run supersedes the earlier replacement run that stopped during `lane2-store`.
 
@@ -220,6 +223,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | Count correction | Unsupported flag inventory corrected to 70 pairs across 20 commands | `aad3923` |
 | 10o | Raw-TUI menu rendering, shared resolver, lifecycle, and attached proof | `1a0f59e` |
 | 10p | Raw-TUI popup state, rendering, input ownership, and attached proof | `587ce54` |
+| 10p proof repair | Live-popup focus suppression, dead `-k` focus-close, and C-locale frame proof | `c909406` |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -239,8 +243,10 @@ Raw zz-tui now:
   bordered content inset beneath the title;
 - renders the popup terminal, styles, border, title, and cursor above the workspace and below menu
   and confirmation overlays;
-- routes popup keys, paste, pointer, tracked wheel, and focus before global shortcuts, prefix
-  handling, prompts, choosers, browsers, or underlay terminal input;
+- routes popup keys, paste, pointer, and tracked wheel before global shortcuts, prefix handling,
+  prompts, choosers, browsers, or underlay terminal input;
+- updates client focus state without forwarding focus reports into a live popup terminal, while a
+  dead close-on-any-key popup closes on FocusOut;
 - tracks held keys only when the outer terminal advertises Kitty release events, while the popup
   application's own Kitty mode controls whether release events reach that application;
 - removes synthetic frames and renderer caches on close or replacement, then repaints the latest
@@ -253,10 +259,10 @@ step.
 
 The attached fixture adds three popup cases. They cover bordered rendering and update-in-place,
 bracketed paste, an exact click press and release, one tracked wheel report, a retained dead popup,
-close-on-key behavior, external focus ownership, and a final one-byte underlay sentinel. Coordinates
-derive from the outer terminal cursor so centering and Unicode width cannot turn the mouse proof
-into a false positive. Pinned tmux emits three internal underlay focus-out/focus-in pairs during the
-fixture; zz emits none. Explicit external focus still stays popup-owned on both.
+close-on-key behavior, live-popup focus suppression, dead `-k` FocusOut closure, and a final
+one-byte underlay sentinel. Coordinates derive from the outer terminal cursor so centering and
+Unicode width cannot turn the mouse proof into a false positive. The frame assertion accepts both
+Unicode and ACS borders, so the complete fixture also proves the contract under `LC_ALL=C`.
 
 Focused proof passed:
 
@@ -279,28 +285,49 @@ contracts below remain open under `display-popup.behavior-fidelity`:
 Real mouse/status format facts remain under `formats.mouse-context`. Control-mode popup
 presentation and read-only popup actions also remain outside this slice.
 
-## Candidate queue after 10p
+## Frozen slice: 10q per-client no-detach-on-destroy fallback
 
-This is a dependency forecast, not a frozen next slice. The post-10p rerank also surfaced
-`clients.no-detach-on-destroy` and `mux.chain-parse-abort` as practical contenders. Recheck the live
-registry and acceptance cost before choosing among them and the 10q registration slice.
+Slice 10q owns exactly `semantic:no-detach-on-destroy-fallback` in
+`clients.no-detach-on-destroy`. The requested flag is already retained and reported. This slice
+changes only the daemon's survivor choice when a session is destroyed; it needs no protocol or
+snapshot change.
 
-| Order | Slice | Exact owner | Boundary |
-| --- | --- | --- | --- |
-| 1 | 10q | `semantic:tracker-nonconstant-format-behavior` | Discover and register nonconstant format behavior |
-| 2 | 10r | `semantic:tracker-open-context-format-vocabulary` | Discover and register open context formats |
-| 3 | 10s | `semantic:tracker-option-consumer-registration` | Discover and register option consumers |
-| 4 | 11 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
-| 5 | 12a through 12f | Remaining `copy-mode.action-fidelity` items | Cursor, logical line, goto, selection, jump/prompt, and copy effects as separate slices |
-| 6 | 13 | `keys.copy-mode-unsupported-default-actions` | Add seven defaults only after their actions exist |
-| 7 | 14 | `copy-mode.command-fidelity` | Resolve or reclassify the interactive-refresh dependency first |
-| 8 | 15 | `keys.copy-mode-binding-fidelity` | Match the 15 divergent shared command shapes |
-| 9 | 16 | `prompt.command-fidelity` | Resolve or reclassify the interactive-refresh dependency first |
-| 10 | 17 | `keys.copy-mode-prompt-defaults` | Add ten defaults only after generic prompt fidelity |
+Acceptance is:
+
+- under `detach-on-destroy on`, a flagged client moves to the newest remaining session while an
+  unflagged client exits;
+- under `detach-on-destroy no-detached`, an existing detached session remains the primary survivor
+  for every client, and the flagged fallback to the newest attached session applies only when no
+  detached survivor exists;
+- flagged and unflagged clients attached to the same destroyed session can diverge;
+- with no remaining session, both clients exit;
+- direct `off`, `previous`, and `next` survivor selection remains unchanged by the flag.
+
+The slice excludes active-pane routing, detach execution, parent-HUP exit, resize-hook ordering,
+buffer and source-file cwd, popup or menu residue, and broader tracker registration. Proof belongs
+at the daemon decision seam plus one real attached multi-client destruction case against the pinned
+tmux oracle.
+
+## Candidate queue after 10q
+
+Only 10q is frozen. The rest is a dependency forecast and must be reranked after the slice closes.
+
+| Order | Exact owner | Boundary |
+| --- | --- | --- |
+| 1 | `mux.chain-parse-abort` | Abort a locally autospawned command group before any effect when a later command cannot parse or prepare |
+| 2 | `semantic:tracker-nonconstant-format-behavior` | Discover and register nonconstant format behavior |
+| 3 | `semantic:tracker-open-context-format-vocabulary` | Discover and register open context formats |
+| 4 | `semantic:tracker-option-consumer-registration` | Discover and register option consumers |
+| 5 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
+| 6 | Remaining `copy-mode.action-fidelity` items | Cursor, logical line, goto, selection, jump/prompt, and copy effects as separate slices |
+| 7 | `keys.copy-mode-unsupported-default-actions` | Add seven defaults only after their actions exist |
+| 8 | `copy-mode.command-fidelity` | Resolve or reclassify the interactive-refresh dependency first |
+| 9 | `keys.copy-mode-binding-fidelity` | Match the 15 divergent shared command shapes |
+| 10 | `prompt.command-fidelity` and then `keys.copy-mode-prompt-defaults` | Land generic prompt behavior before its ten copy-mode defaults |
 
 The two active groups marked `next` in the generated report are not themselves execution order.
-`keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity` and therefore stays
-at slice 15.
+`keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are
+assigned only when a slice is frozen.
 
 Before selecting every later milestone, explicitly recheck attach-dependent and daily-use groups,
 including buffer file context, source-file client cwd variants, detach execution, parent-HUP exit,

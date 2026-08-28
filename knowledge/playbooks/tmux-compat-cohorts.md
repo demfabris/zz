@@ -338,24 +338,32 @@ closure is that exception.
 | 10n | Raw TUI confirmation | Closed under `clients.tui-confirm-before-overlay` on 2026-08-28 | Complete | State, rendering, input capture, reply lifecycle, and seven attached cases close independently |
 | 10o | Raw TUI menu | Closed under `clients.tui-display-menu-overlay` on 2026-08-28 | Complete | Daemon-published descriptor consumption, rendering order, shared keyboard ownership, and bounded attached cases close without absorbing broader menu fidelity |
 | 10p | Raw TUI popup | Closed under `clients.tui-display-popup-overlay` on 2026-08-28 | Complete | Popup state, rendering, input ownership, cleanup, and three attached cases close without absorbing broader popup fidelity |
-| 10q-10s | Remaining source-owned tracker registrations | Nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Three unrelated owners remain three independent milestones |
-| 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
-| 12a-12f | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
-| 13 | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Medium after slice 12 | Seven keys become honest only after their five actions exist |
-| 14 | Copy command fidelity | `copy-mode.command-fidelity` | Hard | Requires the interactive-refresh decision |
-| 15 | Shared copy binding fidelity | `keys.copy-mode-binding-fidelity` | Hard | Follows command fidelity; owns exactly 15 divergent command shapes |
-| 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
-| 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
+| 10q | Per-client no-detach-on-destroy fallback | Frozen under `clients.no-detach-on-destroy` | Small | One retained flag changes only the fallback survivor at the daemon's session-destroy seam |
+| Next rerank | Chain parsing and source-owned tracker registrations | Not frozen | Small to medium | Re-rank chain abort, nonconstant formats, open context formats, and option consumers after 10q |
+| Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
+| Post-rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
+| Post-rerank | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Medium after action fidelity | Seven keys become honest only after their five actions exist |
+| Post-rerank | Copy command fidelity | `copy-mode.command-fidelity` | Hard | Requires the interactive-refresh decision |
+| Post-rerank | Shared copy binding fidelity | `keys.copy-mode-binding-fidelity` | Hard | Follows command fidelity; owns exactly 15 divergent command shapes |
+| Post-rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
+| Post-rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after generic prompts | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10p are closed. Slice 10q is the forecast, but no next slice is
-frozen. Before choosing each later milestone, regenerate the report and re-rank every active daily,
-script, remote, or silent-mismatch group. That audit must include attach-dependent work such as
+Slices 9a through 9f and 10a through 10p are closed. Slice 10q is frozen to
+`semantic:no-detach-on-destroy-fallback`. Under `detach-on-destroy on`, only flagged clients use
+the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
+and only flagged clients fall back to the newest attached session when no detached survivor exists.
+Flagged and unflagged clients on one destroyed session must diverge, while no remaining session
+still exits both. Direct `off`, `previous`, and `next` selection stays unchanged. The slice excludes
+active-pane routing, detach execution, parent-HUP exit, resize-hook ordering, client cwd, and overlay
+residue.
+
+Before choosing each later milestone, regenerate the report and re-rank every active daily, script,
+remote, or silent-mismatch group. That audit must include attach-dependent work such as
 `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, `clients.parent-hup-exit`, `display-popup.behavior-fidelity`, and
-`display-menu.behavior-fidelity`. Rows 4 and
-later are a dependency forecast,
-not permission to skip a newly unblocked practical gate. Keep formats, hooks,
-`active-pane`, and `no-detach-on-destroy` as separate slices.
+`display-menu.behavior-fidelity`. Every row after 10q is a dependency forecast,
+not permission to skip a newly unblocked practical gate. Keep formats, hooks, and `active-pane` as
+separate slices.
 
 # Four-seat Codex pipeline
 

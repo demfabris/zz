@@ -71,11 +71,11 @@ Install the pinned release driver once, preview the next beta, then publish the 
 ```sh
 just release-setup
 just release beta
-just release-execute beta
+just release beta --execute
 ```
 
 `just release` is always a dry run. It checks the clean `main` branch and upstream state, previews
-the workspace and lockfile changes, and shows the release commit and tag. `just release-execute`
+the workspace and lockfile changes, and shows the release commit and tag. Adding `--execute`
 asks for confirmation, creates one version commit plus an annotated `v<version>` tag, and pushes
 both to `origin`. Pushing the tag starts `.github/workflows/release.yml`; no separate GitHub release
 command is needed.

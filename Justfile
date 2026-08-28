@@ -156,13 +156,9 @@ release-mac version profile=macos_notary_profile:
 release-setup:
     cargo install cargo-release --version 1.1.5 --locked
 
-# Preview a SemVer bump, release commit, annotated tag, and push.
-release target:
-    @scripts/release.sh "{{ target }}"
-
-# Apply and publish the previewed release. The pushed tag starts release CI.
-release-execute target:
-    @scripts/release.sh "{{ target }}" --execute
+# Preview a SemVer bump, release commit, tag, and push; --execute applies and publishes it (the pushed tag starts release CI).
+release target *flags:
+    @scripts/release.sh "{{ target }}" {{ flags }}
 
 # Launch a fresh debug instance; append --verbose for continuous diagnostics.
 # Extra args after `--` pass through to the Cargo build.

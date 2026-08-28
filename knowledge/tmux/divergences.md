@@ -396,6 +396,43 @@ spelling, queue order, vi editing, or freeze changes. Those contracts retain the
 owners. Eager whole-file source construction and the broader replay-channel placement difference
 remain with the parser and command-chain owners.
 
+## `set-hook` argument blocks
+
+The `set-hook` slice of the `set-hook-monitor-or-value` rule closed on 2026-08-28 without another
+wire change. Without `-B`, only value position 1 accepts a typed block or string. The hook name and
+extra positionals remain strings. With `-B`, every positional lexically accepts either type, while
+the `-B` and `-t` option values stay strings. zz still rejects `-B` during execution because it has
+no format-monitor runtime. This closure covers the callback argument rule and leaves monitor
+behavior under its existing owner.
+
+Every typed child constructs before parent type, arity, or effect validation. Accepted typed values
+normalize through recursive canonical printing before they enter one of three storage paths:
+built-in hooks, custom `@` options, or the named-option forwarding path used by
+`default-client-command`. Built-in hooks parse the normalized value again and flatten physical
+groups into one command list. Custom `@` typed values store their textual ` ;; ` group markers for
+deferred execution. A quoted brace string is runtime hook syntax for a built-in name, where its
+parse can fail, but remains literal deferred text for a custom name.
+
+Replacement order follows the pin. An unindexed built-in replacement clears the hook array before
+parsing its runtime value, so a malformed value leaves no prior entry. An indexed replacement parses before
+it writes and preserves the prior entry on failure. An unindexed empty block clears without adding
+an entry, appending an empty block does nothing, and an indexed empty block remains present. Local
+hook-array creation precedes empty-append and runtime-parse handling. An empty or failing local
+append therefore installs an empty local array and shadows the inherited global hook. `-R` still
+constructs a supplied typed value and can fail before running the stored hook. The same command
+ignores a supplied quoted string value and runs the stored hook.
+
+The strict three-step `smoke/args-parse-set-hook` scenario runs 24 internal checks. It covers
+string-only hook names and option values, extra-position type and arity errors, child-before-parent
+precedence, canonical readback, preexisting aliases, same-line and physical groups, empty blocks,
+built-in versus custom quoted braces, replacement and local-inheritance ordering, `-R`, named-option
+forwarding, stored bindings, and exact Control framing. Both servers finish with
+`ARGS_PARSE_SET_HOOK=clean:24`.
+
+Eager whole-file construction, aliases created earlier in the same source, multiline inner-source
+diagnostic placement, `-B` monitor semantics, and broader replay placement retain their existing
+owners.
+
 ## Accepted grammar divergence evidence
 
 The catalog count does not include syntax zz accepts or parses before diverging:

@@ -2718,7 +2718,6 @@
         "args-parse:choose-tree",
         "args-parse:display-menu",
         "args-parse:display-panes",
-        "args-parse:set-hook",
         "semantic:tracker-hook-producer-partition",
         "semantic:tracker-key-binding-behavior",
         "semantic:tracker-nonconstant-format-behavior",
@@ -2736,7 +2735,7 @@
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and five per-command callback items remain across three effective rules. Typed command-prompt templates execute their frozen constructed lists after structured substitution. String templates substitute before a fresh parse and whole-result construction pass. Both paths preserve their pinned alias, source, placeholder, and physical-group boundaries. A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while quoted brace strings remain literal. This display-menu boundary does not prove its complete repeating callback rule. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and four per-command callback items remain across two effective rules. `set-hook` accepts one typed-or-string value without `-B`, or lexically accepts every positional as either type with `-B`; format-monitor runtime behavior remains unsupported under its existing owner. Built-in hooks construct normalized values again and flatten physical groups, while custom `@` values keep their normalized textual groups. A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while quoted brace strings remain literal. This display-menu boundary does not prove its complete repeating callback rule. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3996,6 +3995,20 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "resolution": "Protocol v84 lexical command-block positions now drive `run-shell`'s pinned argument callback without another wire change. A leading `-C`, including combined forms, accepts typed blocks at every positional; without it every positional must be a string. Option values remain strings, option scanning stops at the first positional or `--`, and a later `-C` stays positional. Under `-C`, execution consumes only positional 0 while valid extras remain accepted and ignored. A typed command callback preserves physical source groups: failure stops the rest of that group while later physical lines continue. A string callback reparses as one group. Typed failures retain exact diagnostics and preserve prior bindings and hooks; quoted braces remain strings. The strict source-file and Control fixture runs 21 internal checks across canonical, built-in, prefix, and user aliases, foreground, background, stored-command, option-boundary, and no-effect paths. Eager whole-file or nested callback construction, including parse-only `source-file -n` validation, remains with the existing parser-edge and command-chain owners. Ten implemented callback commands remain under `tracker.semantic-coverage`."
+    },
+    {
+      "id": "tracker.args-parse-set-hook",
+      "title": "Apply set-hook monitor-or-value argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-set-hook.sh",
+        "scenario:compat/scenarios/smoke/args-parse-set-hook.txt",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `set-hook`'s pinned monitor-or-value rule without another wire change. Without `-B`, only positional 1 accepts a string or typed block; position 0 and extra typed positionals remain string-only. With `-B`, every positional lexically accepts either type, while `-B` and `-t` values remain strings. zz still rejects `-B` during execution because format-monitor semantics remain unsupported. Every typed child constructs before parent type, arity, or effects. Accepted typed values normalize for built-in hooks, custom `@` options, and values forwarded to `set-option`. Built-in hooks perform a second construction pass and flatten physical groups; custom `@` typed values retain textual ` ;; ` groups. Quoted braces act as runtime syntax for built-in hooks but remain literal deferred storage for custom hooks. An unindexed malformed runtime value clears the existing built-in hook before failing, while an indexed failure preserves its entry. An unindexed empty block clears without adding an entry, `-a` with an empty block does nothing, and an indexed empty block remains present. Local array creation occurs before empty-append or runtime-parse handling, so an empty or failing local append installs an empty local array that shadows the inherited global hook. `-R` constructs and can reject a typed ignored value, while it ignores a quoted string value and runs the stored hook. Preexisting aliases, the stored bind path, exact Control framing, and `default-client-command` forwarding are covered by the strict three-step, 24-check fixture. Eager whole-file construction, same-source alias mutation, multiline inner-source placement, `-B` monitor semantics, and broader replay placement remain with their existing owners. Four implemented callback commands across two effective rules remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-set-option",

@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-set-hook.sh ~/args-parse-set-hook.sh
+out: set-environment -gu ARGS_PARSE_SET_HOOK
+run-shell 'sh ~/args-parse-set-hook.sh'
+out: show-environment -g ARGS_PARSE_SET_HOOK

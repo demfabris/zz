@@ -68,8 +68,8 @@ accepts six rules and fails when a callback body falls outside them:
 
 `COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
 remain unimplemented and need no sidecar entry. `COMMAND_ARGS_PARSE_BEHAVES` now contains
-`bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and
-`set-window-option`. Every `bind-key`
+`bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`,
+and `set-window-option`. Every `bind-key`
 positional accepts a string or typed block while `-T` and `-N` values remain strings. Scanning
 stops at the first positional or `--`; a typed key expands the live mux environment and is
 recursively printed before key lookup. Unknown typed-key commands keep their source diagnostic.
@@ -106,8 +106,21 @@ answer, so quotes and semicolons cannot create new arguments or commands. Typed 
 physical source groups; a failed group stops while later lines continue. String templates and free
 input form one group. String-template diagnostics retain the originating source path and line.
 Prompt chaining and multi-answer `%2` remain under `prompt.command-fidelity`. Eager whole-file
-source construction and its replay-channel placement remain open. `tracker.semantic-coverage`
-owns the remaining five command-specific `args-parse:` items across three effective rules.
+source construction and its replay-channel placement remain open. Without `-B`, `set-hook`
+accepts a typed block only at value position 1; its hook name and extra positionals remain strings.
+With `-B`, every positional lexically accepts either type, while `-B` and `-t` values remain
+strings. zz rejects `-B` at runtime because format monitors remain unsupported. Every typed child
+constructs before the parent type, arity, and effects. Typed values normalize before storage as a
+built-in hook, a custom `@` option, or a forwarded named option. Built-in hooks construct the value
+again and flatten physical groups; custom `@` typed values keep textual ` ;; ` groups. Quoted braces
+are runtime syntax for a built-in hook and literal deferred storage for a custom hook. Unindexed
+built-in replacement clears before a malformed runtime value fails, while indexed replacement preserves
+the prior entry. An unindexed empty value clears without adding an entry, `-a` with an empty value
+does nothing, and an indexed empty value remains present. Local array creation precedes empty append
+and runtime parsing, so an empty or failing local append creates an empty local array that shadows
+the inherited global hook. `-R` constructs a typed supplied value
+before it runs the stored hook but ignores a supplied quoted string. `tracker.semantic-coverage`
+owns the remaining four command-specific `args-parse:` items across two effective rules.
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |
@@ -353,7 +366,10 @@ construction pass against the current alias table. Both paths replace the first 
 with trailing-percent quoting. Typed callbacks retain physical groups, while string templates and
 free input form one group. Prompt chains and multi-answer `%2` remain under their prompt owner.
 `set-hook` and command-valued native set-option apply their documented second construction stage
-before storage or normalization. A typed `display-menu` action drops its structural wrapper before
+before storage or normalization. Built-in hook values flatten physical groups during that stage,
+while custom `@` values retain their normalized textual groups for deferred execution. A typed
+ignored `set-hook -R` value still constructs and can fail before the stored hook runs. A typed
+`display-menu` action drops its structural wrapper before
 the fresh selection parse, while a quoted brace string remains literal. Each stage resolves at most
 one user-alias layer; an alias-produced subtree cannot open another layer.
 

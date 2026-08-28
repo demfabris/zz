@@ -91,12 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The final 10f canonical acceptance inventory contains 94 differential scenarios and 1,505 executable
-steps against pinned tmux `d77c9dc6`, including 26 config/plugin smokes. The complete strict and
+The final 10g canonical acceptance inventory contains 95 differential scenarios and 1,508 executable
+steps against pinned tmux `d77c9dc6`, including the config/plugin smoke corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
+`15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
+The historical 10f artifact remains 94 scenarios and 1,505 steps at SHA-256
 `31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
 The historical 10e artifact remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
@@ -118,7 +120,8 @@ OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still
 visual smoke evidence.
 
 Protocol v84 carries lexical command-block positions. `if-shell`, `run-shell`, both set-option
-commands, `bind-key`, `command-prompt`, and `confirm-before` now apply their pinned callback rules.
+commands, `bind-key`, `command-prompt`, `confirm-before`, and `set-hook` now apply their pinned
+callback rules.
 The strict three-step confirm scenario runs 19 construction, parser, readback, alias, and exact source-file
 plus Control channel checks on both servers. Every lexical typed block recursively constructs
 before parent name, callback type, or arity validation. Recursive paths carry independent one-layer
@@ -138,11 +141,19 @@ table. Both paths replace the first `%%` and every `%1`, with trailing-percent q
 callbacks retain physical groups, while string templates and free input form one group. String
 failures retain the originating source path and line. Prompt chaining and multi-answer `%2` retain
 their prompt owner. `set-hook` and command-valued native set-option deliberately construct
-again. A typed `display-menu` action drops its structural wrapper before the fresh selection parse,
-while a quoted brace string remains literal. Reply
+again. Without `-B`, only `set-hook` value position 1 accepts a typed block; the hook name and extra
+positionals remain strings. With `-B`, every positional lexically accepts either type. Option
+values remain strings in both modes. zz
+still rejects `-B` because format-monitor runtime behavior is unsupported. Built-in hooks flatten
+physical groups during their second construction pass. Custom `@` typed values retain textual
+` ;; ` groups. An empty or failing local append still creates an empty local array and shadows the
+inherited global hook. A typed ignored `-R` value constructs before the stored hook runs. A typed
+`display-menu` action drops its structural wrapper before the fresh selection parse, while a quoted
+brace string remains literal. Reply
 and `-y` Enter-default behavior are daemon and GPUI unit proof, not raw TUI proof. Eager whole-file
-source construction and the broader replay-channel placement difference remain open. Five
-command-specific `args-parse:` items across three rules remain.
+source construction, same-source alias mutation, multiline inner-source placement, and the broader
+replay-channel placement difference remain open. Four command-specific `args-parse:` items across
+two rules remain.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -654,7 +665,9 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    replace the first `%%` and every `%1`, with trailing-percent quoting; typed callbacks retain
    physical groups, while string templates and free input form one group. `set-hook` and
    command-valued native set-option
-   intentionally apply their second construction stage, while selecting a `display-menu` action
+   intentionally apply their second construction stage. Built-in hook values flatten physical
+   groups during that pass, custom `@` values retain normalized textual groups, and typed ignored
+   `-R` values still construct. Selecting a `display-menu` action
    begins a fresh stage. Each stage resolves no more than one user-alias layer and refuses matched
    unsupported bodies.
    Protocol v74 closes the former Control-side static name check. Control asks the daemon to prepare
@@ -2314,8 +2327,10 @@ retain their lexical construction through execution. Typed `command-prompt` temp
 structured prepared command list through submission without re-expanding aliases. String templates
 substitute raw source before a fresh parse and complete construction pass against the current alias
 table. Both prompt paths replace the first `%%` and every `%1`, with trailing-percent quoting;
-typed callbacks retain physical groups, while string templates and free input form one group. `set-hook` and
-command-valued native set-option intentionally construct a second time, while `display-menu`
+typed callbacks retain physical groups, while string templates and free input form one group.
+`set-hook` and command-valued native set-option intentionally construct a second time. Built-in
+hook values flatten physical groups during that pass, custom `@` values retain normalized textual
+groups, and a typed ignored `-R` value still constructs. `display-menu`
 selection begins a fresh stage. Eager whole-file source construction remains open;
 `\377`→U+00FF and `\000`-retained vs the pin's raw byte/NUL-truncation (String storage,
 test-pinned); the pin's `%elif`/`%else`

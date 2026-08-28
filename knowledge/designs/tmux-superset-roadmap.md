@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 86 active groups, 589 classified active items, 86 closed groups, and two known
+The live tracker has 86 active groups, 587 classified active items, 88 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,17 +53,19 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The final 10f canonical checkpoint covers 94 scenarios and 1,505 steps.
+The final 10g canonical checkpoint covers 95 scenarios and 1,508 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`. Requested flags, attached
+`15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
+The historical 10f checkpoint remains 94 scenarios and 1,505 steps at SHA-256
+`31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
 The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
@@ -83,8 +85,8 @@ bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
 closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`, and
-`tracker.args-parse-set-option`, plus the `bind-key`, `command-prompt`, and `confirm-before`
-members of the shared commands-or-string rule.
+`tracker.args-parse-set-option`, plus `tracker.args-parse-set-hook` and the `bind-key`,
+`command-prompt`, and `confirm-before` members of the shared commands-or-string rule.
 Source-file and Control
 parsing preserve unquoted typed arguments through wire transport, aliases, bindings, and hooks;
 quoted braces remain strings. `if-shell` accepts typed branch positions while rejecting typed
@@ -131,8 +133,17 @@ paths replace the first `%%` and every `%1`, with trailing-percent quoting. Type
 physical groups, while string templates and free input form one group. String failures retain the
 originating source path and line. Prompt chaining and multi-answer `%2` retain their prompt owner.
 `set-hook` and command-valued native set-option retain their intentional second
-construction stage. A typed `display-menu` action drops its structural wrapper before the fresh
-selection parse, while a quoted brace string remains literal.
+construction stage. Without `-B`, only `set-hook` value position 1 accepts a typed block; the hook
+name and extra positionals remain strings. With `-B`, every positional lexically accepts either
+type. Option values remain strings in both modes. zz still rejects `-B` because format monitors
+remain unsupported. Built-in hooks flatten
+physical groups during their second pass, while custom `@` typed values retain textual ` ;; `
+groups. Unindexed malformed runtime replacement clears first, indexed replacement preserves its entry, and
+an empty or failing local append creates an empty local array that shadows the inherited global
+hook. Typed ignored `-R` values still construct. A typed `display-menu` action drops its structural
+wrapper before the fresh selection parse, while a quoted brace string remains literal. Four
+callback items across two effective rules remain. Eager whole-file construction, same-source alias
+mutation, multiline inner-source placement, and broader replay placement retain their owners.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -482,7 +493,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    current alias table. Both paths replace the first `%%` and every `%1`, with trailing-percent
    quoting. Typed callbacks retain physical groups, while string templates and free input form one
    group. Prompt chaining and multi-answer `%2` retain their prompt owner. `set-hook` and
-   command-valued native set-option retain their intentional second construction stage. A typed `display-menu` action
+   command-valued native set-option retain their intentional second construction stage. Built-in
+   hook values flatten physical groups during that pass, custom `@` values retain normalized
+   textual groups, and typed ignored `-R` values still construct. A typed `display-menu` action
    drops its structural wrapper before the fresh selection parse, while a quoted brace string stays
    literal. A
    typed alias result now keeps an exact empty, multi-command, or unparsable match from falling
@@ -503,11 +516,11 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each implemented
    callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains
-   `bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and
-   `set-window-option`; three effective rules and five command-specific items remain. The
+   `bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`,
+   and `set-window-option`; two effective rules and four command-specific items remain. The
    unimplemented `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
-   `tracker.semantic-coverage` tracks runtime adoption of the three remaining argument rules, open-ended or
+   `tracker.semantic-coverage` tracks runtime adoption of the two remaining argument rules, open-ended or
    dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
    and option `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
@@ -1074,6 +1087,20 @@ permanent product decision has been recorded for them.
   remaining prompt UI and queue contracts, eager whole-file source construction, and broader replay
   placement keep their existing owners. Three callback rules across five implemented commands
   remain.
+- 2026-08-28: Protocol v84 closed `tracker.args-parse-set-hook` without another wire change.
+  Without `-B`, only value position 1 accepts a typed block or string; the hook name and extra
+  positionals remain strings. With `-B`, every positional lexically accepts either type, while
+  `-B` and `-t` values remain strings. zz still rejects `-B` during execution because format
+  monitors remain unsupported. Every typed child constructs before its parent's type, arity, or
+  effects. Typed values normalize for built-in hooks, custom `@` options, and named-option
+  forwarding. Built-in hooks flatten physical groups during a second construction pass, while
+  custom `@` values retain textual ` ;; ` groups. Quoted braces are runtime syntax for built-in
+  hooks and literal deferred storage for custom hooks. An empty or failing local append creates an
+  empty local array that shadows the inherited global hook. The strict three-step scenario runs 24
+  internal checks and finishes `ARGS_PARSE_SET_HOOK=clean:24` on both servers. Eager whole-file
+  construction, same-source alias mutation, multiline inner-source placement, `-B` monitor
+  semantics, and broader replay placement retain their owners. Two callback rules across four
+  implemented commands remain.
 
 # Related
 

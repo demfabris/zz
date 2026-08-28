@@ -3198,7 +3198,7 @@ impl MuxEngine {
             "unbind-key" => self.unbind_key(&command.args)?,
             "list-keys" => self.list_keys(context, &command.args, hooks)?,
             "list-commands" => self.list_commands(context, &command.args, hooks)?,
-            "set-hook" => self.set_hook(context, &command.args, hooks, default_shell_is_valid)?,
+            "set-hook" => self.set_hook(context, command, hooks, default_shell_is_valid)?,
             "show-hooks" => self.show_hooks(context, &command.args, hooks)?,
             "set-option" => {
                 self.set_option(context, command, false, hooks, default_shell_is_valid)?
@@ -6782,11 +6782,17 @@ impl MuxEngine {
     fn set_hook(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        invocation: &CommandInvocation,
         hooks: &mut impl StatusHooks,
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("set-hook", args)?;
+        let spec = command_spec("set-hook").expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = invocation
+            .args
+            .len()
+            .saturating_sub(parsed_options.positionals.len());
+        let (options, positional) = parse_command_options("set-hook", &invocation.args)?;
         if options.value("-B").is_some() {
             return Err(ServerError::CommandParse("invalid flag -B".to_owned()));
         }
@@ -6800,6 +6806,20 @@ impl MuxEngine {
             self.expand_hook_name(context, &options, argument, hooks)?;
         let parsed = parse_tmux_option(&argument)
             .map_err(|()| ServerError::InvalidCommand(format!("invalid option: {argument}")))?;
+        let value = positional
+            .get(1)
+            .map(|value| {
+                if invocation.argument_is_command_block(positional_start + 1) {
+                    normalize_typed_command_block(
+                        self,
+                        crate::parser::command_block_body(value).unwrap_or(value),
+                    )
+                } else {
+                    Ok(value.clone())
+                }
+            })
+            .transpose()?;
+        let value = value.as_deref();
         if parsed.name.starts_with('@') {
             if options.has("-R") {
                 let Some(commands) = self.user_hook_commands(&target_context, &argument) else {
@@ -6816,13 +6836,7 @@ impl MuxEngine {
                     "not an array: {argument}"
                 )));
             }
-            return self.set_user_option(
-                context,
-                parsed.name,
-                positional.get(1).map(String::as_str),
-                &options,
-                false,
-            );
+            return self.set_user_option(context, parsed.name, value, &options, false);
         }
         let table_option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
@@ -6866,21 +6880,15 @@ impl MuxEngine {
                 forwarded.extend(["-t".to_owned(), target.to_owned()]);
             }
             forwarded.extend(["--".to_owned(), argument]);
-            if let Some(value) = positional.get(1) {
-                forwarded.push(value.clone());
+            if let Some(value) = value {
+                forwarded.push(value.to_owned());
             }
             let forwarded = CommandInvocation::new("set-option", forwarded);
             return self.set_option(context, &forwarded, false, hooks, default_shell_is_valid);
         }
         let target =
             self.resolve_tmux_option_target(context, &options, false, table_option.scope)?;
-        self.set_hook_array_option(
-            target,
-            table_option.name,
-            parsed.index,
-            positional.get(1).map(String::as_str),
-            &options,
-        )
+        self.set_hook_array_option(target, table_option.name, parsed.index, value, &options)
     }
 
     fn set_hook_array_option(
@@ -6911,6 +6919,13 @@ impl MuxEngine {
             return Ok(Execution::default());
         }
         let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
+        self.hook_array_mut_or_insert(target, name);
+        if index.is_none() && !options.has("-a") {
+            self.hook_array_mut_or_insert(target, name).clear();
+        }
+        if index.is_none() && value.is_empty() {
+            return Ok(Execution::default());
+        }
         let commands = parse_hook_commands(self, value)?;
         let hook = self.hook_array_mut_or_insert(target, name);
         if let Some(index) = index {
@@ -6919,7 +6934,6 @@ impl MuxEngine {
             let index = first_free_array_index(hook.keys())?;
             hook.insert(ArrayIndex::Numeric(index), commands);
         } else {
-            hook.clear();
             hook.insert(ArrayIndex::Numeric(0), commands);
         }
         Ok(Execution::default())
@@ -13493,7 +13507,7 @@ fn parse_hook_commands(
     engine: &MuxEngine,
     value: &str,
 ) -> Result<Vec<CommandInvocation>, ServerError> {
-    let input = crate::parser::command_block_body(value).unwrap_or(value);
+    let input = value;
     if has_unquoted_hook_format(input) {
         return Err(ServerError::InvalidCommand("syntax error".to_owned()));
     }
@@ -21195,7 +21209,7 @@ mod tests {
                 &mut context,
                 &command(
                     "set-hook",
-                    &["-g", "session-created", "display-message before"],
+                    &["-g", "session-created[0]", "display-message before"],
                 ),
             )
             .unwrap();
@@ -21211,7 +21225,7 @@ mod tests {
             engine
                 .execute(
                     &mut context,
-                    &command("set-hook", &["-g", "session-created", "lsk one two"]),
+                    &command("set-hook", &["-g", "session-created[0]", "lsk one two"],),
                 )
                 .unwrap_err(),
             ServerError::CommandParse(
@@ -21232,7 +21246,7 @@ mod tests {
             engine
                 .execute(
                     &mut context,
-                    &command("set-hook", &["-g", "session-created", "lsk -@"]),
+                    &command("set-hook", &["-g", "session-created[0]", "lsk -@"]),
                 )
                 .expect_err("stored hook flag error"),
             ServerError::CommandParse("command list-keys: invalid flag -@".to_owned())
@@ -23976,6 +23990,513 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn set_hook_command_blocks_normalize_for_every_storage_path() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "after-new-window",
+                        "{ display -p typed ; list-sessions }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("typed event hook");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "after-new-window"]),
+                )
+                .expect("typed event hook readback")
+                .output,
+            "after-new-window[0] display-message -p typed ; list-sessions"
+        );
+
+        for (name, body, expected) in [
+            (
+                "@same-line",
+                "{ display -p first ; list-sessions }",
+                "display-message -p first ; list-sessions",
+            ),
+            (
+                "@multi-line",
+                "{\n display -p first\n list-sessions\n}",
+                "display-message -p first ;; list-sessions",
+            ),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-g", name, body])
+                        .with_command_blocks([2]),
+                )
+                .expect("typed user hook");
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", &["-g", "-v", name]),)
+                    .expect("typed user hook readback")
+                    .output,
+                expected
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "@empty-typed", "{}"])
+                    .with_command_blocks([2]),
+            )
+            .expect("empty typed user hook");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "@empty-typed"]),
+                )
+                .expect("empty typed user hook readback")
+                .output,
+            "@empty-typed ''"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "@quoted", "{ display -p quoted }"]),
+            )
+            .expect("quoted user hook");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "-v", "@quoted"]),
+                )
+                .expect("quoted user hook readback")
+                .output,
+            "{ display -p quoted }"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "default-client-command",
+                        "{ display -p forwarded ; neww -d }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("forwarded typed option");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-s", "-v", "default-client-command"],),
+                )
+                .expect("forwarded typed option readback")
+                .output,
+            "display-message -p forwarded ; new-window -d"
+        );
+    }
+
+    #[test]
+    fn set_hook_empty_builtin_values_follow_array_assignment() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("hook target session");
+        let session = context.session.expect("hook target session");
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "after-select-window", "display-message baseline"],
+                ),
+            )
+            .expect("baseline unindexed hook");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "after-select-window", "{}"])
+                    .with_command_blocks([2]),
+            )
+            .expect("empty unindexed hook");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "after-select-window"]),
+                )
+                .expect("cleared unindexed hook")
+                .output,
+            "after-select-window"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "after-select-window[7]", "display-message indexed"],
+                ),
+            )
+            .expect("baseline indexed hook");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-ga", "after-select-window", "{}"])
+                    .with_command_blocks([2]),
+            )
+            .expect("empty appended hook");
+        let hooks = engine
+            .hook_array(TmuxOptionTarget::GlobalSession, "after-select-window")
+            .expect("global hook array");
+        assert_eq!(hooks.len(), 1);
+        assert!(hooks.contains_key(&ArrayIndex::Numeric(7)));
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "after-select-window[8]", "{}"])
+                    .with_command_blocks([2]),
+            )
+            .expect("empty indexed hook");
+        let hooks = engine
+            .hook_array(TmuxOptionTarget::GlobalSession, "after-select-window")
+            .expect("global hook array");
+        assert_eq!(hooks.len(), 2);
+        assert!(
+            hooks
+                .get(&ArrayIndex::Numeric(8))
+                .is_some_and(Vec::is_empty)
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "after-select-window[8]"]),
+                )
+                .expect("empty indexed hook readback")
+                .output,
+            "after-select-window[8] "
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-a", "after-select-window", "{}"])
+                    .with_command_blocks([2]),
+            )
+            .expect("empty local append");
+        assert!(
+            engine
+                .hook_array(TmuxOptionTarget::Session(session), "after-select-window")
+                .is_some_and(BTreeMap::is_empty)
+        );
+        assert_eq!(
+            engine.event_hook_commands(&context, "after-select-window"),
+            Some(Vec::new())
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "after-new-window", "display-message inherited"],
+                ),
+            )
+            .expect("inherited hook");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-hook",
+                        &["-a", "after-new-window", "{ display-message invalid }"],
+                    ),
+                )
+                .expect_err("invalid local append")
+                .tmux_message(),
+            "syntax error"
+        );
+        assert!(
+            engine
+                .hook_array(TmuxOptionTarget::Session(session), "after-new-window")
+                .is_some_and(BTreeMap::is_empty)
+        );
+        assert_eq!(
+            engine.event_hook_commands(&context, "after-new-window"),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn set_hook_storage_constructs_aliases_at_the_typed_or_string_boundary() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("hook target session");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[70]", "hook10g=display-message -p"],
+                ),
+            )
+            .expect("initial hook alias");
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "after-new-window", "hook10g string"]),
+            )
+            .expect("string event hook");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "@typed-alias", "{ hook10g typed }"])
+                    .with_command_blocks([2]),
+            )
+            .expect("typed user hook alias");
+        engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "@string-alias", "hook10g deferred"]),
+            )
+            .expect("string user hook alias");
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[70]",
+                        "hook10g=set-environment -g HOOK10G",
+                    ],
+                ),
+            )
+            .expect("replacement hook alias");
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "after-new-window"]),
+                )
+                .expect("frozen string event hook")
+                .output,
+            "after-new-window[0] display-message -p string"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "-v", "@typed-alias"]),
+                )
+                .expect("frozen typed user hook")
+                .output,
+            "display-message -p typed"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-g", "-v", "@string-alias"]),
+                )
+                .expect("deferred string user hook")
+                .output,
+            "hook10g deferred"
+        );
+
+        let fired = engine
+            .execute(
+                &mut context,
+                &command("set-hook", &["-g", "-R", "@string-alias"]),
+            )
+            .expect("run deferred string user hook");
+        let expected = vec![
+            parse_hook_commands(&engine, "hook10g deferred").expect("current string hook alias"),
+        ];
+        let commands = fired
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::RunHook { commands, .. } => Some(commands),
+                _ => None,
+            })
+            .expect("deferred user hook effect");
+        assert_eq!(commands, &expected);
+    }
+
+    #[test]
+    fn set_hook_block_failures_follow_hook_replacement_order() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "after-new-window", "display-message preserved"],
+                ),
+            )
+            .expect("baseline event hook");
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-hook",
+                        &["-g", "after-new-window", "{ display -p quoted }"],
+                    ),
+                )
+                .expect_err("quoted event hook block")
+                .tmux_message(),
+            "syntax error"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "after-new-window"]),
+                )
+                .expect("cleared event hook")
+                .output,
+            "after-new-window"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "after-new-window[3]", "display-message indexed"],
+                ),
+            )
+            .expect("indexed event hook");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-hook",
+                        &["-g", "after-new-window[3]", "{ display -p quoted }",],
+                    ),
+                )
+                .expect_err("quoted indexed event hook block")
+                .tmux_message(),
+            "syntax error"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-hook",
+                        ["-g", "after-new-window", "{ list-sessions unexpected }",],
+                    )
+                    .with_command_blocks([2]),
+                )
+                .expect_err("invalid typed event hook")
+                .tmux_message(),
+            "command list-sessions: too many arguments (need at most 0)"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-hook",
+                        [
+                            "after-new-window",
+                            "display-message replacement",
+                            "{ display-message extra }",
+                        ],
+                    )
+                    .with_command_blocks([2]),
+                )
+                .expect_err("typed extra hook argument")
+                .tmux_message(),
+            "command set-hook: argument 3 must be \"string\""
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "after-new-window"]),
+                )
+                .expect("preserved event hook")
+                .output,
+            "after-new-window[3] display-message indexed"
+        );
+
+        let ignored_typed = CommandInvocation::new(
+            "set-hook",
+            ["-gR", "after-new-window", "{ list-sessions unexpected }"],
+        )
+        .with_command_blocks([2]);
+        assert_eq!(
+            engine
+                .execute(&mut context, &ignored_typed)
+                .expect_err("typed ignored hook value")
+                .tmux_message(),
+            "command list-sessions: too many arguments (need at most 0)"
+        );
+        let ignored_quoted = engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-gR", "after-new-window", "{ list-sessions unexpected }"],
+                ),
+            )
+            .expect("quoted ignored hook value");
+        let expected = vec![
+            parse_hook_commands(&engine, "display-message indexed").expect("stored indexed hook"),
+        ];
+        assert!(matches!(
+            ignored_quoted.effects.as_slice(),
+            [MuxEffect::RunHook { commands, .. }]
+                if commands == &expected
+        ));
+
+        let monitor = CommandInvocation::new(
+            "set-hook",
+            [
+                "-B",
+                "@monitor:window:#{window_name}",
+                "{ display-message ignored }",
+            ],
+        )
+        .with_command_blocks([2]);
+        assert_eq!(
+            engine
+                .execute(&mut context, &monitor)
+                .expect_err("unsupported format monitor")
+                .tmux_message(),
+            "invalid flag -B"
+        );
     }
 
     #[test]
@@ -30202,14 +30723,15 @@ mod tests {
         let error = engine
             .execute(
                 &mut context,
-                &command(
+                &CommandInvocation::new(
                     "set-hook",
-                    &[
+                    [
                         "-g",
                         "session-closed",
                         "{ if-shell -F { display-message condition } 'display-message branch' }",
                     ],
-                ),
+                )
+                .with_command_blocks([2]),
             )
             .expect_err("typed if-shell condition in hook");
         assert_eq!(
@@ -30376,14 +30898,15 @@ mod tests {
         let error = engine
             .execute(
                 &mut context,
-                &command(
+                &CommandInvocation::new(
                     "set-hook",
-                    &[
+                    [
                         "-g",
                         "session-closed",
                         "{ run-shell { display-message -p forbidden } }",
                     ],
-                ),
+                )
+                .with_command_blocks([2]),
             )
             .expect_err("typed shell command in hook");
         assert_eq!(

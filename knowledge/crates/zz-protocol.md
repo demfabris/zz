@@ -144,8 +144,8 @@ Protocol v84 appends `CommandInvocation.command_blocks`. Config and Control pars
 zero-based positions of standalone unquoted command blocks while quoted brace text stays an
 ordinary string. Alias expansion and key-table publication retain the positions. The
 command-aware option parser applies the adopted callback rules to `bind-key`, `command-prompt`,
-`confirm-before`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`. Every `bind-key`
-positional accepts a typed block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
+`confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option`. Every
+`bind-key` positional accepts a typed block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
 block only at value position 1. `confirm-before` accepts either type for its one command positional
 while `-c`, `-p`, and `-t` remain strings. The mux constructs every lexical typed block
 recursively before validating its parent command name, callback type, or arity. One user-alias
@@ -166,8 +166,16 @@ every `%1`; a trailing `%` quotes double quotes, backslashes, dollar signs, semi
 Typed callbacks keep their physical groups,
 while string templates and free input form one group. Prompt chaining and multi-answer `%2`
 substitution retain their existing owner. `set-hook` and command-valued native set-option
-deliberately apply a second construction stage. A typed `display-menu` action drops its structural wrapper before the
-fresh selection parse, while a quoted brace string remains literal. All seven closed commands reuse
+deliberately apply a second construction stage. Without `-B`, `set-hook` accepts a typed block only
+at value position 1; its hook name and extra positionals remain strings. With `-B`, every positional
+lexically accepts either type, while `-B` and `-t` values stay strings. The mux still rejects `-B`
+because it does not implement format monitors. Typed hook values normalize before built-in hook,
+custom `@`, or forwarded option storage. Built-in hooks flatten physical groups during their second
+construction pass, while custom `@` values retain textual ` ;; ` groups. Local hook-array creation
+precedes empty append and runtime parsing, so an empty or failing local append shadows an inherited
+global hook with an empty local array. A typed `display-menu`
+action drops its structural wrapper before the fresh selection parse, while a quoted brace string
+remains literal. All eight behaving commands reuse
 the same protocol v84 metadata. Eager whole-file source construction and its replay-channel
 placement remain a separate parser contract.
 

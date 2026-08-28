@@ -99,7 +99,8 @@ behavior for shared bindings, or consumer truth for option `BEHAVES`.
 `tracker.semantic-coverage` owns those six blind spots. Its command-specific `args-parse:` items name the
 implemented callback commands; `choose-client` and `switch-mode` remain covered by their
 unimplemented command items. Protocol v84 closes three complete runtime rules plus `bind-key`,
-`command-prompt`, and `confirm-before` within the `commands-or-string` rule. `if-shell`
+`command-prompt`, and `confirm-before` within the `commands-or-string` rule, plus `set-hook`'s
+lexical monitor-or-value callback. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions
 and option values before effects, and leaves quoted braces as strings. `run-shell` accepts typed
 positionals only when a leading `-C` enables command mode; option values and all positionals without
@@ -133,10 +134,17 @@ semicolons, and tildes. Typed callbacks retain
 physical groups, while string templates and free input form one group. String failures retain the
 originating source path and line. Prompt chains and multi-answer `%2` stay under their existing
 prompt owner. `set-hook` and command-valued native set-option deliberately construct a second
-time. A typed `display-menu` action drops its structural wrapper before the fresh selection parse,
-while a quoted brace string remains literal. Broader eager whole-file source construction and its
-replay-channel placement remain open.
-Five `args-parse:` items across three effective rules remain.
+time. Without `-B`, only `set-hook` value position 1 accepts a typed block; with `-B`, every
+positional lexically accepts either type. Hook names and extra positionals remain strings without
+`-B`; `-B` and `-t` values remain strings in both modes. zz still rejects `-B` during execution because format monitors remain
+unsupported. Built-in hook values flatten physical groups during their second construction pass;
+custom `@` typed values retain textual ` ;; ` groups. Empty and failing local appends still create
+an empty local array and shadow the inherited global hook. Typed ignored `-R` values construct before the
+stored hook runs. A typed `display-menu` action drops its structural wrapper before the fresh
+selection parse, while a quoted brace string remains literal. Broader eager whole-file source
+construction, same-source alias mutation, multiline inner-source placement, and replay-channel
+placement remain open.
+Four `args-parse:` items across two effective rules remain.
 Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option

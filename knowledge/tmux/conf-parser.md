@@ -326,10 +326,21 @@ backslashes, dollar signs, semicolons, and tildes.
 Typed templates retain their physical groups, while string templates and free input form one group.
 The string path retains the original source path and line for parse or construction failures.
 Prompt chains and multi-answer `%2` stay under their existing prompt owner. `set-hook` and
-command-valued native set-option deliberately construct again.
+command-valued native set-option deliberately construct again. Without `-B`, only `set-hook`
+position 1 accepts a typed block; the hook name and extra positionals remain strings. With `-B`,
+every positional lexically accepts either type, while `-B` and `-t` values remain strings. The mux
+rejects `-B` later because format monitors remain unsupported. Every typed child constructs before
+the parent type or arity check. A typed value normalizes before built-in hook, custom `@`, or
+forwarded option storage. Built-in hooks flatten physical groups during their second construction
+pass. Custom `@` values retain textual ` ;; ` groups for deferred execution. Quoted braces reach a
+built-in hook as runtime syntax but stay literal in a custom hook value. A typed value supplied to
+`-R` constructs before the stored hook runs, while a quoted value is ignored. Local hook-array
+creation occurs before empty append or runtime parsing, so an empty or failing local append shadows
+the inherited global hook with an empty array.
 A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while a
 quoted brace string remains literal. These rules do not yet make source-file parse and construction
-atomic for the whole file or close the broader replay-channel difference.
+atomic for the whole file, provide aliases defined earlier in the same source during construction,
+place multiline inner-source diagnostics, or close the broader replay-channel difference.
 
 # Schema
 

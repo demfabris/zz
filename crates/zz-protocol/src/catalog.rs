@@ -336,6 +336,11 @@ fn validate_command_args_parse(
             .options
             .iter()
             .any(|option| matches!(option, TmuxOption::Flag("-C")));
+    let set_hook_monitor = args_parse == Some(CommandArgsParseRule::SetHookMonitorOrValue)
+        && parsed
+            .options
+            .iter()
+            .any(|option| matches!(option, TmuxOption::Value("-B", _)));
     let start = command.args.len().saturating_sub(parsed.positionals.len());
     for (position, index) in (start..command.args.len()).enumerate() {
         let accepts_command_block = match args_parse {
@@ -343,6 +348,7 @@ fn validate_command_args_parse(
             Some(CommandArgsParseRule::CommandsOrString) => true,
             Some(CommandArgsParseRule::IfShellBranches) => matches!(position, 1 | 2),
             Some(CommandArgsParseRule::RunShellCommandFlag) => run_shell_commands,
+            Some(CommandArgsParseRule::SetHookMonitorOrValue) => set_hook_monitor || position == 1,
             Some(CommandArgsParseRule::SetOptionValue) => position == 1,
             _ => return Ok(()),
         };
@@ -438,6 +444,7 @@ pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "confirm-before",
     "if-shell",
     "run-shell",
+    "set-hook",
     "set-option",
     "set-window-option",
 ];
@@ -3125,6 +3132,95 @@ mod tests {
                     .expect_err("typed option value")
                     .tmux_message(),
                 format!("command command-prompt: {option} argument must be a string")
+            );
+        }
+    }
+
+    #[test]
+    fn set_hook_args_parse_switches_positionals_for_format_monitors() {
+        let spec = catalog_command_spec("set-hook").expect("set-hook");
+
+        for command in [
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-new-window", "{ display-message action }"],
+            )
+            .with_command_blocks([2]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-B",
+                    "@monitor:window:#{window_name}",
+                    "{ display-message first }",
+                    "{ display-message second }",
+                    "{ display-message third }",
+                ],
+            )
+            .with_command_blocks([2, 3, 4]),
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-new-window", "{ display-message quoted }"],
+            ),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("command-or-string positional");
+        }
+
+        for (command, expected) in [
+            (
+                CommandInvocation::new(
+                    "set-hook",
+                    ["-g", "{ display-message name }", "display-message action"],
+                )
+                .with_command_blocks([1]),
+                "command set-hook: argument 1 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "after-new-window",
+                        "display-message action",
+                        "{ display-message extra }",
+                    ],
+                )
+                .with_command_blocks([2]),
+                "command set-hook: argument 3 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "set-hook",
+                    ["after-new-window", "-B", "{ display-message late }"],
+                )
+                .with_command_blocks([2]),
+                "command set-hook: argument 3 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-t",
+                        "{ display-message target }",
+                        "after-new-window",
+                        "display-message action",
+                    ],
+                )
+                .with_command_blocks([1]),
+                "command set-hook: -t argument must be a string",
+            ),
+            (
+                CommandInvocation::new(
+                    "set-hook",
+                    ["-B", "{ display-message monitor }", "after-new-window"],
+                )
+                .with_command_blocks([1]),
+                "command set-hook: -B argument must be a string",
+            ),
+        ] {
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("rejected command block")
+                    .tmux_message(),
+                expected
             );
         }
     }

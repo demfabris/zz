@@ -4937,10 +4937,27 @@ impl Shared {
                     | "window-renamed"
                     | "client-session-changed"
             );
+            let mut control_variables = event.variables.clone();
+            if event.name == "client-session-changed"
+                && let Some(session) = event.context.session
+            {
+                control_variables.insert("hook_session".to_owned(), session.to_string());
+                if let Some(name) = self
+                    .inner
+                    .lock()
+                    .engine
+                    .state
+                    .sessions
+                    .get(&session)
+                    .map(|session| session.name.clone())
+                {
+                    control_variables.insert("hook_session_name".to_owned(), name);
+                }
+            }
             self.publish_to_control_clients(
                 EventPayload::HookEvent {
                     name: event.name.to_owned(),
-                    variables: event.variables.clone(),
+                    variables: control_variables,
                 },
                 event.exclude_client,
                 attached_only,
@@ -23459,11 +23476,16 @@ fn snapshot_presence(inner: &ServerState) -> SnapshotPresence {
             let viewers = clients
                 .iter()
                 .map(|client| {
-                    let name = inner
-                        .client_names
-                        .get(client)
-                        .cloned()
-                        .unwrap_or_else(|| format!("device-{}", client.0));
+                    let name = if inner.client_kinds.get(client) == Some(&ClientKind::Control) {
+                        client_format_name(inner, *client)
+                    } else {
+                        inner
+                            .client_names
+                            .get(client)
+                            .filter(|name| !name.is_empty())
+                            .cloned()
+                            .unwrap_or_else(|| format!("device-{}", client.0))
+                    };
                     (
                         *client,
                         SessionViewer {
@@ -26225,10 +26247,11 @@ fn parse_buffer_command_args(
         }
         index += usize::from(consumed_next) + 1;
     }
-    if let Some(spec) = zz_protocol::catalog_command_spec(command)
-        && zz_protocol::POSITIONAL_MAX_BEHAVES.contains(&spec.name)
-    {
-        spec.validate_positional_maximum(parsed.positional.len())?;
+    if let Some(spec) = zz_protocol::catalog_command_spec(command) {
+        spec.validate_positional_minimum(parsed.positional.len())?;
+        if zz_protocol::POSITIONAL_MAX_BEHAVES.contains(&spec.name) {
+            spec.validate_positional_maximum(parsed.positional.len())?;
+        }
     }
     Ok(parsed)
 }
@@ -26784,11 +26807,9 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
         }
         index = index.saturating_add(1);
     }
-    if parsed.items.is_empty() {
-        return Err(ServerError::CommandParse(
-            "display-menu requires at least one argument".to_owned(),
-        ));
-    }
+    zz_protocol::catalog_command_spec("display-menu")
+        .expect("display-menu has catalog metadata")
+        .validate_positional_minimum(parsed.items.len())?;
     Ok(parsed)
 }
 
@@ -26799,7 +26820,7 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
         let argument = &args[index];
         if argument == "--" {
             let positional = &args[index.saturating_add(1)..];
-            if positional.len() != 1 {
+            if positional.len() > 1 {
                 return Err(ServerError::CommandParse(
                     "confirm-before requires exactly one command".to_owned(),
                 ));
@@ -26809,7 +26830,7 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
         }
         if !argument.starts_with('-') || argument == "-" {
             let positional = &args[index..];
-            if positional.len() != 1 {
+            if positional.len() > 1 {
                 return Err(ServerError::CommandParse(
                     "confirm-before requires exactly one command".to_owned(),
                 ));
@@ -26852,11 +26873,9 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
         }
         index = index.saturating_add(1);
     }
-    if parsed.command.is_none() {
-        return Err(ServerError::CommandParse(
-            "confirm-before requires exactly one command".to_owned(),
-        ));
-    }
+    zz_protocol::catalog_command_spec("confirm-before")
+        .expect("confirm-before has catalog metadata")
+        .validate_positional_minimum(usize::from(parsed.command.is_some()))?;
     Ok(parsed)
 }
 
@@ -35784,6 +35803,7 @@ mod tests {
                 .iter()
                 .any(|capability| capability == NEW_SESSION_ATTACH_CAPABILITY)
         );
+        shared.inner.lock().client_pids.insert(client, 4242);
         let mut context = ExecutionContext::default();
 
         shared
@@ -35802,15 +35822,22 @@ mod tests {
             Some(&BTreeSet::from([client]))
         );
         let messages = take_reliable_messages(&mailbox);
-        assert!(messages.iter().any(|message| {
-            matches!(
-                message,
+        let attached_snapshot = messages
+            .iter()
+            .find_map(|message| match message {
                 ProtocolMessage::Attached {
                     session: attached,
-                    ..
-                } if *attached == session
-            )
-        }));
+                    snapshot,
+                } if *attached == session => Some(snapshot),
+                _ => None,
+            })
+            .expect("attached snapshot");
+        assert!(
+            attached_snapshot.sessions[0]
+                .viewers
+                .iter()
+                .any(|viewer| { viewer.name == "client-4242" && viewer.is_self })
+        );
         assert_eq!(
             messages
                 .iter()
@@ -35835,6 +35862,35 @@ mod tests {
                 "client-session-changed",
                 "client-attached",
             ]
+        );
+        let session_changed_variables = messages
+            .iter()
+            .find_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, variables },
+                    ..
+                }) if name == "client-session-changed" => Some(variables),
+                _ => None,
+            })
+            .expect("client session changed variables");
+        let expected_session = session.to_string();
+        assert_eq!(
+            session_changed_variables
+                .get("hook_session")
+                .map(String::as_str),
+            Some(expected_session.as_str())
+        );
+        assert_eq!(
+            session_changed_variables
+                .get("hook_session_name")
+                .map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            session_changed_variables
+                .get("hook_client")
+                .map(String::as_str),
+            Some("client-4242")
         );
         let hook_names = messages
             .iter()
@@ -38869,7 +38925,7 @@ mod tests {
             CommandResponse::Success {
                 request_id: 1,
                 output: format!(
-                    "{}:1: set-environment needs a variable and optional value\n",
+                    "{}:1: command set-environment: too few arguments (need at least 1)\n",
                     source.display()
                 ),
                 exit_code: 1,
@@ -38903,7 +38959,7 @@ mod tests {
             [
                 (
                     format!(
-                        "{}:1: set-environment needs a variable and optional value",
+                        "{}:1: command set-environment: too few arguments (need at least 1)",
                         source.display()
                     ),
                     true,
@@ -39001,7 +39057,7 @@ mod tests {
                 ),
                 format!("warning:{source}:4: unknown command: badalias"),
                 format!(
-                    "guard:true:false:{source}:5: set-environment needs a variable and optional value"
+                    "guard:true:false:{source}:5: command set-environment: too few arguments (need at least 1)"
                 ),
                 "guard:false:false:".to_owned(),
                 "guard:false:false:".to_owned(),
@@ -47246,6 +47302,58 @@ mod tests {
     }
 
     #[test]
+    fn catalogued_positional_minimums_precede_daemon_targets_and_effects() {
+        let shared = Arc::new(Shared::new(1));
+        let cases = vec![
+            ("bind", "bind-key", vec![], 1),
+            ("confirm", "confirm-before", vec!["-t", "missing"], 1),
+            (
+                "menu",
+                "display-menu",
+                vec!["-c", "missing", "-t", "=missing"],
+                1,
+            ),
+            ("findw", "find-window", vec!["-t", "=missing"], 1),
+            ("if", "if-shell", vec!["-t", "=missing", "condition"], 2),
+            ("loadb", "load-buffer", vec!["-t", "missing"], 1),
+            ("rename", "rename-session", vec!["-t", "=missing"], 1),
+            ("renamew", "rename-window", vec!["-t", "=missing"], 1),
+            ("saveb", "save-buffer", vec![], 1),
+            ("setenv", "set-environment", vec!["-t", "=missing"], 1),
+            ("set", "set-option", vec!["-t", "=missing"], 1),
+            ("setw", "set-window-option", vec!["-t", "=missing"], 1),
+            ("source", "source-file", vec!["-t", "=missing"], 1),
+            ("wait", "wait-for", vec![], 1),
+        ];
+        for (spelling, canonical, arguments, minimum) in cases {
+            let error = shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(spelling, arguments),
+                )
+                .expect_err("positional minimum");
+            let DaemonError::Server(error) = error else {
+                panic!("unexpected error: {error:?}");
+            };
+            assert_eq!(
+                error,
+                ServerError::CommandParse(format!(
+                    "command {canonical}: too few arguments (need at least {minimum})"
+                ))
+            );
+        }
+
+        let inner = shared.inner.lock();
+        assert!(inner.engine.state.sessions.is_empty());
+        assert!(inner.menus.is_empty());
+        assert!(inner.confirms.is_empty());
+        assert!(inner.wait_channels.is_empty());
+        assert!(inner.paste_buffers.is_empty());
+    }
+
+    #[test]
     fn wait_for_matches_sticky_signal_gc_and_dispatch_precedence() {
         let shared = Arc::new(Shared::new(1));
         register_wait_clients(&shared, [1]);
@@ -48373,17 +48481,17 @@ mod tests {
             .expect("hidden -s option");
         assert_eq!(parsed.positional, ["printf ok"]);
 
-        for args in [
-            vec!["condition".to_owned()],
-            ["condition", "yes", "no", "extra"]
-                .map(str::to_owned)
-                .to_vec(),
-        ] {
-            assert!(matches!(
-                parse_if_shell_args(&args),
-                Err(ServerError::CommandParse(message)) if message == IF_SHELL_USAGE
-            ));
-        }
+        assert!(matches!(
+            parse_if_shell_args(&["condition".to_owned()]),
+            Err(ServerError::CommandParse(message))
+                if message == "command if-shell: too few arguments (need at least 2)"
+        ));
+        assert!(matches!(
+            parse_if_shell_args(
+                &["condition", "yes", "no", "extra"].map(str::to_owned)
+            ),
+            Err(ServerError::CommandParse(message)) if message == IF_SHELL_USAGE
+        ));
     }
 
     #[test]
@@ -57688,6 +57796,11 @@ bind - split-window -v -c "#{pane_current_path}"
             None,
             Arc::clone(&nameless_mailbox),
         );
+        shared
+            .inner
+            .lock()
+            .client_ttys
+            .insert(desktop, "/dev/pts/40".to_owned());
 
         let mut context = ExecutionContext::default();
         shared

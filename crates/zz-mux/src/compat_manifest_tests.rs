@@ -8,7 +8,7 @@ use serde::Deserialize;
 use zz_protocol::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, CommandArgsParseRule, CommandResolution,
     DAEMON_COMMAND_SPECS, DAEMON_INVALID_FLAG_BEHAVES, KeyTables, NATIVE_COMMAND_NAMES,
-    POSITIONAL_MAX_BEHAVES, canonical_command, canonical_key, resolve_command,
+    POSITIONAL_MAX_BEHAVES, POSITIONAL_MINIMUMS, canonical_command, canonical_key, resolve_command,
 };
 
 use crate::{
@@ -344,7 +344,7 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
                 flag_arity_mismatches.insert(format!("flag-arity:{}:{flag}", command.name));
             }
         }
-        if command.min_args != 0 {
+        if spec.positional_minimum() != command.min_args {
             positional_min_mismatches.insert(format!("positional-min:{}", command.name));
         }
         let maximum = spec.positional_maximum();
@@ -684,6 +684,61 @@ fn positional_maximum_runtime_inventory_matches_the_pin() {
         assert!(
             !items.contains_key(&format!("positional-max:{name}")),
             "verified positional maximum remains tracked: {name}"
+        );
+    }
+}
+
+#[test]
+fn positional_minimum_runtime_inventory_matches_the_pin() {
+    let (oracle, items) = inventory();
+    let upstream = oracle
+        .commands
+        .iter()
+        .map(|command| (command.name.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    let specs = specs();
+    let behaves = POSITIONAL_MINIMUMS
+        .iter()
+        .copied()
+        .collect::<BTreeMap<_, _>>();
+    let expected = BTreeMap::from([
+        ("bind-key", 1),
+        ("confirm-before", 1),
+        ("display-menu", 1),
+        ("find-window", 1),
+        ("if-shell", 2),
+        ("load-buffer", 1),
+        ("rename-session", 1),
+        ("rename-window", 1),
+        ("save-buffer", 1),
+        ("set-environment", 1),
+        ("set-option", 1),
+        ("set-window-option", 1),
+        ("source-file", 1),
+        ("wait-for", 1),
+    ]);
+
+    assert_eq!(
+        behaves.len(),
+        POSITIONAL_MINIMUMS.len(),
+        "positional minimum behavior inventory contains duplicates"
+    );
+    assert_eq!(
+        behaves, expected,
+        "positional minimum behavior inventory does not match the closed roster"
+    );
+    for (name, minimum) in behaves {
+        let command = upstream.get(name).unwrap_or_else(|| {
+            panic!("positional minimum inventory names a native command: {name}")
+        });
+        let spec = specs.get(name).unwrap_or_else(|| {
+            panic!("positional minimum inventory names an absent command: {name}")
+        });
+        assert_eq!(minimum, command.min_args, "{name}");
+        assert_eq!(spec.positional_minimum(), minimum, "{name}");
+        assert!(
+            !items.contains_key(&format!("positional-min:{name}")),
+            "verified positional minimum remains tracked: {name}"
         );
     }
 }

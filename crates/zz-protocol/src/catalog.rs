@@ -137,6 +137,25 @@ impl CommandSpec {
     }
 
     #[must_use]
+    pub fn positional_minimum(&self) -> usize {
+        POSITIONAL_MINIMUMS
+            .iter()
+            .find_map(|(name, minimum)| (*name == self.name).then_some(*minimum))
+            .unwrap_or(0)
+    }
+
+    pub fn validate_positional_minimum(&self, actual: usize) -> Result<(), ServerError> {
+        let minimum = self.positional_minimum();
+        if actual < minimum {
+            return Err(ServerError::CommandParse(format!(
+                "command {}: too few arguments (need at least {minimum})",
+                self.name
+            )));
+        }
+        Ok(())
+    }
+
+    #[must_use]
     pub const fn positional_maximum(&self) -> Option<usize> {
         if self.variadic.is_none() {
             Some(self.positionals.len())
@@ -315,6 +334,23 @@ pub static DAEMON_INVALID_FLAG_BEHAVES: &[&str] = &[
     "show-prompt-history",
     "switch-client",
     "wait-for",
+];
+
+pub static POSITIONAL_MINIMUMS: &[(&str, usize)] = &[
+    ("bind-key", 1),
+    ("confirm-before", 1),
+    ("display-menu", 1),
+    ("find-window", 1),
+    ("if-shell", 2),
+    ("load-buffer", 1),
+    ("rename-session", 1),
+    ("rename-window", 1),
+    ("save-buffer", 1),
+    ("set-environment", 1),
+    ("set-option", 1),
+    ("set-window-option", 1),
+    ("source-file", 1),
+    ("wait-for", 1),
 ];
 
 pub static POSITIONAL_MAX_BEHAVES: &[&str] = &[

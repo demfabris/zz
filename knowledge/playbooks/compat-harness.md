@@ -150,7 +150,7 @@ Use the registry vocabulary consistently:
 ## Coverage freshness
 
 `compat/results/summary.md` is the persisted canonical artifact. The 2026-08-27 checkpoint contains
-86 scenarios and 1,481 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+87 scenarios and 1,484 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -194,11 +194,15 @@ finally requires the fixture to publish its clean marker.
 `smoke/positional-maximums` contributes three checks: it clears inherited state, then requires exact
 canonical maximum errors for all eight commands and six aliases with valid-looking options after
 the first positional, and finally requires unchanged pane, buffer, and file state.
+`smoke/positional-minimums` contributes three checks: it clears inherited state, then requires exact
+canonical minimum errors for all fourteen commands and aliases before missing-target resolution,
+and finally requires unchanged pane, buffer, and file state. Focused daemon tests separately prove
+that rejected commands do not change menu, confirmation, or wait state.
 
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
-`40358b89c67686bc10ddfa1384f17ecfd71a2edf97f444974a1b1855c54eb18d`.
+`e78bdd3b173e371bb5da062fea2e5806fbc359c00bb16bd0914cad8006234987`.
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also

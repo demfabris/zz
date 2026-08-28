@@ -14,6 +14,7 @@ for required_test in \
   compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle \
   compat_manifest_tests::daemon_invalid_flag_runtime_inventory_matches_the_pin \
   compat_manifest_tests::positional_maximum_runtime_inventory_matches_the_pin \
+  compat_manifest_tests::positional_minimum_runtime_inventory_matches_the_pin \
   compat_manifest_tests::option_format_hook_and_default_key_items_match_pinned_inventories; do
   grep -Fqx -- "$required_test: test" <<<"$test_list" || {
     printf 'error: required compatibility manifest test is missing: %s\n' "$required_test" >&2

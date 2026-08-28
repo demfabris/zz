@@ -12196,6 +12196,7 @@ fn parse_command_options(
     let spec = command_spec(command).expect("executable command has catalog metadata");
     let (options, positional) = parse_options_for_spec(args, spec)?;
     validate_options(command, spec, &options)?;
+    spec.validate_positional_minimum(positional.len())?;
     if POSITIONAL_MAX_BEHAVES.contains(&spec.name) {
         spec.validate_positional_maximum(positional.len())?;
     }
@@ -20543,6 +20544,33 @@ mod tests {
                 error,
                 ServerError::CommandParse(format!(
                     "command {canonical}: too many arguments (need at most {maximum})"
+                ))
+            );
+            assert!(engine.state.sessions.is_empty());
+        }
+    }
+
+    #[test]
+    fn catalogued_positional_minimums_precede_mux_targets_and_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for (spelling, canonical, arguments, minimum) in [
+            ("bind", "bind-key", &[][..], 1),
+            ("findw", "find-window", &["-t", "=missing"][..], 1),
+            ("rename", "rename-session", &["-t", "=missing"][..], 1),
+            ("renamew", "rename-window", &["-t", "=missing"][..], 1),
+            ("setenv", "set-environment", &["-t", "=missing"][..], 1),
+            ("set", "set-option", &["-t", "=missing"][..], 1),
+            ("setw", "set-window-option", &["-t", "=missing"][..], 1),
+            ("source", "source-file", &["-t", "=missing"][..], 1),
+        ] {
+            let error = engine
+                .execute(&mut context, &command(spelling, arguments))
+                .expect_err("positional minimum");
+            assert_eq!(
+                error,
+                ServerError::CommandParse(format!(
+                    "command {canonical}: too few arguments (need at least {minimum})"
                 ))
             );
             assert!(engine.state.sessions.is_empty());

@@ -1339,7 +1339,11 @@ mod daemon_autostart {
         );
 
         for (name, deepest, message) in [
-            ("depth-no-path", "source-file\n", "source-file needs a path"),
+            (
+                "depth-no-path",
+                "source-file\n",
+                "command source-file: too few arguments (need at least 1)",
+            ),
             (
                 "depth-bad-flag",
                 "source-file -z leaf.conf\n",
@@ -3877,7 +3881,7 @@ mod daemon_autostart {
                     "arity-parse-eof-status",
                     b"rename-session\n",
                     0,
-                    &["rename-session requires exactly one new name"],
+                    &["command rename-session: too few arguments (need at least 1)"],
                     true,
                 ),
             ];
@@ -4196,7 +4200,7 @@ mod daemon_autostart {
                 5,
                 1,
                 &[&format!(
-                    "{}:7: set-environment needs a variable and optional value",
+                    "{}:7: command set-environment: too few arguments (need at least 1)",
                     source.display()
                 )],
                 true,

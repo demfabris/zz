@@ -22,7 +22,8 @@ seeding and refresh with protocol v82. The fifth closed retained client formats 
 the sixth closed the six client lifecycle hook producers, and the seventh proved silent Control
 delivery for asynchronous copy-pipe failures. The eighth registered and executed the 24-command
 daemon invalid-flag runtime roster. The ninth closed all eight pinned positional-maximum mismatches
-with catalog-owned metadata and the pin's first-positional flag boundary. The last four needed no
+with catalog-owned metadata and the pin's first-positional flag boundary. The tenth closed all
+fourteen required positional minima through a separate catalog sidecar. The last five needed no
 protocol change.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
@@ -46,15 +47,16 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The fresh 2026-08-27 checkpoint covers 86 scenarios and 1,481 steps. Every ordinary row is clean.
+The fresh 2026-08-27 checkpoint covers 87 scenarios and 1,484 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`40358b89c67686bc10ddfa1384f17ecfd71a2edf97f444974a1b1855c54eb18d`.
-The full strict suite was rerun after the positional-maximum closure, not carried forward from an
-older artifact. The new three-step scenario proves canonical and alias diagnostics, the
-first-positional flag boundary, and side-effect suppression across all eight commands.
+`e78bdd3b173e371bb5da062fea2e5806fbc359c00bb16bd0914cad8006234987`.
+The full strict suite was rerun after the positional-minimum closure, not carried forward from an
+older artifact. The two positional-bound scenarios prove canonical and alias diagnostics, the
+first-positional flag boundary, target-error precedence, and effect suppression across all twenty-two
+closed command bounds.
 
 # Cohorts
 
@@ -87,7 +89,7 @@ milestone per letter, never one combined commit.
 | 8 | Async copy or pipe error delivery | Closed under `control-mode.async-copy-pipe-errors` on 2026-08-27 | Complete | Pinned source plus a delayed exit-7 Control probe prove silent delivery and copy-mode cancellation |
 | 9a | Daemon invalid-flag runtime contract | Closed under `tracker.daemon-invalid-flag-runtime` on 2026-08-27 | Complete | Source-owned 24-command roster plus production-dispatch proof; later error-shape items remain open |
 | 9b | Positional maximums | Closed under `mux.positional-maximums` on 2026-08-27 | Complete | One catalog validator across eight commands, with mux and daemon production-boundary proof |
-| 9c | Required positional minima | The 14 `positional-min:*` items in `mux.error-shapes` | Medium | One catalog sidecar and validator after flags but before targets and effects |
+| 9c | Required positional minima | Closed under `mux.positional-minimums` on 2026-08-27 | Complete | One catalog sidecar and validator after flags but before targets and effects |
 | 9d | Shared arity and flag errors | `semantic:command-arity-errors` and `semantic:command-flag-errors` | Medium | Exact shared families without absorbing callback-body grammar |
 | 9e | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |
 | 10a-10f | `args_parse` runtime rules | Corresponding `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Six effective source rules, never all callback commands at once |
@@ -100,7 +102,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slice 9b is closed and slice 9c is next. Before choosing each later milestone, regenerate the report
+Slice 9c is closed and slice 9d is next. Before choosing each later milestone, regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, and `clients.parent-hup-exit`. Rows 4 and later are a dependency forecast,
@@ -190,9 +192,10 @@ Continue the tmux compatibility campaign in /Users/demfabris/dev/zz-tmux-compat 
 codex/tmux-compat. Preserve unrelated work and do not push.
 
 Verify that the session-cwd, requested-client-flags, retained-client-sizing, client-environment,
-client-formats, client-hooks, asynchronous copy-pipe, daemon-invalid-flag, and positional-maximum
+client-formats, client-hooks, asynchronous copy-pipe, daemon-invalid-flag, positional-maximum, and
+positional-minimum
 milestones are committed and their tracker entries are closed. Confirm the current checkpoint still
-reports 86 scenarios, 1,481 steps, attached-client PASS, and only the two documented GEO rows.
+reports 87 scenarios, 1,484 steps, attached-client PASS, and only the two documented GEO rows.
 
 Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
 daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one

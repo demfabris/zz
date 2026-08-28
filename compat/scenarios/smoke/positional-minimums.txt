@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/positional-minimums.sh ~/positional-minimums.sh
+out: set-environment -gu POSITIONAL_MINIMUMS
+run-shell 'sh ~/positional-minimums.sh'
+out: show-environment -g POSITIONAL_MINIMUMS

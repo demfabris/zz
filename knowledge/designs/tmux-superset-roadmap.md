@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-27
 
-The live tracker has 86 active groups, 609 classified active items, 77 closed groups, and two known
+The live tracker has 86 active groups, 595 classified active items, 78 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,15 +53,15 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after positional-maximum closure covers 86 scenarios and
-1,481 steps.
+The canonical checkpoint freshly rerun after positional-minimum closure covers 87 scenarios and
+1,484 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`40358b89c67686bc10ddfa1384f17ecfd71a2edf97f444974a1b1855c54eb18d`. Requested flags, attached
+`e78bdd3b173e371bb5da062fea2e5806fbc359c00bb16bd0914cad8006234987`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
-and positional-maximum closure each add one fail-closed three-step canonical scenario.
+and both positional-bound closures each add one fail-closed three-step canonical scenario.
 
 Protocol v82 appends one bounded UTF-8 client-environment snapshot to `ClientHello`. Local and
 SSH-forwarded clients now seed fresh sessions and refresh existing sessions through the effective
@@ -438,11 +438,15 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    and option `BEHAVES` consumer truth. Daemon invalid-flag coverage closed on 2026-08-27: the
    source-owned roster reconciles all 24 pinned daemon-dispatched commands and a runtime test executes
    every absent alphanumeric short flag for every entry before command-specific work.
-   The eight positional maximum mismatches closed later that day. One catalog-backed validator now
-   runs after flag parsing and before mux targets or daemon buffer effects. The three-step
+   The eight positional maximum mismatches closed later that day. One catalog-backed validator runs
+   after flag parsing and before mux targets or daemon buffer effects. The three-step
    `positional-maximums` fixture checks every canonical command and alias with exact canonical stderr
-   plus unchanged pane, buffer, and file state. Required bounds and the remaining shared error
-   families stay in `mux.error-shapes`.
+   plus unchanged pane, buffer, and file state. The fourteen required positional minima closed in
+   the next slice through a separate catalog sidecar and the same parser boundaries. Its three-step
+   fixture checks all canonical names and aliases, target-error precedence, and unchanged pane,
+   buffer, and file state. Focused daemon tests prove that rejected commands also leave menu,
+   confirmation, and wait state unchanged. The shared arity, flag, and nested-session families stay
+   in `mux.error-shapes`.
    `knowledge/tmux/gaps.md` remains generated from the registry.
 
 Without this gate, easy compatibility fixes can land while the persisted proof quietly goes stale.
@@ -885,8 +889,18 @@ permanent product decision has been recorded for them.
   change. Seven commands now accept at most one positional and `select-pane` accepts none. The shared
   catalog emits the pin's exact canonical error before target resolution, buffer mutation, or file
   I/O. Focused mux and daemon tests cover canonical and alias routes; the three-step differential is
-  clean. Required positional bounds and the broad arity, flag, and nested-session families remain
-  open.
+  clean. At that checkpoint required positional bounds and the broad arity, flag, and nested-session
+  families remained open.
+- 2026-08-27: The positional-minimum slice closed the remaining fourteen positional-bound items
+  without a protocol change. One exact catalog sidecar supplies minimum one for thirteen commands
+  and minimum two for `if-shell`; mux, shared daemon, menu, and confirmation parsers validate it
+  after flags but before upper bounds, targets, callbacks, files, buffers, or other effects. The
+  three-step differential covers all fourteen canonical names and aliases with exact canonical
+  errors and unchanged state. Integration validation also restored Control `%session-changed`
+  delivery by keeping hook command variables client-only while adding session identity to the
+  Control publication copy and using one tmux-facing client-name ladder for Control snapshot self
+  identity.
+  Shared arity, flag, and nested-session families remain open.
 
 # Related
 

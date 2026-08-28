@@ -51,8 +51,11 @@ On Unix, `run_terminal` obtains its default shell command from `shell_integratio
 Bash receive original zz-owned startup hooks that publish the exact interactive command as OSC 2
 immediately before execution, then replace it with the compact current directory at the next
 prompt. A program's own later OSC 0/2 title wins while it runs. Shell resources are embedded in the
-binary and materialized into a versioned private cache; unsupported shells and explicit opt-out
-(`ZZ_SHELL_INTEGRATION=none`) fall back to `portable_pty`'s unchanged default shell. These hooks emit
+binary and materialized into a versioned private cache on every spawn, never once per process: the
+cache root is a purgeable OS cache directory, and a daemon that memoized it would hand later panes an
+`ENV` path that no longer exists, leaving Bash in `--posix` with no startup files at all. Unsupported
+shells, a purged-and-unwritable cache, and explicit opt-out (`ZZ_SHELL_INTEGRATION=none`) all fall
+back to `portable_pty`'s unchanged default login shell. These hooks emit
 **OSC 2, OSC 7, and cursor shape only**, not OSC 133. Semantic prompt marks come from the user's own
 shell integration (ghostty, kitty, wezterm, starship), and `capture_last_command` needs them.
 

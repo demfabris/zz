@@ -6,10 +6,7 @@ use std::{
     fs::{self, OpenOptions},
     io::{self, ErrorKind, Write},
     path::{Path, PathBuf},
-    sync::{
-        OnceLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[cfg(unix)]
@@ -23,8 +20,6 @@ const ZSH_INTEGRATION: &[u8] = include_bytes!("../assets/shell-integration/zsh/z
 const POWERSHELL_INTEGRATION: &[u8] =
     include_bytes!("../assets/shell-integration/powershell/zz-integration.ps1");
 
-#[cfg(any(unix, windows))]
-static RESOURCE_ROOT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 #[cfg(any(unix, windows))]
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -164,28 +159,27 @@ fn configure_zsh(command: &mut CommandBuilder, root: &Path) {
 
 #[cfg(any(unix, windows))]
 fn resource_root() -> Option<PathBuf> {
-    RESOURCE_ROOT
-        .get_or_init(|| {
-            let root = resource_cache_root().map_err(|error| error.to_string())?;
-            materialize_resources(&root).map_err(|error| error.to_string())?;
+    let prepared = resource_cache_root().and_then(|root| {
+        materialize_resources(&root)?;
+        Ok(root)
+    });
+    match prepared {
+        Ok(root) => {
             log::debug!(
                 target: "zz_terminal::shell_integration",
                 "prepared shell integration resources root={}",
                 root.display(),
             );
-            Ok(root)
-        })
-        .as_ref()
-        .map_or_else(
-            |error| {
-                log::warn!(
-                    target: "zz_terminal::shell_integration",
-                    "shell integration unavailable: {error}",
-                );
-                None
-            },
-            |root| Some(root.clone()),
-        )
+            Some(root)
+        }
+        Err(error) => {
+            log::warn!(
+                target: "zz_terminal::shell_integration",
+                "shell integration unavailable: {error}",
+            );
+            None
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -528,6 +522,25 @@ mod tests {
                 & 0o777,
             0o700
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materializing_restores_a_purged_resource_tree() {
+        let temporary = tempfile::tempdir().expect("temporary resource directory");
+        let root = temporary.path().join("shell-integration/v1");
+        materialize_resources(&root).expect("materialize shell integration");
+        fs::remove_dir_all(&root).expect("purge shell integration cache");
+
+        materialize_resources(&root).expect("rematerialize shell integration");
+        for relative in [
+            "bash/zz-integration.bash",
+            "zsh/.zshenv",
+            "zsh/zz-integration.zsh",
+        ] {
+            let path = root.join(relative);
+            assert!(path.is_file(), "missing {} after a purge", path.display());
+        }
     }
 
     #[cfg(unix)]

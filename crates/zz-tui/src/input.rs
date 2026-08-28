@@ -1,11 +1,11 @@
-use zz_client::{ChromeAction, ChromeKeymap, SIDEBAR_TABLE};
+use zz_client::{ChromeAction, ChromeKeymap, MenuKeyResult, SIDEBAR_TABLE, resolve_menu_key};
 use zz_daemon::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, CommandInvocation, CommandPromptAction,
     CommandPromptMode, ConfirmAction, ConfirmState, DisplayPanesAction, InputMessage,
-    MAX_COMMAND_PROMPT_BYTES, PaneKindSnapshot,
+    MAX_COMMAND_PROMPT_BYTES, MenuAction, MenuState, PaneKindSnapshot,
 };
 use zz_terminal::{
     KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalMouseButton,
@@ -47,6 +47,31 @@ pub(crate) fn handle(
     event: TerminalEvent,
     pixel_mouse: bool,
 ) -> Result<InputOutcome, String> {
+    let event = match menu_input_route(
+        model.menu.as_ref(),
+        model.menu_selection,
+        model.menu_action_pending,
+        &mut model.menu_swallowed_key,
+        event,
+    ) {
+        MenuInputRoute::Forward(event) => event,
+        MenuInputRoute::Consume => return Ok(InputOutcome::None),
+        MenuInputRoute::Select(selection) => {
+            model.menu_selection = selection;
+            return Ok(InputOutcome::Repaint);
+        }
+        MenuInputRoute::Action {
+            action,
+            swallowed_key,
+        } => {
+            client
+                .send_input(InputMessage::Menu { action })
+                .map_err(|error| error.to_string())?;
+            model.menu_action_pending = true;
+            model.menu_swallowed_key = swallowed_key;
+            return Ok(InputOutcome::None);
+        }
+    };
     let event = match confirm_input_route(
         model.confirm.as_ref(),
         model.confirm_reply_pending,
@@ -94,6 +119,54 @@ pub(crate) fn handle(
 }
 
 #[derive(Debug, Eq, PartialEq)]
+enum MenuInputRoute {
+    Forward(TerminalEvent),
+    Consume,
+    Select(Option<usize>),
+    Action {
+        action: MenuAction,
+        swallowed_key: Option<KeyCode>,
+    },
+}
+
+fn menu_input_route(
+    state: Option<&MenuState>,
+    selection: Option<usize>,
+    action_pending: bool,
+    swallowed_key: &mut Option<KeyCode>,
+    event: TerminalEvent,
+) -> MenuInputRoute {
+    if let TerminalEvent::Key(key) = &event
+        && swallow_overlay_key(swallowed_key, *key)
+    {
+        return MenuInputRoute::Consume;
+    }
+    let Some(state) = state else {
+        return MenuInputRoute::Forward(event);
+    };
+    if action_pending
+        && matches!(
+            event,
+            TerminalEvent::Key(_) | TerminalEvent::Paste(_) | TerminalEvent::Mouse(_)
+        )
+    {
+        return MenuInputRoute::Consume;
+    }
+    match event {
+        TerminalEvent::Key(event) => match resolve_menu_key(state, selection, &key_input(event)) {
+            MenuKeyResult::Action(action) => MenuInputRoute::Action {
+                action,
+                swallowed_key: Some(key_code(event.code)),
+            },
+            MenuKeyResult::Select(selection) => MenuInputRoute::Select(selection),
+            MenuKeyResult::Consumed => MenuInputRoute::Consume,
+        },
+        TerminalEvent::Paste(_) | TerminalEvent::Mouse(_) => MenuInputRoute::Consume,
+        event => MenuInputRoute::Forward(event),
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 enum ConfirmInputRoute {
     Forward(TerminalEvent),
     Consume,
@@ -110,7 +183,7 @@ fn confirm_input_route(
     event: TerminalEvent,
 ) -> ConfirmInputRoute {
     if let TerminalEvent::Key(key) = &event
-        && swallow_confirm_key(swallowed_key, *key)
+        && swallow_overlay_key(swallowed_key, *key)
     {
         return ConfirmInputRoute::Consume;
     }
@@ -141,7 +214,7 @@ fn confirm_input_route(
     }
 }
 
-fn swallow_confirm_key(swallowed_key: &mut Option<KeyCode>, event: KeyEvent) -> bool {
+fn swallow_overlay_key(swallowed_key: &mut Option<KeyCode>, event: KeyEvent) -> bool {
     let Some(swallowed) = *swallowed_key else {
         return false;
     };
@@ -1323,6 +1396,11 @@ const fn mouse_button(button: MouseButton) -> TerminalMouseButton {
 
 fn key_input(event: KeyEvent) -> KeyInput {
     let key = key_code(event.code);
+    let event_modifiers = if matches!(event.code, TerminalKeyCode::BackTab) {
+        event.modifiers | KeyModifiers::SHIFT
+    } else {
+        event.modifiers
+    };
     let text = match event.code {
         TerminalKeyCode::Char(character) if !character.is_control() => {
             Some(character.to_string().into_boxed_str())
@@ -1340,7 +1418,7 @@ fn key_input(event: KeyEvent) -> KeyInput {
             KeyEventKind::Release => KeyAction::Release,
         },
         key,
-        modifiers: modifiers(event.modifiers),
+        modifiers: modifiers(event_modifiers),
         text,
         unshifted_codepoint,
     }
@@ -1384,6 +1462,292 @@ const fn modifiers(value: KeyModifiers) -> Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zz_protocol::{MenuItem, PopupBorderLines};
+
+    fn menu_state(selected: Option<u32>, stay_open: bool) -> MenuState {
+        MenuState {
+            left: 0,
+            top: 0,
+            width: 20,
+            height: 6,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Menu".to_owned(),
+            style: "default".to_owned(),
+            selected_style: "reverse".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            items: vec![
+                Some(MenuItem {
+                    name: "Quit item".to_owned(),
+                    key: Some("q".to_owned()),
+                    enabled: true,
+                }),
+                None,
+                Some(MenuItem {
+                    name: "Disabled".to_owned(),
+                    key: None,
+                    enabled: false,
+                }),
+                Some(MenuItem {
+                    name: "Last".to_owned(),
+                    key: None,
+                    enabled: true,
+                }),
+            ],
+            selected,
+            stay_open,
+        }
+    }
+
+    fn menu_route(
+        state: &MenuState,
+        selection: Option<usize>,
+        event: TerminalEvent,
+    ) -> MenuInputRoute {
+        menu_input_route(Some(state), selection, false, &mut None, event)
+    }
+
+    #[test]
+    fn menu_shortcuts_win_and_navigation_changes_only_local_selection() {
+        let state = menu_state(Some(0), false);
+        assert_eq!(
+            menu_route(
+                &state,
+                Some(0),
+                TerminalEvent::Key(KeyEvent::new(
+                    TerminalKeyCode::Char('q'),
+                    KeyModifiers::NONE,
+                )),
+            ),
+            MenuInputRoute::Action {
+                action: MenuAction::Choose(0),
+                swallowed_key: Some(KeyCode::Character('q')),
+            }
+        );
+        assert_eq!(
+            menu_route(
+                &state,
+                Some(0),
+                TerminalEvent::Key(KeyEvent::new(TerminalKeyCode::Down, KeyModifiers::NONE,)),
+            ),
+            MenuInputRoute::Select(Some(3))
+        );
+        assert_eq!(state.selected, Some(0));
+    }
+
+    #[test]
+    fn menu_cancel_enter_and_disabled_stay_open_use_the_shared_resolver() {
+        let state = menu_state(Some(3), false);
+        assert!(matches!(
+            menu_route(
+                &state,
+                Some(3),
+                TerminalEvent::Key(KeyEvent::new(TerminalKeyCode::Esc, KeyModifiers::NONE))
+            ),
+            MenuInputRoute::Action {
+                action: MenuAction::Cancel,
+                ..
+            }
+        ));
+        assert!(matches!(
+            menu_route(
+                &state,
+                Some(3),
+                TerminalEvent::Key(KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::NONE))
+            ),
+            MenuInputRoute::Action {
+                action: MenuAction::Choose(3),
+                ..
+            }
+        ));
+        assert!(matches!(
+            menu_route(
+                &state,
+                Some(2),
+                TerminalEvent::Key(KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::NONE))
+            ),
+            MenuInputRoute::Action {
+                action: MenuAction::Cancel,
+                ..
+            }
+        ));
+        let stay_open = menu_state(Some(2), true);
+        assert_eq!(
+            menu_route(
+                &stay_open,
+                Some(2),
+                TerminalEvent::Key(KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::NONE,)),
+            ),
+            MenuInputRoute::Consume
+        );
+    }
+
+    #[test]
+    fn menu_backtab_uses_real_parser_bytes() {
+        let mut parser = crate::terminal_event::EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b[Z", &mut events);
+        assert_eq!(events.len(), 1);
+        let TerminalEvent::Key(event) = &events[0] else {
+            panic!("backtab did not parse as a key");
+        };
+        let input = key_input(*event);
+        assert_eq!(input.key, KeyCode::Tab);
+        assert!(input.modifiers.shift());
+        assert_eq!(
+            menu_route(&menu_state(Some(3), false), Some(3), events.remove(0)),
+            MenuInputRoute::Select(Some(0))
+        );
+    }
+
+    #[test]
+    fn menu_pending_action_owns_input_until_close() {
+        let state = menu_state(Some(0), false);
+        let press = KeyEvent::new(TerminalKeyCode::Char('q'), KeyModifiers::NONE);
+        assert!(matches!(
+            menu_route(&state, Some(0), TerminalEvent::Key(press)),
+            MenuInputRoute::Action {
+                action: MenuAction::Choose(0),
+                ..
+            }
+        ));
+        assert_eq!(
+            menu_input_route(
+                Some(&state),
+                Some(0),
+                true,
+                &mut None,
+                TerminalEvent::Key(KeyEvent {
+                    kind: KeyEventKind::Repeat,
+                    ..press
+                }),
+            ),
+            MenuInputRoute::Consume
+        );
+        assert_eq!(
+            menu_input_route(
+                Some(&state),
+                Some(0),
+                true,
+                &mut None,
+                TerminalEvent::Paste("q".to_owned()),
+            ),
+            MenuInputRoute::Consume
+        );
+        assert_eq!(
+            menu_input_route(
+                Some(&state),
+                Some(0),
+                true,
+                &mut None,
+                TerminalEvent::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 2,
+                    row: 1,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            ),
+            MenuInputRoute::Consume
+        );
+        assert_eq!(
+            menu_input_route(
+                Some(&state),
+                Some(0),
+                true,
+                &mut None,
+                TerminalEvent::CellSize {
+                    width_px: 8,
+                    height_px: 16,
+                },
+            ),
+            MenuInputRoute::Forward(TerminalEvent::CellSize {
+                width_px: 8,
+                height_px: 16,
+            })
+        );
+    }
+
+    #[test]
+    fn menu_consumes_pointer_paste_releases_and_the_action_key_lifecycle() {
+        let state = menu_state(Some(0), false);
+        assert_eq!(
+            menu_route(&state, Some(0), TerminalEvent::Paste("q".to_owned())),
+            MenuInputRoute::Consume
+        );
+        assert_eq!(
+            menu_route(
+                &state,
+                Some(0),
+                TerminalEvent::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 2,
+                    row: 1,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            ),
+            MenuInputRoute::Consume
+        );
+        let press = KeyEvent::new(TerminalKeyCode::Char('q'), KeyModifiers::NONE);
+        assert_eq!(
+            menu_route(
+                &state,
+                Some(0),
+                TerminalEvent::Key(KeyEvent {
+                    kind: KeyEventKind::Release,
+                    ..press
+                }),
+            ),
+            MenuInputRoute::Consume
+        );
+        let MenuInputRoute::Action {
+            swallowed_key: Some(key),
+            ..
+        } = menu_route(&state, Some(0), TerminalEvent::Key(press))
+        else {
+            panic!("menu shortcut was not consumed");
+        };
+        let mut swallowed = Some(key);
+        assert_eq!(
+            menu_input_route(
+                None,
+                Some(0),
+                false,
+                &mut swallowed,
+                TerminalEvent::Key(KeyEvent {
+                    kind: KeyEventKind::Repeat,
+                    ..press
+                }),
+            ),
+            MenuInputRoute::Consume
+        );
+        assert_eq!(
+            menu_input_route(
+                None,
+                Some(0),
+                false,
+                &mut swallowed,
+                TerminalEvent::Key(KeyEvent {
+                    kind: KeyEventKind::Release,
+                    ..press
+                }),
+            ),
+            MenuInputRoute::Consume
+        );
+        assert_eq!(swallowed, None);
+        assert_eq!(
+            menu_input_route(
+                None,
+                Some(0),
+                false,
+                &mut swallowed,
+                TerminalEvent::Key(press),
+            ),
+            MenuInputRoute::Forward(TerminalEvent::Key(press))
+        );
+    }
 
     fn confirm_state(confirm_key: u8, default_yes: bool) -> ConfirmState {
         ConfirmState {

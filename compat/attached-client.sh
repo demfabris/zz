@@ -1108,6 +1108,124 @@ probe_confirm_before() {
   wait_for_pane_marker "$side" ATTACHED_CONFIRM_UNDERLAY_z
 }
 
+DISPLAY_MENU_PID=""
+
+open_display_menu() {
+  local side="$1"
+  local client_name="$2"
+  local title="$3"
+  shift 3
+
+  side_command "$side" display-menu -c "$client_name" -T "$title" "$@" &
+  DISPLAY_MENU_PID=$!
+  wait_for_current_marker "$side" "$title"
+}
+
+finish_display_menu() {
+  local side="$1"
+
+  if ! wait "$DISPLAY_MENU_PID"; then
+    fixture_failure "$side display-menu command failed"
+  fi
+  DISPLAY_MENU_PID=""
+}
+
+probe_display_menu() {
+  local side="$1"
+  local client_name
+  local option
+  local title
+  local -a options=(
+    @attached_menu_shortcut
+    @attached_menu_navigation
+    @attached_menu_cancel
+    @attached_menu_stay_open
+    @attached_menu_paste
+  )
+
+  client_name="$(side_command "$side" list-clients -F '#{client_name}')"
+  if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
+    fixture_failure "$side did not report exactly one menu target client"
+  fi
+  for option in "${options[@]}"; do
+    side_command "$side" set-option -gu "$option" ||
+      fixture_failure "$side could not reset $option"
+  done
+
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" \
+    'printf "ATTACHED_MENU_UNDERLAY_%s\n" READY; saved=$(stty -g); stty -echo -icanon min 1 time 0; key=$(dd bs=1 count=1 2>/dev/null); stty "$saved"; printf "ATTACHED_MENU_UNDERLAY_%s\n" "$key"'
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_pane_marker "$side" ATTACHED_MENU_UNDERLAY_READY
+
+  title="Q_$side"
+  open_display_menu "$side" "$client_name" "$title" -- \
+    "Shortcut Q" q "set-option -g @attached_menu_shortcut selected"
+  wait_for_current_marker "$side" "Shortcut Q"
+  wait_for_current_marker "$side" "(q)"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_current_marker_absent "$side" "$title"
+  finish_display_menu "$side"
+  wait_for_side_output "$side" selected "menu q shortcut" \
+    show-options -gqv @attached_menu_shortcut
+
+  title="NAV_$side"
+  open_display_menu "$side" "$client_name" "$title" -C 0 -- \
+    First f "set-option -g @attached_menu_navigation wrong" \
+    "" \
+    -Disabled d "set-option -g @attached_menu_navigation disabled" \
+    Last l "set-option -g @attached_menu_navigation selected"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Down Enter
+  wait_for_current_marker_absent "$side" "$title"
+  finish_display_menu "$side"
+  wait_for_side_output "$side" selected "menu separator navigation" \
+    show-options -gqv @attached_menu_navigation
+
+  title="ESC_$side"
+  open_display_menu "$side" "$client_name" "$title" -- \
+    Cancelled c "set-option -g @attached_menu_cancel selected"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
+  wait_for_current_marker_absent "$side" "$title"
+  finish_display_menu "$side"
+  assert_side_output_stays "$side" "" "menu Escape cancellation" \
+    show-options -gqv @attached_menu_cancel
+
+  title="O_$side"
+  open_display_menu "$side" "$client_name" "$title" -O -C 3 -- \
+    -Disabled z "set-option -g @attached_menu_stay_open disabled" \
+    "" \
+    Chosen c "set-option -g @attached_menu_stay_open selected" \
+    Start s "set-option -g @attached_menu_stay_open wrong"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" PPage Enter
+  assert_side_output_stays "$side" "" "menu disabled stay-open selection" \
+    show-options -gqv @attached_menu_stay_open
+  wait_for_current_marker "$side" "$title"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Down Enter
+  wait_for_current_marker_absent "$side" "$title"
+  finish_display_menu "$side"
+  wait_for_side_output "$side" selected "menu stay-open navigation" \
+    show-options -gqv @attached_menu_stay_open
+
+  title="P_$side"
+  open_display_menu "$side" "$client_name" "$title" -- \
+    Paste p "set-option -g @attached_menu_paste selected"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" \
+    $'\033[200~x\033[201~'
+  assert_side_output_stays "$side" "" "menu paste rejection" \
+    show-options -gqv @attached_menu_paste
+  wait_for_current_marker "$side" "$title"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
+  wait_for_current_marker_absent "$side" "$title"
+  finish_display_menu "$side"
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" z
+  wait_for_pane_marker "$side" ATTACHED_MENU_UNDERLAY_z
+
+  for option in "${options[@]}"; do
+    side_command "$side" set-option -gu "$option" ||
+      fixture_failure "$side could not remove $option"
+  done
+}
+
 probe_choose_tree() {
   local side="$1"
 
@@ -2470,6 +2588,8 @@ probe_command_prompt zz
 probe_command_prompt tmux
 probe_confirm_before zz
 probe_confirm_before tmux
+probe_display_menu zz
+probe_display_menu tmux
 probe_choose_tree zz
 probe_choose_tree tmux
 probe_chooser_filter_fallback zz

@@ -1296,6 +1296,7 @@ fn handle_core_event(
             model.attached_session = Some(session);
             model.viewports.clear();
             model.set_command_output(None, None);
+            model.set_menu(None);
             model.confirm = None;
             model.confirm_reply_pending = false;
             model.client_message = None;
@@ -1353,6 +1354,10 @@ fn handle_core_event(
         }
         CoreEvent::DisplayPanesChanged => {
             model.display_panes = lock_core(core).display_panes().cloned();
+            Ok(ProtocolOutcome::RepaintAll)
+        }
+        CoreEvent::MenuChanged => {
+            model.set_menu(lock_core(core).menu().cloned());
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::ConfirmChanged => {
@@ -1458,7 +1463,6 @@ fn handle_core_event(
         | CoreEvent::ViewportChanged { .. }
         | CoreEvent::MuxOptionsChanged
         | CoreEvent::PopupChanged
-        | CoreEvent::MenuChanged
         | CoreEvent::KeyTablesChanged
         | CoreEvent::PrefixCancelled { .. }
         | CoreEvent::Bell { .. }

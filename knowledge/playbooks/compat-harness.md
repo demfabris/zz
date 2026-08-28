@@ -198,8 +198,9 @@ while string templates and free input form one group. Both sides publish
 `ARGS_PARSE_CONFIRM_BEFORE=clean:19`. The scenario proves construction, parsing, readback, and
 output channels. Accept, reject, `-y` Enter-default, blocking, and background replies have daemon
 and GPUI unit coverage. Raw zz-tui confirmation replies later closed under
-`clients.tui-confirm-before-overlay` with focused and attached-client proof; menu and popup state
-remain open. This row does not close eager whole-file source construction or the broader
+`clients.tui-confirm-before-overlay` with focused and attached-client proof. Bounded raw-TUI menu
+descriptor consumption later closed under `clients.tui-display-menu-overlay`; popup state remains
+open. This row does not close eager whole-file source construction or the broader
 replay-channel placement difference.
 
 The strict three-step `smoke/args-parse-command-prompt` scenario drives a real attached client and
@@ -251,12 +252,15 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. The combined 10n checkpoint
+`compat/results/summary.md` is the persisted acceptance artifact. The 10o checkpoint
 from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
 row is clean.
 Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven confirmation cases and
-a pane-input sentinel to the attached fixture without adding a differential row, so the scenario
-count, step count, attached-client result, and digest stay unchanged.
+a pane-input sentinel to the attached fixture. Slice 10o adds bounded menu cases for a visible
+title, shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
+Enter, nonactivating paste, and pane-input isolation. Focused resolver coverage pins exact
+raw-row-zero and all-disabled boundary behavior. Neither slice adds a differential row, so the
+scenario count, step count, attached-client result, and digest stay unchanged.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -366,9 +370,12 @@ substitution preserves leaf-argument boundaries against quote or semicolon injec
 templates substitute before parsing and whole-result construction. Both paths replace the first
 `%%` and every `%1`, with trailing-percent quoting. Typed `display-menu` actions retain canonical
 child printing in stored bindings, then lose their structural wrapper before the fresh selection
-parse; quoted brace strings stay literal. The fixture does not claim attached rendering or input,
-geometry, styles, targets, formats, selected-action runtime errors, same-source alias mutation,
-eager whole-source construction, generic alias recursion, or raw-TUI overlay parity.
+parse; quoted brace strings stay literal. Raw zz-tui now consumes the daemon-published descriptor
+and uses the shared keyboard resolver for the bounded attached cases. The fixture does not claim
+daemon-side geometry construction, mouse `-M` policy, full shortcut grammar or display, live style
+or resize refresh, Interactive queue ordering, selected-action target or error ordering,
+close-mid-paste ordering, same-source alias mutation, eager whole-source construction, or generic
+alias recursion.
 Built-in hook values flatten typed physical groups during their second construction pass. Custom
 `@` values keep normalized textual groups, and typed ignored `set-hook -R` values still construct.
 Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
@@ -486,6 +493,20 @@ Meta plus default-key accept, default-key reject, custom uppercase-key lowercase
 uppercase-key acceptance, default-no Enter rejection, and `-y` Enter acceptance. Each case blocks behind a one-byte read in
 the underlying pane. The expected reply controls whether the callback writes its marker, and a
 final sentinel byte releases the pane while proving the response never reached terminal input.
+
+The menu probe opens a titled short menu on each server. It proves that `q` activates its unique
+shortcut before the ordinary `q` cancel rule, Down skips a separator and a disabled row before
+Enter selects the enabled row, and Escape cancels without mutation. A `-O` case uses PageUp to land
+on an unusable row, keeps the menu open after Enter, then navigates and selects. A
+nonactivating paste is consumed while the menu remains visible. This attached case proves an
+unusable landing, while focused resolver coverage pins exact raw row zero and all-disabled boundary
+behavior. Each ordinary input case blocks an underlying pane behind a one-byte sentinel, proving
+those bytes do not reach the pane. This closes
+raw-TUI consumption of the daemon-published descriptor and shared keyboard ownership for those
+cases. It does not cover daemon-side geometry construction, mouse `-M`, complete shortcut grammar
+or display, live style or resize refresh, Interactive queue ordering, selected-action target or
+error ordering, or close-mid-paste ordering. The raw renderer places menus after chooser and
+command-output bases.
 
 The alert-lifecycle probe uses fresh non-current monitored windows. It replaces a 1,500 ms sticky
 message with a 5,000 ms Bell alert, writes new terminal output behind it, and proves the current

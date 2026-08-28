@@ -6,8 +6,8 @@ use std::{
 
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
-    Axis, PaneId, PaneKindSnapshot, StyledSegment, TmuxAttributeState, TmuxColour, TmuxStyle,
-    parse_styled_segments,
+    Axis, MenuState, PaneId, PaneKindSnapshot, PopupBorderLines, StyledSegment, TmuxAttributeState,
+    TmuxColour, TmuxStyle, parse_style, parse_styled_segments,
 };
 use zz_terminal::{
     CellWidth, Color, CursorStyle, Glyph, KittyPlacement, PackedCell, PackedStyle, SearchDirection,
@@ -297,7 +297,9 @@ impl Renderer {
             self.paint_status_block_in(model, 0, model.size.columns, force);
             self.output.append(&mut self.queued_control);
             self.kitty.suspend(&mut self.output);
-            self.place_command_output_cursor(*pane, viewport, rect, model);
+            if model.menu.is_none() {
+                self.place_command_output_cursor(*pane, viewport, rect, model);
+            }
         } else {
             self.paint_workspace(model, force);
             if model.sidebar_visible() {
@@ -305,8 +307,15 @@ impl Renderer {
             }
             self.paint_status_block(model, force);
             self.output.append(&mut self.queued_control);
-            self.reconcile_kitty_images(model);
-            self.place_active_cursor(model);
+            if model.menu.is_none() {
+                self.reconcile_kitty_images(model);
+                self.place_active_cursor(model);
+            }
+        }
+        if model.menu.is_some() {
+            self.kitty.suspend(&mut self.output);
+            self.paint_menu(model);
+            self.hide_cursor();
         }
 
         self.output.extend_from_slice(b"\x1b[?2026l");
@@ -319,6 +328,7 @@ impl Renderer {
         if model.choose_tree.is_none()
             && model.choose_buffer.is_none()
             && model.command_output.is_none()
+            && model.menu.is_none()
         {
             self.paint_workspace(model, false);
             self.paint_status_area(model);
@@ -902,6 +912,148 @@ impl Renderer {
         );
     }
 
+    fn paint_menu(&mut self, model: &Model) {
+        let Some(state) = model.menu.as_ref() else {
+            return;
+        };
+        let Some(rect) = menu_rect(state, model.size.columns, model.size.rows) else {
+            return;
+        };
+        let border = menu_border(state.border_lines);
+        let border_style = parse_style(&state.border_style).unwrap_or_default();
+        let horizontal = border
+            .horizontal
+            .repeat(usize::from(rect.width.saturating_sub(2)));
+        let mut top = StyledLine::default();
+        top.push_segment(
+            &format!("{}{}{}", border.top_left, horizontal, border.top_right),
+            border_style.clone(),
+        );
+        write_styled_text(
+            &mut self.output,
+            rect.x,
+            rect.y,
+            &top,
+            model.appearance.foreground,
+            model.appearance.background,
+            &model.appearance,
+        );
+
+        let content_width = rect.width.saturating_sub(4);
+        if !state.title.is_empty() && content_width > 0 {
+            let title =
+                zz_client::compose_status_row(&state.title, content_width, &state.border_style);
+            write_styled_text(
+                &mut self.output,
+                rect.x.saturating_add(2),
+                rect.y,
+                &StyledLine::from_segments(title.segments),
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
+        }
+
+        for offset in 0..rect.height.saturating_sub(2) {
+            let index = usize::from(offset);
+            let row = rect.y.saturating_add(offset).saturating_add(1);
+            match state.items.get(index) {
+                Some(None) => {
+                    let mut line = StyledLine::default();
+                    line.push_segment(
+                        &format!(
+                            "{}{}{}",
+                            border.separator_left, horizontal, border.separator_right
+                        ),
+                        border_style.clone(),
+                    );
+                    write_styled_text(
+                        &mut self.output,
+                        rect.x,
+                        row,
+                        &line,
+                        model.appearance.foreground,
+                        model.appearance.background,
+                        &model.appearance,
+                    );
+                }
+                Some(Some(item)) => {
+                    let selected = item.enabled && model.menu_selection == Some(index);
+                    let base_style = if selected {
+                        state.selected_style.clone()
+                    } else if item.enabled {
+                        state.style.clone()
+                    } else {
+                        format!("{},dim", state.style)
+                    };
+                    let content = item
+                        .key
+                        .as_deref()
+                        .filter(|key| !key.is_empty())
+                        .map_or_else(
+                            || item.name.clone(),
+                            |key| format!("{}#[default] #[align=right]({key})", item.name),
+                        );
+                    let content =
+                        zz_client::compose_status_row(&content, content_width, &base_style);
+                    let padding_style = parse_style(&base_style).unwrap_or_default();
+                    let mut line = StyledLine::default();
+                    line.push_segment(border.vertical, border_style.clone());
+                    line.push_segment(" ", padding_style.clone());
+                    line.append(&StyledLine::from_segments(content.segments));
+                    line.push_segment(" ", padding_style);
+                    line.push_segment(border.vertical, border_style.clone());
+                    write_styled_text(
+                        &mut self.output,
+                        rect.x,
+                        row,
+                        &line,
+                        model.appearance.foreground,
+                        model.appearance.background,
+                        &model.appearance,
+                    );
+                }
+                None => {
+                    let base_style = parse_style(&state.style).unwrap_or_default();
+                    let mut line = StyledLine::default();
+                    line.push_segment(border.vertical, border_style.clone());
+                    line.push_segment(
+                        &" ".repeat(usize::from(rect.width.saturating_sub(2))),
+                        base_style,
+                    );
+                    line.push_segment(border.vertical, border_style.clone());
+                    write_styled_text(
+                        &mut self.output,
+                        rect.x,
+                        row,
+                        &line,
+                        model.appearance.foreground,
+                        model.appearance.background,
+                        &model.appearance,
+                    );
+                }
+            }
+        }
+
+        let mut bottom = StyledLine::default();
+        bottom.push_segment(
+            &format!(
+                "{}{}{}",
+                border.bottom_left, horizontal, border.bottom_right
+            ),
+            border_style,
+        );
+        write_styled_text(
+            &mut self.output,
+            rect.x,
+            rect.y.saturating_add(rect.height.saturating_sub(1)),
+            &bottom,
+            model.appearance.foreground,
+            model.appearance.background,
+            &model.appearance,
+        );
+    }
+
     fn paint_sidebar(&mut self, model: &Model, force: bool) {
         let rows = sidebar_rows(model);
         for (index, row) in rows.iter().enumerate() {
@@ -1168,7 +1320,7 @@ impl Renderer {
     }
 
     fn place_active_cursor(&mut self, model: &Model) {
-        if model.confirm.is_some() {
+        if model.menu.is_some() || model.confirm.is_some() {
             self.hide_cursor();
             return;
         }
@@ -1523,6 +1675,103 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let mut line = StyledLine::default();
     line.push_segment(&format!(" {right} "), style);
     Some(StatusOverlay::Right(line))
+}
+
+#[derive(Clone, Copy)]
+struct MenuBorder {
+    top_left: &'static str,
+    top_right: &'static str,
+    bottom_left: &'static str,
+    bottom_right: &'static str,
+    horizontal: &'static str,
+    vertical: &'static str,
+    separator_left: &'static str,
+    separator_right: &'static str,
+}
+
+fn menu_border(lines: PopupBorderLines) -> MenuBorder {
+    match lines {
+        PopupBorderLines::Single => MenuBorder {
+            top_left: "┌",
+            top_right: "┐",
+            bottom_left: "└",
+            bottom_right: "┘",
+            horizontal: "─",
+            vertical: "│",
+            separator_left: "├",
+            separator_right: "┤",
+        },
+        PopupBorderLines::Double => MenuBorder {
+            top_left: "╔",
+            top_right: "╗",
+            bottom_left: "╚",
+            bottom_right: "╝",
+            horizontal: "═",
+            vertical: "║",
+            separator_left: "╠",
+            separator_right: "╣",
+        },
+        PopupBorderLines::Heavy => MenuBorder {
+            top_left: "┏",
+            top_right: "┓",
+            bottom_left: "┗",
+            bottom_right: "┛",
+            horizontal: "━",
+            vertical: "┃",
+            separator_left: "┣",
+            separator_right: "┫",
+        },
+        PopupBorderLines::Simple => MenuBorder {
+            top_left: "+",
+            top_right: "+",
+            bottom_left: "+",
+            bottom_right: "+",
+            horizontal: "-",
+            vertical: "|",
+            separator_left: "+",
+            separator_right: "+",
+        },
+        PopupBorderLines::Rounded => MenuBorder {
+            top_left: "╭",
+            top_right: "╮",
+            bottom_left: "╰",
+            bottom_right: "╯",
+            horizontal: "─",
+            vertical: "│",
+            separator_left: "├",
+            separator_right: "┤",
+        },
+        PopupBorderLines::Padded | PopupBorderLines::None => MenuBorder {
+            top_left: " ",
+            top_right: " ",
+            bottom_left: " ",
+            bottom_right: " ",
+            horizontal: " ",
+            vertical: " ",
+            separator_left: " ",
+            separator_right: " ",
+        },
+    }
+}
+
+fn menu_rect(state: &MenuState, columns: u16, rows: u16) -> Option<Rect> {
+    let width = state.width.min(columns);
+    let height = state.height.min(rows);
+    if width < 4 || height < 2 {
+        return None;
+    }
+    let grid_left = columns.saturating_sub(state.client_columns) / 2;
+    let grid_top = rows.saturating_sub(state.client_rows) / 2;
+    Some(Rect {
+        x: grid_left
+            .saturating_add(state.left)
+            .min(columns.saturating_sub(width)),
+        y: grid_top
+            .saturating_add(state.top)
+            .min(rows.saturating_sub(height)),
+        width,
+        height,
+    })
 }
 
 fn overlay_style(appearance: &TerminalAppearance) -> TmuxStyle {
@@ -2102,6 +2351,111 @@ mod tests {
             endpoint,
             Vec::new(),
         )
+    }
+
+    fn menu_state() -> MenuState {
+        MenuState {
+            left: 5,
+            top: 2,
+            width: 20,
+            height: 5,
+            client_columns: 40,
+            client_rows: 12,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Actions".to_owned(),
+            style: "fg=white,bg=blue".to_owned(),
+            selected_style: "fg=black,bg=yellow,bold".to_owned(),
+            border_style: "fg=red".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            items: vec![
+                Some(zz_protocol::MenuItem {
+                    name: "界 item".to_owned(),
+                    key: Some("q".to_owned()),
+                    enabled: true,
+                }),
+                None,
+                Some(zz_protocol::MenuItem {
+                    name: "Disabled".to_owned(),
+                    key: None,
+                    enabled: false,
+                }),
+            ],
+            selected: Some(0),
+            stay_open: false,
+        }
+    }
+
+    #[test]
+    fn menu_geometry_centres_the_published_grid_and_clamps_after_resize() {
+        let state = MenuState {
+            left: 2,
+            top: 1,
+            width: 10,
+            height: 4,
+            client_columns: 20,
+            client_rows: 10,
+            ..menu_state()
+        };
+        assert_eq!(
+            menu_rect(&state, 30, 16),
+            Some(Rect {
+                x: 7,
+                y: 4,
+                width: 10,
+                height: 4,
+            })
+        );
+        assert_eq!(
+            menu_rect(&state, 8, 3),
+            Some(Rect {
+                x: 0,
+                y: 0,
+                width: 8,
+                height: 3,
+            })
+        );
+        assert_eq!(menu_rect(&state, 3, 3), None);
+    }
+
+    #[test]
+    fn menu_border_tables_cover_every_published_line_style() {
+        assert_eq!(menu_border(PopupBorderLines::Single).top_left, "┌");
+        assert_eq!(menu_border(PopupBorderLines::Double).separator_left, "╠");
+        assert_eq!(menu_border(PopupBorderLines::Heavy).bottom_right, "┛");
+        assert_eq!(menu_border(PopupBorderLines::Simple).vertical, "|");
+        assert_eq!(menu_border(PopupBorderLines::Rounded).top_right, "╮");
+        assert_eq!(menu_border(PopupBorderLines::Padded).horizontal, " ");
+        assert_eq!(menu_border(PopupBorderLines::None).top_left, " ");
+    }
+
+    #[test]
+    fn menu_paints_title_rows_shortcuts_selection_and_disabled_style() {
+        let mut model = block_model(40, 12);
+        model.menu = Some(menu_state());
+        model.menu_selection = Some(0);
+        let mut renderer = Renderer::new();
+        renderer.paint_menu(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("\x1b[3;6H"), "{output:?}");
+        assert!(output.contains("Actions"));
+        assert!(output.contains("界 item"));
+        assert!(output.contains("(q)"));
+        assert!(output.contains('┌'));
+        assert!(output.contains('├'));
+        assert!(output.contains('┘'));
+        assert!(output.contains("\x1b[1m"));
+        assert!(output.contains("\x1b[2m"));
+    }
+
+    #[test]
+    fn menu_hides_the_workspace_cursor() {
+        let mut model = block_model(40, 12);
+        model.menu = Some(menu_state());
+        let mut renderer = Renderer::new();
+        renderer.place_active_cursor(&model);
+        assert_eq!(renderer.output, b"\x1b[?25l");
     }
 
     fn block_status(rows: Vec<&str>, customized: bool) -> zz_protocol::StatusLine {

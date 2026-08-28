@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 87 active groups, 581 classified active items, 95 closed groups, and two known
+The live tracker has 88 active groups, 589 classified active items, 96 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,7 +53,7 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The combined 10j/10k canonical checkpoint covers 98 scenarios and 1,517 steps.
+The 10o checkpoint covers 98 scenarios and 1,517 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
@@ -69,7 +69,13 @@ default-key structural partition explicit and matches tmux's bare key-only `bind
 Slice 10n closes raw-TUI confirmation presentation and input handling. None adds a scenario step,
 so the stored artifact remains 98 scenarios and 1,517 steps with that digest. The bind-key row runs
 17 internal checks, while the attached fixture now exercises seven confirmation replies with a pane
-sentinel that proves reply keys do not leak. Menu presentation in slice 10o is next; nonconstant
+sentinel that proves reply keys do not leak. Slice 10o closes raw-TUI consumption of the
+daemon-published menu descriptor and shared keyboard ownership. Its attached cases cover a title,
+shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
+Enter, nonactivating paste, and pane-input isolation without adding a differential row. Focused
+resolver coverage pins exact raw-row-zero and all-disabled boundary behavior. Popup presentation
+in slice 10p is next. Nine broader menu behavior classes remain under
+`display-menu.behavior-fidelity`; nonconstant
 formats, open context formats, and option consumers remain three independent discovery slices.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
@@ -136,8 +142,10 @@ parent-format expansion as one group. Its strict three-step scenario runs 19 int
 parser, readback, alias, and exact channel checks and finishes
 `ARGS_PARSE_CONFIRM_BEFORE=clean:19` on both servers. Nested bind and confirm failures are preflight
 parse errors. Reply and `-y` Enter-default paths have daemon and GPUI unit proof. Raw zz-tui now
-renders confirmations and handles their replies with unit and attached-client coverage; menu and
-popup state remain open. Eager whole-file source construction and the broader replay-channel
+renders confirmations and handles their replies with unit and attached-client coverage. It also
+consumes the daemon-published menu descriptor and shares keyboard resolution with GPUI; popup state
+remains open. The nine broader menu behavior classes stay under
+`display-menu.behavior-fidelity`. Eager whole-file source construction and the broader replay-channel
 placement difference remain open.
 Stored `bind-key` and `set-hook` commands execute their constructed lists without another
 user-alias lookup. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks stay frozen after
@@ -188,7 +196,10 @@ over recognized parked flags. All 12 implemented callback commands now apply the
 so no command-specific `args-parse:` item remains. Eager whole-file
 construction, same-source alias mutation, multiline inner-source placement, generic alias recursion,
 selected-action runtime errors, and broader replay placement retain their owners. Attached menu
-rendering, input, geometry, styles, targets, formats, and raw-TUI overlay parity remain separate.
+descriptor consumption and shared keyboard ownership now close for raw zz-tui. Geometry
+construction, action context and errors, mouse policy, paste-close ordering, queue ordering,
+rendered width, resize lifecycle, shortcut display and grammar, and style refresh remain separate
+under `display-menu.behavior-fidelity`.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -920,8 +931,9 @@ the same pane-kind operation as the picker. Do not give `split-window` an agent 
 - `%` and `"` may open `split-picker` in the zz default table.
 - `s` and `w` may focus the native sidebar instead of drawing tmux's tree.
 - The GPUI client uses native presentation for prompts, menus, popups, copy mode, status, and
-  choosers. Raw zz-tui handles confirmations, while menu and popup rendering and input consumption
-  remain under `clients.tui-overlay-consumption`.
+  choosers. Raw zz-tui handles confirmations and daemon-published menu descriptors.
+  `clients.tui-overlay-consumption` owns the remaining popup path, and
+  `display-menu.behavior-fidelity` owns the nine open menu behavior classes.
 - Current window may remain per client rather than per session.
 - GUI defaults may keep the persistent-daemon lifecycle until a config explicitly selects tmux
   lifecycle behavior.
@@ -1135,7 +1147,8 @@ permanent product decision has been recorded for them.
   placement difference remain open. Three callback rules across six implemented commands remain.
   The same audit registered `clients.tui-overlay-consumption` because raw zz-tui then dropped
   confirmation, menu, and popup state changes. The later `clients.tui-confirm-before-overlay`
-  closure shipped confirmation handling; menu and popup remain active.
+  closure shipped confirmation handling. Slice 10o later closed menu descriptor consumption, while
+  popup consumption remains active.
 - 2026-08-28: Protocol v84 closed `tracker.args-parse-command-prompt` without another wire change.
   The command accepts zero or one typed-block-or-string template while `-I`, `-p`, `-t`, and `-T`
   values remain strings. Typed templates preserve their recursively constructed command list and
@@ -1236,6 +1249,22 @@ permanent product decision has been recorded for them.
   proves every reply is consumed. The tracker now has 87 active groups, 581 classified active
   items, and 95 closed entries. Menu and popup presentation remain active under
   `clients.tui-overlay-consumption`; menu is slice 10o.
+- 2026-08-28: Slice 10o closed `clients.tui-display-menu-overlay` without a protocol or daemon
+  change. Raw zz-tui now retains and clears menu state with its connection, renders the
+  daemon-published descriptor after chooser and command-output bases, and resolves menu keys through
+  the same renderer-free client helper as GPUI. Input capture runs before confirmation, global
+  shortcuts, and pane delivery; paste and pointer input do not activate an item. The attached
+  fixture covers a title, shortcut-before-cancel behavior, disabled and separator skipping, Escape,
+  an unusable PageUp landing plus stay-open Enter, nonactivating paste, and a pane sentinel. Focused
+  resolver coverage separately pins exact raw-row-zero and all-disabled boundary behavior. This closes the
+  raw-TUI descriptor-consumption boundary only. Daemon-side geometry construction, mouse `-M`, full
+  shortcut grammar and display, live style and resize refresh, Interactive queue ordering,
+  selected-action target and error ordering, and close-mid-paste ordering remain under
+  `display-menu.behavior-fidelity`. Popup consumption remains under
+  `clients.tui-overlay-consumption`. The tracker now has 88 active groups, 589 classified active
+  items, and 96 closed entries. The stored acceptance artifact remains 98 scenarios and 1,517 steps
+  with attached-client `PASS` and SHA-256
+  `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 
 # Related
 

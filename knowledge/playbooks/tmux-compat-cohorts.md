@@ -136,6 +136,16 @@ reconnect state. Seven attached cases compare ordinary and Meta accept, reject, 
 and Enter defaults against pinned tmux. A
 one-byte pane sentinel proves no reply key leaks into terminal input.
 
+The twenty-seventh milestone closes slice 10o. Raw zz-tui retains the daemon-published menu
+descriptor, renders it after chooser and command-output bases, and routes keyboard input through the
+same renderer-free resolver as GPUI before confirmation, global shortcuts, or pane delivery. The
+attached fixture covers a title, shortcut-before-cancel behavior, disabled and separator skipping,
+Escape, an unusable PageUp landing plus stay-open Enter, nonactivating paste, and a one-byte pane
+sentinel. Focused resolver coverage pins exact raw-row-zero and all-disabled boundary behavior.
+This closure stays bounded to descriptor consumption and shared keyboard ownership. The nine
+broader menu behavior classes remain under `display-menu.behavior-fidelity`; popup consumption
+remains under `clients.tui-overlay-consumption`.
+
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
 and TUI reconnect. `resize-window -A` and `-a` now aggregate retained client geometry once and
@@ -157,7 +167,7 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The combined 10n checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
+The 10o checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
 is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
@@ -166,6 +176,7 @@ is
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The 10l and 10m milestones add no differential step. Slice 10n extends the attached fixture with seven
 confirmation cases and a pane sentinel without adding a scenario row, leaving the digest unchanged.
+Slice 10o adds the bounded menu cases without adding a scenario row, so the same digest remains.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
@@ -206,7 +217,8 @@ budgets, self-recursion safety, physical groups, target and child diagnostics, e
 and Control channels, and rejected-binding preservation. Nested bind and confirm failures are
 preflight parse errors. The constructed confirm callback remains frozen through execution; stored
 bindings and hooks likewise perform no execution-time user-alias lookup. Raw zz-tui reply handling
-later closed under `clients.tui-confirm-before-overlay`; menu and popup state remain open. Eager
+later closed under `clients.tui-confirm-before-overlay`; menu descriptor consumption later closed
+under `clients.tui-display-menu-overlay`, while popup state remains open. Eager
 whole-file source construction plus the broader replay-channel placement difference also remain.
 Late focused regressions also prove that typed `if-shell`, `run-shell`, and structured
 `command-prompt` callbacks stop the failed physical group and continue later physical lines, while
@@ -237,9 +249,11 @@ valued flags, child construction precedence, canonical, built-in alias, prefix, 
 user-alias paths, stored binding readback and preservation, incomplete runtime groups, source-file
 diagnostics, and exact initial flag-0 plus attached flag-1 Control frames through a PID-unique FIFO.
 Both sides finish with `ARGS_PARSE_DISPLAY_MENU=clean:34` and zero differences. Attached rendering
-and input, geometry, styles, targets,
-formats, selected-action runtime errors, same-source alias mutation, eager whole-source
-construction, generic alias recursion, and raw-TUI overlay parity retain their owners.
+and shared keyboard ownership now close for raw zz-tui. Daemon-side geometry construction, action
+context and errors, mouse policy, paste-close ordering, queue ordering, rendered width, resize
+lifecycle, shortcut display and grammar, and style refresh remain under
+`display-menu.behavior-fidelity`. Same-source alias mutation, eager whole-source construction, and
+generic alias recursion retain their owners.
 The focused three-step `args-parse-display-panes` row runs 22 internal checks across the optional
 string-or-typed template, string-only `-d` and `-t` values, child-before-option-type and arity validation,
 canonical, built-in alias, prefix, and preexisting user-alias readback, targetless client routing,
@@ -307,7 +321,8 @@ closure is that exception.
 | 10l | Hook-producer source registration | Closed under `tracker.hook-producer-partition` on 2026-08-28 | Complete | 27 explicit plus 37 derived producers reconcile with four tracked hook gaps; no runtime or differential change |
 | 10m | Shared key structure and bare bind mutation | Closed under `tracker.key-binding-behavior` on 2026-08-28 | Complete | Exact structural counts stay distinct from runtime proof; bare key-only bind mutation now matches the pin |
 | 10n | Raw TUI confirmation | Closed under `clients.tui-confirm-before-overlay` on 2026-08-28 | Complete | State, rendering, input capture, reply lifecycle, and seven attached cases close independently |
-| 10o-10p | Raw TUI menu and popup | Two items in `clients.tui-overlay-consumption`, one surface per slice | Hard | ClientCore already retains both states; each renderer and input contract remains independently closable |
+| 10o | Raw TUI menu | Closed under `clients.tui-display-menu-overlay` on 2026-08-28 | Complete | Daemon-published descriptor consumption, rendering order, shared keyboard ownership, and bounded attached cases close without absorbing broader menu fidelity |
+| 10p | Raw TUI popup | `semantic:tui-display-popup-overlay` in `clients.tui-overlay-consumption` | Hard | ClientCore already retains popup state; rendering and input remain independently closable |
 | 10q-10s | Remaining source-owned tracker registrations | Nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Three unrelated owners remain three independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | 12a-12f | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -317,11 +332,12 @@ closure is that exception.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10n are closed; raw-TUI menu presentation in slice 10o is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through 10o are closed; raw-TUI popup presentation in slice 10p is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
-`clients.detach-exec`, `clients.parent-hup-exit`, and `clients.tui-overlay-consumption`. Rows 4 and
+`clients.detach-exec`, `clients.parent-hup-exit`, `clients.tui-overlay-consumption`, and
+`display-menu.behavior-fidelity`. Rows 4 and
 later are a dependency forecast,
 not permission to skip a newly unblocked practical gate. Keep formats, hooks,
 `active-pane`, and `no-detach-on-destroy` as separate slices.

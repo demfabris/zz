@@ -91,7 +91,7 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current combined 10n acceptance inventory contains 98 differential scenarios and
+The current 10o acceptance inventory contains 98 differential scenarios and
 1,517 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
@@ -101,6 +101,11 @@ channel clean. The combined summary records the attached-client fixture as `PASS
 The 10l source registration and 10m key-structure checkpoints add no differential scenario or step.
 Slice 10n adds seven attached confirmation cases plus a one-byte pane sentinel without adding a
 differential row, so the stored artifact and digest remain unchanged.
+Slice 10o adds bounded raw-TUI menu cases without adding a differential row. They cover a visible
+title, shortcut precedence, disabled and separator skipping, Escape, an unusable PageUp landing with
+stay-open Enter, nonactivating paste, and pane-input isolation. Focused resolver coverage pins exact
+raw-row-zero and all-disabled boundary behavior. The stored artifact and digest still
+remain unchanged.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -122,8 +127,9 @@ bindings, and both mode-key tables as local terminal semantics. The Cargo launch
 built-bundle smoke both pass the six bare/new/attach × empty/existing cases through a spaced path.
 Gate 0 provides durable evidence for the surfaces it exercises. The live tracker still records CLI
 and TUI gaps, including ordinary TUI pane copy-search editing, typed Control diagnostics, and raw
-TUI consumption of `display-menu` and `display-popup` state. Raw-TUI confirmation closed in slice
-10n.
+TUI consumption of `display-popup` state. Raw-TUI confirmation closed in slice 10n, and bounded
+consumption of daemon-published `display-menu` descriptors closed in slice 10o. Nine broader menu
+behavior classes remain under `display-menu.behavior-fidelity`.
 Protocol v80 closes startup config cause delivery. Protocol v81 closes targetless and invalid-target
 foreground Control shell-output placement; resolved targets and ordinary background jobs keep zz's
 native per-Interactive command-output view. The
@@ -178,8 +184,10 @@ reports zero differences. Confirmation reply and `-y` Enter-default behavior now
 raw-TUI unit, and attached-client proof. Eager whole-file
 source construction, same-source alias mutation, multiline inner-source placement, generic alias
 recursion, selected-action runtime errors, and the broader replay-channel placement difference
-remain open. Attached-client menu rendering, input, geometry, styles, targets, formats, and raw-TUI
-overlay parity retain their existing owners. `choose-buffer` and `choose-tree` accept zero or one
+remain open. Raw zz-tui now consumes the daemon-published menu descriptor and shares keyboard
+resolution with GPUI. Action context and errors, mouse policy, paste-close ordering, queue ordering,
+rendered width, resize lifecycle, shortcut display and grammar, and style refresh remain open under
+`display-menu.behavior-fidelity`. `choose-buffer` and `choose-tree` accept zero or one
 selection template as a string or typed block; their `-F`, `-f`, `-K`, `-O`, and `-t` values stay
 strings. Typed children construct before parent type, arity, target, or effects. A typed template
 resolves aliases and serializes canonical commands before the chooser opens, retaining ` ; ` and ` ;; `
@@ -212,7 +220,7 @@ daemon invariant names 27 explicit event producers and derives 37 generic `after
 producers from implemented canonical commands. It requires those 64 names plus the four active
 `hook:` items, `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, to equal
 all 68 pinned hooks. `just compat-check` requires and runs the exact daemon partition test. The
-tracker now has 87 active groups, 581 classified active items, and 95 closed-history entries.
+tracker now has 88 active groups, 589 classified active items, and 96 closed-history entries.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -230,8 +238,9 @@ flag gap, but accepted semantic divergences remain outside that count.
 
 **The current queue** is dependency-ordered in the
 [tmux superset roadmap](/designs/tmux-superset-roadmap.md). Shared key structure and bare bind
-mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n. The fresh
-practical rerank puts menu consumption next, followed by popup consumption. Nonconstant formats, open context
+mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
+menu descriptor consumption in slice 10o. The fresh practical rerank puts popup consumption next.
+Nonconstant formats, open context
 formats, and option consumers remain three independent discovery milestones. Regenerate and
 re-rank the full live tracker before every slice so a newly exposed practical gate can move ahead
 of that forecast. Client targeting and ordinary detach are complete;
@@ -1682,8 +1691,9 @@ All waves shipped, each reviewed to CONFIRMED-CLOSED against the pin:
 
   Current qualification: menu and confirm command execution plus GPUI surfaces remain shipped.
   Raw zz-tui confirmation rendering and input handling closed under
-  `clients.tui-confirm-before-overlay`. Its retained menu state still drops, and
-  `clients.tui-overlay-consumption` owns menu rendering, input capture, lifecycle, and cleanup.
+  `clients.tui-confirm-before-overlay`. Raw zz-tui menu descriptor consumption and shared keyboard
+  ownership closed under `clients.tui-display-menu-overlay`. The remaining nine menu behavior
+  classes stay under `display-menu.behavior-fidelity`.
 
 Phase 7a (binary surface) shipped in parallel (`a054c38` + `34d9d60`,
 autostart CONFIRMED-CLOSED): tmux argv (-V `tmux 3.8-zz`, -L/-S/-f, -c, -N,
@@ -1723,8 +1733,10 @@ Original phase-5 tiering, kept for the record:
 - `set-hook`/`show-hooks` — an event bus, not a spawn: tmux has **68** hook points at the pin,
   and control-mode notifications (phase 6) are fed by the same events (~1 week).
 - `display-popup`, `display-menu`, `confirm-before`, the `lock-*` trio: daemon execution and GPUI
-  surfaces shipped. Raw TUI confirmation handling shipped in slice 10n; menu and popup consumption
-  remains active under `clients.tui-overlay-consumption`. Popup support is important for tmux-fzf
+  surfaces shipped. Raw TUI confirmation handling shipped in slice 10n, and bounded menu descriptor
+  consumption shipped in slice 10o. Popup consumption remains active under
+  `clients.tui-overlay-consumption`; the nine broader menu behavior classes remain under
+  `display-menu.behavior-fidelity`. Popup support is important for tmux-fzf
   and `fzf-tmux -p`.
 
 **The consent gate, rebuilt on verified facts.** Config already executes shell ungated today:

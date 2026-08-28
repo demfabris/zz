@@ -8,8 +8,8 @@ use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandPromptState, ConfirmState, DisplayPanesState,
-    InputMessage, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot,
-    StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
+    InputMessage, MenuState, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId,
+    SessionSnapshot, StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{KeyCode, SearchQuery, TerminalAppearance, TerminalViewport};
 
@@ -101,6 +101,10 @@ pub(crate) struct Model {
     pub choose_tree: Option<ChooseTreeState>,
     pub choose_buffer: Option<ChooseBufferState>,
     pub display_panes: Option<DisplayPanesState>,
+    pub menu: Option<MenuState>,
+    pub menu_selection: Option<usize>,
+    pub menu_action_pending: bool,
+    pub menu_swallowed_key: Option<KeyCode>,
     pub confirm: Option<ConfirmState>,
     pub confirm_reply_pending: bool,
     pub confirm_swallowed_key: Option<KeyCode>,
@@ -149,6 +153,13 @@ impl Model {
             choose_tree: core.choose_tree().cloned(),
             choose_buffer: core.choose_buffer().cloned(),
             display_panes: core.display_panes().cloned(),
+            menu: core.menu().cloned(),
+            menu_selection: core
+                .menu()
+                .and_then(|menu| menu.selected)
+                .and_then(|selected| usize::try_from(selected).ok()),
+            menu_action_pending: false,
+            menu_swallowed_key: None,
             confirm: core.confirm().cloned(),
             confirm_reply_pending: false,
             confirm_swallowed_key: None,
@@ -189,6 +200,9 @@ impl Model {
         self.choose_tree = core.choose_tree().cloned();
         self.choose_buffer = core.choose_buffer().cloned();
         self.display_panes = core.display_panes().cloned();
+        self.set_menu(core.menu().cloned());
+        self.menu_action_pending = false;
+        self.menu_swallowed_key = None;
         self.confirm = core.confirm().cloned();
         self.confirm_reply_pending = false;
         self.confirm_swallowed_key = None;
@@ -291,6 +305,16 @@ impl Model {
         }
         self.command_output_id = output_id;
         self.command_output = output;
+    }
+
+    pub fn set_menu(&mut self, menu: Option<MenuState>) {
+        let action_pending = self.menu.is_some() && menu.is_some() && self.menu_action_pending;
+        self.menu_selection = menu
+            .as_ref()
+            .and_then(|menu| menu.selected)
+            .and_then(|selected| usize::try_from(selected).ok());
+        self.menu = menu;
+        self.menu_action_pending = action_pending;
     }
 
     /// Adopts a fresh status publication. Returns whether the block's
@@ -723,7 +747,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_protocol::StatusPosition;
+    use zz_protocol::{MenuItem, PopupBorderLines, StatusPosition};
 
     fn make_model(columns: u16, rows: u16) -> Model {
         let core = ClientCore::new();
@@ -742,6 +766,83 @@ mod tests {
             endpoint,
             Vec::new(),
         )
+    }
+
+    fn menu_state(selected: Option<u32>) -> MenuState {
+        MenuState {
+            left: 1,
+            top: 2,
+            width: 20,
+            height: 5,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Menu".to_owned(),
+            style: "default".to_owned(),
+            selected_style: "reverse".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            items: vec![Some(MenuItem {
+                name: "First".to_owned(),
+                key: Some("f".to_owned()),
+                enabled: true,
+            })],
+            selected,
+            stay_open: false,
+        }
+    }
+
+    #[test]
+    fn menu_state_seeds_updates_closes_and_resets_with_the_connection() {
+        let initial = menu_state(Some(0));
+        let mut core = ClientCore::new();
+        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 1,
+            payload: zz_protocol::EventPayload::Menu {
+                state: Some(initial.clone()),
+            },
+        }));
+        let endpoint = Endpoint::parse("unix:///tmp/zz-state-menu-test.sock").unwrap();
+        let mut model = Model::new(
+            &core,
+            TerminalSize {
+                columns: 80,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        assert_eq!(model.menu, Some(initial));
+        assert_eq!(model.menu_selection, Some(0));
+
+        let updated = menu_state(None);
+        model.set_menu(Some(updated.clone()));
+        assert_eq!(model.menu, Some(updated));
+        assert_eq!(model.menu_selection, None);
+        assert!(!model.menu_action_pending);
+
+        model.menu_action_pending = true;
+        model.set_menu(Some(menu_state(Some(0))));
+        assert!(model.menu_action_pending);
+
+        model.menu_swallowed_key = Some(KeyCode::Enter);
+        model.set_menu(None);
+        assert_eq!(model.menu, None);
+        assert!(!model.menu_action_pending);
+        assert_eq!(model.menu_swallowed_key, Some(KeyCode::Enter));
+
+        model.menu_action_pending = true;
+        model.reset_connection(&ClientCore::new());
+        assert_eq!(model.menu, None);
+        assert_eq!(model.menu_selection, None);
+        assert!(!model.menu_action_pending);
+        assert_eq!(model.menu_swallowed_key, None);
     }
 
     #[test]

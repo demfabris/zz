@@ -443,7 +443,7 @@
     },
     {
       "id": "clients.tui-overlay-consumption",
-      "title": "Render and consume menu and popup overlays in zz-tui",
+      "title": "Render and consume popup overlays in zz-tui",
       "decision": "adopt",
       "status": "open",
       "priority": "next",
@@ -455,7 +455,6 @@
       ],
       "owner": "client",
       "items": [
-        "semantic:tui-display-menu-overlay",
         "semantic:tui-display-popup-overlay"
       ],
       "evidence": [
@@ -466,13 +465,12 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Raw attach handles open, update, resync, and close for display-menu and display-popup overlays.",
-        "Overlay keyboard, paste, and pointer input never reaches the underlying pane; an underlying sentinel proves zero leakage.",
-        "Menu input matches navigation, shortcuts, cancellation, separators, disabled entries, and stay-open actions.",
+        "Raw attach handles open, update, resync, and close for display-popup overlays.",
+        "Popup keyboard, paste, and pointer input stays owned by the popup terminal session instead of reaching the underlying pane; an underlying sentinel proves zero leakage.",
         "Popup rendering and input cover visible frames, keys, paste, mouse, scroll, cursor state, exit flags, and cache cleanup."
       ],
       "depends_on": [],
-      "reason": "ClientCore retains menu and popup state, but zz-tui drops their change events, has no corresponding model, renderer, or input path, and can route input to the underlying pane while an overlay is waiting. Popup viewport frames are retained but do not enter the workspace layout, and close events do not clear the unused synthetic viewport before reconnect. Confirm consumption closed separately under clients.tui-confirm-before-overlay."
+      "reason": "ClientCore retains popup state, but zz-tui drops PopupChanged, has no popup model, renderer, or input path, and can route input to the underlying pane while a popup is waiting. Popup viewport frames are retained but do not enter the workspace layout, and close events do not clear the unused synthetic viewport before reconnect. Confirmation and menu consumption closed under their own history records."
     },
     {
       "id": "commands.native-client-tools",
@@ -725,6 +723,47 @@
         "clients.interactive-refresh"
       ],
       "reason": "Copy mode lives per client in zz and needs explicit target-client semantics."
+    },
+    {
+      "id": "display-menu.behavior-fidelity",
+      "title": "Match remaining display-menu behavior",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:display-menu-action-context-and-errors",
+        "semantic:display-menu-mouse-policy",
+        "semantic:display-menu-paste-close-ordering",
+        "semantic:display-menu-queue-ordering",
+        "semantic:display-menu-rendered-width",
+        "semantic:display-menu-resize-lifecycle",
+        "semantic:display-menu-shortcut-display",
+        "semantic:display-menu-shortcut-grammar",
+        "semantic:display-menu-style-refresh"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-client/src/menu.rs",
+        "resource:crates/zz-tui/src/input.rs",
+        "resource:crates/zz-tui/src/render.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Pinned attached probes cover selected-action client context, error delivery, overlay-close order, and blocking or -b command-queue continuation.",
+        "Pinned keyboard and rendering probes cover shortcut grammar and display, cell width, style updates, and resize lifecycle across live menu descriptors.",
+        "Pinned input probes cover mouse policy and paste bytes when the menu closes during a paste sequence, without pane leakage or duplicate action execution."
+      ],
+      "depends_on": [],
+      "reason": "Slice 10o consumes the daemon-published descriptor in raw zz-tui and proves a bounded keyboard contract. Descriptor construction, action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin."
     },
     {
       "id": "display-message.format-listing",
@@ -3093,6 +3132,25 @@
       "resolution": "zz-tui now caches ConfirmState from ClientCore on construction, reconnect, and every ConfirmChanged notification, clears it on attachment replacement, and paints the daemon prompt once in the configured message row, the status-off virtual row, or the sidebar status area with the pane cursor hidden. Its confirm route runs before detach, sidebar, prompt, chooser, browser, terminal, paste, and mouse handling. Printable ASCII replies compare exact case; Control-transformed characters reject, while Alt and extended modifier bit 8 do not change that comparison. Enter follows default_yes with any decoded modifier; named navigation and function input plus key releases are consumed without closing. Raw-TUI paste and pointer input are swallowed under zz's stricter overlay safety rule, while focus, size, and terminal capability traffic continues. Pinned tmux routes bracketed paste to the pane before prompt dispatch, so focused unit tests cover that intentional difference rather than the attached differential. After a reply, a pending gate retains input ownership until the daemon publishes None, and the reply key's repeat and release cannot escape after close. The attached fixture opens seven targeted prompts on zz and pinned tmux for ordinary y, Meta-y, n, custom uppercase accept and lowercase reject, and Enter with and without -y. Accepted commands mutate unique options, rejected options stay empty for a one-second settle, prompt open and close are visible, and one blocking byte sentinel proves no tested reply key reached the pane before a final z releases it. Unit coverage proves state seeding and reconnect reset, single main or sidebar rendering, hidden-status placement, modifier and key rules, pending reply ownership, paste, pointer, and key lifecycle. No protocol or daemon change was needed. GPUI confirmation shares the pinned Meta and Enter rules while retaining its native platform, function, and named nontext handling."
     },
     {
+      "id": "clients.tui-display-menu-overlay",
+      "title": "Render and consume display-menu in zz-tui",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-client/src/core.rs",
+        "resource:crates/zz-client/src/menu.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz/src/command/menu.rs",
+        "resource:crates/zz-tui/src/state.rs",
+        "resource:crates/zz-tui/src/app.rs",
+        "resource:crates/zz-tui/src/input.rs",
+        "resource:crates/zz-tui/src/render.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "Raw zz-tui now retains MenuState from ClientCore at construction, update, close, attachment replacement, and reconnect. The renderer layers the menu after workspace, chooser, or command-output bases, centres descriptor coordinates in the published client grid, clamps them to the outer terminal, draws the title, borders, item names, shortcuts, selected row, and disabled rows from one descriptor, suspends Kitty images, and hides the base cursor. The shared zz-client resolver gives GPUI and raw TUI one keyboard contract: shortcuts win before cancel, step keys wrap while retaining the pin's raw boundary rows when no usable item exists, Home and End select edges, page keys retain raw-row behavior, Enter handles enabled and unusable rows with stay-open support, the cancel set closes, Press and decoded Repeat share behavior, and Release is consumed. The TUI owns menu input before confirmation, shortcuts, and pane delivery. It keeps selection in client state until an action, swallows paste and pointer events, holds input while an action waits for the daemon to clear the descriptor, and consumes decoded action-key Repeat and Release events across close. Legacy terminals report every repeated byte as a fresh Press, so that indistinguishable event follows ordinary post-close input just as it does in tmux. The attached fixture shows a titled short menu on zz and pinned tmux; proves q shortcut precedence through a unique option mutation; proves Down skips a separator and disabled row before Enter; proves Escape cancels without mutation; proves -O plus PageUp lands on an unusable row and Enter keeps the menu open before navigation selects a valid row; and proves a nonactivating paste leaves the menu open. Focused resolver coverage pins the exact raw-row-zero landing and all-disabled boundary behavior. A one-byte pane sentinel proves those test inputs do not reach the pane. This closure covers raw-TUI consumption of the daemon-published descriptor without a protocol or daemon change. display-menu.behavior-fidelity keeps selected-action context and errors, mouse policy, paste-close ordering, command-queue ordering, rendered width, resize lifecycle, shortcut display and grammar, and style refresh open. clients.tui-overlay-consumption now owns popup consumption only."
+    },
+    {
       "id": "commands.native-prefix-isolation",
       "title": "Preserve tmux unique command prefixes",
       "closed_on": "2026-08-24",
@@ -4018,7 +4076,7 @@
         "scenario:compat/scenarios/smoke/args-parse-confirm-before.txt",
         "resource:knowledge/playbooks/compat-harness.md"
       ],
-      "resolution": "Protocol v84 lexical command-block positions now drive `confirm-before`'s pinned command-or-string rule without another wire change. The single command positional accepts a string or typed block while `-c`, `-p`, and `-t` values remain strings, and option scanning stops at the first positional or `--`. Every lexical typed block is recursively constructed before its parent command's name, callback type, or arity validation. Each recursive path carries one user-alias layer independently from siblings; a subtree produced by a user alias disables further user-alias expansion, and self-recursion fails as unknown without killing the daemon. Nested `if-shell`, `run-shell`, set-option, and `confirm-before` blocks print normalized names; an empty block reads back as `{  }`, and physical internal group newlines print as ` ;; `. A typed confirm callback executes that frozen constructed list without another user-alias lookup. String children construct after target lookup and parent-format expansion as one physical group, then remain frozen with the prompt. Source-file and Control comparisons are exact, nested bind and confirm failures are preflight parse errors, and a rejected replacement preserves the prior binding. The strict three-step scenario runs 19 internal construction, parser, readback, alias, and channel checks. Reply, `-y` Enter-default, blocking, and background execution initially had daemon and GPUI unit coverage. Raw-TUI confirmation handling later closed under `clients.tui-confirm-before-overlay`; menu and popup consumption remains tracked under `clients.tui-overlay-consumption`. Broader eager whole-file source construction and its replay-channel placement remain open under the existing parser and command-chain owners. Six implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
+      "resolution": "Protocol v84 lexical command-block positions now drive `confirm-before`'s pinned command-or-string rule without another wire change. The single command positional accepts a string or typed block while `-c`, `-p`, and `-t` values remain strings, and option scanning stops at the first positional or `--`. Every lexical typed block is recursively constructed before its parent command's name, callback type, or arity validation. Each recursive path carries one user-alias layer independently from siblings; a subtree produced by a user alias disables further user-alias expansion, and self-recursion fails as unknown without killing the daemon. Nested `if-shell`, `run-shell`, set-option, and `confirm-before` blocks print normalized names; an empty block reads back as `{  }`, and physical internal group newlines print as ` ;; `. A typed confirm callback executes that frozen constructed list without another user-alias lookup. String children construct after target lookup and parent-format expansion as one physical group, then remain frozen with the prompt. Source-file and Control comparisons are exact, nested bind and confirm failures are preflight parse errors, and a rejected replacement preserves the prior binding. The strict three-step scenario runs 19 internal construction, parser, readback, alias, and channel checks. Reply, `-y` Enter-default, blocking, and background execution initially had daemon and GPUI unit coverage. Raw-TUI confirmation handling later closed under `clients.tui-confirm-before-overlay`, and menu descriptor consumption later closed under `clients.tui-display-menu-overlay`; popup consumption remains under `clients.tui-overlay-consumption`. Broader eager whole-file source construction and its replay-channel placement remain open under the existing parser and command-chain owners. Six implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-display-menu",
@@ -4033,7 +4091,7 @@
         "scenario:compat/scenarios/smoke/args-parse-display-menu.txt",
         "resource:knowledge/playbooks/compat-harness.md"
       ],
-      "resolution": "Protocol v84 lexical command-block positions now drive `display-menu`'s pinned item rule without another wire change. The parser walks positional data as repeated NAME, KEY, and ACTION fields. A nonempty NAME advances through a string KEY to an ACTION, which accepts a string or typed block and resets the state to NAME. An empty NAME is a separator that consumes no KEY or ACTION and leaves the parser expecting another NAME. Values for `-b`, `-c`, `-C`, `-H`, `-s`, `-S`, `-t`, `-T`, `-x`, and `-y` remain strings. Every lexical typed block constructs before the parent callback type, arity, or effects, so child construction failures precede forbidden NAME, KEY, and option-value type errors. Accepted typed actions print recursively constructed canonical commands in stored binding readback, while quoted brace actions remain strings. The daemon already strips the structural wrapper only from typed actions before its fresh selection parse. Incomplete NAME and NAME-plus-KEY tails pass lexical construction and reach daemon runtime. Runtime resolves the current or `-c` target client before completeness, so an unattached command or initial Control reports `no current client`; initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates an incomplete group as `not enough arguments` before its overlay no-op and emits an exact flag-1 `%error`; EOF after that frame exits 1. Interactive menu ordering remains unchanged. The strict three-step, 34-check fixture covers canonical, built-in alias, unique-prefix, and preexisting user-alias paths; repeated items and separators; typed and quoted actions; every string-only valued flag; child precedence; canonical binding readback and preservation; client-before-completeness precedence; incomplete runtime groups; and exact source-file plus Control channels. A PID-unique FIFO proves attached exit status after EOF. Both servers finish `ARGS_PARSE_DISPLAY_MENU=clean:34` with zero differences. Attached-client rendering and input, geometry, styles, targets, formats, selected-action runtime errors, same-source alias mutation, eager whole-source construction, generic alias recursion, and raw-TUI overlay parity retain their existing owners. Three implemented callback commands across one effective rule remain under `tracker.semantic-coverage`."
+      "resolution": "Protocol v84 lexical command-block positions now drive `display-menu`'s pinned item rule without another wire change. The parser walks positional data as repeated NAME, KEY, and ACTION fields. A nonempty NAME advances through a string KEY to an ACTION, which accepts a string or typed block and resets the state to NAME. An empty NAME is a separator that consumes no KEY or ACTION and leaves the parser expecting another NAME. Values for `-b`, `-c`, `-C`, `-H`, `-s`, `-S`, `-t`, `-T`, `-x`, and `-y` remain strings. Every lexical typed block constructs before the parent callback type, arity, or effects, so child construction failures precede forbidden NAME, KEY, and option-value type errors. Accepted typed actions print recursively constructed command names in stored binding readback, while quoted brace actions remain strings. The daemon already strips the structural wrapper only from typed actions before its fresh selection parse. Incomplete NAME and NAME-plus-KEY tails pass lexical construction and reach daemon runtime. Runtime resolves the current or `-c` target client before completeness, so an unattached command or initial Control reports `no current client`; initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates an incomplete group as `not enough arguments` before its overlay no-op and emits an exact flag-1 `%error`; EOF after that frame exits 1. Interactive menu ordering remains unchanged. The strict three-step, 34-check fixture covers direct names, built-in aliases, unique prefixes, and preexisting user-alias paths; repeated items and separators; typed and quoted actions; every string-only valued flag; child precedence; normalized binding readback and preservation; client-before-completeness precedence; incomplete runtime groups; and exact source-file plus Control channels. A PID-unique FIFO proves attached exit status after EOF. Both servers finish `ARGS_PARSE_DISPLAY_MENU=clean:34` with zero differences. Raw zz-tui descriptor consumption and shared keyboard ownership later closed under `clients.tui-display-menu-overlay`. Action context and errors, mouse policy, paste-close ordering, queue ordering, rendered width, resize lifecycle, shortcut display and grammar, and style refresh remain under `display-menu.behavior-fidelity`; same-source alias mutation, eager whole-source construction, and generic alias recursion retain their existing owners. Three implemented callback commands across one effective rule remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-display-panes",

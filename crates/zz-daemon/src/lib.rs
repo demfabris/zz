@@ -84,6 +84,8 @@ pub enum DaemonError {
     Thread(String),
     #[error("command exited with status {exit_code}")]
     CommandExit { output: String, exit_code: u8 },
+    #[error("{0}")]
+    InsertedCommandParse(String),
     #[error("{error}")]
     CommandFailed {
         output: String,

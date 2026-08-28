@@ -28,6 +28,11 @@ The lexer is a single character-by-character state machine (modeled on tmux's `c
 `list-keys` output can point back at the origin. It produces `CommandInvocation`s only. It does
 **not** validate command names or arguments; that happens later in
 [`MuxEngine::execute`](/tmux/commands.md).
+Protocol v84 also retains every standalone, balanced, unquoted `{ ... }` argument as a zero-based
+position on `CommandInvocation`. The brace-bearing text stays in `args`; the position says it was a
+typed command block. Single- or double-quoted brace text remains an ordinary string, as do braces
+inside another word. Control mode uses the same lexer before transport. Invocations built directly
+from argv strings have no typed positions because shell quoting has already been erased.
 Parser diagnostics keep the location where the invalid statement began. A successfully parsed
 physical multiline command instead records the line where that command completes, matching tmux's
 startup cause location.
@@ -273,6 +278,7 @@ diagnostic and omits only that invalid final command. Its rules:
 | `%if / %elif / %else / %endif` | EVALUATED at parse time: the condition format-expands through the context (no jobs — `#()` is empty) and truth-tests with the pin's `format_true` (false = empty or exactly `"0"`). Same-line and nested forms per the pin's `condition1` grammar; a condition's `#{…}` scans balanced through whitespace; `#{` right after `%else`/`%endif` is a `syntax error` like the pin. |
 | Backslash escape | Outside single quotes, `\` escapes the next char; `\`+newline is line continuation (joins lines). |
 | Quoted empty / concatenation | `""` preserves an empty argument; `""suffix` concatenates into one word (adjacent quoted+bare text is a single token). |
+| Command blocks `{ … }` | A standalone unquoted balanced block is one argument whose zero-based position is retained on `CommandInvocation`; quoted brace text is a string. A block cannot be the command name. |
 | First-word command name | The first word of a command becomes `CommandInvocation.name`; the rest become `args`. |
 
 Only tokenization lives here. What the resulting commands *mean* (supported names, aliases, flags,
@@ -304,7 +310,7 @@ diagnostic — no cascade).
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `commands` | `Vec<CommandInvocation>` | Parsed commands in order, each with an attached `SourceSpan`. |
+| `commands` | `Vec<CommandInvocation>` | Parsed commands in order, each with an attached `SourceSpan` and any lexical command-block positions. Command and argument validation still occurs during replay rather than as one eager whole-file unit. |
 | `environment` | `Vec<ConfigEnvironmentAssignment>` | Ordered `NAME=value` assignments (`name`, `value`, `hidden`) reduced during parse; the daemon applies them to the global environment before the file's commands run. |
 | `diagnostics` | `Vec<ConfigDiagnostic>` | Lexer-level errors (`source`, `line`, `column`, `message`). |
 

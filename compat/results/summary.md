@@ -67,6 +67,7 @@
 | zoom | 5 | yes | 0 | yes | yes | yes |
 | known/known-main-preset-two-panes | 2 | yes | 1 | yes | yes | yes |
 | known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
+| smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
 | smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |

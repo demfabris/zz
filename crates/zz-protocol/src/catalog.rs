@@ -1,6 +1,6 @@
 //! Shared metadata for tmux-compatible commands implemented by `zz`.
 
-use crate::message::ServerError;
+use crate::message::{CommandInvocation, ServerError};
 
 /// The kind of value accepted by an option or positional argument.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,6 +207,28 @@ pub fn parse_tmux_options<'a>(
     spec: &CommandSpec,
     args: &'a [String],
 ) -> Result<TmuxOptionParse<'a>, ServerError> {
+    parse_tmux_options_with_command(spec, args, None)
+}
+
+pub fn parse_tmux_command_options<'a>(
+    spec: &CommandSpec,
+    command: &'a CommandInvocation,
+) -> Result<TmuxOptionParse<'a>, ServerError> {
+    let typed = COMMAND_ARGS_PARSE_BEHAVES
+        .contains(&spec.name)
+        .then_some(command);
+    let parsed = parse_tmux_options_with_command(spec, &command.args, typed)?;
+    if let Some(command) = typed {
+        validate_command_args_parse(spec, command, &parsed)?;
+    }
+    Ok(parsed)
+}
+
+fn parse_tmux_options_with_command<'a>(
+    spec: &CommandSpec,
+    args: &'a [String],
+    command: Option<&CommandInvocation>,
+) -> Result<TmuxOptionParse<'a>, ServerError> {
     let mut options = Vec::new();
     let mut index = 0;
     while let Some(argument) = args.get(index) {
@@ -254,6 +276,12 @@ pub fn parse_tmux_options<'a>(
                     .get(index)
                     .filter(|value| !optional_value_starts_option(value))
                 {
+                    if command.is_some_and(|command| command.argument_is_command_block(index)) {
+                        return Err(ServerError::CommandParse(format!(
+                            "command {}: {} argument must be a string",
+                            spec.name, option.name
+                        )));
+                    }
                     options.push(TmuxOption::Value(option.name, value));
                     index += 1;
                 } else {
@@ -269,6 +297,12 @@ pub fn parse_tmux_options<'a>(
                             spec.name, option.name
                         ))
                     })?;
+                    if command.is_some_and(|command| command.argument_is_command_block(index)) {
+                        return Err(ServerError::CommandParse(format!(
+                            "command {}: {} argument must be a string",
+                            spec.name, option.name
+                        )));
+                    }
                     index += 1;
                     value.as_str()
                 } else {
@@ -284,6 +318,33 @@ pub fn parse_tmux_options<'a>(
         options,
         positionals: &args[index..],
     })
+}
+
+fn validate_command_args_parse(
+    spec: &CommandSpec,
+    command: &CommandInvocation,
+    parsed: &TmuxOptionParse<'_>,
+) -> Result<(), ServerError> {
+    let Some(args_parse) = COMMAND_ARGS_PARSE_SPECS
+        .iter()
+        .find(|args_parse| args_parse.name == spec.name)
+    else {
+        return Ok(());
+    };
+    if args_parse.rule != CommandArgsParseRule::IfShellBranches {
+        return Ok(());
+    }
+    let start = command.args.len().saturating_sub(parsed.positionals.len());
+    for (position, index) in (start..command.args.len()).enumerate() {
+        if command.argument_is_command_block(index) && !matches!(position, 1 | 2) {
+            return Err(ServerError::CommandParse(format!(
+                "command {}: argument {} must be \"string\"",
+                spec.name,
+                position + 1
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn optional_value_starts_option(value: &str) -> bool {
@@ -361,7 +422,7 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
     },
 ];
 
-pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[];
+pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &["if-shell"];
 
 use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
@@ -2706,6 +2767,72 @@ mod tests {
                 positionals: &[],
             }
         );
+    }
+
+    #[test]
+    fn if_shell_args_parse_distinguishes_conditions_branches_and_option_values() {
+        let spec = catalog_command_spec("if-shell").expect("if-shell");
+
+        let condition = CommandInvocation::new(
+            "if-shell",
+            [
+                "-F",
+                "{ display-message condition }",
+                "display-message branch",
+            ],
+        )
+        .with_command_blocks([1]);
+        assert_eq!(
+            parse_tmux_command_options(spec, &condition)
+                .expect_err("typed condition")
+                .tmux_message(),
+            "command if-shell: argument 1 must be \"string\""
+        );
+
+        let branches = CommandInvocation::new(
+            "if-shell",
+            [
+                "-F",
+                "1",
+                "{ display-message true }",
+                "{ display-message false }",
+            ],
+        )
+        .with_command_blocks([2, 3]);
+        let parsed = parse_tmux_command_options(spec, &branches).expect("typed branches");
+        assert_eq!(parsed.positionals, &branches.args[1..]);
+
+        let extra = CommandInvocation::new(
+            "if-shell",
+            ["1", "display-message true", "display-message false", "{}"],
+        )
+        .with_command_blocks([3]);
+        assert_eq!(
+            parse_tmux_command_options(spec, &extra)
+                .expect_err("typed extra positional")
+                .tmux_message(),
+            "command if-shell: argument 4 must be \"string\""
+        );
+
+        let target = CommandInvocation::new(
+            "if-shell",
+            [
+                "-t",
+                "{ display-message target }",
+                "1",
+                "display-message branch",
+            ],
+        )
+        .with_command_blocks([1]);
+        assert_eq!(
+            parse_tmux_command_options(spec, &target)
+                .expect_err("typed option value")
+                .tmux_message(),
+            "command if-shell: -t argument must be a string"
+        );
+
+        let quoted = CommandInvocation::new("if-shell", ["-F", "1", "{ display-message quoted }"]);
+        assert!(parse_tmux_command_options(spec, &quoted).is_ok());
     }
 
     #[test]

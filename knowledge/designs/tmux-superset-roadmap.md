@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 85 active groups, 592 classified active items, 81 closed groups, and two known
+The live tracker has 85 active groups, 591 classified active items, 82 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,13 +53,13 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after nested `new-session` precedence closed covers 88
-scenarios and 1,487 steps.
+The canonical checkpoint freshly rerun after the first callback rule closed covers 89 scenarios
+and 1,490 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`6b7a0261956e84d7340c9ef34f4de0962964215b3cc8eb055a79236acdc257c6`. Requested flags, attached
+`1a6a11a9991540c2c6d7aa26ead79c47440870cdc74fa063cf721cd648efabf8`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
@@ -77,6 +77,13 @@ Protocol v83 appends `ClientHello.process_id` and closes `clients.context-format
 one retained client-fact record for list rows, ordinary commands, foreground inserted commands,
 status recipients, and `display-message`. The attached fixture covers Interactive, status,
 bound-command, implicit target-client, and Control contexts against the pin.
+
+Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and closes
+`tracker.args-parse-if-shell`. Source-file and Control parsing now preserve unquoted typed branches
+through wire transport, aliases, bindings, and hooks; quoted braces remain strings. The shared
+callback validator rejects typed conditions, option values, and extra positionals before effects,
+while format, foreground shell, and background routes execute typed branches. The strict three-step
+scenario runs 12 internal checks on both servers.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -433,10 +440,11 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    `tracker.args-parse-inventory` closed callback discovery on 2026-08-25. The oracle rejects an
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each rule absent from
-   `COMMAND_ARGS_PARSE_BEHAVES`. That behaving roster starts empty. The unimplemented
+   `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains `if-shell`; five effective rules
+   and 11 command-specific items remain. The unimplemented
    `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
-   `tracker.semantic-coverage` tracks runtime adoption of the six argument rules, open-ended or
+   `tracker.semantic-coverage` tracks runtime adoption of the five remaining argument rules, open-ended or
    dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
    and option `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
@@ -942,6 +950,13 @@ permanent product decision has been recorded for them.
   order without implementing session groups. Canonical names, built-in aliases, prefixes, user
   aliases, command lists, detached creation, Control clients, and already-attached clients are
   covered by focused tests and the real attached-client differential.
+- 2026-08-28: Protocol v84 closed `tracker.args-parse-if-shell`, the first custom callback runtime
+  rule. `CommandInvocation` carries zero-based unquoted command-block positions through source-file
+  and Control parsing, postcard transport, aliases, bindings, hooks, and stored printing. The
+  shared validator accepts typed true and false branches, rejects typed conditions, option values,
+  and extra positionals before effects, and keeps quoted braces on the string path. The strict
+  three-step scenario finishes `ARGS_PARSE_IF_SHELL=clean:12` on zz and the pin. Five callback rules
+  across 11 implemented commands remain.
 
 # Related
 

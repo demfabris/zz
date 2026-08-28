@@ -4651,7 +4651,7 @@ impl Shared {
             && let Some(spec) = zz_protocol::catalog_command_spec(canonical)
             && spec.uses_tmux_option_grammar()
         {
-            zz_protocol::parse_tmux_options(spec, &command.args)?;
+            zz_protocol::parse_tmux_command_options(spec, command)?;
         }
         let unattached_watch = {
             let inner = self.inner.lock();
@@ -4673,7 +4673,7 @@ impl Shared {
                         self.run_shell(client, kind, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::IfShell => {
-                        self.if_shell(client, kind, context, canonical, &command.args)
+                        self.if_shell(client, kind, context, canonical, command)
                     }
                     DaemonCommandDispatch::AgentSend => {
                         self.agent_send(client, kind, context, &command.args)
@@ -8250,9 +8250,21 @@ impl Shared {
         kind: ClientKind,
         context: &mut ExecutionContext,
         command_name: &str,
-        args: &[String],
+        command: &CommandInvocation,
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_if_shell_args(args)?;
+        let parsed = parse_if_shell_args(&command.args)?;
+        let branches = parsed
+            .positional
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(position, branch)| {
+                typed_inserted_command_source(
+                    branch,
+                    command.argument_is_command_block(parsed.positional_start + position),
+                )
+            })
+            .collect::<Vec<_>>();
         let (condition, command_context, cwd, tmux, environment) = {
             let mut inner = self.inner.lock();
             let target = parsed.target.as_deref().and_then(|target| {
@@ -8288,18 +8300,16 @@ impl Shared {
         };
 
         if parsed.format {
-            let Some(branch) =
-                select_if_shell_branch(&parsed.positional, if_shell_truthy(&condition))
+            let Some(source) = select_if_shell_branch(&branches, if_shell_truthy(&condition))
             else {
                 return Ok(Execution::default());
             };
-            let source = inserted_command_source(branch);
             let mut command_context = command_context;
             let result = self.execute_foreground_inserted_commands(
                 client,
                 kind,
                 &mut command_context,
-                &source,
+                source,
                 "<if-shell>",
             )?;
             *context = command_context;
@@ -8308,7 +8318,6 @@ impl Shared {
 
         if parsed.background {
             let shared = Arc::clone(self);
-            let branches = parsed.positional;
             let condition_for_error = condition.clone();
             let mut command_context = command_context;
             let control_target = command_context
@@ -8330,18 +8339,17 @@ impl Shared {
                         return;
                     }
                     if let Ok(result) = result {
-                        let Some(branch) =
+                        let Some(source) =
                             select_if_shell_branch(&branches, result.status.success())
                         else {
                             return;
                         };
-                        let source = inserted_command_source(branch);
                         let mut context = command_context;
                         match shared.execute_inserted_commands_with_control_target(
                             client,
                             kind,
                             &mut context,
-                            &source,
+                            source,
                             "<if-shell>",
                             control_target,
                         ) {
@@ -8404,17 +8412,15 @@ impl Shared {
         let result = result.map_err(|()| {
             ServerError::InvalidCommand(format!("failed to run command: {failed_condition}"))
         })?;
-        let Some(branch) = select_if_shell_branch(&parsed.positional, result.status.success())
-        else {
+        let Some(source) = select_if_shell_branch(&branches, result.status.success()) else {
             return Ok(Execution::default());
         };
-        let source = inserted_command_source(branch);
         let mut command_context = command_context;
         let result = self.execute_foreground_inserted_commands(
             client,
             kind,
             &mut command_context,
-            &source,
+            source,
             "<if-shell>",
         )?;
         *context = command_context;
@@ -8473,7 +8479,7 @@ impl Shared {
             inner.engine.parse_config(label, input)
         };
         if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
-            return Err(ServerError::CommandParse(diagnostic.message).into());
+            return Err(DaemonError::InsertedCommandParse(diagnostic.message));
         }
         let mut result = InsertedCommandResult::default();
         for command in parsed.commands {
@@ -18543,6 +18549,15 @@ impl Shared {
                         captured_events,
                     );
                 }
+                Err(DaemonError::InsertedCommandParse(message)) => {
+                    log::warn!(
+                        "{}: invalid inserted tmux command: {message}",
+                        path.display()
+                    );
+                    return Err(DaemonError::InsertedCommandParse(config_command_error(
+                        &command, &message,
+                    )));
+                }
                 Err(DaemonError::Server(ServerError::CommandParse(message))) => {
                     log::warn!(
                         "{}: ignoring invalid tmux command: {message}",
@@ -25653,6 +25668,7 @@ struct ParsedIfShellArgs {
     format: bool,
     target: Option<String>,
     positional: Vec<String>,
+    positional_start: usize,
 }
 
 fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerError> {
@@ -25672,11 +25688,13 @@ fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerErr
 
 fn parse_if_shell_args(args: &[String]) -> Result<ParsedIfShellArgs, ServerError> {
     let parsed = parse_buffer_command_args("if-shell", args, &['t'], &['b', 'F'])?;
+    let positional_start = args.len().saturating_sub(parsed.positional.len());
     Ok(ParsedIfShellArgs {
         background: parsed.has('b'),
         format: parsed.has('F'),
         target: parsed.value('t').map(str::to_owned),
         positional: parsed.positional,
+        positional_start,
     })
 }
 
@@ -25718,13 +25736,22 @@ fn inserted_command_source(argument: &str) -> InsertedCommandSource {
     )
 }
 
-fn select_if_shell_branch(positional: &[String], truthy: bool) -> Option<&str> {
-    if truthy {
-        positional.get(1)
-    } else {
-        positional.get(2)
+fn typed_inserted_command_source(argument: &str, command_block: bool) -> InsertedCommandSource {
+    if command_block && let Some(body) = command_block_body(argument) {
+        return InsertedCommandSource::Block(body.to_owned());
     }
-    .map(String::as_str)
+    InsertedCommandSource::String(argument.to_owned())
+}
+
+fn select_if_shell_branch(
+    branches: &[InsertedCommandSource],
+    truthy: bool,
+) -> Option<&InsertedCommandSource> {
+    if truthy {
+        branches.first()
+    } else {
+        branches.get(1)
+    }
 }
 
 fn merge_command_streams(response: CommandResponse, streams: &CommandStreams) -> CommandResponse {
@@ -25863,6 +25890,7 @@ fn existing_job_working_directory(path: &Path) -> Cow<'_, Path> {
 fn daemon_error_text(error: &DaemonError) -> String {
     match error {
         DaemonError::CommandFailed { error, .. } => daemon_error_text(error),
+        DaemonError::InsertedCommandParse(message) => message.clone(),
         DaemonError::Server(error) => server_error_text(error),
         error => error.to_string(),
     }
@@ -25908,7 +25936,8 @@ fn control_command_guard_error(error: &DaemonError) -> (bool, bool, String) {
     match error {
         DaemonError::CommandFailed { error, .. } => control_command_guard_error(error),
         DaemonError::Server(ServerError::UnsupportedCommand(_)) => (false, false, String::new()),
-        DaemonError::Server(ServerError::CommandParse(message)) => (true, false, message.clone()),
+        DaemonError::InsertedCommandParse(message)
+        | DaemonError::Server(ServerError::CommandParse(message)) => (true, false, message.clone()),
         DaemonError::Server(error) => (true, true, error.tmux_message()),
         error => (true, true, daemon_error_text(error)),
     }
@@ -27982,6 +28011,7 @@ fn validate_hello(hello: &ClientHello) -> Result<(), DaemonError> {
 fn daemon_server_error(error: DaemonError) -> ServerError {
     match error {
         DaemonError::Server(error) => error,
+        DaemonError::InsertedCommandParse(message) => ServerError::CommandParse(message),
         DaemonError::CommandFailed { error, .. } => daemon_server_error(*error),
         DaemonError::CommandExit { exit_code, .. } => {
             ServerError::Internal(format!("command exited with status {exit_code}"))
@@ -28983,15 +29013,12 @@ mod tests {
     fn startup_source_read_errors_keep_location_and_normalized_child_path() {
         let declaring = "/zz/default/mux.conf";
         let child = Path::new("/zz/default/child.conf");
-        let command = CommandInvocation {
-            name: "source-file".to_owned(),
-            args: vec![child.display().to_string()],
-            source: Some(SourceSpan {
+        let command = CommandInvocation::new("source-file", [child.display().to_string()])
+            .with_source(SourceSpan {
                 source: declaring.to_owned(),
                 line: 7,
                 column: 1,
-            }),
-        };
+            });
         for (code, expected) in [
             (
                 libc::EACCES,
@@ -48578,6 +48605,98 @@ mod tests {
     }
 
     #[test]
+    fn if_shell_typed_arguments_reject_conditions_and_preserve_branch_kind() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-F",
+                        "{ display-message -p condition }",
+                        "set-option -g @typed-condition-effect yes",
+                    ],
+                )
+                .with_command_blocks([1]),
+            )
+            .expect_err("typed condition must fail before its branch");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::CommandParse(message))
+                if message == "command if-shell: argument 1 must be \"string\""
+        ));
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@typed-condition-effect"]),
+            )
+            .expect("query rejected branch effect");
+        assert!(output.output.is_empty());
+
+        for (spelling, condition, expected) in
+            [("if-shell", "1", "typed-true"), ("if", "0", "typed-false")]
+        {
+            let output = shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        spelling,
+                        [
+                            "-F",
+                            condition,
+                            "{ display-message -p typed-true }",
+                            "{ display-message -p typed-false }",
+                        ],
+                    )
+                    .with_command_blocks([2, 3]),
+                )
+                .unwrap_or_else(|error| panic!("{spelling}: {error}"));
+            assert_eq!(output.output, expected);
+        }
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "true",
+                        "{ display-message -p typed-shell-true }",
+                        "{ display-message -p typed-shell-false }",
+                    ],
+                )
+                .with_command_blocks([1, 2]),
+            )
+            .expect("typed foreground shell branch");
+        assert_eq!(output.output, "typed-shell-true");
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("if-shell", ["-F", "1", "{ display-message -p quoted }"]),
+            )
+            .expect_err("quoted braces remain a string");
+        assert!(matches!(
+            error,
+            DaemonError::InsertedCommandParse(message) if message == "syntax error"
+        ));
+    }
+
+    #[test]
     fn if_shell_bodies_expand_the_live_global_environment() {
         let shared = Arc::new(Shared::new(1));
         shared
@@ -49218,7 +49337,8 @@ mod tests {
                         "1",
                         "{ display-message -p first ; display-message -p second }",
                     ],
-                ),
+                )
+                .with_command_blocks([2]),
             )
             .expect("brace command block");
         assert_eq!(output.output, "first\nsecond");
@@ -49764,10 +49884,11 @@ mod tests {
                     [
                         "-b",
                         "sleep 0.1; true",
-                        "set-option -g @background-if true",
-                        "set-option -g @background-if false",
+                        "{ set-option -g @background-if true }",
+                        "{ set-option -g @background-if false }",
                     ],
-                ),
+                )
+                .with_command_blocks([2, 3]),
             )
             .expect("background if-shell");
         assert!(output.output.is_empty());
@@ -63690,11 +63811,7 @@ bind - split-window -v -c "#{pane_current_path}"
             column: 3,
         };
         let classified = shared.prepare_command_list(vec![
-            CommandInvocation {
-                name: "a".to_owned(),
-                args: vec!["tail".to_owned()],
-                source: Some(source.clone()),
-            },
+            CommandInvocation::new("a", ["tail"]).with_source(source.clone()),
             CommandInvocation::new("list-sess", [] as [&str; 0]),
             CommandInvocation::new("new-pane", [] as [&str; 0]),
             CommandInvocation::new("bogus", [] as [&str; 0]),

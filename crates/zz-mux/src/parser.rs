@@ -104,14 +104,20 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         column: u32,
         word: &mut String,
         word_started: &mut bool,
+        word_is_command_block: &mut bool,
         words: &mut Vec<String>,
+        command_block_words: &mut Vec<usize>,
         eager_assignment: &mut bool,
     ) {
         if !*word_started {
             return;
         }
+        if *word_is_command_block {
+            command_block_words.push(words.len());
+        }
         words.push(std::mem::take(word));
         *word_started = false;
+        *word_is_command_block = false;
         if words.len() != 1 {
             return;
         }
@@ -132,17 +138,30 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         completion_line: u32,
         word: &mut String,
         word_started: &mut bool,
+        word_is_command_block: &mut bool,
         words: &mut Vec<String>,
+        command_block_words: &mut Vec<usize>,
         eager_assignment: &mut bool,
     ) {
-        self.finish_word(line, column, word, word_started, words, eager_assignment);
+        self.finish_word(
+            line,
+            column,
+            word,
+            word_started,
+            word_is_command_block,
+            words,
+            command_block_words,
+            eager_assignment,
+        );
         if self.aborted {
             return;
         }
         if words.is_empty() {
+            command_block_words.clear();
             return;
         }
         let tokens = std::mem::take(words);
+        let command_block_tokens = std::mem::take(command_block_words);
         if tokens.first().is_some_and(|token| token == "%hidden") {
             self.finish_hidden(line, column, &tokens);
             return;
@@ -172,11 +191,18 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
                         .iter()
                         .position(|token| is_conditional_token(token))
                         .map_or(tokens.len(), |offset| start + 1 + offset);
+                    let command_blocks = command_block_tokens
+                        .iter()
+                        .copied()
+                        .filter(|index| *index >= start && *index < end)
+                        .map(|index| index - start)
+                        .collect::<Vec<_>>();
                     self.finish_command_tokens(
                         line,
                         column,
                         completion_line,
                         &tokens[start..end],
+                        &command_blocks,
                         start == 0 && *eager_assignment,
                     );
                     start = end;
@@ -271,11 +297,13 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         column: u32,
         completion_line: u32,
         tokens: &[String],
+        command_block_tokens: &[usize],
         assignment_recorded: bool,
     ) {
         let mut tokens = tokens.iter().cloned();
         let mut command_name = tokens.next().expect("command has a name");
         let mut command_args = tokens.collect::<Vec<_>>();
+        let mut argument_start = 1;
         match parse_assignment(&command_name) {
             Ok(Some((name, value))) => {
                 if !assignment_recorded {
@@ -285,6 +313,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
                     return;
                 }
                 command_name = command_args.remove(0);
+                argument_start = 2;
                 if parse_assignment(&command_name).ok().flatten().is_some() {
                     self.diagnostic(line, column, "syntax error");
                     return;
@@ -296,18 +325,25 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
                 return;
             }
         }
+        if command_block_tokens.contains(&(argument_start - 1)) {
+            self.diagnostic(line, column, "syntax error");
+            return;
+        }
         if !self.active() {
             return;
         }
-        self.parsed.commands.push(CommandInvocation {
-            name: command_name,
-            args: command_args,
-            source: Some(SourceSpan {
-                source: self.source.clone(),
-                line: completion_line,
-                column,
-            }),
-        });
+        let command_blocks = command_block_tokens
+            .iter()
+            .filter_map(|index| index.checked_sub(argument_start));
+        self.parsed.commands.push(
+            CommandInvocation::new(command_name, command_args)
+                .with_command_blocks(command_blocks)
+                .with_source(SourceSpan {
+                    source: self.source.clone(),
+                    line: completion_line,
+                    column,
+                }),
+        );
     }
 
     fn push_assignment(&mut self, name: String, value: String, hidden: bool) {
@@ -451,8 +487,10 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
         aborted: false,
     };
     let mut words = Vec::new();
+    let mut command_block_words = Vec::new();
     let mut word = String::new();
     let mut word_started = false;
+    let mut word_is_command_block = false;
     let mut quote = Quote::None;
     let mut in_comment = false;
     let mut block: Option<Block> = None;
@@ -497,7 +535,13 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
             }
             if state.feed(character) {
                 block = None;
-                finish_word(&mut word, &mut word_started, &mut words);
+                finish_word(
+                    &mut word,
+                    &mut word_started,
+                    &mut word_is_command_block,
+                    &mut words,
+                    &mut command_block_words,
+                );
             }
             continue;
         }
@@ -509,7 +553,9 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
                     line,
                     &mut word,
                     &mut word_started,
+                    &mut word_is_command_block,
                     &mut words,
+                    &mut command_block_words,
                     &mut eager_assignment,
                 );
                 in_comment = false;
@@ -628,6 +674,7 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
                         command_column = column;
                     }
                     word_started = true;
+                    word_is_command_block = true;
                     word.push('{');
                     block = Some(Block::open(line, column));
                 }
@@ -638,7 +685,9 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
                         line,
                         &mut word,
                         &mut word_started,
+                        &mut word_is_command_block,
                         &mut words,
+                        &mut command_block_words,
                         &mut eager_assignment,
                     );
                     if character == '\n' {
@@ -662,7 +711,9 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
                         command_column,
                         &mut word,
                         &mut word_started,
+                        &mut word_is_command_block,
                         &mut words,
+                        &mut command_block_words,
                         &mut eager_assignment,
                     );
                 }
@@ -692,7 +743,9 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
                 line,
                 &mut word,
                 &mut word_started,
+                &mut word_is_command_block,
                 &mut words,
+                &mut command_block_words,
                 &mut eager_assignment,
             );
         }
@@ -712,10 +765,20 @@ fn expand_tilde(word: &mut String, name: &str) {
     word.push_str(name);
 }
 
-fn finish_word(word: &mut String, word_started: &mut bool, words: &mut Vec<String>) {
+fn finish_word(
+    word: &mut String,
+    word_started: &mut bool,
+    word_is_command_block: &mut bool,
+    words: &mut Vec<String>,
+    command_block_words: &mut Vec<usize>,
+) {
     if *word_started {
+        if *word_is_command_block {
+            command_block_words.push(words.len());
+        }
         words.push(std::mem::take(word));
         *word_started = false;
+        *word_is_command_block = false;
     }
 }
 
@@ -1376,6 +1439,30 @@ set @single '\141\a\b\e\f\s\v\r\n\t\u03bb\U0001F980'"#,
             parsed.commands[0].args,
             ["c", "{ new-window ; split-window }"]
         );
+        assert!(!parsed.commands[0].argument_is_command_block(0));
+        assert!(parsed.commands[0].argument_is_command_block(1));
+    }
+
+    #[test]
+    fn command_block_types_follow_argument_positions() {
+        let parsed = parse_config(
+            "test.conf",
+            "SEED=value display-menu {} \"{ quoted }\" key { display-message second }\n",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(
+            parsed.commands[0].args,
+            ["{}", "{ quoted }", "key", "{ display-message second }"]
+        );
+        assert!(parsed.commands[0].argument_is_command_block(0));
+        assert!(!parsed.commands[0].argument_is_command_block(1));
+        assert!(!parsed.commands[0].argument_is_command_block(2));
+        assert!(parsed.commands[0].argument_is_command_block(3));
+        assert!(!parsed.commands[0].argument_is_command_block(4));
+
+        let parsed = parse_config("test.conf", "{ display-message top-level }\n");
+        assert!(parsed.commands.is_empty());
+        assert_eq!(parsed.diagnostics[0].message, "syntax error");
     }
 
     #[test]
@@ -1422,6 +1509,9 @@ set @single '\141\a\b\e\f\s\v\r\n\t\u03bb\U0001F980'"#,
             ["z", "send-keys", "{ literal ; text }"]
         );
         assert_eq!(parsed.commands[1].args, ["w", "new-window", "-n", "a{b}c"]);
+        assert!(parsed.commands.iter().all(|command| {
+            (0..command.args.len()).all(|index| !command.argument_is_command_block(index))
+        }));
     }
 
     #[test]

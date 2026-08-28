@@ -49,7 +49,10 @@ then stops scanning at its positional-session extension while still accepting tr
 supplies the diagnostic text for 24 commands whose honest
 zz `list-commands` and completion usage differs from the pin. The three-step
 `smoke/command-flag-errors` differential checks 83 canonical commands, 74 aliases, and 516 exact
-probes. Target resolution lives in `MuxState`:
+probes. Protocol v84 adds zero-based unquoted command-block positions to `CommandInvocation`.
+`parse_tmux_command_options(spec, command)` applies the command-aware callback rule for commands in
+`COMMAND_ARGS_PARSE_BEHAVES` while retaining the shared option diagnostics. Target resolution lives
+in `MuxState`:
 
 Oracle schema 4 extracts tmux's custom `args_parse` callbacks from the pinned source. The extractor
 accepts six rules and fails when a callback body falls outside them:
@@ -64,9 +67,12 @@ accepts six rules and fails when a callback body falls outside them:
 | `set-hook-monitor-or-value` | `set-hook -B` makes every positional command-or-string; without `-B`, position 1 uses that type |
 
 `COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
-remain unimplemented and need no sidecar entry. No implemented command has passed this behavior gate,
-so `COMMAND_ARGS_PARSE_BEHAVES` is empty and `tracker.semantic-coverage` owns 12 command-specific
-`args-parse:` items. This inventory adds no parser or daemon behavior.
+remain unimplemented and need no sidecar entry. `COMMAND_ARGS_PARSE_BEHAVES` now contains
+`if-shell`: its zero-based condition position 0 and option values must be strings, while branch
+positions 1 and 2 accept either strings or typed command blocks. Quoted brace text stays a string.
+The parser preserves that lexical distinction through source files, Control transport, aliases,
+bindings, and hooks; validation rejects a forbidden type before branch effects or stored-command
+replacement. `tracker.semantic-coverage` owns the remaining 11 command-specific `args-parse:` items.
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |

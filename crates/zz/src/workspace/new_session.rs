@@ -409,21 +409,13 @@ mod tests {
         let bindings = [
             KeyBindingSnapshot {
                 key: "%".to_owned(),
-                commands: vec![CommandInvocation {
-                    name: "split-picker".to_owned(),
-                    args: vec!["-h".to_owned()],
-                    source: None,
-                }],
+                commands: vec![CommandInvocation::new("split-picker", ["-h"])],
                 repeat: false,
                 note: None,
             },
             KeyBindingSnapshot {
                 key: "|".to_owned(),
-                commands: vec![CommandInvocation {
-                    name: "split-picker".to_owned(),
-                    args: vec!["-h".to_owned()],
-                    source: None,
-                }],
+                commands: vec![CommandInvocation::new("split-picker", ["-h"])],
                 repeat: false,
                 note: None,
             },
@@ -447,11 +439,7 @@ mod tests {
     fn missing_binding_omits_the_row() {
         let bindings = [KeyBindingSnapshot {
             key: "c".to_owned(),
-            commands: vec![CommandInvocation {
-                name: "new-window".to_owned(),
-                args: Vec::new(),
-                source: None,
-            }],
+            commands: vec![CommandInvocation::new("new-window", [] as [&str; 0])],
             repeat: false,
             note: None,
         }];
@@ -463,11 +451,7 @@ mod tests {
     fn unparseable_binding_uses_the_stock_key() {
         let bindings = [KeyBindingSnapshot {
             key: String::new(),
-            commands: vec![CommandInvocation {
-                name: "split-picker".to_owned(),
-                args: vec!["-h".to_owned()],
-                source: None,
-            }],
+            commands: vec![CommandInvocation::new("split-picker", ["-h"])],
             repeat: false,
             note: None,
         }];

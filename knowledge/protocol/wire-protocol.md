@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v83)
+title: zz wire protocol (v84)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-27T00:00:00-03:00
+timestamp: 2026-08-28T00:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 83`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 84`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (83) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (84) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -106,6 +106,14 @@ fields in declaration order.
 | `AgentAcknowledgePromptRestore { pane, reclaim_id }` | one restored draft | Retire one daemon-cached recovered prompt after its owning client has put it back in the composer, preventing a later replay from restoring it again |
 | `PrepareCommandList { request_id, commands }` | request identity plus `Vec<CommandInvocation>` | Client → daemon: freeze one live alias layer for a complete command unit under one mux lock. Preparation performs no command effects, target or format resolution, hook emission, message publication, or authorization |
 | `PreparedCommandList { request_id, commands }` | request identity plus one `PreparedCommand` per input | Daemon → client: return the immutable invocation, optional canonical identity, `alias_matched`, and `Ready` or a typed `ServerError`. The echoed request ID lets a client ignore stale replies while notifications share the stream |
+
+`CommandInvocation` is `{ name: String, args: Vec<String>, source: Option<SourceSpan>,
+command_blocks: Vec<u32> }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based
+positions into `args` for standalone unquoted `{ ... }` arguments. The corresponding argument keeps
+its brace-bearing text. Quoted brace text has no entry and remains a string. Config and Control
+parsers populate the positions; argv-created commands start with an empty vector. Aliases and key
+table snapshots preserve the positions across request, preparation, `ServerHello`, and
+`KeyTablesChanged` frames.
 
 The agent identifiers (`option_id`, `value`, `mode_id`, `method_id`) are bounded to
 `MAX_AGENT_OPTION_BYTES` (4 KiB), and session IDs and list cursors to
@@ -533,9 +541,12 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 83`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 84`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v84 appends `CommandInvocation.command_blocks`. Zero-based positions preserve lexical command
+  blocks through Control requests, prepared commands, and key-table snapshots while quoted braces
+  remain ordinary strings.
 - v83 appends `ClientHello.process_id`. Each local or SSH-forwarded client reports its originating
   process ID; the daemon retains the value for `#{client_pid}` and clears it with the connection.
   A zero value remains the defined unavailable form.
@@ -744,21 +755,21 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 83, client_instance_id: ClientInstanceId(0), kind: Interactive,
+`ClientHello { protocol_version: 84, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
 working_directory: None, environment: [], process_id: 0 }` is 20 bytes on the wire: an 8-byte
 envelope over a 12-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17 18 19
-      10 00 00 00  00     00      53 00         00 53 00 00 00 00 01 01 00 00 00 00
+      10 00 00 00  00     00      54 00         00 54 00 00 00 00 01 01 00 00 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 16  Control        (= 83)
+      length = 16  Control        (= 84)
 ```
 
 - **length `16`** = `ENVELOPE_BYTES` (4) + payload (12); it counts the four envelope bytes, not itself.
-- **payload** `00 53 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x53` (= 83), `client_instance_id` as varint `00`, `kind`
+- **payload** `00 54 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x54` (= 84), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` and `working_directory` as two `Option::None` tags (`00 00`), followed by the empty
@@ -792,11 +803,11 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 83, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 84, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None,
                        working_directory: Some("/home/demo"), environment: ["TERM=xterm-256color"],
                        process_id: 1234 }
-server → ServerHello { protocol_version: 83, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 84, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

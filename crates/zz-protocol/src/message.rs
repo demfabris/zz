@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 83;
+pub const PROTOCOL_VERSION: u16 = 84;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1221,6 +1221,7 @@ pub struct CommandInvocation {
     pub name: String,
     pub args: Vec<String>,
     pub source: Option<SourceSpan>,
+    command_blocks: Vec<u32>,
 }
 
 impl CommandInvocation {
@@ -1230,7 +1231,76 @@ impl CommandInvocation {
             name: name.into(),
             args: args.into_iter().map(Into::into).collect(),
             source: None,
+            command_blocks: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_source(mut self, source: SourceSpan) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    #[must_use]
+    pub fn with_command_blocks(mut self, indices: impl IntoIterator<Item = usize>) -> Self {
+        self.command_blocks = indices
+            .into_iter()
+            .filter(|index| *index < self.args.len())
+            .filter_map(|index| u32::try_from(index).ok())
+            .collect();
+        self.command_blocks.sort_unstable();
+        self.command_blocks.dedup();
+        self
+    }
+
+    #[must_use]
+    pub fn argument_is_command_block(&self, index: usize) -> bool {
+        u32::try_from(index).is_ok_and(|index| self.command_blocks.contains(&index))
+    }
+
+    pub fn append_args(&mut self, command: Self) {
+        let offset = self.args.len();
+        let appended_len = command.args.len();
+        self.args.extend(command.args);
+        self.command_blocks
+            .extend(command.command_blocks.into_iter().filter_map(|index| {
+                let index = usize::try_from(index).ok()?;
+                (index < appended_len)
+                    .then(|| offset.checked_add(index))
+                    .flatten()
+                    .and_then(|index| u32::try_from(index).ok())
+            }));
+        self.command_blocks
+            .retain(|index| usize::try_from(*index).is_ok_and(|index| index < self.args.len()));
+        self.command_blocks.sort_unstable();
+        self.command_blocks.dedup();
+    }
+
+    #[must_use]
+    pub fn split_commands_from(&self, start: usize) -> Vec<Self> {
+        split_tagged_command_words(
+            self.args
+                .iter()
+                .cloned()
+                .enumerate()
+                .skip(start)
+                .map(|(index, word)| (word, self.argument_is_command_block(index))),
+        )
+        .into_iter()
+        .filter_map(|words| {
+            let mut words = words.into_iter();
+            let (name, _) = words.next()?;
+            let mut args = Vec::new();
+            let mut command_blocks = Vec::new();
+            for (index, (word, is_command_block)) in words.enumerate() {
+                args.push(word);
+                if is_command_block {
+                    command_blocks.push(index);
+                }
+            }
+            Some(Self::new(name, args).with_command_blocks(command_blocks))
+        })
+        .collect()
     }
 }
 
@@ -1239,9 +1309,18 @@ impl CommandInvocation {
 /// while a trailing `\;` keeps a literal `;` in the word.
 #[must_use]
 pub fn split_command_words(words: impl IntoIterator<Item = String>) -> Vec<Vec<String>> {
+    split_tagged_command_words(words.into_iter().map(|word| (word, ())))
+        .into_iter()
+        .map(|words| words.into_iter().map(|(word, ())| word).collect())
+        .collect()
+}
+
+fn split_tagged_command_words<T>(
+    words: impl IntoIterator<Item = (String, T)>,
+) -> Vec<Vec<(String, T)>> {
     let mut commands = Vec::new();
-    let mut current: Vec<String> = Vec::new();
-    for mut word in words {
+    let mut current = Vec::new();
+    for (mut word, tag) in words {
         let mut end = false;
         if word.ends_with(';') {
             word.pop();
@@ -1253,7 +1332,7 @@ pub fn split_command_words(words: impl IntoIterator<Item = String>) -> Vec<Vec<S
             }
         }
         if !end || !word.is_empty() {
-            current.push(word);
+            current.push((word, tag));
         }
         if end && !current.is_empty() {
             commands.push(std::mem::take(&mut current));
@@ -2674,6 +2753,73 @@ mod tests {
     }
 
     #[test]
+    fn command_invocation_command_blocks_round_trip_and_append() {
+        let mut command = super::CommandInvocation::new("bind-key", ["x", "{ first }"])
+            .with_command_blocks([1, 1, 9]);
+        let appended = super::CommandInvocation::new("unused", ["plain", "{ second }"])
+            .with_command_blocks([1]);
+        command.append_args(appended);
+
+        assert_eq!(command.args, ["x", "{ first }", "plain", "{ second }"]);
+        assert!(!command.argument_is_command_block(0));
+        assert!(command.argument_is_command_block(1));
+        assert!(!command.argument_is_command_block(2));
+        assert!(command.argument_is_command_block(3));
+        assert!(!command.argument_is_command_block(4));
+        assert_eq!(command.command_blocks, [1, 3]);
+
+        let bytes = postcard::to_stdvec(&command).expect("command invocation encodes");
+        let decoded = postcard::from_bytes::<super::CommandInvocation>(&bytes)
+            .expect("command invocation decodes");
+        assert_eq!(decoded, command);
+    }
+
+    #[test]
+    fn command_invocation_new_has_no_typed_blocks() {
+        let command = super::CommandInvocation::new("display-message", ["{ literal }"]);
+        assert!(!command.argument_is_command_block(0));
+        assert!(command.command_blocks.is_empty());
+    }
+
+    #[test]
+    fn command_invocation_split_preserves_typed_positions_across_chains() {
+        let command = super::CommandInvocation::new(
+            "bind-key",
+            [
+                "F10",
+                "display-message",
+                "first",
+                ";",
+                "if-shell",
+                "-F",
+                "1",
+                "{ display-message -p true }",
+                "{ display-message -p false }",
+            ],
+        )
+        .with_command_blocks([7, 8]);
+
+        let commands = command.split_commands_from(1);
+
+        assert_eq!(
+            commands,
+            [
+                super::CommandInvocation::new("display-message", ["first"]),
+                super::CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-F",
+                        "1",
+                        "{ display-message -p true }",
+                        "{ display-message -p false }",
+                    ],
+                )
+                .with_command_blocks([2, 3]),
+            ]
+        );
+    }
+
+    #[test]
     fn terminal_modifiers_use_one_validated_control_byte() {
         let modifiers = Modifiers::new(true, true, true, true);
         assert_eq!(postcard::to_stdvec(&modifiers).expect("encode"), [0x0f]);
@@ -3622,7 +3768,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 83);
+        assert_eq!(super::PROTOCOL_VERSION, 84);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

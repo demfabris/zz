@@ -564,10 +564,11 @@ impl KeyTables {
                             .commands
                             .iter()
                             .map(|command| {
-                                CommandInvocation::new(
-                                    crate::catalog::canonical_command(&command.name),
-                                    command.args.iter().cloned(),
-                                )
+                                let mut command = command.clone();
+                                command.name =
+                                    crate::catalog::canonical_command(&command.name).to_owned();
+                                command.source = None;
+                                command
                             })
                             .collect(),
                         repeat: binding.repeat,
@@ -1337,7 +1338,15 @@ mod tests {
             "prefix",
             "|",
             Binding {
-                commands: vec![CommandInvocation::new("splitw", ["-h"])],
+                commands: vec![
+                    CommandInvocation::new("splitw", ["-h", "{ display-message -p true }"])
+                        .with_command_blocks([1])
+                        .with_source(crate::SourceSpan {
+                            source: "test.conf".to_owned(),
+                            line: 4,
+                            column: 2,
+                        }),
+                ],
                 repeat: false,
                 note: Some("Split right".to_owned()),
             },
@@ -1364,7 +1373,12 @@ mod tests {
             .find(|binding| binding.key == "|")
             .expect("the | binding is published");
         assert_eq!(pipe.commands[0].name, "split-window");
-        assert_eq!(pipe.commands[0].args, vec!["-h".to_owned()]);
+        assert_eq!(
+            pipe.commands[0].args,
+            vec!["-h".to_owned(), "{ display-message -p true }".to_owned()]
+        );
+        assert!(pipe.commands[0].argument_is_command_block(1));
+        assert_eq!(pipe.commands[0].source, None);
         assert_eq!(pipe.note.as_deref(), Some("Split right"));
         let f1 = table("root")
             .bindings

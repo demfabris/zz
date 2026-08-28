@@ -96,15 +96,18 @@ rendered command and repeat bit or requires a named `binding:` divergence.
 The gate does not prove that the runtime parser applies each inventoried `args_parse` rule,
 open-ended or dynamic context-format names, nonconstant format behavior, hook production, runtime
 behavior for shared bindings, or consumer truth for option `BEHAVES`.
-`tracker.semantic-coverage` owns those six blind spots. Its 12 `args-parse:` items name the
+`tracker.semantic-coverage` owns those six blind spots. Its command-specific `args-parse:` items name the
 implemented callback commands; `choose-client` and `switch-mode` remain covered by their
-unimplemented command items. Shared command-flag diagnostics closed on 2026-08-28. One
+unimplemented command items. Protocol v84 closes the first runtime rule: `if-shell` preserves
+unquoted typed branches across source-file and Control parsing, rejects typed conditions and option
+values before effects, and leaves quoted braces as strings. Eleven `args-parse:` items remain.
+Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option
 diagnostics, then stops scanning at its positional-session extension. The focused differential
 compares 516 probes against both zz and the pin, including unknown and invalid flags, help usage,
-missing values, required-value absorption, and optional-value lookahead. Whole-command-group
-prevalidation and custom `args_parse` behavior remain separate tracker work. Differential scenarios,
+missing values, required-value absorption, and optional-value lookahead. Parser-group atomicity and
+the remaining custom `args_parse` behavior stay separate tracker work. Differential scenarios,
 attached-client fixtures, unit tests, and manual GUI checks supply behavioral evidence.
 
 The [2026-08-22 CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)

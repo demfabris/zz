@@ -11,7 +11,7 @@ tags:
 - prediction
 - roaming
 - design-plan
-timestamp: 2026-08-15T00:00:00Z
+timestamp: 2026-08-28T00:00:00-03:00
 ---
 
 # Overview
@@ -32,8 +32,8 @@ timestamp: 2026-08-15T00:00:00Z
 > behind `Endpoint::parse`. Everything below is the design record as of 2026-07-31.
 >
 > **Status (2026-08-13): partially retired.** QUIC/zstd/predictor/egress-splice are gone. Surviving
-> transport-independent pieces and `zz attach` are current. The live wire is protocol v55 over a
-> unix socket or `ssh -L`, documented in [wire-protocol](/protocol/wire-protocol.md). Historical
+> transport-independent pieces and `zz attach` are current. The live wire version is published in
+> [wire-protocol](/protocol/wire-protocol.md). Historical
 > record of the 2026-07-31 campaign follows. M0 landed 2026-07-16 (commits
 > `6e6509c`, `7e5410c`): `ZZ_SOCKET`/global `--socket` overrides, the monomorphized `Transport`
 > trait seam in `crates/zz-daemon/src/transport.rs`, the `measure_attach` example, and

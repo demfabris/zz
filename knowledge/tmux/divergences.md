@@ -215,8 +215,29 @@ overrides so `list-commands` and completion continue to describe zz's implemente
 
 The strict three-step `smoke/command-flag-errors` fixture compares 516 probes on each server. It
 contains 513 exact failures and three required-value absorption successes, then checks pane,
-buffer, file, binding, and hook sentinels. Custom `args_parse` callbacks, semantic value validation,
-and whole-command-group prevalidation remain under their existing owners.
+buffer, file, binding, and hook sentinels. The remaining 11 custom `args_parse` command items,
+semantic value validation, and parser-group atomicity stay under their existing owners.
+
+## `if-shell` argument blocks
+
+The first custom callback rule closed on 2026-08-28. Protocol v84 carries zero-based lexical
+command-block positions with each `CommandInvocation`. An unquoted `{ ... }` branch remains typed
+through source-file parsing, Control transport, user aliases, bindings, hooks, and stored-command
+printing. Quoted brace text remains a string and is reparsed as such when selected.
+
+For `if-shell`, the condition and option values must be strings; zero-based branch positions 1 and
+2 accept either a string or a typed block. A typed condition, typed `-t` value, or typed fourth
+positional produces the pin's exact diagnostic before effects. Format and foreground shell routes
+execute typed true and false branches, and the background route retains the same type contract.
+An invalid plain `bind-key` replacement leaves the previous binding intact, reports bare stderr
+with status 1, and does not open a replacement view. Plain command tails retain typed positions
+across command chains, and stored printing keeps typed branches unquoted. The strict three-step
+`smoke/args-parse-if-shell` scenario runs 12 internal checks on both source-file and Control paths,
+including the canonical name, built-in alias, quoted-brace stderr placement, stored printing, and
+the no-mutation case. It finishes with `ARGS_PARSE_IF_SHELL=clean:12` on both servers.
+
+This closure does not claim tmux's eager whole-file construction timing for every nested command
+list. That broader parser-group contract remains separately tracked.
 
 ## Accepted grammar divergence evidence
 

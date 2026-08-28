@@ -8,13 +8,14 @@ use std::{
 };
 
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, ClientId,
-    CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
-    DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId, PaneKindSnapshot,
-    PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId, catalog_command_spec,
-    command_specs, normalize_browser_profile_name, parse_tmux_options, resolve_command,
+    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, COMMAND_ARGS_PARSE_BEHAVES,
+    ChooseTreeKind, ClientId, CommandInvocation, CommandPromptMode, CommandPromptType,
+    CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
+    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
+    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId,
+    PaneKindSnapshot, PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId,
+    catalog_command_spec, command_specs, normalize_browser_profile_name,
+    parse_tmux_command_options, parse_tmux_options, resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
@@ -3016,7 +3017,7 @@ impl MuxEngine {
             return CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Multiple);
         }
         let mut expanded = commands.remove(0);
-        expanded.args.extend(command.args.iter().cloned());
+        expanded.append_args(command.clone());
         expanded.source.clone_from(&command.source);
         CommandAliasResolution::Expanded(expanded)
     }
@@ -3117,7 +3118,7 @@ impl MuxEngine {
             "display-message" => self.display_message(context, &command.args, hooks)?,
             "display-panes" => self.display_panes(context, &command.args)?,
             "clear-history" => self.clear_history(context, &command.args)?,
-            "bind-key" => self.bind_key(&command.args)?,
+            "bind-key" => self.bind_key(command)?,
             "unbind-key" => self.unbind_key(&command.args)?,
             "list-keys" => self.list_keys(context, &command.args, hooks)?,
             "list-commands" => self.list_commands(context, &command.args, hooks)?,
@@ -6424,7 +6425,8 @@ impl MuxEngine {
         }))
     }
 
-    fn bind_key(&mut self, args: &[String]) -> Result<Execution, ServerError> {
+    fn bind_key(&mut self, command: &CommandInvocation) -> Result<Execution, ServerError> {
+        let args = &command.args;
         let (options, positional) = parse_command_options("bind-key", args)?;
         let table = key_table(&options);
         let repeat = options.has("-r");
@@ -6434,7 +6436,8 @@ impl MuxEngine {
             .filter(|key| key != "None")
             .ok_or_else(|| ServerError::InvalidCommand(format!("unknown key: {key}")))?;
         required_arg(&positional, 1, "command")?;
-        let commands = bound_commands(self, &positional[1..])?;
+        let tail_start = args.len() - positional.len() + 1;
+        let commands = bound_commands(self, command, tail_start)?;
         self.keys.bind(
             table,
             &key,
@@ -13138,9 +13141,10 @@ fn copy_selection_action(
 // reparsed, so a mutation after config load can change the payload.
 fn bound_commands(
     engine: &MuxEngine,
-    tail: &[String],
+    owner: &CommandInvocation,
+    start: usize,
 ) -> Result<Vec<CommandInvocation>, ServerError> {
-    let mut commands = if let [argument] = tail
+    let mut commands = if let [argument] = &owner.args[start..]
         && let Some(body) = crate::parser::command_block_body(argument)
     {
         let parsed = engine.parse_config("<bind-key>", body);
@@ -13150,17 +13154,13 @@ fn bound_commands(
         parsed
             .commands
             .into_iter()
-            .map(|command| CommandInvocation::new(command.name, command.args))
+            .map(|mut command| {
+                command.source = None;
+                command
+            })
             .collect::<Vec<_>>()
     } else {
-        let commands = zz_protocol::split_command_words(tail.iter().cloned())
-            .into_iter()
-            .filter_map(|words| {
-                let mut words = words.into_iter();
-                let name = words.next()?;
-                Some(CommandInvocation::new(name, words))
-            })
-            .collect::<Vec<_>>();
+        let commands = owner.split_commands_from(start);
         if commands.is_empty() {
             return Err(ServerError::InvalidCommand(
                 "bind-key command chain contains an empty command".to_owned(),
@@ -13292,6 +13292,20 @@ fn expand_stored_aliases(
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
     let name = canonical_command(&command.name);
     if let Some(spec) = catalog_command_spec(name) {
+        if COMMAND_ARGS_PARSE_BEHAVES.contains(&spec.name) {
+            let result = parse_tmux_command_options(spec, command);
+            if owner == "bind-key" {
+                if let Err(error) = result {
+                    parse_tmux_options(spec, &command.args)?;
+                    return Err(match error {
+                        ServerError::CommandParse(message) => ServerError::InvalidCommand(message),
+                        error => error,
+                    });
+                }
+            } else {
+                result?;
+            }
+        }
         let (options, positional) = parse_options_for_spec(&command.args, spec)?;
         validate_options(name, spec, &options)?;
         spec.validate_positional_minimum(positional.len())?;
@@ -13352,14 +13366,18 @@ fn tmux_command_print(command: &CommandInvocation) -> String {
 
     let mut flags = BTreeMap::<char, usize>::new();
     let mut long_flags = BTreeMap::<&str, usize>::new();
-    let mut valued = BTreeMap::<char, Vec<&str>>::new();
-    let mut long_valued = BTreeMap::<&str, Vec<&str>>::new();
+    let mut valued = BTreeMap::<char, Vec<(usize, &str)>>::new();
+    let mut long_valued = BTreeMap::<&str, Vec<(usize, &str)>>::new();
     let mut positional = Vec::new();
-    let mut args = command.args.iter().map(String::as_str);
+    let mut args = command
+        .args
+        .iter()
+        .enumerate()
+        .map(|(index, value)| (index, value.as_str()));
     let mut parsing_flags = true;
-    while let Some(arg) = args.next() {
+    while let Some((index, arg)) = args.next() {
         if !parsing_flags {
-            positional.push(arg);
+            positional.push((index, arg));
             continue;
         }
         if arg == "--" {
@@ -13376,25 +13394,26 @@ fn tmux_command_print(command: &CommandInvocation) -> String {
                 .find(|option| option.name.strip_prefix("--") == Some(name));
             match (option, attached) {
                 (Some(option), Some(value)) if option.value.is_some() && !value.is_empty() => {
-                    long_valued.entry(option.name).or_default().push(value);
-                }
-                (Some(option), None) if option.value.is_some() => {
                     long_valued
                         .entry(option.name)
                         .or_default()
-                        .push(args.next().unwrap_or(""));
+                        .push((index, value));
+                }
+                (Some(option), None) if option.value.is_some() => {
+                    let value = args.next().unwrap_or((index, ""));
+                    long_valued.entry(option.name).or_default().push(value);
                 }
                 (Some(option), None) => *long_flags.entry(option.name).or_default() += 1,
                 _ => {
                     parsing_flags = false;
-                    positional.push(arg);
+                    positional.push((index, arg));
                 }
             }
             continue;
         }
         let Some(cluster) = arg.strip_prefix('-').filter(|rest| !rest.is_empty()) else {
             parsing_flags = false;
-            positional.push(arg);
+            positional.push((index, arg));
             continue;
         };
         for (offset, flag) in cluster.char_indices() {
@@ -13404,15 +13423,15 @@ fn tmux_command_print(command: &CommandInvocation) -> String {
                     if rest.is_empty() {
                         *flags.entry(flag).or_default() += 1;
                     } else {
-                        valued.entry(flag).or_default().push(rest);
+                        valued.entry(flag).or_default().push((index, rest));
                     }
                     break;
                 }
                 Some(option) if option.value.is_some() => {
                     let value = if rest.is_empty() {
-                        args.next().unwrap_or("")
+                        args.next().unwrap_or((index, ""))
                     } else {
-                        rest
+                        (index, rest)
                     };
                     valued.entry(flag).or_default().push(value);
                     break;
@@ -13436,32 +13455,42 @@ fn tmux_command_print(command: &CommandInvocation) -> String {
         }
     }
     for (flag, values) in &valued {
-        for value in values {
+        for (index, value) in values {
             output.push_str(" -");
             output.push(*flag);
             output.push(' ');
-            output.push_str(&tmux_args_escape(value));
+            output.push_str(&tmux_command_argument_print(command, *index, value));
         }
     }
     for (flag, values) in &long_valued {
-        for value in values {
+        for (index, value) in values {
             output.push(' ');
             output.push_str(flag);
             output.push(' ');
-            output.push_str(&tmux_args_escape(value));
+            output.push_str(&tmux_command_argument_print(command, *index, value));
         }
     }
-    for arg in positional {
+    for (index, arg) in positional {
         output.push(' ');
-        output.push_str(&tmux_args_escape(arg));
+        output.push_str(&tmux_command_argument_print(command, index, arg));
     }
     output
 }
 
-fn format_command_arguments(arguments: &[String]) -> String {
-    arguments
+fn tmux_command_argument_print(command: &CommandInvocation, index: usize, value: &str) -> String {
+    if command.argument_is_command_block(index) {
+        value.to_owned()
+    } else {
+        tmux_args_escape(value)
+    }
+}
+
+fn format_command_arguments(command: &CommandInvocation) -> String {
+    command
+        .args
         .iter()
-        .map(|argument| tmux_args_escape(argument))
+        .enumerate()
+        .map(|(index, argument)| tmux_command_argument_print(command, index, argument))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -13588,7 +13617,7 @@ pub fn hook_format_variables(command: &CommandInvocation, hook: &str) -> BTreeMa
         ("hook".to_owned(), hook.to_owned()),
         (
             "hook_arguments".to_owned(),
-            format_command_arguments(&command.args),
+            format_command_arguments(command),
         ),
     ]);
     let name = canonical_command(&command.name);
@@ -28430,6 +28459,41 @@ mod tests {
                     "set-option",
                     &[
                         "-s",
+                        "command-alias[16]",
+                        "typed-if=if-shell -F 1 { display-message -p true }",
+                    ],
+                ),
+            )
+            .expect("typed alias write");
+        let invocation = CommandInvocation::new("typed-if", ["{ display-message -p false }"])
+            .with_command_blocks([0]);
+        let CommandAliasResolution::Expanded(expanded) = engine.resolve_command_alias(&invocation)
+        else {
+            panic!("typed alias must expand");
+        };
+        assert_eq!(
+            expanded.args,
+            [
+                "-F",
+                "1",
+                "{ display-message -p true }",
+                "{ display-message -p false }"
+            ]
+        );
+        assert!(expanded.argument_is_command_block(2));
+        assert!(expanded.argument_is_command_block(3));
+        assert_eq!(
+            format_command(&expanded),
+            "if-shell -F 1 { display-message -p true } { display-message -p false }"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
                         "command-alias[11]",
                         "list-sessions=display-message -p shadowed",
                     ],
@@ -28818,6 +28882,172 @@ mod tests {
                 .unwrap()
                 .output,
             "split-window -h"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F8", "display-message", "preserved"]),
+            )
+            .expect("baseline typed binding");
+        let error = engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    [
+                        "F8",
+                        "if-shell",
+                        "-F",
+                        "{ display-message condition }",
+                        "display-message branch",
+                    ],
+                )
+                .with_command_blocks([3]),
+            )
+            .expect_err("unwrapped typed if-shell condition in binding");
+        assert_eq!(
+            error,
+            ServerError::InvalidCommand(
+                "command if-shell: argument 1 must be \"string\"".to_owned()
+            )
+        );
+        let error = engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &[
+                        "F8",
+                        "{ if-shell -F { display-message condition } 'display-message branch' }",
+                    ],
+                ),
+            )
+            .expect_err("typed if-shell condition in binding");
+        assert_eq!(
+            error,
+            ServerError::InvalidCommand(
+                "command if-shell: argument 1 must be \"string\"".to_owned()
+            )
+        );
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                    ),
+                )
+                .expect("preserved typed binding")
+                .output
+                .lines()
+                .any(|line| line == "F8=display-message preserved")
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "session-closed", "display-message preserved"],
+                ),
+            )
+            .expect("baseline typed hook");
+        let error = engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &[
+                        "-g",
+                        "session-closed",
+                        "{ if-shell -F { display-message condition } 'display-message branch' }",
+                    ],
+                ),
+            )
+            .expect_err("typed if-shell condition in hook");
+        assert_eq!(
+            error,
+            ServerError::CommandParse("command if-shell: argument 1 must be \"string\"".to_owned())
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "session-closed"]),
+                )
+                .expect("preserved typed hook")
+                .output,
+            "session-closed[0] display-message preserved"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &[
+                        "F9",
+                        "{ if-shell -F 1 { display-message -p true } { display-message -p false } }",
+                    ],
+                ),
+            )
+            .expect("valid typed if-shell binding");
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                    ),
+                )
+                .expect("printed typed if-shell binding")
+                .output
+                .lines()
+                .any(|line| {
+                    line == "F9=if-shell -F 1 { display-message -p true } { display-message -p false }"
+                })
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    [
+                        "-T",
+                        "prefix",
+                        "F10",
+                        "display-message",
+                        "first;",
+                        "if-shell",
+                        "-F",
+                        "1",
+                        "{ display-message -p true }",
+                        "{ display-message -p false }",
+                    ],
+                )
+                .with_command_blocks([8, 9]),
+            )
+            .expect("valid unwrapped typed if-shell binding chain");
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                    ),
+                )
+                .expect("printed unwrapped typed if-shell binding chain")
+                .output
+                .lines()
+                .any(|line| {
+                    line
+                        == "F10=display-message first \\; if-shell -F 1 { display-message -p true } { display-message -p false }"
+                })
         );
     }
 

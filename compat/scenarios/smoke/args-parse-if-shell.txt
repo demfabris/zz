@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-if-shell.sh ~/args-parse-if-shell.sh
+out: set-environment -gu ARGS_PARSE_IF_SHELL
+run-shell 'sh ~/args-parse-if-shell.sh'
+out: show-environment -g ARGS_PARSE_IF_SHELL

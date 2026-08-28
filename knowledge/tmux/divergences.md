@@ -860,7 +860,7 @@ format differences.
 | `session_group` | Session groups are unsupported, so no group name exists. | **silent** |
 | `session_group_attached_list` | Session groups are unsupported, so no grouped attachment list exists. | **silent** |
 | `session_group_list` | Session groups are unsupported, so no member list exists. | **silent** |
-| `session_path` | Sessions retain an internal working directory, but the format engine does not expose it as `session_path`. | **silent**, tracked under `formats.session-runtime` |
+| `session_path` | Sessions retain an internal working directory, but the format engine does not expose it as `session_path`. | **silent**, tracked under `formats.session-path` |
 | `tree_mode_format` | No tmux tree-mode row formatter; zz's tree chooser is native. | **silent** |
 | `window_activity` | Mux state tracks a monotonic activity point for `-O activity` list and chooser sorting, but does not expose a timestamp through this format variable; `W/t` retains window-index order. | **silent**, bounded |
 | `window_offset_x` | Client viewport X offset is not fed into window formats. | **silent** |

@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10S DELIVERED: LIVE RERANK REQUIRED**
+> Campaign state: **SLICE 10T FROZEN: TARGET SESSION PATH**
 >
-> Tracker resolution progress: **64.7% (121 of 187 known groups)**
+> Tracker resolution progress: **64.4% (121 of 188 known groups)**
 >
-> Audited pre-close base: **2026-08-28** at `6e076028e867e67bbbc0a988224ec0c5cf42f1aa`
+> Committed milestone base: **2026-08-28** at `8e0ef67fd1866b48455e00e066a11b951ef1dd7b`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited pre-close base | `6e076028e867e67bbbc0a988224ec0c5cf42f1aa` |
-| Delivery | The current local milestone closes 10s on top of its committed plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Committed milestone base | `8e0ef67fd1866b48455e00e066a11b951ef1dd7b` |
+| Delivery | Local `main` contains the committed 10s closure and frozen 10t plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10s is complete; run a live full-registry rerank before freezing its successor |
-| Live registry | 87 active groups, 593 active items, 100 closed records |
-| Active status | 46 open, 20 blocked, 21 accepted |
+| Campaign point | Slice 10t is frozen on target-session `session_path`; `session_active` remains separate |
+| Live registry | 88 active groups, 593 active items, 100 closed records |
+| Active status | 47 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10s closure descends from the committed plan above. Resolve the commit
+The 10t plan descends from the committed 10s milestone above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(100 + 21) / (100 + 87) = 121 / 187 = 64.7%
+(100 + 21) / (100 + 88) = 121 / 188 = 64.4%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -249,7 +249,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10p proof repair | Live-popup focus suppression, dead `-k` focus-close, and C-locale frame proof | `c909406` |
 | 10q | Per-client no-detach-on-destroy fallback and attached proof | `8310fb7` |
 | 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | `02bb4a1` |
-| 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | Current milestone; resolve after commit |
+| 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | `8e0ef67` |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -390,22 +390,51 @@ changes no runtime value, fixes no active `format:` item, expands no open-ended 
 context vocabulary, registers no option consumer, and changes neither the oracle nor protocol.
 Existing format owners retain responsibility for value and context parity.
 
-## Non-frozen forecast after 10s
+## Frozen slice: 10t target session path
 
-No successor is frozen. Run a full live rerank first; the table records the previous rerank's
-strongest successors, not permission to skip that audit.
+The full post-10s rerank first surfaced `formats.session-runtime`, but independent source and oracle
+audits disproved its shared-client premise. The live registry now separates `formats.session-path`
+from the residual `formats.session-runtime`. Pinned `session_path` reads only the selected session's
+stored cwd at expansion time. Pinned `session_active` is empty without a target session or format
+client; otherwise it is `1` exactly when that client is attached to the target and `0` for an
+unattached client or one attached elsewhere. zz does not yet represent that three-state context
+across all format producers. Combining the two would turn a direct value repair into a hidden
+caller policy refactor.
+
+Slice 10t therefore freezes only `formats.session-path/format:session_path`:
+
+- `#{session_path}` resolves from the selected session's retained working directory, independent of
+  the invoking client's selected session;
+- targeted display and list-session rows return the matching session's path, while a missing
+  session or missing retained path expands to empty;
+- lexical UTF-8 paths remain unchanged, including `..`, spaces, and glob metacharacters; the format
+  layer does not canonicalize or expand the stored value a second time;
+- an existing `attach-session -c` update is visible on the next expansion without changing cwd
+  mutation semantics;
+- the required 198-name manifest partition moves from 92 direct, 32 delegated, and 74 active gaps
+  to exactly 93 direct, 32 delegated, and 73 active gaps;
+- focused mux tests prove the zz-only missing-retained-state fallback, while a pinned differential
+  proves missing-session output, two target and list rows, lexical retention, and
+  `attach-session -c` update visibility.
+
+The slice changes no protocol, snapshot, daemon client selection, session-cwd mutation, startup
+source provenance, non-UTF-8 path policy, format vocabulary, or other format value. In particular,
+`format:session_active` stays live under its own later three-state producer audit.
+
+## Candidate queue after 10t
+
+The table records the fresh rerank, not permission to skip the next audit.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |
-| 1 | `semantic:source-file-startup-initial-client-cwd` | Recheck the newly bounded cold-bootstrap seam for startup-relative source paths |
-| 2 | `semantic:config-source-group-parse-abort` | Recheck config and source replay atomicity using the 10r preparation machinery |
-| 3 | `semantic:tracker-open-context-format-vocabulary` | Discover and register open context formats |
-| 4 | `semantic:tracker-option-consumer-registration` | Discover and register option consumers |
-| 5 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
-| 6 | `semantic:source-file-sourced-hook-client-cwd` | Preserve the invoking client when a sourced hook re-enters source replay |
-| 7 | Remaining `copy-mode.action-fidelity` items | Cursor, logical line, goto, selection, jump/prompt, and copy effects as separate slices |
-| 8 | `keys.copy-mode-unsupported-default-actions` | Add seven defaults only after their actions exist |
-| 9 | `copy-mode.command-fidelity` and dependent binding or prompt work | Resolve or reclassify the interactive-refresh dependency first |
+| 1 | `semantic:source-file-startup-initial-client-cwd` | Carry the launching cwd through the bounded cold-bootstrap provenance seam |
+| 2 | `format:session_active` | Model no client, unattached client, and attached session across every format producer |
+| 3 | File-wide config parse unit | Combine warm preparation, config/source construction, alias snapshots, and the stale first-error item honestly |
+| 4 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
+| 5 | `semantic:tracker-open-context-format-vocabulary` | Discover and register the omitted open context formats |
+| 6 | `semantic:control-mode-typed-config-diagnostics` | Replace prose sniffing with typed config diagnostics |
+| 7 | `semantic:client-resized-post-geometry-context` | Emit resize hooks after the matching geometry reaches the daemon |
+| 8 | `format:window_activity` | Add a real activity timestamp without grouping per-client viewport formats |
 
 The active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are

@@ -17,11 +17,11 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **87**. Classified items: **593**.
+Tracked gap groups: **88**. Classified items: **593**.
 
-- Status: open: 46, blocked: 20, accepted: 21.
-- Decision: adopt: 51, native: 15, park: 15, never: 6.
-- Priority: next: 2, later: 64, none: 21.
+- Status: open: 47, blocked: 20, accepted: 21.
+- Decision: adopt: 52, native: 15, park: 15, never: 6.
+- Priority: next: 3, later: 64, none: 21.
 - Closed history entries: 100.
 - Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 74, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 111, presentation: 8, protocol: 2.
 
@@ -50,6 +50,7 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `formats.session-path` | Expose the target session working path | adopt | open | easy | mux | scripts | none |
 | `mux.chain-parse-abort` | Abort invalid command groups before effects | adopt | open | medium | mux | scripts | none |
 | `tracker.semantic-coverage` | Close the remaining semantic discovery blind spots | adopt | open | medium | protocol | scripts | none |
 
@@ -64,9 +65,9 @@ structure as proof.
 | `clients.path-encoding` | Preserve non-UTF-8 client facts | adopt | open | medium | protocol | scripts | none |
 | `config.parser-edge-cases` | Close config parser edge cases | adopt | open | medium | mux | scripts | none |
 | `control-mode.diagnostic-typing` | Type Control-mode config diagnostics | adopt | open | medium | protocol | scripts | none |
-| `display-message.format-listing` | List display-message format variables | adopt | open | medium | daemon | scripts, admin | formats.mouse-context, formats.pane-process, formats.pane-runtime, formats.session-runtime, formats.terminal-cells, formats.terminal-runtime, formats.window-runtime |
+| `display-message.format-listing` | List display-message format variables | adopt | open | medium | daemon | scripts, admin | formats.mouse-context, formats.pane-process, formats.pane-runtime, formats.session-path, formats.session-runtime, formats.terminal-cells, formats.terminal-runtime, formats.window-runtime |
 | `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | medium | mux | scripts | none |
-| `formats.session-runtime` | Expose client-derived session formats | adopt | open | medium | protocol | scripts | none |
+| `formats.session-runtime` | Expose format-client session activity | adopt | open | medium | mux | scripts | none |
 | `formats.window-runtime` | Expose remaining window formats | adopt | open | medium | daemon | scripts, remote | none |
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `hooks.queue` | Produce after-queue hooks | adopt | open | medium | daemon | scripts | none |
@@ -603,7 +604,7 @@ The format expander resolves named lookups but exposes no ordered enumeration of
 - Owner: `daemon`
 - User impact: scripts, admin
 - Items: `flag:display-message:-a`, `semantic:display-message-format-listing`
-- Depends on: `formats.mouse-context`, `formats.pane-process`, `formats.pane-runtime`, `formats.session-runtime`, `formats.terminal-cells`, `formats.terminal-runtime`, `formats.window-runtime`
+- Depends on: `formats.mouse-context`, `formats.pane-process`, `formats.pane-runtime`, `formats.session-path`, `formats.session-runtime`, `formats.terminal-cells`, `formats.terminal-runtime`, `formats.window-runtime`
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:crates/zz-mux/src/formats.rs`
@@ -810,21 +811,42 @@ Pinned tmux refreshes session activity when a suspended tty client wakes or unlo
 - Acceptance:
   - `zz keeps activity on its native attach and input lifecycle and does not fabricate a tmux MSG_WAKEUP or MSG_UNLOCK refresh without a suspended-client protocol state.`
 
-### `formats.session-runtime`: Expose client-derived session formats
+### `formats.session-path`: Expose the target session working path
 
-Both values depend on the attached client's selected session and working directory.
+Pinned tmux returns the selected session's stored cwd, while zz already retains the same session state but maps session_path to an empty format backing.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `easy`
+- Owner: `mux`
+- User impact: scripts
+- Items: `format:session_path`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-mux/src/model.rs`
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `Session path expands to the selected session's exact retained UTF-8 working directory at expansion time in target and list contexts, while a missing session or missing retained zz path expands to empty.`
+
+### `formats.session-runtime`: Expose format-client session activity
+
+The mux can compare one attached session with a target, but its format context cannot distinguish no format client from an unattached format client. Producers also select or suppress the format client differently, so the backing stays empty until that three-state caller audit is complete.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
-- Owner: `protocol`
+- Owner: `mux`
 - User impact: scripts
-- Items: `format:session_active`, `format:session_path`
+- Items: `format:session_active`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `Session active and working path have target-aware expansion from the shared attached-client context.`
+  - `Session active is empty without a target session or format client; otherwise it is 1 exactly when the format client is attached to the target session and 0 for an unattached client or a client attached elsewhere, while clientless list and filter producers remain empty.`
 
 ### `formats.terminal-cells`: Expose terminal cell formats
 
@@ -1724,7 +1746,7 @@ All six `args_parse` rules, the pinned hook producer partition, the shared defau
 | `choosers.presentation-consistency` | 2026-08-24 | Protocol v72 appends a durable filter_no_matches bit to both chooser states. A full daemon rebuild sets it only when an explicit static -f filter produced no rows and the chooser restored its unfiltered rows; a matching filter or no filter clears it, while incremental search and selection deltas preserve it. TUI and GUI render the native status `filter: no matches` without replacing the selectable fallback rows. The GUI reserves its 46px shortcut cell for every rendered row only when at least one rendered row has a nonempty key, and removes the cell for a fully keyless list, matching the TUI's list-level gutter decision. The real attached-client fixture requires the status independently on the current tree and buffer chooser screens for both zz and pinned tmux. Native layout differences remain under choosers.native-presentation, while key vocabulary remains under choosers.command-flags. | `resource:crates/zz-protocol/src/message.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-tui/src/render.rs`, `resource:crates/zz-ui/src/chooser.rs`, `file:crates/zz-client/src/core.rs`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/choose-tree.md` |
 | `clients.attach-environment` | 2026-08-27 | Protocol v82 appends a bounded environment snapshot to ClientHello for local and SSH-forwarded clients. The client sorts and deduplicates up to 4,096 valid UTF-8 NAME=VALUE entries within a 4 MiB aggregate limit; the codec enforces the same count, entry, syntax, and aggregate bounds, and debug output reports only the entry count. The daemon retains one immutable snapshot per connection and removes it on unregister. Fresh new-session copies names selected by the effective update-environment array from the invoking client unless -E, writes unset markers for selected missing names, expands wildcard patterns, preserves empty values, replaces selected hidden entries as ordinary values, then applies repeated -e overlays. Existing new-session -A follows attach behavior, honors -E, and ignores -e. attach-session refreshes only after target and terminal preflight, while the native attach path and Control clients use the same update. The exact native attach parser accepts separate or bundled -E and routes the initial attachment through the daemon command path, preserving the session environment; its automatic reconnect behavior remains unchanged. switch-client refreshes from the selected target client's snapshot rather than an external command caller; -T exits before refresh and -E preserves the session environment. Existing processes keep their startup environment, future panes consume the refreshed session map, and the session values survive client disconnect. Focused protocol, mux, and daemon tests plus the full attached-client differential pass against pinned tmux d77c9dc6, including exact, missing, empty, wildcard, hidden, Control, PTY, -A, -E, targeted-switch, and disconnect cases. A native PTY integration test independently proves -E preservation followed by ordinary attach refresh. Non-UTF-8 Unix environment entries remain visible under clients.path-encoding rather than being substituted. | `resource:crates/zz-protocol/src/message.rs`, `resource:crates/zz-protocol/src/terminal_codec.rs`, `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-daemon/src/client.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/model.rs`, `resource:crates/zz/src/lib.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `clients.attach-flags` | 2026-08-27 | attach-session -f and attaching new-session -f now retain the final comma-separated client-flag mutation string in typed daemon state. Common flags are read-only, ignore-size, active-pane, and no-detach-on-destroy; Control clients also apply no-output, wait-exit, and pause-after with the pin's unsigned numeric-prefix and wrapping behavior. Unknown and empty names are ignored, ! clears except that read-only cannot clear itself, repeated -f keeps the last argument, missing targets do not mutate, terminal-open failure retains an existing-target mutation, detached creation ignores flags, and successful -A follows the attach path. State survives session switches and detach, clears on client unregister or replacement, and exact native and TUI reconnect paths replay only the mutation actually applied by a successful attaching command. Protocol v81 and the wire schema are unchanged. The fresh debug attached-client differential passes against the pinned tmux binary, including the accepted zz divergence that -r adds only read-only rather than tmux's coupled ignore-size. Flag retention and ignore-size consumption closed in this slice; the later clients.no-detach-on-destroy closure consumes the destruction fallback, while active-pane behavior remains under clients.active-pane. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/client.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-tui/src/lib.rs`, `resource:crates/zz-tui/src/app.rs`, `resource:crates/zz/src/lib.rs`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
-| `clients.attach-session-cwd` | 2026-08-26 | Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags and retained-client sizing later closed under clients.attach-flags and clients.attach-sizing; session_path remains under formats.session-runtime. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/model.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz/src/lib.rs`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/conf-parser.md`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
+| `clients.attach-session-cwd` | 2026-08-26 | Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags and retained-client sizing later closed under clients.attach-flags and clients.attach-sizing; session_path remains under formats.session-path. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/model.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz/src/lib.rs`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/conf-parser.md`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `clients.attach-sizing` | 2026-08-27 | resize-window -A and -a now perform one-shot component-wise largest and smallest aggregation over eligible retained client geometry, with full target and numeric validation before sizing and -A winning when both flags are present. Interactive clients use retained outer terminal size minus their effective status rows, GUI clients fall back to projected full-window pane geometry, and Control clients count only after refresh-client -C; a per-window Control size overrides its global size and hard-clamps each aggregate dimension. Detached, unrelated-session, and Command clients do not count. Explicit ignore-size follows tmux's global fallback rule: ignored clients are excluded while any attached unignored client exists anywhere, then become eligible when every attached client is ignored. The same rule and Control ceilings now apply to automatic latest, largest, and smallest modes. No eligible target client uses the target session's effective default-size. Final dimensions clamp to 1 through 10000, and the command stores an immediate durable manual extent that later client changes cannot overwrite. The multi-client attached differential uses crossed rectangles to prove component-wise extrema, unrelated exclusion, numeric override, -A precedence, manual freeze, mixed and all-global ignore-size behavior, and default-size fallback against pinned tmux. Focused daemon tests cover Control ceilings, status subtraction, GUI projection, automatic modes, and size limits. The fixture also exposed and closed a pre-existing refresh-client -f seam so targeted Interactive clients now mutate common retained flags. The implementation uses one internal mux effect with no protocol, wire, client, or snapshot-schema change. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `clients.context-formats` | 2026-08-27 | Protocol v83 appends the originating process id to ClientHello and retains it with existing per-connection tty, environment, geometry, colour scheme, requested flags, focus, attachment, activity, and creation state. The daemon derives the pin's 26 client format facts plus session_last_attached from that retained state, the active key table, Control geometry, terminal cell metrics, and reliable-mailbox byte counters. Interactive clients expose tty, size, cell, colour, terminal-feature, theme, UTF-8, identity, and session values. client_flags reports attached, the current focused state, requested flags, Control mode state, and UTF-8 in pinned order. Piped Control clients keep tmux's defined empty height, cell, colour, feature, type, theme, and tty fields while explicit refresh-client -C supplies width; terminal-backed Control can expose a retained tty. Unavailable terminal type remains empty, missing TERM becomes unknown, zero counters remain numeric, and clientless contexts retain only session facts. One shared client-fact selection path serves list-clients, ordinary commands, foreground inserted commands, status rendering, and display-message, including the highest-activity target-session client with oldest-created tie precedence when -c is absent. The real attached-client differential passes against pinned tmux d77c9dc6 for list, explicit and implicit display, an attached key binding through run-shell -C, status, Interactive empties, Control empties, and session_last_attached. The CLI suite checks flags by membership so pinned focused and UTF-8 additions do not become false regressions. | `resource:crates/zz-protocol/src/message.rs`, `resource:crates/zz-protocol/src/terminal_codec.rs`, `resource:crates/zz-daemon/src/client.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-daemon/src/status.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/attached-client.sh`, `resource:knowledge/protocol/wire-protocol.md`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `clients.cwd-context` | 2026-08-23 | Protocol v72 carries a bounded cwd only for local endpoints; top-level command-client source-file resolves after -F and before globbing. Exact attached session-cwd selection later closed under clients.attach-session-cwd. | `resource:crates/zz-protocol/src/message.rs`, `resource:crates/zz-daemon/src/client.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/attached-client.sh`, `scenario:compat/scenarios/source-file-format.txt` |

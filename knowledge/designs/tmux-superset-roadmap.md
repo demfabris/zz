@@ -38,8 +38,8 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 87 active groups, 593 classified active items, 100 closed groups, and two known
-differentials. Accepted active groups plus closed history resolve 121 of 187 known groups (64.7%).
+The live tracker has 88 active groups, 593 classified active items, 100 closed groups, and two known
+differentials. Accepted active groups plus closed history resolve 121 of 188 known groups (64.4%).
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -389,8 +389,8 @@ The first eight ease ranks have shipped at least one evidence-driven slice:
 - `session_activity` now exposes retained Unix seconds initialized from session creation and refreshed
   by the shared attach and terminal-input funnels. `S/t` and `list-sessions -O activity` use a
   separate logical counter, preserving deterministic same-second MRU order. Sessions now retain an
-  internal cwd, while the client-derived `session_active` and public `session_path` format facts
-  remain under `formats.session-runtime`. Every attach now
+  internal cwd. Public `session_path` now has the separate `formats.session-path` owner, while the
+  format-client-specific `session_active` remains under `formats.session-runtime`. Every attach now
   advances latest geometry independently of `focus-events`; enabled FocusIn uses the same owner
   seam. Read-only rejected native input updates activity and latest geometry without clearing bells,
   while writable chooser input counts once, advances latest geometry, and preserves bells. Chooser

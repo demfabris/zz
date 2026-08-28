@@ -736,6 +736,7 @@
         "formats.mouse-context",
         "formats.pane-process",
         "formats.pane-runtime",
+        "formats.session-path",
         "formats.session-runtime",
         "formats.terminal-cells",
         "formats.terminal-runtime",
@@ -1059,8 +1060,33 @@
       "reason": "Pinned tmux refreshes session activity when a suspended tty client wakes or unlocks. zz has no suspended attached-client state or wake/unlock protocol message; reconnect and reattach already flow through the ordinary attach activity seam."
     },
     {
+      "id": "formats.session-path",
+      "title": "Expose the target session working path",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "easy",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "mux",
+      "items": [
+        "format:session_path"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Session path expands to the selected session's exact retained UTF-8 working directory at expansion time in target and list contexts, while a missing session or missing retained zz path expands to empty."
+      ],
+      "depends_on": [],
+      "reason": "Pinned tmux returns the selected session's stored cwd, while zz already retains the same session state but maps session_path to an empty format backing."
+    },
+    {
       "id": "formats.session-runtime",
-      "title": "Expose client-derived session formats",
+      "title": "Expose format-client session activity",
       "decision": "adopt",
       "status": "open",
       "priority": "later",
@@ -1068,19 +1094,21 @@
       "impact": [
         "scripts"
       ],
-      "owner": "protocol",
+      "owner": "mux",
       "items": [
-        "format:session_active",
-        "format:session_path"
+        "format:session_active"
       ],
       "evidence": [
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Session active and working path have target-aware expansion from the shared attached-client context."
+        "Session active is empty without a target session or format client; otherwise it is 1 exactly when the format client is attached to the target session and 0 for an unattached client or a client attached elsewhere, while clientless list and filter producers remain empty."
       ],
       "depends_on": [],
-      "reason": "Both values depend on the attached client's selected session and working directory."
+      "reason": "The mux can compare one attached session with a target, but its format context cannot distinguish no format client from an unattached format client. Producers also select or suppress the format client differently, so the backing stays empty until that three-state caller audit is complete."
     },
     {
       "id": "formats.terminal-cells",
@@ -2940,7 +2968,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags and retained-client sizing later closed under clients.attach-flags and clients.attach-sizing; session_path remains under formats.session-runtime."
+      "resolution": "Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags and retained-client sizing later closed under clients.attach-flags and clients.attach-sizing; session_path remains under formats.session-path."
     },
     {
       "id": "clients.attach-sizing",

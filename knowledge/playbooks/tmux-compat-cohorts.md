@@ -193,8 +193,8 @@ production consumer.
 
 The accepted post-10s checkpoint remains at 98 scenarios and 1,517 steps. Every ordinary row is
 clean.
-The registry now holds 87 active groups with 593 items and 100 closed records. Its status split is
-46 open, 20 blocked, and 21 accepted, for 64.7% resolution (121 of 187 groups).
+The registry now holds 88 active groups with 593 items and 100 closed records. Its status split is
+47 open, 20 blocked, and 21 accepted, for 64.4% resolution (121 of 188 groups).
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the stored summary SHA-256
@@ -361,7 +361,10 @@ closure is that exception.
 | 10q | Per-client no-detach-on-destroy fallback | Closed under `clients.no-detach-on-destroy` on 2026-08-28 | Complete | The configured primary remains shared, while only flagged clients use the bounded newest-session fallback |
 | 10r | Local cold-start CLI parse abort | Closed under `mux.local-cli-autospawn-parse-abort` on 2026-08-28 | Complete | Static syntax covers 83 implemented and nine parked commands; exact attach, `-N`, post-config preparation, and one-shot generation ownership close before effects |
 | 10s | Nonconstant format behavior partition | Closed under `tracker.nonconstant-format-behavior` on 2026-08-28 | Complete | The single 198-name source table derives 92 mux and 32 daemon behavior registrations against 74 live gaps; an exact daemon test proves its delegated consumers |
-| Post-10s rerank | Startup source cwd and config-group atomicity | Not frozen | Medium | Recheck the newly bounded startup client-cwd seam and config/source group preparation before returning to forecast registrations |
+| 10t | Target session path format | Frozen on `formats.session-path/format:session_path` on 2026-08-28 | Small | Expose the retained target-session cwd and move the source partition to 93 direct, 32 delegated, and 73 live gaps without absorbing `session_active` |
+| Post-10t rerank | Startup initial-client cwd | Not frozen | Medium | Carry the launching cwd through the bounded cold-bootstrap provenance seam for startup-relative sources |
+| Post-rerank | Session-active client context | `format:session_active` | Medium research | Model no format client, an unattached client, and an attached session across each producer before changing the backing |
+| Post-rerank | File-wide config parse unit | Four related active items | Medium-hard | Prepare warm vectors and whole source files under frozen alias state without changing runtime-error queue semantics |
 | Post-rerank forecast | Remaining source-owned tracker registrations | Open context formats, then option consumers | Small research | Register every claimed consumer before broader behavior slices |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | Post-rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -401,15 +404,24 @@ seeds buffer, client, and session facts and resolves all 32 delegated names thro
 `DaemonFormatHooks`. The slice changes no runtime value and claims no context-specific value parity.
 Open context formats and option consumers remain separate.
 
-The rerank also exposed `semantic:source-file-startup-initial-client-cwd` as a potentially bounded
-use of 10r's cold-bootstrap provenance, with `semantic:config-source-group-parse-abort` close behind.
-Before freezing the next milestone, regenerate the report and re-rank every active daily, script,
-remote, or silent-mismatch group. That audit must include attach-dependent work such as
-`buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
-`clients.detach-exec`, `clients.parent-hup-exit`, `display-popup.behavior-fidelity`, and
-`display-menu.behavior-fidelity`. Every row after 10s is a non-frozen dependency forecast,
-not permission to skip a newly unblocked practical gate. Keep formats, hooks, and `active-pane` as
-separate slices.
+The full post-10s rerank first selected `formats.session-runtime`, then its independent source and
+oracle audits disproved the group's shared-client premise. The registry now splits
+`formats.session-path` from the residual `formats.session-runtime`. Pinned `session_path` reads the
+selected session's stored cwd at expansion time. Pinned `session_active` is empty without a target
+or format client; otherwise it is `1` only for a client attached to that target and `0` for an
+unattached client or one attached elsewhere. Slice 10t freezes only `format:session_path`: expose
+the exact retained UTF-8 target-session cwd, prove target and list contexts plus missing-session
+output, the zz-only missing-retained fallback, lexical state, and `attach-session -c` update
+visibility, then change the source partition to 93 direct values, 32 delegated values, and 73 live
+gaps. Do not change client selection or `session_active`.
+
+Startup initial-client cwd won the successor ranking, with the honest file-wide config parse unit
+behind it. The config boundary combines warm generic preparation, config/source construction,
+alias snapshots, and the existing first-error item; a same-line-only repair would encode the wrong
+tmux model. Every row after 10t remains a non-frozen forecast. Before freezing another milestone,
+rerank daily, script, remote, silent, and attach-dependent work including buffer file context,
+source-file cwd variants, detach execution, parent-HUP exit, popup and menu fidelity, and
+`active-pane`.
 
 # Four-seat Codex pipeline
 
@@ -510,10 +522,13 @@ Confirm that slice 10s is closed under `tracker.nonconstant-format-behavior`: 92
 delegated name resolved through the production consumer. Treat runtime value parity, open context
 formats, and option consumers as separate residual owners.
 
-Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
-daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one
-acceptance contract after that audit. Do not combine context formats, event hooks, exit actions, or
-`active-pane` behavior merely because they share client state.
+Confirm that slice 10t is frozen only on `formats.session-path/format:session_path`. Resolve the
+selected session's exact retained UTF-8 cwd in target and list contexts, keep absent state empty,
+prove `attach-session -c` updates become visible, and change the manifest partition to 93 direct,
+32 delegated, and 73 live gaps. Leave `format:session_active` untouched: it is empty without a
+target or format client, `1` for a client attached to that target, and `0` for an unattached client
+or one attached elsewhere. Do not change protocol, snapshot, cwd mutation, startup sourcing, or
+non-UTF-8 policy.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
 source before editing. Use one coordinator and three Codex subagents to probe the selected

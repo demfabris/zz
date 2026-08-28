@@ -266,9 +266,9 @@ flag gap, but accepted semantic divergences remain outside that count.
 mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
 menu descriptor consumption in slice 10o, popup consumption in slice 10p, per-client destruction
 fallback in slice 10q, cold local CLI parse atomicity in slice 10r, and nonconstant global-format
-source registration in slice 10s. The live registry now has 87
-active groups, 593 classified active items, and 100 closed records; 121 of 187 groups are resolved
-(64.7%). Slice 10s partitions the 198 pinned global format names into 92 direct mux values, 32
+source registration in slice 10s. The frozen 10t plan splits target-session path from the harder
+format-client activity contract. The live registry now has 88 active groups, 593 classified active
+items, and 100 closed records; 121 of 188 groups are resolved (64.4%). Slice 10s partitions the 198 pinned global format names into 92 direct mux values, 32
 daemon-delegated values, and 74 constant-backed live gaps. Open context formats and option consumers
 remain two independent discovery milestones. Regenerate and
 re-rank the full live tracker before every slice so a newly exposed practical gate can move ahead

@@ -53,17 +53,19 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The final 10e canonical checkpoint covers 93 scenarios and 1,502 steps.
+The final 10f canonical checkpoint covers 94 scenarios and 1,505 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`. Requested flags, attached
+`31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
+The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
+`e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
 
@@ -81,8 +83,8 @@ bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
 closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`, and
-`tracker.args-parse-set-option`, plus the `bind-key` and `confirm-before` members of the shared
-commands-or-string rule.
+`tracker.args-parse-set-option`, plus the `bind-key`, `command-prompt`, and `confirm-before`
+members of the shared commands-or-string rule.
 Source-file and Control
 parsing preserve unquoted typed arguments through wire transport, aliases, bindings, and hooks;
 quoted braces remain strings. `if-shell` accepts typed branch positions while rejecting typed
@@ -121,11 +123,14 @@ user-alias lookup. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks
 lexical construction. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed
 group stops its remaining commands while later physical lines continue; string callbacks stay one
 group. Typed `command-prompt` templates retain their structured prepared command list through
-submission without re-expanding aliases. Structured substitution preserves leaf-argument
-boundaries against quote or semicolon injection, replaces only the first `%%` in each leaf, and
-keeps the same typed physical-group failure boundary. String templates and free input start fresh
-as one group. The command's args-parse item, broader `%1` behavior, and string-template fidelity
-remain open for 10f. `set-hook` and command-valued native set-option retain their intentional second
+submission without re-expanding aliases. Its template positional accepts a typed block or string
+while `-I`, `-p`, `-t`, and `-T` values remain strings. Structured substitution preserves
+leaf-argument boundaries against quote or semicolon injection. String templates substitute raw
+source before a fresh parse and complete construction pass against the current alias table. Both
+paths replace the first `%%` and every `%1`, with trailing-percent quoting. Typed callbacks retain
+physical groups, while string templates and free input form one group. String failures retain the
+originating source path and line. Prompt chaining and multi-answer `%2` retain their prompt owner.
+`set-hook` and command-valued native set-option retain their intentional second
 construction stage. A typed `display-menu` action drops its structural wrapper before the fresh
 selection parse, while a quoted brace string remains literal.
 
@@ -472,11 +477,12 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    `if-shell` and `run-shell` callbacks preserve physical groups: a failed group stops its remaining
    commands while later physical lines continue; string callbacks remain one group. Typed
    `command-prompt` templates retain their structured prepared command list through submission
-   without re-expanding aliases. Structured substitution preserves leaf-argument boundaries,
-   replaces only the first `%%` per leaf, and keeps the same typed physical-group boundary. String
-   templates and free input start fresh as one group. The command's args-parse item, broader `%1`
-   behavior, and string-template fidelity remain open for 10f. `set-hook` and command-valued native
-   set-option retain their intentional second construction stage. A typed `display-menu` action
+   without re-expanding aliases. Structured substitution preserves leaf-argument boundaries. String
+   templates substitute raw source before a fresh parse and complete construction pass against the
+   current alias table. Both paths replace the first `%%` and every `%1`, with trailing-percent
+   quoting. Typed callbacks retain physical groups, while string templates and free input form one
+   group. Prompt chaining and multi-answer `%2` retain their prompt owner. `set-hook` and
+   command-valued native set-option retain their intentional second construction stage. A typed `display-menu` action
    drops its structural wrapper before the fresh selection parse, while a quoted brace string stays
    literal. A
    typed alias result now keeps an exact empty, multi-command, or unparsable match from falling
@@ -497,9 +503,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each implemented
    callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains
-   `bind-key`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`;
-   three effective rules and six command-specific items remain. The unimplemented
-   `choose-client` and `switch-mode` callbacks stay covered by their command items.
+   `bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and
+   `set-window-option`; three effective rules and five command-specific items remain. The
+   unimplemented `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
    `tracker.semantic-coverage` tracks runtime adoption of the three remaining argument rules, open-ended or
    dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
@@ -1054,6 +1060,20 @@ permanent product decision has been recorded for them.
   placement difference remain open. Three callback rules across six implemented commands remain.
   The same audit registered `clients.tui-overlay-consumption` because raw zz-tui drops confirm,
   menu, and popup state changes and does not intercept overlay input.
+- 2026-08-28: Protocol v84 closed `tracker.args-parse-command-prompt` without another wire change.
+  The command accepts zero or one typed-block-or-string template while `-I`, `-p`, `-t`, and `-T`
+  values remain strings. Typed templates preserve their recursively constructed command list and
+  alias snapshot through submission. String templates preserve raw source, substitute the answer,
+  then parse and construct the complete result against the current alias table before effects.
+  Both paths replace the first `%%` and every `%1`, with trailing-percent quoting. Typed
+  substitution preserves argument boundaries against quote and semicolon injection. Typed
+  callbacks retain physical source groups, while string templates and free input form one group.
+  Stored source paths and lines survive the string path. The strict three-step scenario drives a
+  real attached client, runs 43 internal checks, and finishes
+  `ARGS_PARSE_COMMAND_PROMPT=clean:43` on both servers. Prompt chaining and multi-answer `%2`, the
+  remaining prompt UI and queue contracts, eager whole-file source construction, and broader replay
+  placement keep their existing owners. Three callback rules across five implemented commands
+  remain.
 
 # Related
 

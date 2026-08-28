@@ -13,9 +13,9 @@ use zz_protocol::{
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
     MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId, PaneKindSnapshot,
-    PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId, catalog_command_spec,
-    command_specs, normalize_browser_profile_name, parse_tmux_command_options, parse_tmux_options,
-    resolve_command,
+    PopupBorderLines, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
+    catalog_command_spec, command_specs, normalize_browser_profile_name,
+    parse_tmux_command_options, parse_tmux_options, resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
@@ -480,6 +480,7 @@ pub enum MuxEffect {
         prompt: String,
         input: String,
         template: Option<CommandPromptTemplate>,
+        source: Option<SourceSpan>,
         prompt_type: CommandPromptType,
         mode: CommandPromptMode,
         no_freeze: bool,
@@ -2196,6 +2197,14 @@ impl MuxEngine {
         prepare_callback_invocations_with_aliases(self, commands, owner, false, false)
     }
 
+    pub fn prepare_callback_invocations(
+        &self,
+        commands: &mut [CommandInvocation],
+        owner: &str,
+    ) -> Result<(), ServerError> {
+        prepare_callback_invocations(self, commands, owner)
+    }
+
     pub fn prepare_expanded_callback_command(
         &self,
         command: &mut CommandInvocation,
@@ -2211,6 +2220,11 @@ impl MuxEngine {
         input: &str,
     ) -> Result<(), ServerError> {
         substitute_command_prompt_invocations(commands, input)
+    }
+
+    #[must_use]
+    pub fn substitute_command_prompt_template(template: &str, input: &str) -> String {
+        command_template_replace(template, input, 1)
     }
 
     pub fn parse_config_without_variable_expansion(
@@ -6216,6 +6230,7 @@ impl MuxEngine {
             prompt,
             input,
             template,
+            source: invocation.source.clone(),
             prompt_type,
             mode,
             no_freeze: options.has("-C"),
@@ -13409,7 +13424,7 @@ fn substitute_command_prompt_invocations(
     for command in commands {
         for index in 0..command.args.len() {
             if !command.argument_is_command_block(index) {
-                command.args[index] = command.args[index].replacen("%%", input, 1);
+                command.args[index] = command_template_replace(&command.args[index], input, 1);
                 continue;
             }
             let body = crate::parser::command_block_body(&command.args[index])
@@ -13425,6 +13440,46 @@ fn substitute_command_prompt_invocations(
         }
     }
     Ok(())
+}
+
+fn command_template_replace(template: &str, input: &str, index: u8) -> String {
+    if !template.as_bytes().contains(&b'%') {
+        return template.to_owned();
+    }
+
+    let bytes = template.as_bytes();
+    let mut output = Vec::with_capacity(template.len().saturating_add(input.len()));
+    let mut offset = 0;
+    let mut replaced_double = false;
+    while offset < bytes.len() {
+        if bytes[offset] != b'%' {
+            output.push(bytes[offset]);
+            offset += 1;
+            continue;
+        }
+
+        let next = bytes.get(offset + 1).copied();
+        let indexed = next == Some(b'0'.saturating_add(index));
+        let doubled = next == Some(b'%') && !replaced_double;
+        if !indexed && !doubled {
+            output.push(bytes[offset]);
+            offset += 1;
+            continue;
+        }
+        replaced_double |= doubled;
+        offset += 2;
+        let quoted = bytes.get(offset) == Some(&b'%');
+        if quoted {
+            offset += 1;
+        }
+        for byte in input.bytes() {
+            if quoted && matches!(byte, b'"' | b'\\' | b'$' | b';' | b'~') {
+                output.push(b'\\');
+            }
+            output.push(byte);
+        }
+    }
+    String::from_utf8(output).expect("template replacement preserves UTF-8")
 }
 
 fn callback_construction_error(owner: &str, error: ServerError) -> ServerError {
@@ -31428,6 +31483,7 @@ mod tests {
                 prompt: "window name".to_owned(),
                 input: "scratch".to_owned(),
                 template: Some(CommandPromptTemplate::String("new-window -n %%".to_owned(),)),
+                source: None,
                 prompt_type: CommandPromptType::Command,
                 mode: CommandPromptMode::Text,
                 no_freeze: false,
@@ -31457,6 +31513,7 @@ mod tests {
                 template: Some(CommandPromptTemplate::String(
                     "rename-window -- '%%'".to_owned(),
                 )),
+                source: None,
                 prompt_type: CommandPromptType::Command,
                 mode: CommandPromptMode::Text,
                 no_freeze: false,
@@ -31529,6 +31586,28 @@ mod tests {
             nested.commands[0].args,
             ["-g", "PROMPT_VALUE", &format!("{input}:%%")]
         );
+    }
+
+    #[test]
+    fn command_prompt_substitution_matches_tmux_placeholders_and_quoting() {
+        assert_eq!(
+            MuxEngine::substitute_command_prompt_template("%%:%%:%1:%1:%2", "abc"),
+            "abc:%%:abc:abc:%2"
+        );
+        assert_eq!(
+            MuxEngine::substitute_command_prompt_template("%%%|%1%", "\"\\$;~"),
+            r#"\"\\\$\;\~|\"\\\$\;\~"#
+        );
+
+        let engine = MuxEngine::default();
+        let parsed =
+            engine.parse_config("prompt.conf", "display-message -p '%%:%%:%1:%1:%2:%%%:%1%'");
+        assert!(parsed.diagnostics.is_empty());
+        let mut commands = parsed.commands;
+        engine
+            .substitute_command_prompt_commands(&mut commands, "abc")
+            .expect("substitute typed prompt placeholders");
+        assert_eq!(commands[0].args[1], "abc:%%:abc:abc:%2:%%%:abc");
     }
 
     #[test]

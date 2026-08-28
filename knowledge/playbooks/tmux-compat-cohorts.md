@@ -57,12 +57,22 @@ command-valued native set-option deliberately construct again. A typed `display-
 its structural wrapper before the fresh selection parse, while a quoted brace string remains
 literal. Typed `command-prompt` templates retain their structured prepared command list through
 submission without re-expanding aliases. Structured substitution preserves leaf-argument
-boundaries against quote or semicolon injection, replaces only the first `%%` in each leaf, and
-keeps the same typed physical-group failure boundary. String templates and free input start fresh
-as one group. The command's args-parse item, broader `%1` behavior, and string-template fidelity
-remain open for 10f. The strict fixture proves exact construction,
+boundaries against quote or semicolon injection. String templates substitute raw source before a
+fresh parse and complete construction pass against the current alias table. Both paths replace the
+first `%%` and every `%1`, with trailing-percent quoting. Typed callbacks retain physical groups,
+while string templates and free input form one group. Prompt chaining and multi-answer `%2` retain
+their existing prompt owner. The strict fixture proves exact construction,
 parser, readback, and source-file plus Control channels; reply and `-y` Enter-default behavior
 remain covered by daemon and GPUI tests.
+
+The nineteenth milestone reuses protocol v84 for `command-prompt`. The command accepts zero or one
+template positional as a typed block or string while `-I`, `-p`, `-t`, and `-T` values remain
+strings. Typed templates preserve their recursively constructed commands through submission.
+String templates preserve raw source, substitute the answer, then parse and construct every
+resulting command before effects. Frozen typed aliases and fresh string aliases match the pin.
+Source paths and lines survive the string path. The strict 43-check fixture drives a real attached
+client through template typing, construction precedence, aliases, placeholders, injection,
+physical groups, source-file diagnostics, and exact Control frames.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -85,16 +95,18 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The final 10e canonical checkpoint covers 93 scenarios and 1,502 steps. Every ordinary row is clean.
+The final 10f canonical checkpoint covers 94 scenarios and 1,505 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
+`31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
-rows remain. The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
+rows remain. The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
+`e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
+The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
-The full strict suite was rerun for the final 10e artifact, not carried forward from an older run.
+The full strict suite was rerun for the final 10f artifact, not carried forward from an older run.
 The two positional-bound scenarios prove canonical and alias diagnostics, the
 first-positional flag boundary, target-error precedence, and effect suppression. The expanded
 maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
@@ -122,10 +134,16 @@ whole-file source construction plus the broader replay-channel placement differe
 Late focused regressions also prove that typed `if-shell`, `run-shell`, and structured
 `command-prompt` callbacks stop the failed physical group and continue later physical lines, while
 string callbacks remain one group. Structured prompt substitution preserves leaf-argument
-boundaries against quote or semicolon injection and replaces only the first `%%` in each leaf.
+boundaries against quote or semicolon injection. Raw string templates substitute before parsing
+and complete construction. Both paths replace the first `%%` and every `%1`, with trailing-percent
+quoting.
 Typed `display-menu` actions lose their structural wrapper before the fresh selection parse, while
-quoted brace strings remain literal. The prompt's complete args-parse rule, broader `%1` behavior,
-and string-template fidelity remain open for 10f.
+quoted brace strings remain literal. Prompt chaining and multi-answer `%2` retain their existing
+prompt owner.
+The focused three-step `args-parse-command-prompt` row drives a real attached client and runs 43
+internal checks across template types, recursive construction precedence, alias timing,
+substitution, injection resistance, physical groups, source-file diagnostics, and exact Control
+frames. Both sides finish with `ARGS_PARSE_COMMAND_PROMPT=clean:43`.
 
 # Cohorts
 
@@ -167,7 +185,8 @@ milestone per letter, never one combined commit.
 | 10c | Shared set-option value argument rule | Closed under `tracker.args-parse-set-option` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; two commands and one effective rule |
 | 10d | `bind-key` commands-or-string argument rule | Closed under `tracker.args-parse-bind-key` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; one command within a shared rule |
 | 10e | `confirm-before` commands-or-string argument rule | Closed under `tracker.args-parse-confirm-before` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; recursive construction and exact channel proof stay separate from client reply rendering and whole-file source construction |
-| 10f-10k | Remaining `args_parse` runtime rules | Six `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | Three effective source rules, never all callback commands at once |
+| 10f | `command-prompt` commands-or-string argument rule | Closed under `tracker.args-parse-command-prompt` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; one typed-or-string template plus deferred substitution, alias, source, and group boundaries |
+| 10g-10k | Remaining `args_parse` runtime rules | Five `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | Three effective source rules, never all callback commands at once |
 | 10l-10p | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 10q-10s | Raw TUI daemon overlays | Three items in `clients.tui-overlay-consumption`, one confirm, menu, or popup surface per slice | Hard | ClientCore already retains state; each client renderer and input contract remains independently closable |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -178,7 +197,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10e are closed; slice 10f is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through 10f are closed; slice 10g is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

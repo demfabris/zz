@@ -317,11 +317,16 @@ each constructed command tree. Stored `bind-key` and `set-hook` lists and typed 
 user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed
 group stops its remaining commands while later physical lines continue; string callbacks remain
 one group. Typed `command-prompt` templates retain their structured prepared command list through
-submission without re-expanding aliases. Structured substitution edits each leaf argument in place,
-preserves argument boundaries against quote or semicolon injection, replaces only the first `%%`
-per leaf, and keeps the same typed physical-group failure boundary. String templates and free input
-start fresh as one group. Its args-parse rule, broader `%1` behavior, and string-template fidelity
-remain open for 10f. `set-hook` and command-valued native set-option deliberately construct again.
+submission without re-expanding aliases. The command accepts zero or one template positional as a
+typed block or string, while `-I`, `-p`, `-t`, and `-T` values stay strings. Structured substitution
+edits leaf arguments in place and preserves their boundaries against quote or semicolon injection.
+A string template substitutes its raw source before a fresh parse and whole-result construction
+pass. Both paths replace the first `%%` and every `%1`; a trailing `%` quotes double quotes,
+backslashes, dollar signs, semicolons, and tildes.
+Typed templates retain their physical groups, while string templates and free input form one group.
+The string path retains the original source path and line for parse or construction failures.
+Prompt chains and multi-answer `%2` stay under their existing prompt owner. `set-hook` and
+command-valued native set-option deliberately construct again.
 A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while a
 quoted brace string remains literal. These rules do not yet make source-file parse and construction
 atomic for the whole file or close the broader replay-channel difference.

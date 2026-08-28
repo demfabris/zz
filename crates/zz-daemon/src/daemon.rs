@@ -29,14 +29,14 @@ use zz_mux::{
     send_keys_is_read_only_safe,
 };
 use zz_protocol::{
-    AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
-    ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind, ChooseTreePaneKind,
-    ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientHello, ClientId,
-    ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
-    CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
-    CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
-    ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
-    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
+    AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
+    ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
+    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientHello,
+    ClientId, ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation,
+    CommandPromptAction, CommandPromptKind, CommandPromptMode, CommandPromptState,
+    CommandPromptType, CommandRequest, CommandResolution, CommandResponse, ConfigOverrideEntry,
+    ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState,
+    Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
     MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
     MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem,
@@ -4500,7 +4500,10 @@ impl Shared {
                 };
                 let has_command_blocks = (0..invocation.args.len())
                     .any(|index| invocation.argument_is_command_block(index));
-                if has_command_blocks {
+                let preflight_args = canonical_name
+                    .as_deref()
+                    .is_some_and(|name| COMMAND_ARGS_PARSE_BEHAVES.contains(&name));
+                if has_command_blocks || preflight_args {
                     let owner = canonical_name
                         .clone()
                         .unwrap_or_else(|| invocation.name.clone());
@@ -5933,6 +5936,7 @@ impl Shared {
                         prompt,
                         input,
                         template,
+                        source,
                         prompt_type,
                         mode,
                         no_freeze,
@@ -5959,6 +5963,7 @@ impl Shared {
                                 prompt.clone(),
                                 input.clone(),
                                 template.clone(),
+                                source.clone(),
                                 *prompt_type,
                                 *mode,
                                 *no_freeze,
@@ -5972,6 +5977,7 @@ impl Shared {
                                     CommandPromptSubmission {
                                         input: format!("={}", prompt.input),
                                         template: prompt.template.clone(),
+                                        source: prompt.source.clone(),
                                     }
                                 });
                             inner.command_prompts.insert(client, prompt);
@@ -13770,17 +13776,22 @@ impl Shared {
         context: &mut ExecutionContext,
         input: String,
     ) {
-        let template = self
+        let (template, source) = self
             .inner
             .lock()
             .command_prompts
             .get(&client)
-            .and_then(|prompt| prompt.template.clone());
+            .map(|prompt| (prompt.template.clone(), prompt.source.clone()))
+            .unwrap_or_default();
         self.submit_command_prompt(
             client,
             kind,
             context,
-            &CommandPromptSubmission { input, template },
+            &CommandPromptSubmission {
+                input,
+                template,
+                source,
+            },
         );
     }
 
@@ -13855,6 +13866,7 @@ impl Shared {
                     .then_some(CommandPromptSubmission {
                         input: prompt.input.clone(),
                         template: prompt.template,
+                        source: prompt.source,
                     });
                     let remembered = (!prompt.input.is_empty()).then_some(prompt.input);
                     (submission, remembered, prompt_type, retired)
@@ -13974,43 +13986,75 @@ impl Shared {
         context: &mut ExecutionContext,
         submission: &CommandPromptSubmission,
     ) {
-        let prepared = matches!(
+        let typed = matches!(
             &submission.template,
             Some(CommandPromptTemplate::Commands(_))
         );
         let mut commands = match &submission.template {
             Some(CommandPromptTemplate::Commands(commands)) => commands.clone(),
             template => {
-                let source = match template {
+                let template = match template {
                     Some(CommandPromptTemplate::String(template)) => template.as_str(),
                     Some(CommandPromptTemplate::Commands(_)) => unreachable!(),
-                    None => submission.input.as_str(),
+                    None => "%1",
                 };
-                let parsed = {
+                let command =
+                    MuxEngine::substitute_command_prompt_template(template, &submission.input);
+                let prepared = {
                     let inner = self.inner.lock();
-                    inner.engine.parse_config("<command-prompt>", source)
+                    let source = submission
+                        .source
+                        .as_ref()
+                        .map_or("<command-prompt>", |source| source.source.as_str());
+                    let mut parsed = inner.engine.parse_config(source, &command);
+                    if let Some(source) = &submission.source {
+                        shift_command_prompt_source(&mut parsed, source);
+                    }
+                    if let Some(diagnostic) = parsed.diagnostics.first() {
+                        Err(submission.source.as_ref().map_or_else(
+                            || diagnostic.message.clone(),
+                            |_| {
+                                format!(
+                                    "{}:{}: {}",
+                                    diagnostic.source, diagnostic.line, diagnostic.message
+                                )
+                            },
+                        ))
+                    } else {
+                        let mut commands = parsed.commands;
+                        let mut error = None;
+                        for command in &mut commands {
+                            if let Err(cause) = inner.engine.prepare_callback_invocations(
+                                std::slice::from_mut(command),
+                                "command-prompt",
+                            ) {
+                                error = Some(submission.source.as_ref().map_or_else(
+                                    || cause.tmux_message(),
+                                    |_| config_command_error(command, &cause.tmux_message()),
+                                ));
+                                break;
+                            }
+                        }
+                        error.map_or_else(|| Ok(commands), Err)
+                    }
                 };
-                if let Some(diagnostic) = parsed.diagnostics.first() {
-                    self.publish_to_client(
-                        client,
-                        EventPayload::ClientMessage {
-                            pane: context.pane,
-                            kind: ClientMessageKind::Error,
-                            text: format!(
-                                "{}:{}:{}: {}",
-                                diagnostic.source,
-                                diagnostic.line,
-                                diagnostic.column,
-                                diagnostic.message
-                            ),
-                        },
-                    );
-                    return;
+                match prepared {
+                    Ok(commands) => commands,
+                    Err(text) => {
+                        self.publish_to_client(
+                            client,
+                            EventPayload::ClientMessage {
+                                pane: context.pane,
+                                kind: ClientMessageKind::Error,
+                                text,
+                            },
+                        );
+                        return;
+                    }
                 }
-                parsed.commands
             }
         };
-        if prepared {
+        if typed {
             let substitution = self
                 .inner
                 .lock()
@@ -14027,13 +14071,6 @@ impl Shared {
                 );
                 return;
             }
-        } else if submission.template.is_some() {
-            for command in &mut commands {
-                command.name = command.name.replace("%%", &submission.input);
-                for argument in &mut command.args {
-                    *argument = argument.replace("%%", &submission.input);
-                }
-            }
         }
 
         let mut output = String::new();
@@ -14044,23 +14081,19 @@ impl Shared {
                 .source
                 .as_ref()
                 .map(|source| (source.source.clone(), source.line));
-            if prepared && let Some(failed) = &failed_group {
+            if typed && let Some(failed) = &failed_group {
                 if failed == &group {
                     continue;
                 }
                 failed_group = None;
             }
-            let execution = if prepared {
-                self.execute_with_mux_source_routed(
-                    client,
-                    kind,
-                    context,
-                    &command,
-                    MuxOptionSource::RuntimeCommand,
-                )
-            } else {
-                self.execute(client, kind, context, &command)
-            };
+            let execution = self.execute_with_mux_source_routed(
+                client,
+                kind,
+                context,
+                &command,
+                MuxOptionSource::RuntimeCommand,
+            );
             match execution {
                 Ok(execution) if !execution.output.is_empty() && !output_truncated => {
                     output_truncated = append_command_prompt_output(&mut output, &execution.output);
@@ -14072,7 +14105,7 @@ impl Shared {
                     {
                         output_truncated = append_command_prompt_output(&mut output, error_output);
                     }
-                    if prepared {
+                    if typed {
                         self.publish_to_client(
                             client,
                             EventPayload::ClientMessage {
@@ -19577,6 +19610,20 @@ fn config_command_error(command: &CommandInvocation, message: &str) -> String {
     )
 }
 
+fn shift_command_prompt_source(parsed: &mut ParsedConfig, source: &SourceSpan) {
+    let offset = source.line.saturating_sub(1);
+    for diagnostic in &mut parsed.diagnostics {
+        diagnostic.source.clone_from(&source.source);
+        diagnostic.line = diagnostic.line.saturating_add(offset);
+    }
+    for command in &mut parsed.commands {
+        if let Some(command_source) = &mut command.source {
+            command_source.source.clone_from(&source.source);
+            command_source.line = command_source.line.saturating_add(offset);
+        }
+    }
+}
+
 enum ConfigReplayIssue {
     SourceErrors(usize),
     CommandError {
@@ -21730,6 +21777,7 @@ struct CommandPrompt {
     input: String,
     cursor: usize,
     template: Option<CommandPromptTemplate>,
+    source: Option<SourceSpan>,
     history_index: Option<usize>,
     history_draft: String,
     prompt_type: CommandPromptType,
@@ -21745,6 +21793,7 @@ impl CommandPrompt {
         prompt: String,
         input: String,
         template: Option<CommandPromptTemplate>,
+        source: Option<SourceSpan>,
         prompt_type: CommandPromptType,
         mode: CommandPromptMode,
         no_freeze: bool,
@@ -21762,6 +21811,7 @@ impl CommandPrompt {
             input,
             cursor,
             template,
+            source,
             history_index: None,
             prompt_type,
             mode,
@@ -22108,6 +22158,7 @@ enum PromptKeyAction {
 struct CommandPromptSubmission {
     input: String,
     template: Option<CommandPromptTemplate>,
+    source: Option<SourceSpan>,
 }
 
 /// What the wire owes the client about the prompt after one key press.
@@ -22179,6 +22230,7 @@ fn command_prompt_outcome(
             let fired = CommandPromptSubmission {
                 input: format!("{prefix}{}", prompt.input),
                 template: prompt.template.clone(),
+                source: prompt.source.clone(),
             };
             inner.command_prompts.insert(client, prompt);
             PromptKeyOutcome {
@@ -22206,6 +22258,7 @@ fn command_prompt_outcome(
             submission: Some(CommandPromptSubmission {
                 input: answer,
                 template: prompt.template,
+                source: prompt.source,
             }),
             ..PromptKeyOutcome::default()
         },
@@ -22215,6 +22268,7 @@ fn command_prompt_outcome(
                 CommandPromptSubmission {
                     input: prompt.input.clone(),
                     template: prompt.template.clone(),
+                    source: prompt.source.clone(),
                 }
             });
             PromptKeyOutcome {
@@ -22232,6 +22286,7 @@ fn command_prompt_outcome(
                 CommandPromptSubmission {
                     input: prompt.input,
                     template: prompt.template,
+                    source: prompt.source,
                 }
             });
             PromptKeyOutcome {
@@ -31003,6 +31058,7 @@ mod tests {
                 Some(CommandPromptTemplate::String(
                     "rename-session -- 'prompt-before-any'".to_owned(),
                 )),
+                None,
                 CommandPromptType::Command,
                 CommandPromptMode::Numeric,
                 false,
@@ -31349,6 +31405,7 @@ mod tests {
                     "prompt".to_owned(),
                     input.to_owned(),
                     template.map(|template| CommandPromptTemplate::String(template.to_owned())),
+                    None,
                     CommandPromptType::Command,
                     mode,
                     false,
@@ -31882,6 +31939,7 @@ mod tests {
                 CommandPrompt::new(
                     "prompt".to_owned(),
                     "kept".to_owned(),
+                    None,
                     None,
                     CommandPromptType::Command,
                     CommandPromptMode::Text,
@@ -45456,6 +45514,7 @@ mod tests {
                     "prompt".to_owned(),
                     "kept".to_owned(),
                     None,
+                    None,
                     CommandPromptType::Command,
                     CommandPromptMode::Text,
                     false,
@@ -56207,6 +56266,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ":".to_owned(),
             "α beta".to_owned(),
             None,
+            None,
             CommandPromptType::Command,
             CommandPromptMode::Text,
             false,
@@ -61692,6 +61752,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "prompt".to_owned(),
                 String::new(),
                 None,
+                None,
                 CommandPromptType::Command,
                 CommandPromptMode::Text,
                 false,
@@ -62644,6 +62705,7 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandPrompt::new(
                 "prompt".to_owned(),
                 String::new(),
+                None,
                 None,
                 CommandPromptType::Command,
                 CommandPromptMode::Text,
@@ -69817,6 +69879,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &CommandPromptSubmission {
                 input: "x".to_owned(),
                 template,
+                source: None,
             },
         );
         assert_eq!(
@@ -69855,6 +69918,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &CommandPromptSubmission {
                 input: "x".to_owned(),
                 template,
+                source: None,
             },
         );
         let inner = shared.inner.lock();
@@ -69902,6 +69966,7 @@ bind - split-window -v -c "#{pane_current_path}"
             &CommandPromptSubmission {
                 input: input.to_owned(),
                 template,
+                source: None,
             },
         );
 
@@ -69912,6 +69977,150 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         assert_eq!(
             inner.engine.global_environment_variable("PROMPT_INJECTED"),
+            None
+        );
+    }
+
+    #[test]
+    fn string_command_prompt_preflights_the_substituted_source_before_execution() {
+        let (shared, client, mailbox, mut context) = popup_test_workspace("prompt-preflight");
+        shared.submit_command_prompt(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandPromptSubmission {
+                input: "x".to_owned(),
+                template: Some(CommandPromptTemplate::String(
+                    "set-environment -g COMMAND_PROMPT_PRECHECK yes\nunknown-%1".to_owned(),
+                )),
+                source: Some(SourceSpan {
+                    source: "prompt-origin.conf".to_owned(),
+                    line: 37,
+                    column: 1,
+                }),
+            },
+        );
+
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("COMMAND_PROMPT_PRECHECK"),
+            None
+        );
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Error,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text == "prompt-origin.conf:38: unknown command: unknown-x"
+            )
+        }));
+    }
+
+    #[test]
+    fn command_prompt_typed_and_string_aliases_freeze_at_different_stages() {
+        let (shared, client, _, mut context) = popup_test_workspace("prompt-alias-stages");
+        let set_alias = |value: &str| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("set-option", ["-s", "command-alias[94]", value]),
+                )
+                .expect("set prompt alias");
+        };
+
+        set_alias("cpalias10f=set-environment -g CP_ALIAS_FROZEN");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["{ cpalias10f typed }"])
+                    .with_command_blocks([0]),
+            )
+            .expect("open typed alias prompt");
+        let typed = shared
+            .inner
+            .lock()
+            .command_prompts
+            .remove(&client)
+            .expect("typed prompt");
+        set_alias("cpalias10f=set-environment -g CP_ALIAS_REPLACED");
+        shared.submit_command_prompt(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandPromptSubmission {
+                input: "go".to_owned(),
+                template: typed.template,
+                source: typed.source,
+            },
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("CP_ALIAS_FROZEN"),
+            Some("typed".to_owned())
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("CP_ALIAS_REPLACED"),
+            None
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["cpalias10f string"]),
+            )
+            .expect("open string alias prompt");
+        let string = shared
+            .inner
+            .lock()
+            .command_prompts
+            .remove(&client)
+            .expect("string prompt");
+        set_alias("cpalias10f=set-environment -g CP_ALIAS_FRESH");
+        shared.submit_command_prompt(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandPromptSubmission {
+                input: "go".to_owned(),
+                template: string.template,
+                source: string.source,
+            },
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("CP_ALIAS_FRESH"),
+            Some("string".to_owned())
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("CP_ALIAS_REPLACED"),
             None
         );
     }

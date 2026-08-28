@@ -434,6 +434,7 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
 
 pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "bind-key",
+    "command-prompt",
     "confirm-before",
     "if-shell",
     "run-shell",
@@ -3091,6 +3092,39 @@ mod tests {
                     .expect_err("typed option value")
                     .tmux_message(),
                 format!("command confirm-before: {option} argument must be a string")
+            );
+        }
+    }
+
+    #[test]
+    fn command_prompt_args_parse_accepts_only_the_template_as_a_block() {
+        let spec = catalog_command_spec("command-prompt").expect("command-prompt");
+
+        for command in [
+            CommandInvocation::new("command-prompt", ["{ display-message action }"])
+                .with_command_blocks([0]),
+            CommandInvocation::new("command-prompt", ["-b", "--", "{ display-message action }"])
+                .with_command_blocks([2]),
+            CommandInvocation::new("command-prompt", ["{ display-message quoted }"]),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("command-or-string positional");
+        }
+
+        for option in ["-I", "-p", "-t", "-T"] {
+            let command = CommandInvocation::new(
+                "command-prompt",
+                [
+                    option,
+                    "{ display-message option }",
+                    "display-message action",
+                ],
+            )
+            .with_command_blocks([1]);
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed option value")
+                    .tmux_message(),
+                format!("command command-prompt: {option} argument must be a string")
             );
         }
     }

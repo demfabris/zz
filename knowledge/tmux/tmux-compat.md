@@ -98,8 +98,8 @@ open-ended or dynamic context-format names, nonconstant format behavior, hook pr
 behavior for shared bindings, or consumer truth for option `BEHAVES`.
 `tracker.semantic-coverage` owns those six blind spots. Its command-specific `args-parse:` items name the
 implemented callback commands; `choose-client` and `switch-mode` remain covered by their
-unimplemented command items. Protocol v84 closes three complete runtime rules plus `bind-key`
-within the `commands-or-string` rule. `if-shell`
+unimplemented command items. Protocol v84 closes three complete runtime rules plus `bind-key`,
+`command-prompt`, and `confirm-before` within the `commands-or-string` rule. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions
 and option values before effects, and leaves quoted braces as strings. `run-shell` accepts typed
 positionals only when a leading `-C` enables command mode; option values and all positionals without
@@ -124,15 +124,19 @@ construction failures are preflight parse errors. Stored `bind-key` and `set-hoo
 another user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a
 failed group stops its remaining commands while later physical lines continue; string callbacks
 stay one group. Typed `command-prompt` templates retain their structured prepared command list
-through submission without re-expanding aliases. Structured substitution preserves leaf-argument
-boundaries against quote or semicolon injection, replaces only the first `%%` in each leaf, and
-keeps the same typed physical-group failure boundary. String templates and free input start fresh
-as one group. The command's args-parse item, broader `%1` behavior, and string-template fidelity
-remain open for 10f. `set-hook` and command-valued native set-option deliberately construct a second
+through submission without re-expanding aliases. The template positional accepts a typed block or
+string, while option values remain strings. Structured substitution preserves leaf-argument
+boundaries against quote or semicolon injection. String templates substitute raw source before a
+fresh parse and whole-result construction pass against the current alias table. Both paths replace
+the first `%%` and every `%1`; a trailing `%` quotes double quotes, backslashes, dollar signs,
+semicolons, and tildes. Typed callbacks retain
+physical groups, while string templates and free input form one group. String failures retain the
+originating source path and line. Prompt chains and multi-answer `%2` stay under their existing
+prompt owner. `set-hook` and command-valued native set-option deliberately construct a second
 time. A typed `display-menu` action drops its structural wrapper before the fresh selection parse,
 while a quoted brace string remains literal. Broader eager whole-file source construction and its
 replay-channel placement remain open.
-Six `args-parse:` items across three effective rules remain.
+Five `args-parse:` items across three effective rules remain.
 Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option

@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-command-prompt.sh ~/args-parse-command-prompt.sh
+out: set-environment -gu ARGS_PARSE_COMMAND_PROMPT
+run-shell 'sh ~/args-parse-command-prompt.sh'
+out: show-environment -g ARGS_PARSE_COMMAND_PROMPT

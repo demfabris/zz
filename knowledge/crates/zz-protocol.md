@@ -143,9 +143,9 @@ it on unregister with the rest of the connection facts.
 Protocol v84 appends `CommandInvocation.command_blocks`. Config and Control parsers record the
 zero-based positions of standalone unquoted command blocks while quoted brace text stays an
 ordinary string. Alias expansion and key-table publication retain the positions. The
-command-aware option parser applies the adopted callback rules to `bind-key`, `confirm-before`,
-`if-shell`, `run-shell`, `set-option`, and `set-window-option`. Every `bind-key` positional accepts a typed
-block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
+command-aware option parser applies the adopted callback rules to `bind-key`, `command-prompt`,
+`confirm-before`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`. Every `bind-key`
+positional accepts a typed block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
 block only at value position 1. `confirm-before` accepts either type for its one command positional
 while `-c`, `-p`, and `-t` remain strings. The mux constructs every lexical typed block
 recursively before validating its parent command name, callback type, or arity. One user-alias
@@ -157,13 +157,17 @@ typed `if-shell`, `run-shell`, and `confirm-before` callbacks execute their cons
 without another user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical
 groups: a failed group stops its remaining commands while later physical lines continue; string
 callbacks remain one group. Typed `command-prompt` templates retain their structured prepared
-command list through submission without re-expanding aliases. Structured substitution preserves
-leaf-argument boundaries against quote or semicolon injection, replaces only the first `%%` per
-leaf, and keeps the same typed physical-group failure boundary. String templates and free input
-start fresh as one group. The command's args-parse rule, broader `%1` behavior, and string-template
-fidelity remain open for 10f. `set-hook` and command-valued native set-option deliberately apply a
-second construction stage. A typed `display-menu` action drops its structural wrapper before the
-fresh selection parse, while a quoted brace string remains literal. All six closed commands reuse
+command list through submission without re-expanding aliases. Its one template positional accepts
+a typed block or string while `-I`, `-p`, `-t`, and `-T` values remain strings. Structured
+substitution preserves leaf-argument boundaries against quote or semicolon injection. A string
+template substitutes the raw source before a fresh parse and whole-result construction pass,
+retaining the originating source path and line for failures. Both paths replace the first `%%` and
+every `%1`; a trailing `%` quotes double quotes, backslashes, dollar signs, semicolons, and tildes.
+Typed callbacks keep their physical groups,
+while string templates and free input form one group. Prompt chaining and multi-answer `%2`
+substitution retain their existing owner. `set-hook` and command-valued native set-option
+deliberately apply a second construction stage. A typed `display-menu` action drops its structural wrapper before the
+fresh selection parse, while a quoted brace string remains literal. All seven closed commands reuse
 the same protocol v84 metadata. Eager whole-file source construction and its replay-channel
 placement remain a separate parser contract.
 

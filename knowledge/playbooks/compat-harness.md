@@ -113,8 +113,8 @@ dispatch now match the pin.
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
 `CommandInvocation`, and `COMMAND_ARGS_PARSE_BEHAVES` contains `if-shell`, `run-shell`,
-`set-option`, `set-window-option`, `bind-key`, and `confirm-before` after source-file, Control,
-stored-command, parser, postcard, mux, and daemon proofs. The manifest carries six remaining
+`set-option`, `set-window-option`, `bind-key`, `command-prompt`, and `confirm-before` after
+source-file, Control, stored-command, parser, postcard, mux, and daemon proofs. The manifest carries five remaining
 `args-parse:` items. The unimplemented
 `choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
 the whole command.
@@ -169,12 +169,24 @@ errors. The typed confirm callback executes its constructed list without another
 stored `bind-key` and `set-hook` lists have the same frozen execution boundary. `set-hook` and
 command-valued native set-option deliberately construct again, while `display-menu` selection starts
 a fresh stage. Typed `command-prompt` templates retain their structured prepared command list
-through submission without re-expanding aliases; string templates and free input start fresh, and
-the command's args-parse item remains open. Both sides publish
+through submission without re-expanding aliases. String templates substitute raw source before a
+fresh parse and complete construction pass against the current alias table. Both paths replace the
+first `%%` and every `%1`, with trailing-percent quoting. Typed callbacks retain physical groups,
+while string templates and free input form one group. Both sides publish
 `ARGS_PARSE_CONFIRM_BEFORE=clean:19`. The scenario proves construction, parsing, readback, and
 output channels. Accept, reject, `-y` Enter-default, blocking, and background replies are daemon and
 GPUI unit-test evidence; raw zz-tui does not yet consume confirm, menu, or popup state. It does not
 close eager whole-file source construction or the broader replay-channel placement difference.
+
+The strict three-step `smoke/args-parse-command-prompt` scenario drives a real attached client and
+runs 43 internal checks. It covers zero, typed, string, and empty templates; string-only `-I`,
+`-p`, `-t`, and `-T` values; child-before-parent construction errors; canonical readback;
+independent recursive alias paths; exact Control frames; frozen typed aliases versus fresh string
+aliases; the first `%%`, every `%1`, `%%%`, and `%1%`; structured injection resistance; and typed
+versus string physical groups. String templates substitute before parsing, preflight the complete
+result before effects, and retain the stored source path and line for failures. Both sides publish
+`ARGS_PARSE_COMMAND_PROMPT=clean:43`. Prompt chains and multi-answer `%2`, format and target flags,
+labels, key spelling, pass order, vi editing, and freeze behavior retain their existing owners.
 
 Regenerate the readable report after changing the manifest:
 
@@ -203,8 +215,8 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The final 10e checkpoint from
-2026-08-28 contains 93 scenarios and 1,502 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`compat/results/summary.md` is the persisted canonical artifact. The final 10f checkpoint from
+2026-08-28 contains 94 scenarios and 1,505 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -269,17 +281,23 @@ Control routing, and physical-group execution through a real attached client.
 recursive typed and string construction, string-only option values, nested canonical readback,
 per-path alias budgets, self-recursion safety, physical groups, invalid replacement preservation,
 and exact source-file plus Control diagnostics.
-Late focused regressions prove that typed `if-shell`, `run-shell`, and structured `command-prompt`
-callbacks stop the failed physical group and continue later physical lines, while string callbacks
-stay one group. Structured prompt substitution preserves leaf-argument boundaries against quote or
-semicolon injection and replaces only the first `%%` in each leaf. Typed `display-menu` actions drop
+`smoke/args-parse-command-prompt` contributes three harness steps around 43 internal checks for
+template types, recursive construction precedence, alias timing, placeholder substitution,
+injection resistance, physical groups, source-file diagnostics, exact Control framing, and real
+attached prompt submission.
+Typed `if-shell`, `run-shell`, and structured `command-prompt` callbacks stop the failed physical
+group and continue later physical lines, while string callbacks stay one group. Structured prompt
+substitution preserves leaf-argument boundaries against quote or semicolon injection. Raw string
+templates substitute before parsing and whole-result construction. Both paths replace the first
+`%%` and every `%1`, with trailing-percent quoting. Typed `display-menu` actions drop
 their structural wrapper before the fresh selection parse, while quoted brace strings stay literal.
-The command-prompt args-parse rule, broader `%1` behavior, and string-template fidelity remain open
-for 10f.
+Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
 
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
+`31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
+The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.

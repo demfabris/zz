@@ -360,6 +360,42 @@ and input consumption remain under `clients.tui-overlay-consumption`.
 It also does not close eager whole-file source construction or the broader replay-channel
 placement difference, which remain with the existing parser and command-chain owners.
 
+## `command-prompt` argument blocks
+
+The `command-prompt` slice of the `commands-or-string` rule closed on 2026-08-28 without another
+wire change. The command accepts zero or one template positional as a typed block or string while
+`-I`, `-p`, `-t`, and `-T` values stay strings. Typed children construct recursively before the
+parent command's name, callback type, or arity validation. Recursive paths carry independent
+one-layer user-alias budgets. An outer user alias disables another alias in its produced subtree,
+while a sibling typed template receives its own layer. Empty typed templates remain valid.
+
+The two template shapes keep distinct deferred-execution contracts. A typed template retains its
+structured constructed command list through submission without another user-alias lookup. Answer
+substitution edits leaf arguments without reparsing the answer, so quotes and semicolons cannot
+create arguments or commands. A string template retains raw source and substitutes the answer
+before parsing. The daemon then constructs every parsed command against the current alias table
+before it executes any of them. Both shapes replace the first `%%` and every `%1`; a trailing `%`
+quotes double quotes, backslashes, dollar signs, semicolons, and tildes in the inserted answer.
+
+Typed templates retain physical source groups. A failed command stops the rest of that group while
+later physical lines continue. String templates and free input form one group, so a failure stops
+the rest of the submission. The string path also carries the original invocation's source path and
+line through substitution, parsing, and construction. Located failures therefore point back to the
+stored template rather than a synthetic prompt source.
+
+The strict three-step `smoke/args-parse-command-prompt` scenario drives a real attached client and
+runs 43 internal checks. It covers zero, typed, string, and empty templates; string-only options;
+child-before-parent error precedence; canonical readback; outer and sibling aliases; exact Control
+frames; fresh string aliases versus frozen typed aliases; `%%`, `%1`, `%%%`, and `%1%`
+substitution; structured injection resistance; and typed versus string group failure. Both servers
+finish with `ARGS_PARSE_COMMAND_PROMPT=clean:43`. Focused daemon tests cover whole-result string
+preflight and stored source-line retention.
+
+This slice does not add prompt chaining or multi-answer `%2`, `-F`, `-l`, `-t`, labels, key
+spelling, queue order, vi editing, or freeze changes. Those contracts retain their existing prompt
+owners. Eager whole-file source construction and the broader replay-channel placement difference
+remain with the parser and command-chain owners.
+
 ## Accepted grammar divergence evidence
 
 The catalog count does not include syntax zz accepts or parses before diverging:
@@ -417,14 +453,13 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   `format_single_from_target`, and zz's only prompt-side expander (`expand_prompt_input`)
   understands `#S` and `#W` and nothing else, so accepting `-F` would silently drop every
   other format. `-t` stays rejected with the rest of the client-fanout contract.
-- `command-prompt` now preserves the alias boundary of its template shape. A typed template keeps
-  its structured prepared command list through submission without another user-alias lookup.
-  Substitution edits each leaf argument in place, preserves its boundary against quote or semicolon
-  injection, and replaces only the first `%%` in each leaf. A failed typed physical group stops its
-  remaining commands while later physical lines continue. A string template and free input begin
-  fresh one-group construction. This proves the deferred execution boundary only;
-  `args-parse:command-prompt`, broader `%1` behavior, and string-template fidelity remain open for
-  10f.
+- `command-prompt` preserves the alias and source boundary of its template shape. A typed template
+  keeps its structured constructed command list through submission. A string template substitutes
+  raw source, then parses and constructs the complete result against the current alias table before
+  execution. Both paths apply the pinned `%%`, `%1`, and trailing-percent quoting rules. Typed
+  templates keep physical groups; string templates and free input form one group. Prompt chains,
+  multi-answer `%2`, and the remaining prompt UI and queue contracts stay with
+  `prompt.command-fidelity`.
 - A selected typed `display-menu` action drops its structural block wrapper before the fresh parse.
   A quoted brace string remains literal. This boundary does not close the command's repeating
   display-menu-items callback rule.

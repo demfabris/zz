@@ -128,6 +128,7 @@ zz_command() {
       HOME="$ZZ_HOME" XDG_CONFIG_HOME="$ZZ_CONFIG_HOME" \
       PATH="$ZZ_SHIM_DIR:$(dirname -- "$ZZ_BIN"):$(dirname -- "$TMUX_BIN"):$HARNESS_PATH" \
       ZZ_SMOKE_CANARY="zz-side-only" ZZ_SMOKE_ZZ_BIN="$ZZ_BIN" \
+      ZZ_SMOKE_TMUX_BIN="$TMUX_BIN" \
       ZZ_SMOKE_ZZ_SOCKET="$ZZ_SOCKET" \
       "$ZZ_BIN" --socket "$ZZ_SOCKET" "$@"
   else

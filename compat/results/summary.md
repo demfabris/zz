@@ -68,6 +68,7 @@
 | known/known-main-preset-two-panes | 2 | yes | 1 | yes | yes | yes |
 | known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
 | smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-command-prompt | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-confirm-before | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-run-shell | 3 | yes | 0 | yes | yes | yes |

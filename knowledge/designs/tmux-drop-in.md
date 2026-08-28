@@ -91,12 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The final 10e canonical acceptance inventory contains 93 differential scenarios and 1,502 executable
-steps against pinned tmux `d77c9dc6`, including 25 config/plugin smokes. The complete strict and
+The final 10f canonical acceptance inventory contains 94 differential scenarios and 1,505 executable
+steps against pinned tmux `d77c9dc6`, including 26 config/plugin smokes. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
+`31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
+The historical 10e artifact remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d artifact remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
@@ -116,8 +118,8 @@ OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still
 visual smoke evidence.
 
 Protocol v84 carries lexical command-block positions. `if-shell`, `run-shell`, both set-option
-commands, `bind-key`, and `confirm-before` now apply their pinned callback rules. The strict
-three-step confirm scenario runs 19 construction, parser, readback, alias, and exact source-file
+commands, `bind-key`, `command-prompt`, and `confirm-before` now apply their pinned callback rules.
+The strict three-step confirm scenario runs 19 construction, parser, readback, alias, and exact source-file
 plus Control channel checks on both servers. Every lexical typed block recursively constructs
 before parent name, callback type, or arity validation. Recursive paths carry independent one-layer
 user-alias budgets; alias-produced subtrees disable further user aliases, self-recursion fails
@@ -128,15 +130,18 @@ typed `if-shell`, `run-shell`, and `confirm-before` callbacks execute their cons
 without another user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical
 groups: a failed group stops its remaining commands while later physical lines continue; string
 callbacks stay one group. Typed `command-prompt` templates retain their structured prepared command
-list through submission without re-expanding aliases. Structured substitution preserves
-leaf-argument boundaries against quote or semicolon injection, replaces only the first `%%` in each
-leaf, and keeps the same typed physical-group failure boundary. String templates and free input
-start fresh as one group. The command's args-parse item, broader `%1` behavior, and string-template
-fidelity remain open for 10f. `set-hook` and command-valued native set-option deliberately construct
+list through submission without re-expanding aliases. Its template positional accepts a typed
+block or string while `-I`, `-p`, `-t`, and `-T` values stay strings. Structured substitution
+preserves leaf-argument boundaries against quote or semicolon injection. String templates
+substitute raw source before a fresh parse and complete construction pass against the current alias
+table. Both paths replace the first `%%` and every `%1`, with trailing-percent quoting. Typed
+callbacks retain physical groups, while string templates and free input form one group. String
+failures retain the originating source path and line. Prompt chaining and multi-answer `%2` retain
+their prompt owner. `set-hook` and command-valued native set-option deliberately construct
 again. A typed `display-menu` action drops its structural wrapper before the fresh selection parse,
 while a quoted brace string remains literal. Reply
 and `-y` Enter-default behavior are daemon and GPUI unit proof, not raw TUI proof. Eager whole-file
-source construction and the broader replay-channel placement difference remain open. Six
+source construction and the broader replay-channel placement difference remain open. Five
 command-specific `args-parse:` items across three rules remain.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
@@ -644,8 +649,11 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    without another user-alias lookup; read-only clients authorize that same frozen chain before any
    effect. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks stay frozen after lexical
    construction. Typed `command-prompt` templates retain their structured prepared command list
-   through submission without re-expanding aliases; string templates and free input start fresh,
-   and the command's args-parse item remains open. `set-hook` and command-valued native set-option
+   through submission without re-expanding aliases. String templates substitute raw source before a
+   fresh parse and complete construction pass against the current alias table. Both prompt paths
+   replace the first `%%` and every `%1`, with trailing-percent quoting; typed callbacks retain
+   physical groups, while string templates and free input form one group. `set-hook` and
+   command-valued native set-option
    intentionally apply their second construction stage, while selecting a `display-menu` action
    begins a fresh stage. Each stage resolves no more than one user-alias layer and refuses matched
    unsupported bodies.
@@ -2303,8 +2311,10 @@ scenario byte-diffed against the pin. Ledgered divergences: control-mode stdin k
 `$VAR` LITERAL (pin expands server-side; non-expanding entry point, test-pinned);
 stored bind and hook lists and typed `if-shell`, `run-shell`, and `confirm-before` callbacks now
 retain their lexical construction through execution. Typed `command-prompt` templates retain their
-structured prepared command list through submission without re-expanding aliases; string templates
-and free input start fresh, and the command's args-parse item remains open. `set-hook` and
+structured prepared command list through submission without re-expanding aliases. String templates
+substitute raw source before a fresh parse and complete construction pass against the current alias
+table. Both prompt paths replace the first `%%` and every `%1`, with trailing-percent quoting;
+typed callbacks retain physical groups, while string templates and free input form one group. `set-hook` and
 command-valued native set-option intentionally construct a second time, while `display-menu`
 selection begins a fresh stage. Eager whole-file source construction remains open;
 `\377`→U+00FF and `\000`-retained vs the pin's raw byte/NUL-truncation (String storage,

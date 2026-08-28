@@ -3546,6 +3546,22 @@ mod daemon_autostart {
             assert_eq!(block.error, error);
         }
 
+        fn next_block_guard<'a>(lines: impl Iterator<Item = &'a str>) -> &'a str {
+            for line in lines {
+                if line.starts_with("%begin ")
+                    || line.starts_with("%end ")
+                    || line.starts_with("%error ")
+                {
+                    return line;
+                }
+                assert!(
+                    line.starts_with('%'),
+                    "raw line {line:?} between the error and its guard"
+                );
+            }
+            panic!("no block guard next to the raw error");
+        }
+
         fn assert_attached_startup(outside: &[String], name: &str) {
             let settled = outside
                 .iter()
@@ -4491,10 +4507,16 @@ mod daemon_autostart {
                 .iter()
                 .position(|line| line == &expected)
                 .expect("raw source read error");
-            assert!(lines[error_index - 1].starts_with("%end "));
-            assert!(lines[error_index - 1].ends_with(" 3 1"));
-            assert!(lines[error_index + 1].starts_with("%begin "));
-            assert!(lines[error_index + 1].ends_with(" 6 1"));
+            let before = next_block_guard(lines[..error_index].iter().rev().copied());
+            assert!(
+                before.starts_with("%end ") && before.ends_with(" 3 1"),
+                "{lines:?}"
+            );
+            let after = next_block_guard(lines[error_index + 1..].iter().copied());
+            assert!(
+                after.starts_with("%begin ") && after.ends_with(" 6 1"),
+                "{lines:?}"
+            );
             let stream = parse_stream_allow_gaps(&output.stdout, false);
             assert_eq!(stream.blocks.len(), 5);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
@@ -5777,10 +5799,16 @@ mod daemon_autostart {
                 .iter()
                 .position(|line| line == &read_error)
                 .expect("raw hook source read error");
-            assert!(read_lines[read_error_index - 1].starts_with("%end "));
-            assert!(read_lines[read_error_index - 1].ends_with(" 3 0"));
-            assert!(read_lines[read_error_index + 1].starts_with("%begin "));
-            assert!(read_lines[read_error_index + 1].ends_with(" 5 1"));
+            let before = next_block_guard(read_lines[..read_error_index].iter().rev().copied());
+            assert!(
+                before.starts_with("%end ") && before.ends_with(" 3 0"),
+                "{read_lines:?}"
+            );
+            let after = next_block_guard(read_lines[read_error_index + 1..].iter().copied());
+            assert!(
+                after.starts_with("%begin ") && after.ends_with(" 5 1"),
+                "{read_lines:?}"
+            );
             let read = parse_stream_allow_gaps(&read.stdout, false);
             assert_eq!(read.blocks.len(), 6, "{read:?}");
             assert_block(&read.blocks[0], 1, 0, &[], false);

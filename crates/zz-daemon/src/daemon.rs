@@ -40155,6 +40155,7 @@ mod tests {
                     })
                 ))
         );
+        let replay_id = current_command_output_id(&shared, interactive);
         shared
             .input(
                 interactive,
@@ -40166,7 +40167,7 @@ mod tests {
                 },
             )
             .expect("dismiss replay command output");
-        wait_for_command_output_close(&interactive_mailbox);
+        wait_for_command_output_close(&interactive_mailbox, replay_id);
         assert!(shared.inner.lock().command_outputs.is_empty());
 
         let control_mailbox = OutboundMailbox::new();
@@ -50513,6 +50514,19 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn wait_for_process_group_exit(group: rustix::process::Pid, timeout: Duration, what: &str) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match rustix::process::test_kill_process_group(group) {
+                Err(rustix::io::Errno::SRCH | rustix::io::Errno::PERM) => return,
+                Ok(()) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+                Ok(()) => panic!("{what} process group survived"),
+                Err(error) => panic!("could not query {what} process group: {error}"),
+            }
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
     fn kill_server_reaps_running_shell_job_process_groups() {
         let shared = Arc::new(Shared::new(1));
@@ -50543,16 +50557,25 @@ mod tests {
             assert!(Instant::now() < deadline, "shell job never started");
             thread::sleep(Duration::from_millis(10));
         };
-        {
-            let inner = shared.inner.lock();
-            assert_eq!(inner.active_shell_jobs, 1);
-            assert_eq!(inner.shell_jobs.len(), 1);
-            assert!(
-                inner
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            {
+                let inner = shared.inner.lock();
+                assert_eq!(inner.active_shell_jobs, 1);
+                assert_eq!(inner.shell_jobs.len(), 1);
+                if inner
                     .shell_jobs
                     .values()
                     .all(|process| process.lock().is_some())
+                {
+                    break;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "shell job process handle never registered"
             );
+            thread::sleep(Duration::from_millis(10));
         }
 
         shared
@@ -50565,17 +50588,7 @@ mod tests {
             .expect("kill server");
         assert!(shared.inner.lock().shell_jobs.is_empty());
 
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            match rustix::process::test_kill_process_group(group) {
-                Err(rustix::io::Errno::SRCH) => break,
-                Ok(()) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Ok(()) => panic!("shell job process group survived kill-server"),
-                Err(error) => panic!("could not query shell job process group: {error}"),
-            }
-        }
+        wait_for_process_group_exit(group, Duration::from_secs(2), "shell job");
         let deadline = Instant::now() + Duration::from_secs(2);
         while shared.inner.lock().active_shell_jobs != 0 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
@@ -53989,6 +54002,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some("observer-table")
             );
         }
+        let output_id = current_command_output_id(&shared, client);
         input_test_key(
             &shared,
             client,
@@ -53996,7 +54010,7 @@ bind - split-window -v -c "#{pane_current_path}"
             pane,
             test_key(KeyCode::Escape, Modifiers::default(), None),
         );
-        wait_for_command_output_close(&mailbox);
+        wait_for_command_output_close(&mailbox, output_id);
         let inner = shared.inner.lock();
         assert!(!inner.command_outputs.contains_key(&client));
         assert_eq!(
@@ -54035,6 +54049,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some("copy-mode-vi")
             );
         }
+        let output_id = current_command_output_id(&shared, client);
         input_test_key(
             &shared,
             client,
@@ -54042,7 +54057,7 @@ bind - split-window -v -c "#{pane_current_path}"
             pane,
             test_key(KeyCode::Character('q'), Modifiers::default(), Some("q")),
         );
-        wait_for_command_output_close(&mailbox);
+        wait_for_command_output_close(&mailbox, output_id);
         let inner = shared.inner.lock();
         assert!(inner.copy_sessions.contains_key(&client));
         assert_eq!(
@@ -54099,6 +54114,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some("copy-mode-vi")
             );
         }
+        let output_id = current_command_output_id(&shared, client);
         input_test_key(
             &shared,
             client,
@@ -54106,7 +54122,7 @@ bind - split-window -v -c "#{pane_current_path}"
             pane,
             test_key(KeyCode::Escape, Modifiers::default(), None),
         );
-        wait_for_command_output_close(&mailbox);
+        wait_for_command_output_close(&mailbox, output_id);
         let inner = shared.inner.lock();
         assert!(inner.copy_sessions.contains_key(&client));
         assert_eq!(
@@ -54263,17 +54279,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .ok()
             .and_then(rustix::process::Pid::from_raw)
             .expect("copy-pipe process group pid");
-        let deadline = Instant::now() + Duration::from_secs(8);
-        loop {
-            match rustix::process::test_kill_process_group(group) {
-                Err(rustix::io::Errno::SRCH) => break,
-                Ok(()) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Ok(()) => panic!("copy-pipe process group survived timeout"),
-                Err(error) => panic!("could not query copy-pipe process group: {error}"),
-            }
-        }
+        wait_for_process_group_exit(group, Duration::from_secs(8), "copy-pipe");
     }
 
     #[test]
@@ -62191,6 +62197,18 @@ bind - split-window -v -c "#{pane_current_path}"
     #[test]
     fn display_menu_strips_only_structured_action_wrappers() {
         let (shared, client, _, mut context) = popup_test_workspace("desktop");
+        let pane = context.pane.expect("active pane");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-p", "-t", &pane.to_string(), "allow-set-title", "off"],
+                ),
+            )
+            .expect("pin the pane title");
         shared
             .execute(
                 client,
@@ -62234,7 +62252,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 .lock()
                 .engine
                 .state
-                .pane(context.pane.expect("active pane"))
+                .pane(pane)
                 .expect("live pane")
                 .title,
             "typed-choice"
@@ -71014,6 +71032,7 @@ bind - split-window -v -c "#{pane_current_path}"
             })
         ));
 
+        let output_id = current_command_output_id(&shared, client);
         shared
             .input(
                 client,
@@ -71025,7 +71044,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 },
             )
             .expect("close output view");
-        wait_for_command_output_close(&mailbox);
+        wait_for_command_output_close(&mailbox, output_id);
         let inner = shared.inner.lock();
         assert!(!inner.command_outputs.contains_key(&client));
         assert_eq!(inner.key_engines[&client].active_table(), None);
@@ -71073,7 +71092,7 @@ bind - split-window -v -c "#{pane_current_path}"
             (output.output_id, Arc::clone(&output.terminal))
         };
         assert!(second_id > first_id);
-        assert_eq!(wait_for_command_output_close(&mailbox), first_id);
+        wait_for_command_output_close(&mailbox, first_id);
         assert_eq!(
             command_output_message_id(&take_command_output_message(&mailbox)),
             second_id
@@ -71084,7 +71103,7 @@ bind - split-window -v -c "#{pane_current_path}"
             second_id
         );
         shared.close_command_output(client, &second_terminal);
-        assert_eq!(wait_for_command_output_close(&mailbox), second_id);
+        wait_for_command_output_close(&mailbox, second_id);
         shared.send_resync(client, &mailbox);
         assert!(take_reliable_messages(&mailbox).into_iter().any(|message| {
             matches!(
@@ -71110,7 +71129,7 @@ bind - split-window -v -c "#{pane_current_path}"
         };
         assert!(third_id > second_id);
         shared.close_command_output(client, &third_terminal);
-        assert_eq!(wait_for_command_output_close(&mailbox), third_id);
+        wait_for_command_output_close(&mailbox, third_id);
         assert!(mailbox.state.lock().command_output.is_none());
     }
 
@@ -71151,6 +71170,7 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("open pane output");
         take_command_output_message(&mailbox);
+        let pane_output_id = current_command_output_id(&shared, client);
         shared
             .execute(
                 client,
@@ -71159,7 +71179,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("kill-pane", ["-t", &source.to_string()]),
             )
             .expect("remove output source");
-        wait_for_command_output_close(&mailbox);
+        wait_for_command_output_close(&mailbox, pane_output_id);
         assert!(!shared.inner.lock().command_outputs.contains_key(&client));
 
         let remaining = context.pane.expect("remaining pane");
@@ -71172,6 +71192,7 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("open session output");
         take_command_output_message(&mailbox);
+        let session_output_id = current_command_output_id(&shared, client);
         shared
             .execute(
                 client,
@@ -71184,7 +71205,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared
             .attach(client, second_session)
             .expect("switch attached session");
-        wait_for_command_output_close(&mailbox);
+        wait_for_command_output_close(&mailbox, session_output_id);
         let second_pane = context.pane.expect("second-session pane");
         shared
             .open_command_output(
@@ -71195,6 +71216,7 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("open window output");
         take_command_output_message(&mailbox);
+        let window_output_id = current_command_output_id(&shared, client);
         shared
             .execute(
                 client,
@@ -71203,7 +71225,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("new-window", [] as [&str; 0]),
             )
             .expect("change active window");
-        wait_for_command_output_close(&mailbox);
+        wait_for_command_output_close(&mailbox, window_output_id);
         let inner = shared.inner.lock();
         assert!(!inner.command_outputs.contains_key(&client));
         assert_eq!(inner.key_engines[&client].active_table(), None);
@@ -72072,6 +72094,8 @@ bind - split-window -v -c "#{pane_current_path}"
         );
     }
 
+    const QUIET_PANE_COMMAND: &str = "while read -r line; do eval \"$line\"; done";
+
     fn belled_session(
         shared: &Arc<Shared>,
         mailbox: &Arc<OutboundMailbox>,
@@ -72084,7 +72108,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", [] as [&str; 0]),
+                &CommandInvocation::new("new-session", [QUIET_PANE_COMMAND]),
             )
             .expect("new session");
         let session = context.session.expect("session");
@@ -72094,7 +72118,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-window", [] as [&str; 0]),
+                &CommandInvocation::new("new-window", [QUIET_PANE_COMMAND]),
             )
             .expect("second terminal");
         let second = context.pane.expect("second terminal");
@@ -72708,9 +72732,6 @@ bind - split-window -v -c "#{pane_current_path}"
             ("set-window-option", ["-g", "monitor-activity", "on"]),
             ("set-option", ["-g", "activity-action", "any"]),
             ("set-option", ["-g", "visual-activity", "on"]),
-            ("set-window-option", ["-g", "monitor-silence", "1"]),
-            ("set-option", ["-g", "silence-action", "any"]),
-            ("set-option", ["-g", "visual-silence", "on"]),
         ] {
             shared
                 .execute(
@@ -72743,6 +72764,21 @@ bind - split-window -v -c "#{pane_current_path}"
             vec![(true, activity_record.token), (false, bell_record.token)]
         );
 
+        for (command, arguments) in [
+            ("set-window-option", ["-g", "monitor-silence", "1"]),
+            ("set-option", ["-g", "silence-action", "any"]),
+            ("set-option", ["-g", "visual-silence", "on"]),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(command, arguments),
+                )
+                .expect("configure silence producer");
+        }
+        take_reliable_messages(&mailbox);
         let silence_deadline = shared.inner.lock().silence_deadlines[&second_window];
         shared.expire_window_silence(silence_deadline, silence_deadline.deadline);
         let silence_messages = take_reliable_messages(&mailbox);
@@ -74806,30 +74842,33 @@ bind - split-window -v -c "#{pane_current_path}"
         *output_id
     }
 
-    fn wait_for_command_output_close(mailbox: &OutboundMailbox) -> u64 {
+    fn current_command_output_id(shared: &Arc<Shared>, client: ClientId) -> u64 {
+        shared.inner.lock().command_outputs[&client].output_id
+    }
+
+    fn wait_for_command_output_close(mailbox: &OutboundMailbox, output_id: u64) {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            let closed = take_reliable_messages(mailbox)
-                .into_iter()
-                .find_map(|message| {
-                    let ProtocolMessage::Event(Event {
-                        payload:
-                            EventPayload::CommandOutput {
-                                output_id,
-                                viewport: None,
-                                ..
-                            },
+            let closed = take_reliable_messages(mailbox).into_iter().any(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::CommandOutput {
+                            output_id: closed,
+                            viewport: None,
+                            ..
+                        },
                         ..
-                    }) = message
-                    else {
-                        return None;
-                    };
-                    Some(output_id)
-                });
-            if let Some(output_id) = closed {
-                return output_id;
+                    }) if closed == output_id
+                )
+            });
+            if closed {
+                return;
             }
-            assert!(Instant::now() < deadline, "output view did not close");
+            assert!(
+                Instant::now() < deadline,
+                "output view {output_id} did not close"
+            );
             thread::sleep(Duration::from_millis(10));
         }
     }

@@ -10620,7 +10620,7 @@ dependencies = [
 
 [[package]]
 name = "zz"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "agent-client-protocol",
  "async-channel",
@@ -10670,7 +10670,7 @@ dependencies = [
 
 [[package]]
 name = "zz-browser"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -10695,7 +10695,7 @@ dependencies = [
 
 [[package]]
 name = "zz-chrome-import"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -10721,7 +10721,7 @@ dependencies = [
 
 [[package]]
 name = "zz-client"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "log",
  "tempfile",
@@ -10733,7 +10733,7 @@ dependencies = [
 
 [[package]]
 name = "zz-client-ffi"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "rustix 1.1.4",
  "serde_json",
@@ -10746,7 +10746,7 @@ dependencies = [
 
 [[package]]
 name = "zz-daemon"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "agent-client-protocol",
  "async-channel",
@@ -10783,7 +10783,7 @@ dependencies = [
 
 [[package]]
 name = "zz-mux"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "glob",
@@ -10797,7 +10797,7 @@ dependencies = [
 
 [[package]]
 name = "zz-protocol"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "postcard",
  "serde",
@@ -10809,7 +10809,7 @@ dependencies = [
 
 [[package]]
 name = "zz-terminal"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-channel",
  "crossbeam-channel",
@@ -10832,7 +10832,7 @@ dependencies = [
 
 [[package]]
 name = "zz-tui"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-signal",
  "base64 0.22.1",
@@ -10849,7 +10849,7 @@ dependencies = [
 
 [[package]]
 name = "zz-ui"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -10879,7 +10879,7 @@ dependencies = [
 
 [[package]]
 name = "zz-xtask"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "cargo_metadata",
  "cef",

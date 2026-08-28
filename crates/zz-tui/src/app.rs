@@ -1296,6 +1296,8 @@ fn handle_core_event(
             model.attached_session = Some(session);
             model.viewports.clear();
             model.set_command_output(None, None);
+            model.confirm = None;
+            model.confirm_reply_pending = false;
             model.client_message = None;
             model.update_snapshot(Arc::clone(lock_core(core).snapshot()));
             if let Some(input) = model.finish_client_focus_attach() {
@@ -1351,6 +1353,11 @@ fn handle_core_event(
         }
         CoreEvent::DisplayPanesChanged => {
             model.display_panes = lock_core(core).display_panes().cloned();
+            Ok(ProtocolOutcome::RepaintAll)
+        }
+        CoreEvent::ConfirmChanged => {
+            model.confirm = lock_core(core).confirm().cloned();
+            model.confirm_reply_pending = false;
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::ClientMessage {
@@ -1452,7 +1459,6 @@ fn handle_core_event(
         | CoreEvent::MuxOptionsChanged
         | CoreEvent::PopupChanged
         | CoreEvent::MenuChanged
-        | CoreEvent::ConfirmChanged
         | CoreEvent::KeyTablesChanged
         | CoreEvent::PrefixCancelled { .. }
         | CoreEvent::Bell { .. }

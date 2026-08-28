@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 87 active groups, 582 classified active items, 94 closed groups, and two known
+The live tracker has 87 active groups, 581 classified active items, 95 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -66,10 +66,11 @@ The combined chooser row contributes three harness steps and 26 internal checks 
 GEO, FMT, OUT, or WARN differences.
 Slice 10l registers the pinned hook-producer partition in source. Slice 10m then makes the full
 default-key structural partition explicit and matches tmux's bare key-only `bind-key` mutation.
-Neither adds a scenario step, so the canonical artifact remains 98 scenarios and 1,517 steps with
-that digest. The existing bind-key row now runs 17 internal checks. A fresh practical rerank puts
-raw-TUI confirm consumption next; nonconstant formats, open context formats, and option consumers
-remain three independent discovery slices.
+Slice 10n closes raw-TUI confirmation presentation and input handling. None adds a scenario step,
+so the stored artifact remains 98 scenarios and 1,517 steps with that digest. The bind-key row runs
+17 internal checks, while the attached fixture now exercises seven confirmation replies with a pane
+sentinel that proves reply keys do not leak. Menu presentation in slice 10o is next; nonconstant
+formats, open context formats, and option consumers remain three independent discovery slices.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
@@ -134,9 +135,10 @@ physical internal group newlines print as ` ;; `. String children construct afte
 parent-format expansion as one group. Its strict three-step scenario runs 19 internal construction,
 parser, readback, alias, and exact channel checks and finishes
 `ARGS_PARSE_CONFIRM_BEFORE=clean:19` on both servers. Nested bind and confirm failures are preflight
-parse errors. Reply and `-y` Enter-default paths are daemon and GPUI unit proof; raw zz-tui does not
-yet consume confirm, menu, or popup state. Eager whole-file source construction and the broader
-replay-channel placement difference remain open.
+parse errors. Reply and `-y` Enter-default paths have daemon and GPUI unit proof. Raw zz-tui now
+renders confirmations and handles their replies with unit and attached-client coverage; menu and
+popup state remain open. Eager whole-file source construction and the broader replay-channel
+placement difference remain open.
 Stored `bind-key` and `set-hook` commands execute their constructed lists without another
 user-alias lookup. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks stay frozen after
 lexical construction. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed
@@ -576,7 +578,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    The matches split into 49 copy-mode, 61 copy-mode-vi, and 32 prefix entries without claiming
    complete runtime parity. Bare key-only `bind-key` now also preserves commands and unspecified
    metadata, replaces a note only with `-N`, sets repeat with `-r`, and leaves an absent key
-   unbound while creating its table. `tracker.semantic-coverage` now tracks open-ended or dynamic
+   unbound while creating its table. Slice 10n then closes raw-TUI confirmation presentation and
+   input handling, including exact key case, modifier reduction, Enter defaults, pending-reply capture, and seven attached
+   reply paths that prove the response does not reach the pane. `tracker.semantic-coverage` now tracks open-ended or dynamic
    context formats, nonconstant formats, and option `BEHAVES` consumer truth. Daemon invalid-flag
    coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
@@ -916,8 +920,8 @@ the same pane-kind operation as the picker. Do not give `split-window` an agent 
 - `%` and `"` may open `split-picker` in the zz default table.
 - `s` and `w` may focus the native sidebar instead of drawing tmux's tree.
 - The GPUI client uses native presentation for prompts, menus, popups, copy mode, status, and
-  choosers. Raw zz-tui still lacks confirm, menu, and popup rendering and input consumption under
-  `clients.tui-overlay-consumption`.
+  choosers. Raw zz-tui handles confirmations, while menu and popup rendering and input consumption
+  remain under `clients.tui-overlay-consumption`.
 - Current window may remain per client rather than per session.
 - GUI defaults may keep the persistent-daemon lifecycle until a config explicitly selects tmux
   lifecycle behavior.
@@ -1129,8 +1133,9 @@ permanent product decision has been recorded for them.
   `ARGS_PARSE_CONFIRM_BEFORE=clean:19` on zz and the pin. Nested bind and confirm failures are
   preflight parse errors. Eager whole-file source construction and the broader replay-channel
   placement difference remain open. Three callback rules across six implemented commands remain.
-  The same audit registered `clients.tui-overlay-consumption` because raw zz-tui drops confirm,
-  menu, and popup state changes and does not intercept overlay input.
+  The same audit registered `clients.tui-overlay-consumption` because raw zz-tui then dropped
+  confirmation, menu, and popup state changes. The later `clients.tui-confirm-before-overlay`
+  closure shipped confirmation handling; menu and popup remain active.
 - 2026-08-28: Protocol v84 closed `tracker.args-parse-command-prompt` without another wire change.
   The command accepts zero or one typed-block-or-string template while `-I`, `-p`, `-t`, and `-T`
   values remain strings. Typed templates preserve their recursively constructed command list and
@@ -1220,6 +1225,17 @@ permanent product decision has been recorded for them.
   and silently leaves an absent key unbound. The strict three-step bind-key row grows from 16 to 17
   internal checks and reports zero differences. Its harness step count and the canonical summary
   digest remain unchanged.
+- 2026-08-28: Slice 10n closed `clients.tui-confirm-before-overlay` without a protocol or daemon
+  change. Raw zz-tui now seeds and resets retained confirmation state with its connection, renders
+  the prompt in the status or sidebar message area, hides the cursor, and intercepts input before
+  normal shortcuts and pane delivery. Exact ASCII case, tmux-style Meta and Enter modifier handling,
+  custom confirmation keys, Escape, pending replies, key repeat and release, paste, pointer input,
+  and named nontext keys are covered by focused tests. The attached fixture compares default and
+  Meta accept, default reject, custom-case reject and accept, default-no Enter, and `-y` Enter on zz
+  and pinned tmux. A one-byte pane sentinel
+  proves every reply is consumed. The tracker now has 87 active groups, 581 classified active
+  items, and 95 closed entries. Menu and popup presentation remain active under
+  `clients.tui-overlay-consumption`; menu is slice 10o.
 
 # Related
 

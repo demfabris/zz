@@ -196,9 +196,11 @@ fresh parse and complete construction pass against the current alias table. Both
 first `%%` and every `%1`, with trailing-percent quoting. Typed callbacks retain physical groups,
 while string templates and free input form one group. Both sides publish
 `ARGS_PARSE_CONFIRM_BEFORE=clean:19`. The scenario proves construction, parsing, readback, and
-output channels. Accept, reject, `-y` Enter-default, blocking, and background replies are daemon and
-GPUI unit-test evidence; raw zz-tui does not yet consume confirm, menu, or popup state. It does not
-close eager whole-file source construction or the broader replay-channel placement difference.
+output channels. Accept, reject, `-y` Enter-default, blocking, and background replies have daemon
+and GPUI unit coverage. Raw zz-tui confirmation replies later closed under
+`clients.tui-confirm-before-overlay` with focused and attached-client proof; menu and popup state
+remain open. This row does not close eager whole-file source construction or the broader
+replay-channel placement difference.
 
 The strict three-step `smoke/args-parse-command-prompt` scenario drives a real attached client and
 runs 43 internal checks. It covers zero, typed, string, and empty templates; string-only `-I`,
@@ -249,11 +251,12 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The combined 10j/10k checkpoint
+`compat/results/summary.md` is the persisted acceptance artifact. The combined 10n checkpoint
 from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
 row is clean.
-Slice 10l adds a source registration and no differential scenario or runtime behavior, so it keeps
-the same scenario count, step count, attached-client result, and digest.
+Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven confirmation cases and
+a pane-input sentinel to the attached fixture without adding a differential row, so the scenario
+count, step count, attached-client result, and digest stay unchanged.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -477,6 +480,12 @@ page movement, vi Escape selection clearing without exit, search cancel, search 
 table, vi `q` cancel, and emacs Escape cancel. It verifies the created paste buffer contains the
 selected match and then removes it. The current full fixture passed for zz and pinned tmux after
 independent review of the fresh-session marker.
+
+The confirmation probe runs seven fresh `confirm-before` cases on each server: default-key accept,
+Meta plus default-key accept, default-key reject, custom uppercase-key lowercase rejection, custom
+uppercase-key acceptance, default-no Enter rejection, and `-y` Enter acceptance. Each case blocks behind a one-byte read in
+the underlying pane. The expected reply controls whether the callback writes its marker, and a
+final sentinel byte releases the pane while proving the response never reached terminal input.
 
 The alert-lifecycle probe uses fresh non-current monitored windows. It replaces a 1,500 ms sticky
 message with a 5,000 ms Bell alert, writes new terminal output behind it, and proves the current

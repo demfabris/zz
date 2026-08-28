@@ -1168,6 +1168,10 @@ impl Renderer {
     }
 
     fn place_active_cursor(&mut self, model: &Model) {
+        if model.confirm.is_some() {
+            self.hide_cursor();
+            return;
+        }
         if model.sidebar_edit.is_some() {
             self.place_sidebar_edit_cursor(model);
             return;
@@ -1421,6 +1425,13 @@ fn sidebar_status_lines(model: &Model) -> Vec<StyledLine> {
     if line_count == 0 {
         return Vec::new();
     }
+    if let Some(confirm) = &model.confirm {
+        let mut lines =
+            vec![StyledLine::plain(&" ".repeat(usize::from(sidebar::WIDTH))); line_count];
+        lines[line_count - 1] =
+            padded_styled(&StyledLine::plain(&confirm.prompt), sidebar::WIDTH, ' ');
+        return lines;
+    }
     if let Some(prompt) = &model.command_prompt {
         let mut lines =
             vec![StyledLine::plain(&" ".repeat(usize::from(sidebar::WIDTH))); line_count];
@@ -1469,6 +1480,14 @@ enum StatusOverlay {
 
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let style = overlay_style(&model.appearance);
+    if let Some(confirm) = &model.confirm {
+        if model.sidebar_visible() && model.command_output.is_none() {
+            return None;
+        }
+        let mut line = StyledLine::default();
+        line.push_segment(&padded_segment(&confirm.prompt, width, ' '), style);
+        return Some(StatusOverlay::Row(line));
+    }
     if let Some(query) = &model.command_output_search {
         let mut line = StyledLine::default();
         let (prompt, _) = command_output_search_display(query, width);
@@ -2181,6 +2200,48 @@ mod tests {
             "bottom virtual row: {output:?}"
         );
         assert!(output.contains("virtual"));
+    }
+
+    #[test]
+    fn confirm_prompt_replaces_the_status_row_and_other_local_overlays() {
+        let mut model = block_model(40, 10);
+        model.set_status(zz_protocol::StatusLine {
+            customized: true,
+            ..zz_protocol::StatusLine::default()
+        });
+        model.command_output_search = Some(SearchQuery::literal("hidden search"));
+        model.client_message = Some(ClientMessage::local("hidden message"));
+        model.confirm = Some(zz_protocol::ConfirmState {
+            prompt: "Confirm attached? (y/n) ".to_owned(),
+            confirm_key: b'y',
+            default_yes: false,
+        });
+        let mut renderer = Renderer::new();
+        renderer.paint_status_block(&model, true);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("\x1b[10;1H"), "{output:?}");
+        assert!(output.contains("Confirm attached? (y/n) "));
+        assert!(!output.contains("hidden search"));
+        assert!(!output.contains("hidden message"));
+
+        let mut sidebar_model = block_model(80, 10);
+        assert!(sidebar_model.sidebar_visible());
+        sidebar_model.confirm = model.confirm;
+        assert!(status_overlay(&sidebar_model, 80).is_none());
+        let lines = sidebar_status_lines(&sidebar_model);
+        assert_eq!(lines.len(), 3);
+        assert!(lines.last().is_some_and(|line| {
+            line.segments
+                .iter()
+                .any(|segment| segment.text.contains("Confirm attached? (y/n) "))
+        }));
+
+        let mut sidebar_renderer = Renderer::new();
+        sidebar_renderer.paint_sidebar(&sidebar_model, true);
+        sidebar_renderer.paint_status_block(&sidebar_model, true);
+        let output = String::from_utf8(sidebar_renderer.output).unwrap();
+        assert_eq!(output.matches("Confirm attached? (y/n) ").count(), 1);
     }
 
     #[test]

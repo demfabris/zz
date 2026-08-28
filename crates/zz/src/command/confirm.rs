@@ -69,18 +69,9 @@ impl Render for ConfirmView {
 
 fn confirm_accepts(state: &ConfirmState, keystroke: &Keystroke) -> bool {
     if keystroke.key == "enter" {
-        return state.default_yes
-            && !keystroke.modifiers.shift
-            && !keystroke.modifiers.control
-            && !keystroke.modifiers.alt
-            && !keystroke.modifiers.platform
-            && !keystroke.modifiers.function;
+        return state.default_yes && !keystroke.modifiers.platform && !keystroke.modifiers.function;
     }
-    if keystroke.modifiers.control
-        || keystroke.modifiers.alt
-        || keystroke.modifiers.platform
-        || keystroke.modifiers.function
-    {
+    if keystroke.modifiers.control || keystroke.modifiers.platform || keystroke.modifiers.function {
         return false;
     }
     let Some(character) = keystroke.key_char.as_deref().and_then(|value| {
@@ -138,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn control_modified_and_unrelated_keys_reject() {
+    fn confirmation_modifiers_follow_single_key_prompt_rules() {
         let state = ConfirmState {
             prompt: String::new(),
             confirm_key: b'y',
@@ -152,6 +143,19 @@ mod tests {
         assert!(!confirm_accepts(
             &state,
             &key("escape", None, Modifiers::default())
+        ));
+
+        let alt = Modifiers {
+            alt: true,
+            ..Modifiers::default()
+        };
+        assert!(confirm_accepts(&state, &key("y", Some("y"), alt)));
+        assert!(confirm_accepts(
+            &ConfirmState {
+                default_yes: true,
+                ..state
+            },
+            &key("enter", None, alt)
         ));
     }
 }

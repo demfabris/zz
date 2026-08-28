@@ -7,9 +7,9 @@ use std::{
 use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
-    ChooseBufferState, ChooseTreeState, CommandPromptState, DisplayPanesState, InputMessage,
-    MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot, StatusLine,
-    StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
+    ChooseBufferState, ChooseTreeState, CommandPromptState, ConfirmState, DisplayPanesState,
+    InputMessage, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot,
+    StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{KeyCode, SearchQuery, TerminalAppearance, TerminalViewport};
 
@@ -101,6 +101,9 @@ pub(crate) struct Model {
     pub choose_tree: Option<ChooseTreeState>,
     pub choose_buffer: Option<ChooseBufferState>,
     pub display_panes: Option<DisplayPanesState>,
+    pub confirm: Option<ConfirmState>,
+    pub confirm_reply_pending: bool,
+    pub confirm_swallowed_key: Option<KeyCode>,
     pub client_message: Option<ClientMessage>,
     pub chrome: zz_client::ChromeKeymap,
     pub sidebar: sidebar::State,
@@ -146,6 +149,9 @@ impl Model {
             choose_tree: core.choose_tree().cloned(),
             choose_buffer: core.choose_buffer().cloned(),
             display_panes: core.display_panes().cloned(),
+            confirm: core.confirm().cloned(),
+            confirm_reply_pending: false,
+            confirm_swallowed_key: None,
             client_message: None,
             chrome: zz_client::ChromeKeymap::new(),
             sidebar: sidebar::State::default(),
@@ -183,6 +189,9 @@ impl Model {
         self.choose_tree = core.choose_tree().cloned();
         self.choose_buffer = core.choose_buffer().cloned();
         self.display_panes = core.display_panes().cloned();
+        self.confirm = core.confirm().cloned();
+        self.confirm_reply_pending = false;
+        self.confirm_swallowed_key = None;
         self.sidebar_edit = None;
         self.picker_pane = None;
         self.picker_selection = 0;
@@ -375,6 +384,12 @@ impl Model {
         if block > 0 {
             let line = u16::from(self.status.message_line).min(block.saturating_sub(1));
             Some(self.status_origin_y().saturating_add(line))
+        } else if self.confirm.is_some() {
+            Some(if self.status_top() {
+                0
+            } else {
+                self.size.rows.saturating_sub(1)
+            })
         } else if self.command_output_search.is_some() {
             Some(self.size.rows.saturating_sub(1))
         } else if self.command_prompt.is_some() || self.client_message.is_some() {
@@ -727,6 +742,68 @@ mod tests {
             endpoint,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn confirm_state_seeds_and_resets_with_the_connection() {
+        let confirm = ConfirmState {
+            prompt: "Confirm attached? ".to_owned(),
+            confirm_key: b'Y',
+            default_yes: true,
+        };
+        let mut core = ClientCore::new();
+        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 1,
+            payload: zz_protocol::EventPayload::Confirm {
+                state: Some(confirm.clone()),
+            },
+        }));
+        let endpoint = Endpoint::parse("unix:///tmp/zz-state-confirm-test.sock").unwrap();
+        let mut model = Model::new(
+            &core,
+            TerminalSize {
+                columns: 80,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        assert_eq!(model.confirm, Some(confirm));
+        model.confirm_reply_pending = true;
+        model.confirm_swallowed_key = Some(KeyCode::Enter);
+
+        model.reset_connection(&ClientCore::new());
+
+        assert_eq!(model.confirm, None);
+        assert!(!model.confirm_reply_pending);
+        assert_eq!(model.confirm_swallowed_key, None);
+    }
+
+    #[test]
+    fn confirm_uses_the_message_row_with_status_on_or_off() {
+        let mut model = make_model(80, 24);
+        model.confirm = Some(ConfirmState {
+            prompt: "Confirm? ".to_owned(),
+            confirm_key: b'y',
+            default_yes: false,
+        });
+        assert_eq!(model.message_row_y(), Some(23));
+
+        model.status.position = StatusPosition::Top;
+        assert_eq!(model.message_row_y(), Some(0));
+
+        model.set_status(StatusLine {
+            rows: vec!["zero".to_owned(), "one".to_owned()],
+            position: StatusPosition::Bottom,
+            message_line: 1,
+            ..StatusLine::default()
+        });
+        assert_eq!(model.message_row_y(), Some(23));
     }
 
     #[test]

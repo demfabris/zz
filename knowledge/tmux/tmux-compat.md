@@ -248,9 +248,8 @@ cells. zz publishes daemon-owned state and renders it in its clients:
   status. Native sidebar and titlebar presentation remain at defaults.
 - The GPUI client uses native surfaces for prompts, choosers, menus, popups, copy mode, and pane
   indicators.
-- The raw TUI already consumes command prompts, choose trees, choose buffers, and display-panes,
-  but does not yet render or consume `confirm-before`, `display-menu`, or `display-popup`. Those
-  three client paths are an active compatibility gap.
+- The raw TUI consumes command prompts, confirmations, choose trees, choose buffers, and
+  display-panes. `display-menu` and `display-popup` remain active client gaps.
 - A native surface may look different. Its command, key, target, exit, and state semantics remain
   part of the compatibility contract for every client that presents it.
 

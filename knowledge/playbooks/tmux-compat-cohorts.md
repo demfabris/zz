@@ -64,8 +64,8 @@ fresh parse and complete construction pass against the current alias table. Both
 first `%%` and every `%1`, with trailing-percent quoting. Typed callbacks retain physical groups,
 while string templates and free input form one group. Prompt chaining and multi-answer `%2` retain
 their existing prompt owner. The strict fixture proves exact construction,
-parser, readback, and source-file plus Control channels; reply and `-y` Enter-default behavior
-remain covered by daemon and GPUI tests.
+parser, readback, and source-file plus Control channels. Reply and `-y` Enter-default behavior has
+daemon and GPUI coverage, and slice 10n later adds raw-TUI unit and attached-client proof.
 
 The nineteenth milestone reuses protocol v84 for `command-prompt`. The command accepts zero or one
 template positional as a typed block or string while `-I`, `-p`, `-t`, and `-T` values remain
@@ -126,6 +126,16 @@ duplicate explicit names and overlap between produced and tracked names. `just c
 requires the named daemon test and runs it through `--exact`. The slice changes no runtime
 behavior, protocol, differential scenario, or step.
 
+The twenty-fifth milestone closes slice 10m by pinning the full default-key structural partition
+and matching bare key-only `bind-key` mutation. Structural matches stay separate from their runtime
+owners. The twenty-sixth closes slice 10n: raw zz-tui retains and renders confirmation state, routes
+confirmation input before normal shortcuts, and keeps the prompt active until the daemon clears it.
+Focused tests cover exact key case, modifier reduction, Enter defaults, named nontext keys, key
+lifecycle, paste, pointer input, pending replies, status placement, sidebar placement, and
+reconnect state. Seven attached cases compare ordinary and Meta accept, reject, custom key case,
+and Enter defaults against pinned tmux. A
+one-byte pane sentinel proves no reply key leaks into terminal input.
+
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
 and TUI reconnect. `resize-window -A` and `-a` now aggregate retained client geometry once and
@@ -147,14 +157,15 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The combined 10j/10k canonical checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
+The combined 10n checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
 is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
-attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
+attached fixture passes, and `compat/run.sh --check-summary` confirms the stored summary SHA-256
 is
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
-The 10l source-registration milestone leaves that artifact and digest unchanged.
+The 10l and 10m milestones add no differential step. Slice 10n extends the attached fixture with seven
+confirmation cases and a pane sentinel without adding a scenario row, leaving the digest unchanged.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
@@ -190,13 +201,13 @@ positions, exact typed and string tails, aliases, boundary flags, stored-child p
 bare-key metadata mutation, absent-key table creation, and physical-group execution through a real
 attached client.
 The focused three-step `args-parse-confirm-before` row runs 19 internal checks for recursive typed
-and string construction, string-only option values, canonical nested readback, per-path alias
+and string construction, string-only option values, nested readback, per-path alias
 budgets, self-recursion safety, physical groups, target and child diagnostics, exact source-file
 and Control channels, and rejected-binding preservation. Nested bind and confirm failures are
 preflight parse errors. The constructed confirm callback remains frozen through execution; stored
-bindings and hooks likewise perform no execution-time user-alias lookup. It does not claim replies
-through raw zz-tui, which does not yet consume confirm, menu, or popup state, and it leaves eager
-whole-file source construction plus the broader replay-channel placement difference open.
+bindings and hooks likewise perform no execution-time user-alias lookup. Raw zz-tui reply handling
+later closed under `clients.tui-confirm-before-overlay`; menu and popup state remain open. Eager
+whole-file source construction plus the broader replay-channel placement difference also remain.
 Late focused regressions also prove that typed `if-shell`, `run-shell`, and structured
 `command-prompt` callbacks stop the failed physical group and continue later physical lines, while
 string callbacks remain one group. Structured prompt substitution preserves leaf-argument
@@ -295,7 +306,8 @@ closure is that exception.
 | 10j/10k | `choose-buffer` and `choose-tree` commands-or-string rule | Closed under `tracker.args-parse-choose-buffer` and `tracker.args-parse-choose-tree` on 2026-08-28 | Complete | One deliberate combined milestone for one callback rule, one chooser-template executor, and one attached 26-check proof |
 | 10l | Hook-producer source registration | Closed under `tracker.hook-producer-partition` on 2026-08-28 | Complete | 27 explicit plus 37 derived producers reconcile with four tracked hook gaps; no runtime or differential change |
 | 10m | Shared key structure and bare bind mutation | Closed under `tracker.key-binding-behavior` on 2026-08-28 | Complete | Exact structural counts stay distinct from runtime proof; bare key-only bind mutation now matches the pin |
-| 10n-10p | Raw TUI daemon overlays | Three items in `clients.tui-overlay-consumption`, one confirm, menu, or popup surface per slice | Hard | ClientCore already retains state; each client renderer and input contract remains independently closable |
+| 10n | Raw TUI confirmation | Closed under `clients.tui-confirm-before-overlay` on 2026-08-28 | Complete | State, rendering, input capture, reply lifecycle, and seven attached cases close independently |
+| 10o-10p | Raw TUI menu and popup | Two items in `clients.tui-overlay-consumption`, one surface per slice | Hard | ClientCore already retains both states; each renderer and input contract remains independently closable |
 | 10q-10s | Remaining source-owned tracker registrations | Nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Three unrelated owners remain three independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | 12a-12f | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -305,7 +317,7 @@ closure is that exception.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10m are closed; raw-TUI confirm consumption in slice 10n is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through 10n are closed; raw-TUI menu presentation in slice 10o is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

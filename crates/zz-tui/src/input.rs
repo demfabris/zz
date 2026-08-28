@@ -4,8 +4,8 @@ use zz_daemon::{
 };
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, CommandInvocation, CommandPromptAction,
-    CommandPromptMode, DisplayPanesAction, InputMessage, MAX_COMMAND_PROMPT_BYTES,
-    PaneKindSnapshot,
+    CommandPromptMode, ConfirmAction, ConfirmState, DisplayPanesAction, InputMessage,
+    MAX_COMMAND_PROMPT_BYTES, PaneKindSnapshot,
 };
 use zz_terminal::{
     KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalMouseButton,
@@ -47,6 +47,28 @@ pub(crate) fn handle(
     event: TerminalEvent,
     pixel_mouse: bool,
 ) -> Result<InputOutcome, String> {
+    let event = match confirm_input_route(
+        model.confirm.as_ref(),
+        model.confirm_reply_pending,
+        &mut model.confirm_swallowed_key,
+        event,
+    ) {
+        ConfirmInputRoute::Forward(event) => event,
+        ConfirmInputRoute::Consume => return Ok(InputOutcome::None),
+        ConfirmInputRoute::Reply {
+            accepted,
+            swallowed_key,
+        } => {
+            client
+                .send_input(InputMessage::Confirm {
+                    action: ConfirmAction::Reply(accepted),
+                })
+                .map_err(|error| error.to_string())?;
+            model.confirm_reply_pending = true;
+            model.confirm_swallowed_key = swallowed_key;
+            return Ok(InputOutcome::None);
+        }
+    };
     match event {
         TerminalEvent::CellSize {
             width_px,
@@ -68,6 +90,87 @@ pub(crate) fn handle(
         TerminalEvent::Paste(text) => handle_paste(model, client, text),
         TerminalEvent::Mouse(event) => handle_mouse(model, client, browser, event, pixel_mouse),
         TerminalEvent::Key(event) => handle_key(model, client, browser, event),
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ConfirmInputRoute {
+    Forward(TerminalEvent),
+    Consume,
+    Reply {
+        accepted: bool,
+        swallowed_key: Option<KeyCode>,
+    },
+}
+
+fn confirm_input_route(
+    state: Option<&ConfirmState>,
+    reply_pending: bool,
+    swallowed_key: &mut Option<KeyCode>,
+    event: TerminalEvent,
+) -> ConfirmInputRoute {
+    if let TerminalEvent::Key(key) = &event
+        && swallow_confirm_key(swallowed_key, *key)
+    {
+        return ConfirmInputRoute::Consume;
+    }
+    let Some(state) = state else {
+        return ConfirmInputRoute::Forward(event);
+    };
+    if reply_pending
+        && matches!(
+            event,
+            TerminalEvent::Key(_) | TerminalEvent::Paste(_) | TerminalEvent::Mouse(_)
+        )
+    {
+        return ConfirmInputRoute::Consume;
+    }
+    match event {
+        TerminalEvent::Key(event) if event.kind == KeyEventKind::Release => {
+            ConfirmInputRoute::Consume
+        }
+        TerminalEvent::Key(event) => match confirm_reply(state, event) {
+            Some(accepted) => ConfirmInputRoute::Reply {
+                accepted,
+                swallowed_key: Some(key_code(event.code)),
+            },
+            None => ConfirmInputRoute::Consume,
+        },
+        TerminalEvent::Paste(_) | TerminalEvent::Mouse(_) => ConfirmInputRoute::Consume,
+        event => ConfirmInputRoute::Forward(event),
+    }
+}
+
+fn swallow_confirm_key(swallowed_key: &mut Option<KeyCode>, event: KeyEvent) -> bool {
+    let Some(swallowed) = *swallowed_key else {
+        return false;
+    };
+    if key_code(event.code) != swallowed {
+        return false;
+    }
+    match event.kind {
+        KeyEventKind::Repeat => true,
+        KeyEventKind::Release => {
+            *swallowed_key = None;
+            true
+        }
+        KeyEventKind::Press => {
+            *swallowed_key = None;
+            false
+        }
+    }
+}
+
+fn confirm_reply(state: &ConfirmState, event: KeyEvent) -> Option<bool> {
+    match event.code {
+        TerminalKeyCode::Enter => Some(state.default_yes),
+        TerminalKeyCode::Char(character) => Some(
+            !event.modifiers.contains(KeyModifiers::CONTROL)
+                && character.is_ascii()
+                && character as u8 == state.confirm_key,
+        ),
+        TerminalKeyCode::Backspace | TerminalKeyCode::Tab | TerminalKeyCode::Esc => Some(false),
+        _ => None,
     }
 }
 
@@ -1281,6 +1384,223 @@ const fn modifiers(value: KeyModifiers) -> Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn confirm_state(confirm_key: u8, default_yes: bool) -> ConfirmState {
+        ConfirmState {
+            prompt: "Confirm? ".to_owned(),
+            confirm_key,
+            default_yes,
+        }
+    }
+
+    fn confirm_route(state: &ConfirmState, event: TerminalEvent) -> ConfirmInputRoute {
+        confirm_input_route(Some(state), false, &mut None, event)
+    }
+
+    fn assert_confirm_reply(state: &ConfirmState, event: KeyEvent, accepted: bool) {
+        assert!(matches!(
+            confirm_route(state, TerminalEvent::Key(event)),
+            ConfirmInputRoute::Reply {
+                accepted: actual,
+                swallowed_key: Some(_),
+            } if actual == accepted
+        ));
+    }
+
+    #[test]
+    fn confirm_keys_follow_the_published_case_and_enter_rules() {
+        let lower = confirm_state(b'y', false);
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Char('y'), KeyModifiers::NONE),
+            true,
+        );
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Char('n'), KeyModifiers::NONE),
+            false,
+        );
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Char('Y'), KeyModifiers::SHIFT),
+            false,
+        );
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Char('y'), KeyModifiers::CONTROL),
+            false,
+        );
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Char('y'), KeyModifiers::ALT),
+            true,
+        );
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Char('y'), KeyModifiers::SUPER),
+            true,
+        );
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::NONE),
+            false,
+        );
+
+        let upper = confirm_state(b'Y', false);
+        assert_confirm_reply(
+            &upper,
+            KeyEvent::new(TerminalKeyCode::Char('Y'), KeyModifiers::SHIFT),
+            true,
+        );
+        assert_confirm_reply(
+            &upper,
+            KeyEvent::new(TerminalKeyCode::Char('y'), KeyModifiers::NONE),
+            false,
+        );
+
+        let enter = confirm_state(b'y', true);
+        assert_confirm_reply(
+            &enter,
+            KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::NONE),
+            true,
+        );
+        assert_confirm_reply(
+            &enter,
+            KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::SHIFT),
+            true,
+        );
+        assert_confirm_reply(
+            &enter,
+            KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::ALT),
+            true,
+        );
+        assert_confirm_reply(
+            &enter,
+            KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::CONTROL),
+            true,
+        );
+        assert_confirm_reply(
+            &enter,
+            KeyEvent::new(TerminalKeyCode::Enter, KeyModifiers::SUPER),
+            true,
+        );
+        assert_eq!(
+            confirm_route(
+                &lower,
+                TerminalEvent::Key(KeyEvent::new(TerminalKeyCode::F(2), KeyModifiers::NONE))
+            ),
+            ConfirmInputRoute::Consume
+        );
+        assert_confirm_reply(
+            &lower,
+            KeyEvent::new(TerminalKeyCode::Esc, KeyModifiers::NONE),
+            false,
+        );
+    }
+
+    #[test]
+    fn confirm_routes_extended_modifier_bit_eight_like_tmux_meta() {
+        let mut parser = crate::terminal_event::EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b[121;9u\x1b[13;9u", &mut events);
+        assert_eq!(events.len(), 2);
+
+        let lower = confirm_state(b'y', false);
+        assert!(matches!(
+            confirm_route(&lower, events[0].clone()),
+            ConfirmInputRoute::Reply { accepted: true, .. }
+        ));
+
+        let enter = confirm_state(b'y', true);
+        assert!(matches!(
+            confirm_route(&enter, events[1].clone()),
+            ConfirmInputRoute::Reply { accepted: true, .. }
+        ));
+    }
+
+    #[test]
+    fn confirm_consumes_paste_pointer_and_the_reply_key_lifecycle() {
+        let lower = confirm_state(b'y', false);
+        assert_eq!(
+            confirm_route(&lower, TerminalEvent::Paste("y trailing".to_owned())),
+            ConfirmInputRoute::Consume
+        );
+        assert_eq!(
+            confirm_route(
+                &lower,
+                TerminalEvent::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 4,
+                    row: 3,
+                    modifiers: KeyModifiers::NONE,
+                })
+            ),
+            ConfirmInputRoute::Consume
+        );
+        let press = KeyEvent::new(TerminalKeyCode::Char('y'), KeyModifiers::NONE);
+        let ConfirmInputRoute::Reply {
+            swallowed_key: Some(key),
+            ..
+        } = confirm_route(&lower, TerminalEvent::Key(press))
+        else {
+            panic!("confirm key was not consumed");
+        };
+        let mut swallowed = Some(key);
+        assert_eq!(
+            confirm_input_route(
+                None,
+                false,
+                &mut swallowed,
+                TerminalEvent::Key(KeyEvent {
+                    kind: KeyEventKind::Repeat,
+                    ..press
+                })
+            ),
+            ConfirmInputRoute::Consume
+        );
+        assert_eq!(
+            confirm_input_route(
+                None,
+                false,
+                &mut swallowed,
+                TerminalEvent::Key(KeyEvent {
+                    kind: KeyEventKind::Release,
+                    ..press
+                })
+            ),
+            ConfirmInputRoute::Consume
+        );
+        assert_eq!(swallowed, None);
+        assert_eq!(
+            confirm_input_route(None, false, &mut swallowed, TerminalEvent::Key(press)),
+            ConfirmInputRoute::Forward(TerminalEvent::Key(press))
+        );
+        assert_eq!(
+            confirm_input_route(
+                Some(&lower),
+                true,
+                &mut None,
+                TerminalEvent::Key(KeyEvent::new(
+                    TerminalKeyCode::Char('n'),
+                    KeyModifiers::NONE,
+                ))
+            ),
+            ConfirmInputRoute::Consume
+        );
+        assert_eq!(
+            confirm_route(
+                &lower,
+                TerminalEvent::CellSize {
+                    width_px: 8,
+                    height_px: 16,
+                }
+            ),
+            ConfirmInputRoute::Forward(TerminalEvent::CellSize {
+                width_px: 8,
+                height_px: 16,
+            })
+        );
+    }
 
     #[test]
     fn scalar_index_clamps_and_tracks_multibyte_text() {

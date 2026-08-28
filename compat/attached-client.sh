@@ -762,6 +762,23 @@ wait_for_side_output() {
   fixture_failure "$side $label did not become $expected within 10 seconds; last output: ${LAST_SIDE_OUTPUT:-<empty>}"
 }
 
+assert_side_output_stays() {
+  local side="$1"
+  local expected="$2"
+  local label="$3"
+  local attempt
+  local actual
+  shift 3
+
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    actual="$(side_command "$side" "$@" 2>/dev/null || true)"
+    if [ "$actual" != "$expected" ]; then
+      fixture_failure "$side $label changed during settle; expected ${expected:-<empty>}, got ${actual:-<empty>}"
+    fi
+    sleep 0.05
+  done
+}
+
 wait_for_pane_marker() {
   local side="$1"
   local marker="$2"
@@ -1030,6 +1047,65 @@ probe_command_prompt() {
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
   wait_for_side_output "$side" prompted "prompt rename" \
     list-windows -t "$INNER_SESSION" -F '#{window_name}'
+}
+
+probe_confirm_case() {
+  local side="$1"
+  local client_name="$2"
+  local option="$3"
+  local marker="$4"
+  local answer="$5"
+  local expected="$6"
+  shift 6
+
+  side_command "$side" confirm-before -b -t "$client_name" "$@" \
+    "set-option -g $option accepted" ||
+    fixture_failure "$side could not open $option confirm"
+
+  wait_for_current_marker "$side" "$marker"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" "$answer"
+  wait_for_current_marker_absent "$side" "$marker"
+
+  if [ -n "$expected" ]; then
+    wait_for_side_output "$side" "$expected" "$option result" \
+      show-options -gqv "$option"
+  else
+    assert_side_output_stays "$side" "" "$option rejection" \
+      show-options -gqv "$option"
+  fi
+}
+
+probe_confirm_before() {
+  local side="$1"
+  local client_name
+
+  client_name="$(side_command "$side" list-clients -F '#{client_name}')"
+  if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
+    fixture_failure "$side did not report exactly one confirm target client"
+  fi
+
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" \
+    'printf "ATTACHED_CONFIRM_UNDERLAY_%s\n" READY; saved=$(stty -g); stty -echo -icanon min 1 time 0; key=$(dd bs=1 count=1 2>/dev/null); stty "$saved"; printf "ATTACHED_CONFIRM_UNDERLAY_%s\n" "$key"'
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_pane_marker "$side" ATTACHED_CONFIRM_UNDERLAY_READY
+
+  probe_confirm_case "$side" "$client_name" @attached_confirm_default_y \
+    "Confirm 'set-option'? (y/n)" y accepted
+  probe_confirm_case "$side" "$client_name" @attached_confirm_meta_y \
+    "Confirm 'set-option'? (y/n)" M-y accepted
+  probe_confirm_case "$side" "$client_name" @attached_confirm_default_n \
+    "Confirm 'set-option'? (y/n)" n ""
+  probe_confirm_case "$side" "$client_name" @attached_confirm_custom_lower \
+    "Confirm 'set-option'? (Y/n)" y "" -c Y
+  probe_confirm_case "$side" "$client_name" @attached_confirm_custom_upper \
+    "Confirm 'set-option'? (Y/n)" Y accepted -c Y
+  probe_confirm_case "$side" "$client_name" @attached_confirm_enter_no \
+    "Confirm 'set-option'? (y/n)" Enter ""
+  probe_confirm_case "$side" "$client_name" @attached_confirm_enter_yes \
+    "Confirm 'set-option'? (y/n)" Enter accepted -y
+
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" z
+  wait_for_pane_marker "$side" ATTACHED_CONFIRM_UNDERLAY_z
 }
 
 probe_choose_tree() {
@@ -2392,6 +2468,8 @@ probe_alert_message_lifecycle zz
 probe_alert_message_lifecycle tmux
 probe_command_prompt zz
 probe_command_prompt tmux
+probe_confirm_before zz
+probe_confirm_before tmux
 probe_choose_tree zz
 probe_choose_tree tmux
 probe_chooser_filter_fallback zz

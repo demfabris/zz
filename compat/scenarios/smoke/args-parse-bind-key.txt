@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-bind-key.sh ~/args-parse-bind-key.sh
+out: set-environment -gu ARGS_PARSE_BIND_KEY
+run-shell 'sh ~/args-parse-bind-key.sh'
+out: show-environment -g ARGS_PARSE_BIND_KEY

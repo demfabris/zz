@@ -1289,7 +1289,10 @@ impl CommandInvocation {
         .into_iter()
         .filter_map(|words| {
             let mut words = words.into_iter();
-            let (name, _) = words.next()?;
+            let (name, name_is_command_block) = words.next()?;
+            if name_is_command_block {
+                return None;
+            }
             let mut args = Vec::new();
             let mut command_blocks = Vec::new();
             for (index, (word, is_command_block)) in words.enumerate() {
@@ -2816,6 +2819,26 @@ mod tests {
                 )
                 .with_command_blocks([2, 3]),
             ]
+        );
+    }
+
+    #[test]
+    fn command_invocation_split_omits_typed_command_names() {
+        let command = super::CommandInvocation::new(
+            "bind-key",
+            [
+                "F4",
+                "display-message",
+                "first",
+                ";",
+                "{ display-message second }",
+            ],
+        )
+        .with_command_blocks([4]);
+
+        assert_eq!(
+            command.split_commands_from(1),
+            [super::CommandInvocation::new("display-message", ["first"],)]
         );
     }
 

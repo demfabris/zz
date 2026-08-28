@@ -229,12 +229,12 @@ This is no-effect source parsing, not full tmux parse validation: tmux validates
 arguments while building its command list, while zz performs those checks during replay. Shared flag
 and arity diagnostics match at dispatch. `config.parser-edge-cases` and `mux.chain-parse-abort`
 retain the parse-unit boundary.
-The first three callback closures do not claim tmux's eager nested-command construction. Pinned
+The protocol-v84 callback closures do not claim tmux's eager nested-command construction. Pinned
 tmux recursively builds `{ ... }` bodies before it applies the outer callback, including under
 `source-file -n`. zz records lexical block positions during config parsing and applies callback and
 child-command validation only during replay. Consequently, `source-file -n` still does not reject
-an otherwise invalid typed `run-shell` or set-option value in zz, and an invalid nested body can
-take diagnostic precedence on the pin. Alias definitions earlier in the same source are also
+an otherwise invalid typed `run-shell`, set-option value, or `bind-key` child in zz, and an invalid
+nested body can take diagnostic precedence on the pin. Alias definitions earlier in the same source are also
 unavailable during the pin's whole-file construction. The outer-user-alias plus nested-user-alias
 case retains tmux's `NOALIAS` parse state, which protocol v84 does not carry. `config.parser-edge-cases`,
 `mux.chain-parse-abort`, `aliases.config-parse-unit`, and the existing alias owners retain those
@@ -297,9 +297,12 @@ Only tokenization lives here. What the resulting commands *mean* (supported name
 changes, and mux commands). Unsupported directives parse fine here and are rejected/skipped downstream
 with a source-span diagnostic.
 
-For `bind-key`, one balanced `{ … }` argument is reparsed as a command list. An empty `{}` is a
-valid empty list. Outside a block, an escaped `\;` separates bound commands; one final separator is
-discarded, while leading and doubled separators still report an empty command.
+For `bind-key`, every positional accepts either a string or balanced typed `{ … }` block while
+`-T` and `-N` values remain strings. A typed key expands the live mux environment and prints its
+recursive command tree before key lookup. One typed tail preserves parsed physical groups, one
+string tail reparses as one group, and longer tails use argument-list parsing. An empty typed tail
+is a valid empty list. Outside a block, an escaped `\;` separates bound commands; one final
+separator is discarded, while leading and doubled separators still report an empty command.
 
 # Schema
 

@@ -214,9 +214,11 @@ pub fn parse_tmux_command_options<'a>(
     spec: &CommandSpec,
     command: &'a CommandInvocation,
 ) -> Result<TmuxOptionParse<'a>, ServerError> {
-    let typed = COMMAND_ARGS_PARSE_BEHAVES
-        .contains(&spec.name)
-        .then_some(command);
+    let has_custom_parser = COMMAND_ARGS_PARSE_SPECS
+        .iter()
+        .any(|args_parse| args_parse.name == spec.name);
+    let typed =
+        (!has_custom_parser || COMMAND_ARGS_PARSE_BEHAVES.contains(&spec.name)).then_some(command);
     let parsed = parse_tmux_options_with_command(spec, &command.args, typed)?;
     if let Some(command) = typed {
         validate_command_args_parse(spec, command, &parsed)?;
@@ -325,23 +327,23 @@ fn validate_command_args_parse(
     command: &CommandInvocation,
     parsed: &TmuxOptionParse<'_>,
 ) -> Result<(), ServerError> {
-    let Some(args_parse) = COMMAND_ARGS_PARSE_SPECS
+    let args_parse = COMMAND_ARGS_PARSE_SPECS
         .iter()
         .find(|args_parse| args_parse.name == spec.name)
-    else {
-        return Ok(());
-    };
-    let run_shell_commands = args_parse.rule == CommandArgsParseRule::RunShellCommandFlag
+        .map(|args_parse| args_parse.rule);
+    let run_shell_commands = args_parse == Some(CommandArgsParseRule::RunShellCommandFlag)
         && parsed
             .options
             .iter()
             .any(|option| matches!(option, TmuxOption::Flag("-C")));
     let start = command.args.len().saturating_sub(parsed.positionals.len());
     for (position, index) in (start..command.args.len()).enumerate() {
-        let accepts_command_block = match args_parse.rule {
-            CommandArgsParseRule::IfShellBranches => matches!(position, 1 | 2),
-            CommandArgsParseRule::RunShellCommandFlag => run_shell_commands,
-            CommandArgsParseRule::SetOptionValue => position == 1,
+        let accepts_command_block = match args_parse {
+            None => false,
+            Some(CommandArgsParseRule::CommandsOrString) => true,
+            Some(CommandArgsParseRule::IfShellBranches) => matches!(position, 1 | 2),
+            Some(CommandArgsParseRule::RunShellCommandFlag) => run_shell_commands,
+            Some(CommandArgsParseRule::SetOptionValue) => position == 1,
             _ => return Ok(()),
         };
         if command.argument_is_command_block(index) && !accepts_command_block {
@@ -430,8 +432,13 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
     },
 ];
 
-pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] =
-    &["if-shell", "run-shell", "set-option", "set-window-option"];
+pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
+    "bind-key",
+    "if-shell",
+    "run-shell",
+    "set-option",
+    "set-window-option",
+];
 
 use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
@@ -3005,6 +3012,83 @@ mod tests {
                 CommandInvocation::new(name, ["-g", "@quoted", "{ display-message quoted }"]);
             parse_tmux_command_options(spec, &quoted).expect("quoted braces");
         }
+    }
+
+    #[test]
+    fn bind_key_args_parse_accepts_every_positional_as_command_or_string() {
+        let spec = catalog_command_spec("bind-key").expect("bind-key");
+
+        for command in [
+            CommandInvocation::new(
+                "bind-key",
+                ["{ display-message key }", "display-message action"],
+            )
+            .with_command_blocks([0]),
+            CommandInvocation::new("bind-key", ["F1", "{ display-message action }"])
+                .with_command_blocks([1]),
+            CommandInvocation::new(
+                "bind-key",
+                ["F1", "display-message", "{ display-message argument }"],
+            )
+            .with_command_blocks([2]),
+            CommandInvocation::new("bind-key", ["--", "F1", "{}"]).with_command_blocks([2]),
+            CommandInvocation::new("bind-key", ["F1", "-T", "{}"]).with_command_blocks([2]),
+            CommandInvocation::new("bind-key", ["F1", "{ display-message quoted }"]),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("command-or-string positional");
+        }
+
+        for option in ["-T", "-N"] {
+            let command = CommandInvocation::new(
+                "bind-key",
+                [
+                    option,
+                    "{ display-message option }",
+                    "F1",
+                    "display-message",
+                ],
+            )
+            .with_command_blocks([1]);
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed option value")
+                    .tmux_message(),
+                format!("command bind-key: {option} argument must be a string")
+            );
+        }
+    }
+
+    #[test]
+    fn default_args_parse_requires_string_positionals_and_option_values() {
+        let spec = catalog_command_spec("display-message").expect("display-message");
+        for (command, expected) in [
+            (
+                CommandInvocation::new("display-message", ["{ display-message value }"])
+                    .with_command_blocks([0]),
+                "command display-message: argument 1 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "display-message",
+                    ["-t", "{ display-message target }", "value"],
+                )
+                .with_command_blocks([1]),
+                "command display-message: -t argument must be a string",
+            ),
+        ] {
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed string position")
+                    .tmux_message(),
+                expected
+            );
+        }
+
+        parse_tmux_command_options(
+            spec,
+            &CommandInvocation::new("display-message", ["{ display-message quoted }"]),
+        )
+        .expect("quoted braces");
     }
 
     #[test]

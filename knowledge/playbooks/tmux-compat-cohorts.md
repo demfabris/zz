@@ -39,6 +39,9 @@ background callback.
 The sixteenth reuses protocol v84 again and applies the shared `SetOptionValue` rule to
 `set-option` and `set-window-option`, including recursive group printing, format order, aliases,
 stored commands, source-file, and direct Control behavior.
+The seventeenth reuses protocol v84 for `bind-key`, applying the shared commands-or-string rule to
+every positional while preserving the pin's distinct typed-tail, string-tail, key-printing, and
+physical-group execution contracts through a real attached client.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -61,13 +64,13 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The current canonical checkpoint covers 91 scenarios and 1,496 steps. Every ordinary row is clean.
+The current canonical checkpoint covers 92 scenarios and 1,499 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`50b5eddb77da336747557d66928289dec366e6699917d3495c115f360caa5102`.
-The full strict suite was rerun after the third callback rule closed, not carried forward from an
+`afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
+The full strict suite was rerun after the `bind-key` callback slice closed, not carried forward from an
 older artifact. The two positional-bound scenarios prove canonical and alias diagnostics, the
 first-positional flag boundary, target-error precedence, and effect suppression. The expanded
 maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
@@ -81,6 +84,9 @@ command preservation.
 The focused three-step `args-parse-set-option` row runs 21 internal checks across both set-option
 commands for lexical type, recursive group printing, format order, aliases, source-file, Control,
 and rejected-state preservation.
+The focused three-step `args-parse-bind-key` row runs 16 internal checks for typed option and key
+positions, exact typed and string tails, aliases, boundary flags, stored-child preservation, and
+physical-group execution through a real attached client.
 
 # Cohorts
 
@@ -120,8 +126,9 @@ milestone per letter, never one combined commit.
 | 10a | `if-shell` branch argument rule | Closed under `tracker.args-parse-if-shell` on 2026-08-28 | Complete | Protocol v84 preserves typed blocks; one command and one effective rule |
 | 10b | `run-shell` command-mode argument rule | Closed under `tracker.args-parse-run-shell` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; one command and one effective rule |
 | 10c | Shared set-option value argument rule | Closed under `tracker.args-parse-set-option` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; two commands and one effective rule |
-| 10d-10f | Remaining `args_parse` runtime rules | Eight `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Three effective source rules, never all callback commands at once |
-| 10g-10k | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
+| 10d | `bind-key` commands-or-string argument rule | Closed under `tracker.args-parse-bind-key` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; one command within a shared rule |
+| 10e-10k | Remaining `args_parse` runtime rules | Seven `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | Three effective source rules, never all callback commands at once |
+| 10l-10p | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | 12a-12f | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
 | 13 | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Medium after slice 12 | Seven keys become honest only after their five actions exist |
@@ -130,7 +137,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10c are closed; slice 10d is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through 10d are closed; slice 10e is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

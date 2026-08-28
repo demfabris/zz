@@ -215,7 +215,7 @@ overrides so `list-commands` and completion continue to describe zz's implemente
 
 The strict three-step `smoke/command-flag-errors` fixture compares 516 probes on each server. It
 contains 513 exact failures and three required-value absorption successes, then checks pane,
-buffer, file, binding, and hook sentinels. The remaining eight custom `args_parse` command items,
+buffer, file, binding, and hook sentinels. The remaining seven custom `args_parse` command items,
 semantic value validation, and parser-group atomicity stay under their existing owners.
 
 ## `if-shell` argument blocks
@@ -273,7 +273,8 @@ block. The option name, every flag value, and every extra positional remain stri
 use the canonical command name and precede maximum arity, target lookup, and effects. A rejected
 direct command or stored binding replacement leaves existing state unchanged.
 
-Accepted blocks stringify through recursive command printing before optional `-F` expansion.
+Accepted blocks expand the live mux environment and stringify through recursive command printing
+before optional `-F` expansion.
 Built-in aliases, unique prefixes, and one preexisting user-alias layer become canonical names;
 same-line commands retain ` ; `, physical-line groups retain ` ;; `, and nested blocks are printed
 recursively. A top-level empty block becomes an empty value. Quoted brace text stays literal.
@@ -292,6 +293,37 @@ This closure does not claim eager whole-file or invalid-child construction, call
 under `source-file -n`, aliases created earlier in the same source, or tmux's suppressed nested user
 alias after an outer user-alias expansion. Those remain with `config.parser-edge-cases`,
 `mux.chain-parse-abort`, `aliases.config-parse-unit`, and the existing alias owners.
+
+## `bind-key` argument blocks
+
+The `bind-key` slice of the `commands-or-string` rule closed on 2026-08-28 without another wire
+change. Every positional accepts either a string or typed command block while `-T` and `-N` values
+remain strings. Option scanning stops at the first positional or `--`. A typed key is recursively
+printed after live mux-environment expansion, with canonical command names and same-line `;` or
+physical-line `;;` separators, before key lookup. Unknown or ambiguous commands discovered while
+constructing that typed key retain the source path and line diagnostic; a successfully constructed
+but invalid key remains a bare key error.
+
+One typed tail retains its parsed command list and physical-line groups. One string tail is
+reparsed as one group. Longer tails follow the argument-list parser, including the pin's empty
+binding when the first tail value is typed and more arguments follow. Typed command-name groups in
+a longer tail are omitted. Child validation completes before replacement, so exact type, syntax,
+and unknown-command failures leave the previous binding unchanged.
+
+The strict three-step `smoke/args-parse-bind-key` scenario runs 16 internal source-file and Control
+checks. It covers canonical, built-in, unique-prefix, and preexisting user aliases; typed keys,
+unknown-command construction, option values, exact typed and string tails, nested callbacks, empty
+blocks, `--`, late flags, recursive printing, Control framing, and preserved
+state. A temporary attached client selects the test key table and sends real F-keys, proving that
+failure drops only the current typed physical-line group while a quoted multiline string remains
+one group. Both servers finish with
+`ARGS_PARSE_BIND_KEY=clean:16`.
+
+Bare `bind-key KEY` note and repeat mutation remains under `semantic:tracker-key-binding-behavior`.
+Eager whole-file and parse-only `source-file -n` child validation, aliases created earlier in one
+source, and the outer-user-alias plus nested-user-alias suppression case retain their existing
+parser and alias owners. The fixture does not dispatch the pin's crashing `confirm-before {}`
+binding and does not claim the separately tracked `send-keys -K` behavior.
 
 ## Accepted grammar divergence evidence
 

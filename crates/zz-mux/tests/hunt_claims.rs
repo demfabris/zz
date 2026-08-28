@@ -327,7 +327,7 @@ fn bind_key_validates_payloads_before_storing_them() {
     let error = engine
         .execute(&mut context, &command("bind-key", &["x", "not-a-command"]))
         .unwrap_err();
-    assert!(matches!(error, ServerError::CommandParse(message)
+    assert!(matches!(error, ServerError::InvalidCommand(message)
         if message == "unknown command: not-a-command"));
     assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
 
@@ -410,13 +410,17 @@ fn bind_key_surfaces_block_diagnostics_and_accepts_empty_endings() {
     let error = engine
         .execute(
             &mut context,
-            &command("bind-key", &["x", "{ send-keys 'unterminated }"]),
+            &CommandInvocation::new("bind-key", ["x", "{ send-keys 'unterminated }"])
+                .with_command_blocks([1]),
         )
         .unwrap_err();
     assert!(matches!(error, ServerError::InvalidCommand(message)
         if message == "unterminated quote"));
     engine
-        .execute(&mut context, &command("bind-key", &["x", "{}"]))
+        .execute(
+            &mut context,
+            &CommandInvocation::new("bind-key", ["x", "{}"]).with_command_blocks([1]),
+        )
         .expect("empty block");
     assert!(
         engine

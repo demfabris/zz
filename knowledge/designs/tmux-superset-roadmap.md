@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 85 active groups, 588 classified active items, 84 closed groups, and two known
+The live tracker has 85 active groups, 587 classified active items, 85 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,13 +53,13 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after the third callback rule closed covers 91 scenarios
-and 1,496 steps.
+The canonical checkpoint freshly rerun after the `bind-key` callback slice closed covers 92 scenarios
+and 1,499 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`50b5eddb77da336747557d66928289dec366e6699917d3495c115f360caa5102`. Requested flags, attached
+`afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
@@ -80,7 +80,8 @@ bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
 closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`, and
-`tracker.args-parse-set-option`. Source-file and Control
+`tracker.args-parse-set-option`, plus the `bind-key` member of the shared commands-or-string rule.
+Source-file and Control
 parsing preserve unquoted typed arguments through wire transport, aliases, bindings, and hooks;
 quoted braces remain strings. `if-shell` accepts typed branch positions while rejecting typed
 conditions, option values, and extra positionals. `run-shell` accepts typed positionals only when a
@@ -90,8 +91,16 @@ and finishes with `ARGS_PARSE_RUN_SHELL=clean:21`. `set-option` and `set-window-
 `SetOptionValue` rule: only positional 1 accepts a typed block; option names, flag values, and extra
 positionals remain strings. Recursive command printing preserves same-line `;` and physical-line
 `;;`, empty blocks become empty values, quoted braces stay literal, and `-F` expands after typed
-normalization. Their strict three-step scenario runs 21 internal checks on both servers and finishes
+normalization. Typed values use the live mux environment during that construction. Their strict
+three-step scenario runs 21 internal checks on both servers and finishes
 with `ARGS_PARSE_SET_OPTION=clean:21`.
+`bind-key` accepts strings or typed blocks in every positional while keeping `-T` and `-N` values
+string-only. Option scanning stops at the first positional or `--`. Typed keys expand the live mux
+environment and print recursively before lookup. One typed tail preserves physical source groups,
+one string tail reparses as one group, and a typed first tail with extra arguments stores an empty
+binding. Stored child failures leave the prior binding intact. Its strict three-step scenario runs
+16 internal checks through a real attached client and finishes `ARGS_PARSE_BIND_KEY=clean:16` on
+both servers.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -448,9 +457,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    `tracker.args-parse-inventory` closed callback discovery on 2026-08-25. The oracle rejects an
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each implemented
-   callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains `if-shell`, `run-shell`,
-   `set-option`, and `set-window-option`; three effective rules and eight command-specific items
-   remain. The unimplemented
+   callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains
+   `bind-key`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`; three effective rules
+   and seven command-specific items remain. The unimplemented
    `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
    `tracker.semantic-coverage` tracks runtime adoption of the three remaining argument rules, open-ended or
@@ -981,6 +990,15 @@ permanent product decision has been recorded for them.
   values and quoted braces stay literal. The strict three-step scenario runs 21 source-file and
   Control checks and finishes `ARGS_PARSE_SET_OPTION=clean:21` on zz and the pin. Three callback
   rules across eight implemented commands remain.
+- 2026-08-28: The existing protocol v84 metadata closed `tracker.args-parse-bind-key` without a
+  wire change. Every positional accepts a string or typed command block while `-T` and `-N` values
+  remain strings, and option scanning stops at the first positional or `--`. Typed keys expand the
+  live mux environment and print recursively before lookup. Exact typed and string tails preserve
+  their distinct grouping rules; a typed first tail with extras stores an empty binding. Child
+  failures preserve the prior binding, and failed typed physical groups do not suppress later
+  physical groups. The strict three-step scenario drives a real attached client, runs 16 internal
+  checks, and finishes `ARGS_PARSE_BIND_KEY=clean:16` on zz and the pin. Three callback rules across
+  seven implemented commands remain.
 
 # Related
 

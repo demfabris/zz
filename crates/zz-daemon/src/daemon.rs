@@ -4474,11 +4474,26 @@ impl Shared {
                 }
                 match resolve_command(&invocation.name) {
                     CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
+                        let has_command_blocks = (0..invocation.args.len())
+                            .any(|index| invocation.argument_is_command_block(index));
+                        let result = if has_command_blocks {
+                            zz_protocol::catalog_command_spec(name)
+                                .filter(|spec| spec.uses_tmux_option_grammar())
+                                .map_or(Ok(()), |spec| {
+                                    zz_protocol::parse_tmux_command_options(spec, &invocation)
+                                        .map(|_| ())
+                                })
+                                .map_or_else(PreparedCommandResult::Error, |()| {
+                                    PreparedCommandResult::Ready
+                                })
+                        } else {
+                            PreparedCommandResult::Ready
+                        };
                         PreparedCommand {
                             invocation,
                             canonical_name: Some(name.to_owned()),
                             alias_matched,
-                            result: PreparedCommandResult::Ready,
+                            result,
                         }
                     }
                     CommandResolution::Ambiguous(message) => PreparedCommand {
@@ -13367,7 +13382,19 @@ impl Shared {
             );
             return Ok(());
         }
+        let mut first_error = None;
+        let mut failed_group = None;
         for (index, original) in commands.iter().enumerate() {
+            let group = original
+                .source
+                .as_ref()
+                .map(|source| (source.source.clone(), source.line));
+            if let Some(failed) = &failed_group {
+                if failed == &group {
+                    continue;
+                }
+                failed_group = None;
+            }
             let command = if let Some(commands) = &read_only_commands {
                 Ok(commands[index].clone())
             } else {
@@ -13402,32 +13429,17 @@ impl Shared {
                     {
                         output_truncated = append_command_prompt_output(&mut output, error_output);
                     }
-                    if output_truncated {
-                        if !output.is_empty() {
-                            output.push('\n');
-                        }
-                        output.push_str(COMMAND_PROMPT_OUTPUT_TRUNCATED);
-                    }
-                    if kind == ClientKind::Interactive && !output.is_empty() {
-                        let title = commands.first().map_or_else(
-                            || "command output".to_owned(),
-                            |command| {
-                                if commands.len() == 1 {
-                                    command.name.clone()
-                                } else {
-                                    "command output".to_owned()
-                                }
-                            },
-                        );
-                        self.open_command_output(client, Some(pane), title, &output)?;
-                    }
                     log::warn!(
                         target: "zz_daemon::diagnostics::input",
                         "key_command_failed client={client} command={} args={:?} error={error}",
                         command.name,
                         command.args,
                     );
-                    return Err(error);
+                    failed_group = Some(group);
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                    continue;
                 }
             };
             if !execution.output.is_empty() && !output_truncated {
@@ -13453,7 +13465,7 @@ impl Shared {
             );
             self.open_command_output(client, Some(pane), title, &output)?;
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     fn input_command_prompt_text(
@@ -42453,7 +42465,7 @@ mod tests {
     }
 
     #[test]
-    fn config_report_counts_invalid_and_unsupported_bound_commands() {
+    fn config_report_routes_bound_command_failures_as_runtime_errors() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let mux_config = directory.path().join("mux.conf");
         fs::write(
@@ -42493,8 +42505,20 @@ mod tests {
                         ..
                     },
                     ..
-                }) if text.contains("1 invalid line")
-                    && text.contains("unknown command: not-a-command")
+                }) if text == "Unknown command: not-a-command"
+            )
+        }));
+        assert!(messages.iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Success,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text == "Reloaded zz configuration"
             )
         }));
         assert!(!messages.iter().any(|message| {
@@ -42503,7 +42527,9 @@ mod tests {
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ClientMessage { text, .. },
                     ..
-                }) if text.contains("run-shell") || text.contains("unsupported tmux command")
+                }) if text.contains("invalid line")
+                    || text.contains("run-shell")
+                    || text.contains("unsupported tmux command")
             )
         }));
     }
@@ -63895,6 +63921,27 @@ bind - split-window -v -c "#{pane_current_path}"
                 PreparedCommandResult::Error(ref error) if error.is_command_parse()
             ));
         }
+        let typed_option = shared.prepare_command_list(vec![
+            CommandInvocation::new(
+                "bind",
+                [
+                    "-T",
+                    "{ display-message typed-table }",
+                    "F1",
+                    "display-message",
+                ],
+            )
+            .with_command_blocks([1]),
+        ]);
+        assert_eq!(
+            typed_option[0].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(
+                "command bind-key: -T argument must be a string".to_owned()
+            ))
+        );
+        let ordinary_invalid =
+            shared.prepare_command_list(vec![CommandInvocation::new("list-sessions", ["-Z"])]);
+        assert_eq!(ordinary_invalid[0].result, PreparedCommandResult::Ready);
         let mutation = CommandInvocation::new(
             "set-option",
             ["-s", "command-alias[40]", "a=display-message -p new"],
@@ -64255,6 +64302,91 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("binding chain");
         assert!(!shared.inner.lock().engine.state.sessions.contains_key(&b));
+    }
+
+    #[test]
+    fn key_binding_command_groups_continue_after_a_failed_physical_line() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, pane) = switch_test_session(&shared, "grouped");
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("writer".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("binding context");
+
+        let first_group = SourceSpan {
+            source: "<bind-key>".to_owned(),
+            line: 1,
+            column: 1,
+        };
+        let second_group = SourceSpan {
+            source: "<bind-key>".to_owned(),
+            line: 2,
+            column: 1,
+        };
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[
+                    CommandInvocation::new("kill-pane", ["-t", "missing"])
+                        .with_source(first_group.clone()),
+                    CommandInvocation::new(
+                        "set-environment",
+                        ["-g", "BIND_GROUP_CONTINUED", "yes"],
+                    )
+                    .with_source(second_group),
+                ],
+                false,
+            )
+            .expect_err("first physical group fails");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("BIND_GROUP_CONTINUED")
+                .as_deref(),
+            Some("yes")
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-environment", ["-g", "-u", "BIND_GROUP_CONTINUED"]),
+            )
+            .expect("clear group marker");
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[
+                    CommandInvocation::new("kill-pane", ["-t", "missing"])
+                        .with_source(first_group.clone()),
+                    CommandInvocation::new("set-environment", ["-g", "BIND_GROUP_CONTINUED", "no"])
+                        .with_source(first_group),
+                ],
+                false,
+            )
+            .expect_err("one command group fails");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("BIND_GROUP_CONTINUED"),
+            None
+        );
     }
 
     #[test]

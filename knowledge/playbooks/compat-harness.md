@@ -113,8 +113,8 @@ dispatch now match the pin.
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
 `CommandInvocation`, and `COMMAND_ARGS_PARSE_BEHAVES` contains `if-shell`, `run-shell`,
-`set-option`, and `set-window-option` after source-file, Control, stored-command, parser, postcard,
-mux, and daemon proofs. The manifest carries eight remaining `args-parse:` items. The unimplemented
+`set-option`, `set-window-option`, and `bind-key` after source-file, Control, stored-command, parser,
+postcard, mux, and daemon proofs. The manifest carries seven remaining `args-parse:` items. The unimplemented
 `choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
 the whole command.
 
@@ -148,6 +148,12 @@ precede arity, targets, and effects. Recursive printing preserves same-line `;` 
 normalization. Canonical names, built-in aliases, unique prefixes, preexisting user aliases, inner
 aliases, `--`, late flags, a real command option, stored bindings, source-file, and direct Control
 paths finish `ARGS_PARSE_SET_OPTION=clean:21` on both servers.
+The strict three-step `smoke/args-parse-bind-key` scenario runs 16 internal checks. Every positional
+accepts strings or typed blocks while `-T` and `-N` values remain strings, with option scanning
+ending at the first positional or `--`. It covers exact typed and string tails, empty and variadic
+typed tails, aliases, boundary flags, child-failure preservation,
+Control routing, and physical-group execution through a real attached client. Both sides publish
+`ARGS_PARSE_BIND_KEY=clean:16`. The fixture does not invoke or claim `send-keys -K` behavior.
 
 Regenerate the readable report after changing the manifest:
 
@@ -177,7 +183,7 @@ Use the registry vocabulary consistently:
 ## Coverage freshness
 
 `compat/results/summary.md` is the persisted canonical artifact. The 2026-08-28 checkpoint contains
-91 scenarios and 1,496 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+92 scenarios and 1,499 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -235,11 +241,14 @@ and background execution, aliases, Control transport, and stored-command preserv
 `smoke/args-parse-set-option` contributes three harness steps around 21 internal checks for typed
 option values, exact rejection and state preservation, recursive command printing, format order,
 aliases, source-file, and direct Control behavior across both set-option commands.
+`smoke/args-parse-bind-key` contributes three harness steps around 16 internal checks for typed
+option and key positions, exact typed and string tails, aliases, flag boundaries, child rejection,
+Control routing, and physical-group execution through a real attached client.
 
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
-`50b5eddb77da336747557d66928289dec366e6699917d3495c115f360caa5102`.
+`afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also

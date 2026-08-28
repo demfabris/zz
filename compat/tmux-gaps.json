@@ -2676,7 +2676,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "args-parse:bind-key",
         "args-parse:choose-buffer",
         "args-parse:choose-tree",
         "args-parse:command-prompt",
@@ -2701,7 +2700,7 @@
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `if-shell`, `run-shell`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and eight per-command callback items remain. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `if-shell`, `run-shell`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and seven per-command callback items remain across three effective rules. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3866,6 +3865,22 @@
         "scenario:compat/scenarios/smoke/source-file-tilde.txt"
       ],
       "resolution": "source-file no longer rewrites a literal leading ~/ after parsing: parser-expanded leading tildes still arrive as absolute paths, top-level literal tildes pass through cwd resolution, and registered-client nested literal tildes use the stable invoking base closed under source-file.nested-client-cwd. Startup and deferred event-hook base selection remain active. The CLI regression pins the top-level choice against a metacharacter-bearing daemon HOME."
+    },
+    {
+      "id": "tracker.args-parse-bind-key",
+      "title": "Apply bind-key command-or-string argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-bind-key.sh",
+        "scenario:compat/scenarios/smoke/args-parse-bind-key.txt",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `bind-key`'s pinned command-or-string rule without another wire change. Every positional accepts a string or typed block while `-T` and `-N` remain string-only, option scanning stops at the first positional or `--`, exact typed and string tails take their distinct construction paths, and typed command-name groups are omitted from variadic chains. Typed keys expand the live mux environment and use recursive canonical printing before key validation. Daemon dispatch stops the failed source group but continues later physical groups, while a string tail remains one group. Empty blocks, the pin's typed-first variadic oddity, aliases, nested callbacks, multiline groups, exact diagnostics, Control framing, and prior-binding preservation are covered by a strict 16-check source-file and Control fixture. Bare key-only mutation remains under `semantic:tracker-key-binding-behavior`; eager whole-file validation, parse-only `source-file -n`, same-source alias creation, and nested user-alias suppression remain with their existing parser and alias owners. Seven implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-if-shell",

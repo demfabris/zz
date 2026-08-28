@@ -8,14 +8,14 @@ use std::{
 };
 
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, COMMAND_ARGS_PARSE_BEHAVES,
-    ChooseTreeKind, ClientId, CommandInvocation, CommandPromptMode, CommandPromptType,
-    CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
-    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
-    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId,
-    PaneKindSnapshot, PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId,
-    catalog_command_spec, command_specs, normalize_browser_profile_name,
-    parse_tmux_command_options, parse_tmux_options, resolve_command,
+    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, ClientId,
+    CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
+    DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
+    DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
+    MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId, PaneKindSnapshot,
+    PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId, catalog_command_spec,
+    command_specs, normalize_browser_profile_name, parse_tmux_command_options, parse_tmux_options,
+    resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
@@ -6427,16 +6427,27 @@ impl MuxEngine {
 
     fn bind_key(&mut self, command: &CommandInvocation) -> Result<Execution, ServerError> {
         let args = &command.args;
+        let spec = command_spec("bind-key").expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, command)?;
+        let positional_start = args.len().saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("bind-key", args)?;
         let table = key_table(&options);
         let repeat = options.has("-r");
         let note = options.value("-N").map(str::to_owned);
         let key = required_arg(&positional, 0, "key")?;
-        let key = parse_tmux_key(key)
+        let key = if command.argument_is_command_block(positional_start) {
+            normalize_typed_command_block(
+                self,
+                crate::parser::command_block_body(key).unwrap_or(key),
+            )?
+        } else {
+            key.to_owned()
+        };
+        let key = parse_tmux_key(&key)
             .filter(|key| key != "None")
             .ok_or_else(|| ServerError::InvalidCommand(format!("unknown key: {key}")))?;
         required_arg(&positional, 1, "command")?;
-        let tail_start = args.len() - positional.len() + 1;
+        let tail_start = positional_start + 1;
         let commands = bound_commands(self, command, tail_start)?;
         self.keys.bind(
             table,
@@ -7590,7 +7601,7 @@ impl MuxEngine {
             .get(1)
             .map(|value| {
                 let value = if invocation.argument_is_command_block(positional_start + 1) {
-                    normalize_typed_option_command(
+                    normalize_typed_command_block(
                         self,
                         crate::parser::command_block_body(value).unwrap_or(value),
                     )?
@@ -13162,33 +13173,54 @@ fn bound_commands(
     owner: &CommandInvocation,
     start: usize,
 ) -> Result<Vec<CommandInvocation>, ServerError> {
-    let mut commands = if let [argument] = &owner.args[start..]
-        && let Some(body) = crate::parser::command_block_body(argument)
-    {
-        let parsed = engine.parse_config("<bind-key>", body);
-        if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
-            return Err(ServerError::InvalidCommand(diagnostic.message));
+    let tail = &owner.args[start..];
+    let mut commands = if owner.argument_is_command_block(start) {
+        if let [argument] = tail {
+            parse_bound_command_string(
+                engine,
+                crate::parser::command_block_body(argument).unwrap_or(argument),
+                true,
+            )?
+        } else {
+            Vec::new()
         }
-        parsed
-            .commands
-            .into_iter()
-            .map(|mut command| {
-                command.source = None;
-                command
-            })
-            .collect::<Vec<_>>()
+    } else if let [argument] = tail {
+        parse_bound_command_string(engine, argument, false)?
     } else {
-        let commands = owner.split_commands_from(start);
-        if commands.is_empty() {
-            return Err(ServerError::InvalidCommand(
-                "bind-key command chain contains an empty command".to_owned(),
-            ));
-        }
-        commands
+        owner.split_commands_from(start)
     };
     expand_stored_aliases(engine, &mut commands)?;
     for command in &commands {
         validate_bound_command(command, "bind-key")?;
+    }
+    Ok(commands)
+}
+
+fn parse_bound_command_string(
+    engine: &MuxEngine,
+    input: &str,
+    source_groups: bool,
+) -> Result<Vec<CommandInvocation>, ServerError> {
+    let parsed = engine.parse_config("<bind-key>", input);
+    if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+        return Err(ServerError::InvalidCommand(diagnostic.message));
+    }
+    let mut commands = parsed.commands;
+    let multiple_groups = source_groups
+        && commands.windows(2).any(|commands| {
+            commands[0]
+                .source
+                .as_ref()
+                .map(|source| (&source.source, source.line))
+                != commands[1]
+                    .source
+                    .as_ref()
+                    .map(|source| (&source.source, source.line))
+        });
+    if !multiple_groups {
+        for command in &mut commands {
+            command.source = None;
+        }
     }
     Ok(commands)
 }
@@ -13217,7 +13249,7 @@ fn normalize_option_command(engine: &MuxEngine, value: &str) -> Result<String, S
     normalize_option_command_with_groups(engine, value, false)
 }
 
-fn normalize_typed_option_command(engine: &MuxEngine, value: &str) -> Result<String, ServerError> {
+fn normalize_typed_command_block(engine: &MuxEngine, value: &str) -> Result<String, ServerError> {
     normalize_option_command_with_groups(engine, value, true)
 }
 
@@ -13226,7 +13258,7 @@ fn normalize_option_command_with_groups(
     value: &str,
     source_groups: bool,
 ) -> Result<String, ServerError> {
-    let parsed = crate::parse_config("<set-option>", value);
+    let parsed = engine.parse_config("<set-option>", value);
     if !parsed.diagnostics.is_empty() {
         return Err(ServerError::InvalidCommand("syntax error".to_owned()));
     }
@@ -13240,10 +13272,10 @@ fn normalize_option_command_with_groups(
                 name.to_owned()
             }
             CommandResolution::Ambiguous(message) => {
-                return Err(ServerError::InvalidCommand(message));
+                return Err(ServerError::CommandParse(message));
             }
             CommandResolution::Unknown => {
-                return Err(ServerError::InvalidCommand(format!(
+                return Err(ServerError::CommandParse(format!(
                     "unknown command: {}",
                     command.name
                 )));
@@ -13349,7 +13381,7 @@ fn expand_stored_aliases(
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
     let name = canonical_command(&command.name);
     if let Some(spec) = catalog_command_spec(name) {
-        if COMMAND_ARGS_PARSE_BEHAVES.contains(&spec.name) {
+        if spec.uses_tmux_option_grammar() {
             let result = parse_tmux_command_options(spec, command);
             if owner == "bind-key" {
                 if let Err(error) = result {
@@ -13377,12 +13409,15 @@ fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<()
     if CommandSpec::UNIMPLEMENTED_TMUX_COMMANDS.contains(&name) {
         return Err(ServerError::UnsupportedCommand(format!("{owner} {name}")));
     }
-    match resolve_command(&command.name) {
-        CommandResolution::Ambiguous(message) => Err(ServerError::CommandParse(message)),
-        _ => Err(ServerError::CommandParse(format!(
-            "unknown command: {name}"
-        ))),
-    }
+    let message = match resolve_command(&command.name) {
+        CommandResolution::Ambiguous(message) => message,
+        _ => format!("unknown command: {name}"),
+    };
+    Err(if owner == "bind-key" {
+        ServerError::InvalidCommand(message)
+    } else {
+        ServerError::CommandParse(message)
+    })
 }
 
 pub fn format_command(command: &CommandInvocation) -> String {
@@ -21374,18 +21409,288 @@ mod tests {
     #[test]
     fn bind_key_blocks_expand_the_live_global_environment() {
         let mut engine = MuxEngine::default();
-        engine.seed_global_environment([("FOO", "hello")]);
+        engine.seed_global_environment([("FOO", "hello world")]);
         engine
             .execute(
                 &mut ExecutionContext::default(),
-                &command("bind-key", &["Q", "{ send-keys $FOO }"]),
+                &CommandInvocation::new("bind-key", ["Q", "{ send-keys $FOO }"])
+                    .with_command_blocks([1]),
             )
             .expect("environment-backed binding");
 
         assert_eq!(
             engine.keys.get("prefix", "Q").expect("binding").commands,
-            [CommandInvocation::new("send-keys", ["hello"])]
+            [CommandInvocation::new("send-keys", ["hello world"])]
         );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        "bind-key",
+                        ["{ display-message -p $FOO }", "display-message"],
+                    )
+                    .with_command_blocks([0]),
+                )
+                .expect_err("typed key is normalized before lookup")
+                .tmux_message(),
+            "unknown key: display-message -p \"hello world\""
+        );
+    }
+
+    #[test]
+    fn bind_key_distinguishes_typed_and_string_single_command_tails() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("bind-key", ["F1", "{ display -p typed ; list-s }"])
+                    .with_command_blocks([1]),
+            )
+            .expect("typed command tail");
+        assert_eq!(
+            format_key_command(engine.keys.get("prefix", "F1").expect("typed binding")),
+            "display-message -p typed \\; list-sessions"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F2", "display -p string"]),
+            )
+            .expect("string command tail");
+        assert_eq!(
+            format_key_command(engine.keys.get("prefix", "F2").expect("string binding")),
+            "display-message -p string"
+        );
+
+        for (key, invocation) in [
+            (
+                "F3",
+                CommandInvocation::new("bind-key", ["F3", "{}"]).with_command_blocks([1]),
+            ),
+            ("F4", CommandInvocation::new("bind-key", ["F4", ""])),
+        ] {
+            engine
+                .execute(&mut context, &invocation)
+                .expect("empty command tail");
+            assert!(
+                engine
+                    .keys
+                    .get("prefix", key)
+                    .expect("empty binding")
+                    .commands
+                    .is_empty()
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("bind-key", ["F6", "{ display -p ignored }", "extra"])
+                    .with_command_blocks([1]),
+            )
+            .expect("typed first tail with extra argument");
+        assert!(
+            engine
+                .keys
+                .get("prefix", "F6")
+                .expect("discarded typed tail")
+                .commands
+                .is_empty()
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    [
+                        "F6",
+                        "display-message",
+                        "first",
+                        ";",
+                        "{ display-message ignored }",
+                    ],
+                )
+                .with_command_blocks([4]),
+            )
+            .expect("later typed command name");
+        assert_eq!(
+            engine
+                .keys
+                .get("prefix", "F6")
+                .expect("filtered typed group")
+                .commands,
+            [CommandInvocation::new("display-message", ["first"])]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F5", "display-message", "preserved"]),
+            )
+            .expect("baseline binding");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("bind-key", &["F5", "{ display -p quoted }"]),
+                )
+                .expect_err("quoted braces stay string")
+                .tmux_message(),
+            "syntax error"
+        );
+        assert_eq!(
+            engine
+                .keys
+                .get("prefix", "F5")
+                .expect("preserved binding")
+                .commands,
+            [CommandInvocation::new("display-message", ["preserved"])]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &["-T", "late", "F10", "display-message", "kept"],
+                ),
+            )
+            .expect("late flag baseline");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "bind-key",
+                        ["-T", "late", "F10", "-r", "{ display-message ignored }"],
+                    )
+                    .with_command_blocks([4]),
+                )
+                .expect_err("late flag is a child command"),
+            ServerError::InvalidCommand("unknown command: -r".to_owned())
+        );
+        assert_eq!(
+            engine
+                .keys
+                .get("late", "F10")
+                .expect("late flag prior binding")
+                .commands,
+            [CommandInvocation::new("display-message", ["kept"])]
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F7", "display-message", "preserved"]),
+            )
+            .expect("typed child baseline");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "bind-key",
+                        ["F7", "display-message", "{ display -p argument }"],
+                    )
+                    .with_command_blocks([2]),
+                )
+                .expect_err("generic child string position")
+                .tmux_message(),
+            "command display-message: argument 1 must be \"string\""
+        );
+        assert_eq!(
+            engine
+                .keys
+                .get("prefix", "F7")
+                .expect("typed child preserved")
+                .commands,
+            [CommandInvocation::new("display-message", ["preserved"])]
+        );
+
+        for (body, expected) in [
+            (
+                "{ display -p one ; display -p two }",
+                "unknown key: display-message -p one ; display-message -p two",
+            ),
+            (
+                "{\n display -p one\n display -p two\n}",
+                "unknown key: display-message -p one ;; display-message -p two",
+            ),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &CommandInvocation::new("bind-key", [body, "display-message"])
+                            .with_command_blocks([0]),
+                    )
+                    .expect_err("typed key is printed before validation")
+                    .tmux_message(),
+                expected
+            );
+        }
+
+        for body in ["{ wibble }", "{ list- }"] {
+            assert!(matches!(
+                engine.execute(
+                    &mut context,
+                    &CommandInvocation::new("bind-key", [body, "display-message"])
+                        .with_command_blocks([0]),
+                ),
+                Err(ServerError::CommandParse(_))
+            ));
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("bind-key", ["{}", "display-message"])
+                        .with_command_blocks([0]),
+                )
+                .expect_err("empty typed key is rejected"),
+            ServerError::InvalidCommand("unknown key: ".to_owned())
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    [
+                        "F11",
+                        "{\n kill-pane -t missing\n set-environment -g TYPED yes\n}",
+                    ],
+                )
+                .with_command_blocks([1]),
+            )
+            .expect("typed physical-line groups");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    ["F12", "kill-pane -t missing\nset-environment -g STRING yes"].as_slice(),
+                ),
+            )
+            .expect("string one-group tail");
+        let typed = &engine
+            .keys
+            .get("prefix", "F11")
+            .expect("typed group binding")
+            .commands;
+        let string = &engine
+            .keys
+            .get("prefix", "F12")
+            .expect("string group binding")
+            .commands;
+        assert_ne!(typed[0].source, typed[1].source);
+        assert!(typed.iter().all(|command| command.source.is_some()));
+        assert!(string.iter().all(|command| command.source.is_none()));
     }
 
     #[test]
@@ -28199,6 +28504,7 @@ mod tests {
     fn set_option_command_block_values_normalize_before_format_expansion() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
+        engine.seed_global_environment([("FOO", "hello world")]);
         engine
             .execute(
                 &mut context,
@@ -28360,6 +28666,31 @@ mod tests {
                 .expect("command option readback")
                 .output,
             "display-message -p client ; new-window -d"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "default-client-command",
+                        "{ display-message -p $FOO }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("environment-backed command option");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-client-command"]),
+                )
+                .expect("environment-backed command option readback")
+                .output,
+            "display-message -p \"hello world\""
         );
 
         engine
@@ -29248,13 +29579,14 @@ mod tests {
         let error = engine
             .execute(
                 &mut context,
-                &command(
+                &CommandInvocation::new(
                     "bind-key",
-                    &[
+                    [
                         "F8",
                         "{ if-shell -F { display-message condition } 'display-message branch' }",
                     ],
-                ),
+                )
+                .with_command_blocks([1]),
             )
             .expect_err("typed if-shell condition in binding");
         assert_eq!(
@@ -29318,13 +29650,14 @@ mod tests {
         engine
             .execute(
                 &mut context,
-                &command(
+                &CommandInvocation::new(
                     "bind-key",
-                    &[
+                    [
                         "F9",
                         "{ if-shell -F 1 { display-message -p true } { display-message -p false } }",
                     ],
-                ),
+                )
+                .with_command_blocks([1]),
             )
             .expect("valid typed if-shell binding");
         assert!(

@@ -98,13 +98,20 @@ open-ended or dynamic context-format names, nonconstant format behavior, hook pr
 behavior for shared bindings, or consumer truth for option `BEHAVES`.
 `tracker.semantic-coverage` owns those six blind spots. Its command-specific `args-parse:` items name the
 implemented callback commands; `choose-client` and `switch-mode` remain covered by their
-unimplemented command items. Protocol v84 closes the first three runtime rules. `if-shell`
+unimplemented command items. Protocol v84 closes three complete runtime rules plus `bind-key`
+within the `commands-or-string` rule. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions
 and option values before effects, and leaves quoted braces as strings. `run-shell` accepts typed
 positionals only when a leading `-C` enables command mode; option values and all positionals without
 that flag remain strings. `set-option` and `set-window-option` accept typed value position 1,
-recursively print it before optional `-F` expansion, and keep names, flag values, and extras
-string-only. Eight `args-parse:` items across three effective rules remain.
+expand the live mux environment and recursively print it before optional `-F` expansion, and keep
+names, flag values, and extras string-only. Every `bind-key` positional accepts a typed block or
+string while `-T` and `-N`
+remain string-only. It stops scanning at the first positional or `--`, prints a typed key before
+lookup after live mux-environment expansion, preserves typed physical-line groups, reparses one
+string tail as one group, and retains the pin's empty binding for a typed first variadic tail.
+Unknown typed-key commands keep their source diagnostic, while a constructed invalid key remains
+a bare key error. Seven `args-parse:` items across three effective rules remain.
 Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option

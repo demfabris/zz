@@ -45,7 +45,8 @@ just compat-check
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
 and registry, requires seven named mux manifest tests, then runs the full `zz-mux` library suite.
-It also requires the named daemon hook-producer partition test and runs it through `--exact`.
+It also requires two named daemon tests, the hook-producer partition and delegated-format consumer
+tests, and runs each through `--exact`.
 Linux CI runs the same command after restoring the pinned tmux cache. A full
 `compat/run.sh` checks the oracle and tracker before executing scenarios.
 
@@ -55,7 +56,9 @@ minimum and maximum. The source pass also records 14 commands that use nine cust
 callbacks as six effective rules. The remaining inventories contain 180 options, 198 global
 format-table names, 14 source-enumerated names across the selected `command-item`, `list-commands`,
 and `list-keys` contexts, 68 hooks, and 303 default bindings across `root`, `prefix`, `copy-mode`,
-`copy-mode-vi`, and `move`.
+`copy-mode-vi`, and `move`. The 198 global names divide into 92 values resolved directly by the mux,
+32 delegated to daemon `StatusHooks`, and 74 constant-backed names that remain active `format:`
+gaps.
 
 The Rust gate reconciles command and alias names, flag arities, positional bounds, custom argument
 rules, option names, global and selected context-format names, and hook names. It also classifies
@@ -138,12 +141,19 @@ producers and derives 37 generic `after-<command>` producers from implemented ca
 It reads the four active `hook:` items from the live tracker, rejects duplicate explicit names and
 produced-versus-tracked overlap, and requires those 64 produced names plus `after-queue`,
 `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard` to equal all 68 pinned names.
-`just compat-check` requires
-`daemon::tests::pinned_hook_producer_partition_matches_the_oracle` and runs it through `--exact`.
-Four semantic gaps remain:
-open-ended or dynamic context-format names, nonconstant format behavior, runtime behavior for
-shared bindings, and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns
-that work. Shared command-flag diagnostics
+`just compat-check` requires the exact
+`daemon::tests::pinned_hook_producer_partition_matches_the_oracle` and
+`status::tests::daemon_delegated_format_consumers_match_mux_inventory` tests. The second test seeds
+buffer, client, and session facts, then requires every one of the 32 delegated names to resolve
+through the production `DaemonFormatHooks` consumer. The mux manifest test requires the 92 direct,
+32 delegated, and 74 tracked sets to stay pairwise disjoint and equal the 198-name pin.
+
+This closes source registration only. It does not claim context-specific value parity, and all 74
+active `format:` gaps retain their runtime owners. The oracle, protocol, snapshots, scenarios, and
+accepted compatibility artifact did not change. Slice 10m already closed the shared-binding
+runtime mismatch for bare key-only `bind-key`; downstream command and copy-action behavior retains
+its separate owners. Two semantic discovery gaps remain: open-ended or dynamic context-format names
+and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns that work. Shared command-flag diagnostics
 closed on 2026-08-28 without retaining the earlier partial
 daemon roster. The catalog parser covers 83 implemented upstream canonical commands and 74 aliases
 through mux execution, daemon preflight, and stored commands. Exact native attach shares the

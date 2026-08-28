@@ -69,7 +69,7 @@ pub(crate) struct BufferFormatFacts {
     pub(crate) created: SystemTime,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct ClientFormatFacts {
     pub(crate) activity: String,
     pub(crate) cell_height: String,
@@ -1074,6 +1074,35 @@ mod tests {
                 &zz_protocol::CommandInvocation::new(args[0], args[1..].iter().copied()),
             )
             .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
+    }
+
+    #[test]
+    fn daemon_delegated_format_consumers_match_mux_inventory() {
+        let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
+        assert_eq!(delegated.len(), 32);
+
+        let session = SessionId(1);
+        let facts = FormatHookFacts {
+            session_last_attached: Arc::new(BTreeMap::from([(session, 1)])),
+            buffer: Some(BufferFormatFacts {
+                name: String::new(),
+                data: Arc::from([]),
+                created: UNIX_EPOCH,
+            }),
+            client: Some(ClientFormatFacts::default()),
+            ..FormatHookFacts::default()
+        };
+        let context = StatusContext {
+            session_id: session.to_string(),
+            ..StatusContext::default()
+        };
+        let mut hooks = DaemonFormatHooks::command(&facts);
+        for name in delegated {
+            assert!(
+                hooks.variable(name, &context).is_some(),
+                "daemon format hook does not consume {name}"
+            );
+        }
     }
 
     #[test]

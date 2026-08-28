@@ -25,7 +25,10 @@ pub use command::{
     hook_format_variables, if_shell_truthy, send_keys_is_read_only_safe,
     validate_static_command_chain,
 };
-pub use formats::{TmuxColour, display_width, format_true, indexed_colour_rgb, parse_tmux_colour};
+pub use formats::{
+    TmuxColour, delegated_format_variable_names, display_width, format_true, indexed_colour_rgb,
+    parse_tmux_colour,
+};
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};
 pub use model::{

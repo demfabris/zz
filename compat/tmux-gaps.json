@@ -2762,7 +2762,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "semantic:tracker-nonconstant-format-behavior",
         "semantic:tracker-open-context-format-vocabulary",
         "semantic:tracker-option-consumer-registration"
       ],
@@ -2773,10 +2772,10 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "acceptance": [
-        "Consumer-owned inventories reconcile nonconstant and open-ended context formats plus option consumption against the live manifest."
+        "Consumer-owned inventories reconcile open-ended context formats plus option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "All six `args_parse` rules, the pinned hook producer partition, and the shared default-binding structural partition now have source-owned registrations. Bare key-only bind mutation also matches the pin. Option consumption plus nonconstant and open-ended formats remain the three discovery blind spots."
+      "reason": "All six `args_parse` rules, the pinned hook producer partition, the shared default-binding structural partition, and the nonconstant global-format behavior partition now have source-owned registrations. Bare key-only bind mutation also matches the pin. Option consumption plus open-ended formats remain the two discovery blind spots."
     }
   ],
   "closed": [
@@ -4262,6 +4261,20 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "resolution": "The manifest invariant now makes the default-binding structural partition explicit: 303 pinned bindings and 251 zz defaults yield 193 shared keys, 110 tracked omissions, 58 tracked native keys, 51 tracked command-or-repeat divergences, and 142 structurally matching shared bindings. Those 142 divide into 49 copy-mode, 61 copy-mode-vi, and 32 prefix entries. Matching rendered commands and repeat bits are recorded only as structural evidence; command consumers, copy actions, prefix timing, prompts, and native behavior retain their existing owners. Runtime inspection also exposed and closed the bare key-only `bind-key` contract. The command now ensures the selected table, silently leaves an absent key unbound, preserves an existing binding's commands and unspecified metadata, replaces its note only with `-N`, and sets repeat monotonically with `-r`; a later command-bearing bind replaces all metadata normally. The focused source-file fixture grew from 16 to 17 checks and reports zero differences. No protocol change was needed."
+    },
+    {
+      "id": "tracker.nonconstant-format-behavior",
+      "title": "Register the nonconstant global-format behavior partition",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "file:compat/check.sh",
+        "resource:knowledge/playbooks/compat-harness.md",
+        "resource:knowledge/tmux/tmux-compat.md"
+      ],
+      "resolution": "The source-owned global-format partition now classifies all 198 pinned names without changing runtime behavior. The zz format table derives 92 direct mux values and 32 values delegated through `StatusHooks`; those 124 nonconstant behavior registrations are pairwise disjoint from the 74 active constant-backed `format:` gaps and their union equals the pinned oracle exactly. A required exact daemon test seeds buffer, client, and session facts and proves every delegated name resolves through the production `DaemonFormatHooks` consumer. This registration does not claim context-specific value parity. All 74 active format gaps remain with their runtime owners, while open-ended context formats and option consumer truth remain under `tracker.semantic-coverage`. No oracle, protocol, snapshot, scenario, or accepted artifact changed."
     }
   ],
   "known_differentials": [

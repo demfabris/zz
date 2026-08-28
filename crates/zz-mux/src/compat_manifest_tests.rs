@@ -18,7 +18,10 @@ use crate::{
         COMMAND_ITEM_CONTEXT_FORMATS, LIST_COMMAND_CONTEXT_FORMATS, LIST_KEY_CONTEXT_FORMATS,
         format_key_command,
     },
-    formats::{constant_format_variable_names, format_variable_names},
+    formats::{
+        constant_format_variable_names, delegated_format_variable_names,
+        direct_format_variable_names, format_variable_names,
+    },
 };
 
 #[derive(Deserialize)]
@@ -811,6 +814,37 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         "zz format names differ from the pinned oracle"
     );
     let constant_formats = constant_format_variable_names().collect::<BTreeSet<_>>();
+    let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
+    let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
+    assert_eq!(formats.len(), 198, "pinned global format count changed");
+    assert_eq!(constant_formats.len(), 74, "tracked format count changed");
+    assert_eq!(direct_formats.len(), 92, "direct format count changed");
+    assert_eq!(
+        delegated_formats.len(),
+        32,
+        "delegated format count changed"
+    );
+    assert!(
+        constant_formats.is_disjoint(&direct_formats),
+        "tracked and direct format registrations overlap"
+    );
+    assert!(
+        constant_formats.is_disjoint(&delegated_formats),
+        "tracked and delegated format registrations overlap"
+    );
+    assert!(
+        direct_formats.is_disjoint(&delegated_formats),
+        "direct and delegated format registrations overlap"
+    );
+    let nonconstant_formats = direct_formats
+        .union(&delegated_formats)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        nonconstant_formats.len(),
+        124,
+        "nonconstant format registration count changed"
+    );
     let tracked_formats = items
         .keys()
         .filter_map(|item| item.strip_prefix("format:"))
@@ -818,6 +852,14 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     assert_eq!(
         tracked_formats, constant_formats,
         "constant-backed format variables and tracked format gaps differ"
+    );
+    let classified_formats = nonconstant_formats
+        .union(&tracked_formats)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        classified_formats, formats,
+        "nonconstant behavior registrations and tracked format gaps do not partition the pin"
     );
     for item in items.keys().filter(|item| item.starts_with("format:")) {
         let format = item.strip_prefix("format:").unwrap();

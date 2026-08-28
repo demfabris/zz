@@ -186,10 +186,15 @@ lease excludes startup reentry, makes contention sticky, commits on successful p
 pipelined command, and shuts down only after returning a preparation error to its owner. The
 stopping state rejects late registrations. Protocol and snapshot schemas stay unchanged.
 
-The accepted post-10r checkpoint remains at 98 scenarios and 1,517 steps. Every ordinary row is
+Slice 10s closes nonconstant global-format discovery without changing runtime behavior. The single
+198-entry production table derives 92 direct mux values, 32 daemon-delegated values, and 74 active
+constant-placeholder gaps. A required exact daemon test proves every delegated name reaches the
+production consumer.
+
+The accepted post-10s checkpoint remains at 98 scenarios and 1,517 steps. Every ordinary row is
 clean.
-The registry now holds 87 active groups with 594 items and 99 closed records. Its status split is
-46 open, 20 blocked, and 21 accepted, for 64.5% resolution (120 of 186 groups).
+The registry now holds 87 active groups with 593 items and 100 closed records. Its status split is
+46 open, 20 blocked, and 21 accepted, for 64.7% resolution (121 of 187 groups).
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the stored summary SHA-256
@@ -205,6 +210,7 @@ Slice 10q adds a mixed flagged and unflagged client-destruction case to the atta
 adding a scenario row, so the same digest remains.
 Slice 10r adds 11 cold-socket probes per engine for implemented and parked syntax, exact native
 attach tails, and `-N` routing. It adds no differential row or step, so the same digest remains.
+Slice 10s adds only required source-registration tests, so the same artifact and digest remain.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
@@ -354,7 +360,7 @@ closure is that exception.
 | 10p | Raw TUI popup | Closed under `clients.tui-display-popup-overlay` on 2026-08-28 | Complete | Popup state, rendering, input ownership, cleanup, and three attached cases close without absorbing broader popup fidelity |
 | 10q | Per-client no-detach-on-destroy fallback | Closed under `clients.no-detach-on-destroy` on 2026-08-28 | Complete | The configured primary remains shared, while only flagged clients use the bounded newest-session fallback |
 | 10r | Local cold-start CLI parse abort | Closed under `mux.local-cli-autospawn-parse-abort` on 2026-08-28 | Complete | Static syntax covers 83 implemented and nine parked commands; exact attach, `-N`, post-config preparation, and one-shot generation ownership close before effects |
-| 10s | Nonconstant format behavior partition | Frozen under `semantic:tracker-nonconstant-format-behavior` on 2026-08-28 | Small research | Partition 124 behavior registrations into 92 mux and 32 daemon consumers against 74 live gaps and all 198 pinned names |
+| 10s | Nonconstant format behavior partition | Closed under `tracker.nonconstant-format-behavior` on 2026-08-28 | Complete | The single 198-name source table derives 92 mux and 32 daemon behavior registrations against 74 live gaps; an exact daemon test proves its delegated consumers |
 | Post-10s rerank | Startup source cwd and config-group atomicity | Not frozen | Medium | Recheck the newly bounded startup client-cwd seam and config/source group preparation before returning to forecast registrations |
 | Post-rerank forecast | Remaining source-owned tracker registrations | Open context formats, then option consumers | Small research | Register every claimed consumer before broader behavior slices |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -365,7 +371,7 @@ closure is that exception.
 | Post-rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | Post-rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after generic prompts | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10r are closed. Under `detach-on-destroy on`, only flagged clients use
+Slices 9a through 9f and 10a through 10s are closed. Under `detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
 and only flagged clients fall back to the newest attached session when no detached survivor exists.
 Flagged and unflagged clients on one destroyed session must diverge, while no remaining session
@@ -387,12 +393,13 @@ shutdown, and rejects registrations once stopping begins. Runtime target and eff
 their queue semantics. The old chain gap retains two active siblings: warm unaliased generic command
 groups and config or source-file replay.
 
-The post-10r rerank froze slice 10s on `semantic:tracker-nonconstant-format-behavior`. The 198-name
-global format table currently has 74 active constant-placeholder gaps and 124 implicitly trusted
-nonconstant names. Slice 10s registers those 124 names as 92 direct mux values and 32 daemon-hook
-values, proves the daemon consumes its complete delegated roster, and requires the two behavior
-sets plus the 74 live gaps to partition the pin exactly. It changes no runtime value and claims no
-context-specific value parity. Open context formats and option consumers remain separate.
+Slice 10s moved `semantic:tracker-nonconstant-format-behavior` into closed history as
+`tracker.nonconstant-format-behavior`. The 198-name global format table now derives 92 direct mux
+values and 32 daemon-hook values from its production backings. Those 124 behavior registrations
+plus the 74 live `format:` gaps form a complete disjoint partition. A required exact daemon test
+seeds buffer, client, and session facts and resolves all 32 delegated names through
+`DaemonFormatHooks`. The slice changes no runtime value and claims no context-specific value parity.
+Open context formats and option consumers remain separate.
 
 The rerank also exposed `semantic:source-file-startup-initial-client-cwd` as a potentially bounded
 use of 10r's cold-bootstrap provenance, with `semantic:config-source-group-parse-abort` close behind.
@@ -498,11 +505,15 @@ and nine parked syntax entries, exact attach-tail and `-N` coverage, one post-co
 snapshot, the generation-owned one-shot lease, and 11 cold probes per engine. Treat warm unaliased
 command groups and config or source-file replay as separate residual owners.
 
-Confirm that slice 10s is frozen under `semantic:tracker-nonconstant-format-behavior`. Implement
-only the source-owned partition of 124 behavior registrations into 92 mux and 32 daemon consumers,
-prove the delegated consumer roster, and reconcile those names plus 74 active `format:` gaps with
-all 198 pinned names. Do not change runtime values, context-format vocabulary, option consumers, the
-oracle, or the protocol.
+Confirm that slice 10s is closed under `tracker.nonconstant-format-behavior`: 92 direct mux values,
+32 daemon-delegated values, and 74 active `format:` gaps partition all 198 pinned names, with every
+delegated name resolved through the production consumer. Treat runtime value parity, open context
+formats, and option consumers as separate residual owners.
+
+Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
+daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one
+acceptance contract after that audit. Do not combine context formats, event hooks, exit actions, or
+`active-pane` behavior merely because they share client state.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
 source before editing. Use one coordinator and three Codex subagents to probe the selected

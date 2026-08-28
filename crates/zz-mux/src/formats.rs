@@ -1131,16 +1131,36 @@ pub(crate) fn format_variable_names() -> impl Iterator<Item = &'static str> {
 }
 
 #[cfg(test)]
+const fn format_backing_is_tracked(backing: FormatBacking) -> bool {
+    matches!(
+        backing,
+        FormatBacking::Empty
+            | FormatBacking::Zero
+            | FormatBacking::One
+            | FormatBacking::WindowLinked
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn constant_format_variable_names() -> impl Iterator<Item = &'static str> {
+    FORMAT_VARIABLES
+        .iter()
+        .filter_map(|variable| format_backing_is_tracked(variable.backing).then_some(variable.name))
+}
+
+#[cfg(test)]
+pub(crate) fn direct_format_variable_names() -> impl Iterator<Item = &'static str> {
     FORMAT_VARIABLES.iter().filter_map(|variable| {
-        matches!(
-            variable.backing,
-            FormatBacking::Empty
-                | FormatBacking::Zero
-                | FormatBacking::One
-                | FormatBacking::WindowLinked
-        )
-        .then_some(variable.name)
+        (!format_backing_is_tracked(variable.backing)
+            && variable.backing != FormatBacking::StatusHook)
+            .then_some(variable.name)
+    })
+}
+
+#[doc(hidden)]
+pub fn delegated_format_variable_names() -> impl Iterator<Item = &'static str> {
+    FORMAT_VARIABLES.iter().filter_map(|variable| {
+        (variable.backing == FormatBacking::StatusHook).then_some(variable.name)
     })
 }
 

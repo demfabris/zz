@@ -38,8 +38,8 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 87 active groups, 594 classified active items, 99 closed groups, and two known
-differentials. Accepted active groups plus closed history resolve 120 of 186 known groups (64.5%).
+The live tracker has 87 active groups, 593 classified active items, 100 closed groups, and two known
+differentials. Accepted active groups plus closed history resolve 121 of 187 known groups (64.7%).
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -54,7 +54,7 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The 10r checkpoint covers 98 scenarios and 1,517 steps.
+The 10s checkpoint retains 98 scenarios and 1,517 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
@@ -79,8 +79,8 @@ closed in slice 10p. Its attached A/B/C cases cover live title-only modification
 exact content-relative pointer and wheel input, dead `-k` retention, live external focus
 suppression, dead focus-close, and pane-input isolation. Six broader popup contracts remain under
 `display-popup.behavior-fidelity`, while broader menu behavior stays under
-`display-menu.behavior-fidelity`. Nonconstant formats, open context formats, and option consumers
-remain three independent discovery slices.
+`display-menu.behavior-fidelity`. Open context formats and option consumers remain two independent
+discovery slices.
 Slice 10q closes the per-client `no-detach-on-destroy` fallback with two real raw clients and no new
 differential row. Slice 10r closes the cold local CLI parse-abort contract. An alias-free raw pass
 validates the complete vector against all 83 implemented and nine recognized parked tmux verbs,
@@ -92,6 +92,13 @@ sticky when a second external client connects, commits before a pipelined comman
 worker, and shuts down after a failed preparation only when the owner disconnects uncontested.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
+Slice 10s closes the nonconstant global-format behavior registration without changing runtime, the
+pinned oracle, protocol, scenario inventory, or accepted artifact. Source-owned inventories
+partition all 198 pinned global names into 92 values resolved directly by the mux, 32 delegated
+through `StatusHooks`, and 74 constant-backed names that remain live `format:` gaps. The three sets
+are pairwise disjoint and their union equals the pinned oracle. A required exact daemon test seeds
+buffer, client, and session facts, then proves that the production `DaemonFormatHooks` consumer
+resolves every delegated name. This registration makes no context-specific value-parity claim.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
@@ -611,8 +618,11 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    metadata, replaces a note only with `-N`, sets repeat with `-r`, and leaves an absent key
    unbound while creating its table. Slice 10n then closes raw-TUI confirmation presentation and
    input handling, including exact key case, modifier reduction, Enter defaults, pending-reply capture, and seven attached
-   reply paths that prove the response does not reach the pane. `tracker.semantic-coverage` now tracks open-ended or dynamic
-   context formats, nonconstant formats, and option `BEHAVES` consumer truth. Daemon invalid-flag
+   reply paths that prove the response does not reach the pane. Slice 10s partitions all 198 pinned
+   global format names into 92 direct mux values, 32 values delegated through `StatusHooks`, and 74
+   constant-backed live gaps. The required daemon test resolves each delegated name through the
+   production consumer. `tracker.semantic-coverage` now tracks only open-ended or dynamic context
+   formats and option `BEHAVES` consumer truth. Daemon invalid-flag
    coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
    partial roster and routed daemon preflight through the catalog parser used by mux execution.
@@ -1327,6 +1337,18 @@ permanent product decision has been recorded for them.
   with attached-client `PASS` and SHA-256
   `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`. Warm unaliased argument groups
   and config or source-file replay remain under `mux.chain-parse-abort`.
+- 2026-08-28: Slice 10s closed `semantic:tracker-nonconstant-format-behavior` without changing
+  runtime, the pinned oracle, protocol, scenario inventory, or accepted artifact. Source-owned
+  registries partition all 198 pinned global format names into 92 values resolved directly by the
+  mux, 32 delegated through `StatusHooks`, and 74 constant-backed names retained as live `format:`
+  gaps. The partitions are pairwise disjoint and exhaustive. A required exact daemon test seeds
+  buffer, client, and session facts and proves that the production `DaemonFormatHooks` consumer
+  resolves all 32 delegated names. Context-specific value parity remains outside this registration.
+  The tracker now has 87 active groups, 593 classified active items, and 100 closed entries; 121 of
+  187 groups are resolved (64.7%). Open context formats and option consumers remain the two
+  discovery blind spots. The accepted artifact stays at 98 scenarios and 1,517 steps with
+  attached-client `PASS` and SHA-256
+  `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 
 # Related
 

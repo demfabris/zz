@@ -91,7 +91,7 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current 10r acceptance inventory contains 98 differential scenarios and
+The current 10s acceptance inventory contains 98 differential scenarios and
 1,517 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
@@ -121,6 +121,14 @@ client still owns the daemon exclusively. Startup reentry does not contest the l
 external client makes contention sticky, a pipelined command commits it before worker scheduling,
 and a stopping daemon rejects new registration. Eleven cold fixture probes and focused race tests
 cover those boundaries. The stored artifact and digest remain unchanged.
+Slice 10s closes the nonconstant global-format behavior registration without changing runtime, the
+pinned oracle, protocol, scenario inventory, or accepted artifact. Source-owned inventories
+partition all 198 pinned global names into 92 values resolved directly by the mux, 32 delegated
+through `StatusHooks`, and 74 constant-backed names retained as live `format:` gaps. Those sets are
+pairwise disjoint and exhaustive. A required exact daemon test seeds buffer, client, and session
+facts and proves that the production `DaemonFormatHooks` consumer resolves every delegated name.
+This registration makes no context-specific value-parity claim. Open context formats and option
+consumers remain the two semantic discovery blind spots.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -257,10 +265,12 @@ flag gap, but accepted semantic divergences remain outside that count.
 [tmux superset roadmap](/designs/tmux-superset-roadmap.md). Shared key structure and bare bind
 mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
 menu descriptor consumption in slice 10o, popup consumption in slice 10p, per-client destruction
-fallback in slice 10q, and cold local CLI parse atomicity in slice 10r. The live registry now has 87
-active groups, 594 classified active items, and 99 closed records; 120 of 186 groups are resolved
-(64.5%). Nonconstant formats, open context
-formats, and option consumers remain three independent discovery milestones. Regenerate and
+fallback in slice 10q, cold local CLI parse atomicity in slice 10r, and nonconstant global-format
+source registration in slice 10s. The live registry now has 87
+active groups, 593 classified active items, and 100 closed records; 121 of 187 groups are resolved
+(64.7%). Slice 10s partitions the 198 pinned global format names into 92 direct mux values, 32
+daemon-delegated values, and 74 constant-backed live gaps. Open context formats and option consumers
+remain two independent discovery milestones. Regenerate and
 re-rank the full live tracker before every slice so a newly exposed practical gate can move ahead
 of that forecast. Client targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading

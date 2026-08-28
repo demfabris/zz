@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10S FROZEN: NONCONSTANT FORMAT BEHAVIOR PARTITION**
+> Campaign state: **SLICE 10S DELIVERED: LIVE RERANK REQUIRED**
 >
-> Tracker resolution progress: **64.5% (120 of 186 known groups)**
+> Tracker resolution progress: **64.7% (121 of 187 known groups)**
 >
-> Committed milestone base: **2026-08-28** at `02bb4a145141610a9c43bb2e25cf0cd92bf43520`
+> Audited pre-close base: **2026-08-28** at `6e076028e867e67bbbc0a988224ec0c5cf42f1aa`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Committed milestone base | `02bb4a145141610a9c43bb2e25cf0cd92bf43520` |
-| Delivery | Local `main` contains the committed 10r closure and frozen 10s plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Audited pre-close base | `6e076028e867e67bbbc0a988224ec0c5cf42f1aa` |
+| Delivery | The current local milestone closes 10s on top of its committed plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10s is frozen on the nonconstant global-format behavior partition |
-| Live registry | 87 active groups, 594 active items, 99 closed records |
+| Campaign point | Slice 10s is complete; run a live full-registry rerank before freezing its successor |
+| Live registry | 87 active groups, 593 active items, 100 closed records |
 | Active status | 46 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10s plan descends from the committed 10r milestone above. Resolve the commit
+The 10s closure descends from the committed plan above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(99 + 21) / (99 + 87) = 120 / 186 = 64.5%
+(100 + 21) / (100 + 87) = 121 / 187 = 64.7%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -152,9 +152,9 @@ Work one bounded milestone at a time:
 Fabrico granted standing authority to commit each reviewed campaign milestone and continue into the
 next reranked slice. Pushes still require an explicit request.
 
-## Accepted evidence after 10r
+## Accepted evidence after 10s
 
-The strict-plus-attached artifact remains the current accepted checkpoint. Slice 10r adds no
+The strict-plus-attached artifact remains the current accepted checkpoint. Slice 10s adds no
 differential row or step and does not change its digest:
 
 | Evidence | Result |
@@ -182,6 +182,11 @@ tails; and `-N` routes. Every invalid vector exits before spawn or mutation. The
 therefore stays at 98 scenarios, 1,517 steps, attached-client `PASS`, and SHA-256
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 
+Slice 10s adds only source-registration invariants. The required mux manifest test partitions all
+198 pinned global format names, and the required exact daemon test resolves every delegated name
+through the production consumer. It changes no differential row, fixture step, runtime value, or
+accepted digest.
+
 This run supersedes the earlier replacement run that stopped during `lane2-store`.
 
 The fresh monolithic workspace run reached the unrelated
@@ -193,9 +198,15 @@ tests. Workspace strict clippy also passes. This is the load-induced daemon-test
 documented in `AGENTS.md`, not a 10r regression; the checkpoint does not claim one uninterrupted
 monolithic workspace test process.
 
+The fresh 10s daemon-package sweep again reached that flood test after the changed status-test
+cluster passed, then wedged. Its exact solo rerun also wedged and was stopped. The focused delegated
+consumer test, both exact compatibility daemon tests, all 422 mux tests, the all-feature workspace
+suite excluding `zz-daemon`, and strict workspace clippy pass. Slice 10s therefore claims the
+source-registration closure above, not a fresh uninterrupted 712-test daemon-package pass.
+
 ## Shipped history
 
-The 99 entries under the generated report's
+The 100 entries under the generated report's
 [`Closed history`](knowledge/tmux/gaps.md#closed-history) section are the complete item-level record.
 The table below is the milestone rollup an agent needs for orientation.
 
@@ -238,6 +249,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10p proof repair | Live-popup focus suppression, dead `-k` focus-close, and C-locale frame proof | `c909406` |
 | 10q | Per-client no-detach-on-destroy fallback and attached proof | `8310fb7` |
 | 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | `02bb4a1` |
+| 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | Current milestone; resolve after commit |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -352,7 +364,7 @@ ownership, contention, pipelining, and shutdown ordering. The strict fixture run
 each engine. Runtime target and effect errors retain queue semantics: earlier effects stay visible,
 and later commands do not run. Slice 10r changes neither protocol nor snapshot schema.
 
-## Frozen slice: 10s nonconstant format behavior partition
+## Completed slice: 10s nonconstant format behavior partition
 
 The post-10r rerank selected `semantic:tracker-nonconstant-format-behavior` as the largest bounded
 silent-discovery surface. The pinned oracle and zz both name 198 global format-table variables, but
@@ -360,27 +372,28 @@ the compatibility gate currently classifies only the 74 variables whose zz backi
 placeholder. The other 124 names are implicitly trusted even though their behavior is split
 between 92 mux-resolved backings and 32 daemon-provided status-hook values.
 
-Slice 10s acceptance is:
+Slice 10s closes the blind spot with one source-derived partition:
 
-- source-owned inventories classify exactly 124 unique nonconstant format names as 92 direct mux
-  values plus 32 values delegated to the daemon;
-- a daemon consumer test proves that the complete 32-name delegated roster is handled by the
+- the production format table classifies exactly 124 unique nonconstant format names as 92 direct
+  mux values plus 32 values delegated to the daemon;
+- an exact daemon consumer test proves that the complete 32-name delegated roster is handled by the
   production format hook rather than merely named by the mux;
 - the 124 behavior registrations and 74 active `format:` items are disjoint and their union equals
   all 198 unique names in the pinned oracle and zz format table;
 - every registered or tracked name remains live, and duplicate, stale, missing, or newly
   unclassified names fail the compatibility gate;
-- the invariant extends the existing required manifest test and gains a required exact daemon test,
+- the invariant extends the existing required manifest test and adds a required exact daemon test,
   so `just compat-check` cannot silently stop enforcing either half.
 
 This is a registration milestone, not a claim that all 124 values match tmux in every context. It
-must not change runtime values, fix any active `format:` item, expand open-ended command-specific
-context vocabularies, register option consumers, change the oracle or protocol, or add a
-differential scenario. Existing format owners retain value and context parity.
+changes no runtime value, fixes no active `format:` item, expands no open-ended command-specific
+context vocabulary, registers no option consumer, and changes neither the oracle nor protocol.
+Existing format owners retain responsibility for value and context parity.
 
-## Candidate queue after 10s
+## Non-frozen forecast after 10s
 
-The table records the live rerank's strongest successors, not permission to skip the next rerank.
+No successor is frozen. Run a full live rerank first; the table records the previous rerank's
+strongest successors, not permission to skip that audit.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |

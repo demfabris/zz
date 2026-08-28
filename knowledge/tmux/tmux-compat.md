@@ -54,7 +54,9 @@ valueless, 246 required-value, and 8 optional-value. Each command also carries p
 and maximum metadata. It parses nine custom `args_parse` callbacks used by 14 commands and reduces
 them to six effective rules. The remaining inventories contain 180 options, 198 global format-table
 names, 14 source-enumerated names across three selected format contexts, 68 hooks, and 303 default
-bindings across five tables. The context selection consists of 1 shared `command-item` name, 3
+bindings across five tables. The 198 global names divide into 92 values resolved directly by the
+mux, 32 delegated to daemon `StatusHooks`, and 74 constant-backed names that remain active
+`format:` gaps. The context selection consists of 1 shared `command-item` name, 3
 `list-commands` names, and 10 `list-keys` names. zz implements all 14. The 13 list-specific names
 came first, and `formats.command-item-context` closed on 2026-08-24 when the shared `command` name
 became a command-queue-item fact that every command the mux engine runs carries.
@@ -83,10 +85,10 @@ product disposition as open, blocked, or accepted. `depends_on` records delivery
 set status.
 
 `just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, runs
-the full `zz-mux` library suite, then requires the named daemon hook-producer partition test and
-runs it through `--exact`. The Rust gate reconciles upstream command and alias names,
-flag arities, positional bounds, custom argument rules, option names, global and selected
-context-format names, and hook names. It classifies native commands, native aliases, zz-only flags
+the full `zz-mux` library suite, then requires the daemon hook-producer partition and
+delegated-format consumer tests and runs each through `--exact`. The Rust gate reconciles upstream
+command and alias names, flag arities, positional bounds, custom argument rules, option names,
+global and selected context-format names, and hook names. It classifies native commands, native aliases, zz-only flags
 on tmux command names, and every zz-only default key. It derives the guarded native-name roster from
 the catalog minus the pinned oracle, then checks every pinned canonical prefix against the live
 resolver. It pairs every
@@ -105,8 +107,17 @@ closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves
 unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
 unbound after ensuring its table. Structural key equality still does not prove every downstream
 command or copy action. Those consumers retain their existing owners. The gate still does not prove
-open-ended or dynamic context-format names, nonconstant format behavior, or consumer truth for
-option `BEHAVES`. `tracker.semantic-coverage` owns those three gaps. Protocol v84 closes all six runtime rules
+open-ended or dynamic context-format names or consumer truth for option `BEHAVES`.
+`tracker.semantic-coverage` owns those two gaps. The nonconstant global-format registration now
+partitions the 198-name pin into 92 direct mux values, 32 daemon-delegated values, and 74 active
+constant-backed `format:` gaps. The mux invariant keeps those sets pairwise disjoint. The exact
+`status::tests::daemon_delegated_format_consumers_match_mux_inventory` test seeds buffer, client,
+and session facts and resolves every delegated name through the production `DaemonFormatHooks`
+consumer.
+
+This registration does not claim context-specific value parity. The 74 active format gaps keep
+their runtime owners, and the oracle, protocol, snapshots, scenarios, and accepted compatibility
+artifact remain unchanged. Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.
 `choose-client` and `switch-mode` remain covered by their unimplemented command items. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions

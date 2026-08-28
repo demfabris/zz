@@ -258,7 +258,7 @@ A terminal paints its resolved Ghostty background color as a tint over that opaq
 color. The setting no longer exposes the desktop or chrome blur. Ghostty's `background-blur` stays
 ignored; `window-background-blur` owns the native compositor request.
 
-Each chrome region paints its tint once; 0.9 over 0.9 becomes 0.99 and hides the
+Each chrome region paints its tint once; 0.93 over 0.93 becomes 0.995 and hides the
 backdrop. During active blur the workspace root leaves pane rectangles unpainted. The outer margin,
 split gaps, and rounded corner wedges paint chrome around opaque pane interiors. The Settings
 window has no workspace chrome plane and stays opaque.

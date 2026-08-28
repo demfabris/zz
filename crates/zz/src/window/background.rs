@@ -165,7 +165,7 @@ mod macos {
     use objc2_app_kit::NSView;
     use raw_window_handle::RawWindowHandle;
 
-    const BLUR_RADIUS: i32 = 40;
+    const BLUR_RADIUS: i32 = 160;
 
     type ConnectionId = u32;
     type WindowId = u32;

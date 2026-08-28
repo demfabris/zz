@@ -498,7 +498,7 @@ pub(crate) fn terminal_appearance(cx: &App) -> Option<Arc<TerminalAppearance>> {
         .map(|appearance| Arc::clone(&appearance.0))
 }
 
-const BLURRED_CHROME_ALPHA: f32 = 0.9;
+const BLURRED_CHROME_ALPHA: f32 = 0.93;
 
 pub(crate) fn chrome_blur(cx: &App) -> bool {
     config::resolved_config(cx).window_background_blur.value

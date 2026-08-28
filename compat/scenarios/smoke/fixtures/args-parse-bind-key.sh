@@ -74,6 +74,18 @@ expect_binding() {
     fi
 }
 
+expect_binding_metadata() {
+    label="$1"
+    table="$2"
+    key="$3"
+    expected="$4"
+    if [ "$(main_client list-keys -T "$table" \
+        -F '#{key_string}=#{key_note}|#{key_repeat}|#{key_command}' "$key")" != \
+        "$expected" ]; then
+        fail_check "$label"
+    fi
+}
+
 expect_absent_environment() {
     label="$1"
     name="$2"
@@ -241,6 +253,37 @@ expect_binding invalid-replacement-preserved zzstored F10 \
     'F10=display-message -p preserved'
 
 check_count=$((check_count + 1))
+main_client bind-key -T zzmetadata -N original F6 display-message -p preserved
+metadata_bare="$work/metadata-bare.conf"
+printf '%s\n' 'bind-key -T zzmetadata F6' >"$metadata_bare"
+probe metadata-bare 0 '' ''
+expect_binding_metadata metadata-bare-preserves zzmetadata F6 \
+    'F6=original|0|display-message -p preserved'
+metadata_update="$work/metadata-update.conf"
+printf '%s\n' \
+    'bind-key -T zzmetadata -N replacement -r F6' \
+    'bind-key -T zzmetadata F6' \
+    'bind-key -T zzmetadata-empty -r F7' \
+    >"$metadata_update"
+probe metadata-update 0 '' ''
+expect_binding_metadata metadata-update-preserves zzmetadata F6 \
+    'F6=replacement|1|display-message -p preserved'
+metadata_empty_output="$work/metadata-empty.out"
+metadata_empty_error="$work/metadata-empty.err"
+set +e
+main_client list-keys -T zzmetadata-empty \
+    -F '#{key_string}=#{key_command}' >"$metadata_empty_output" 2>"$metadata_empty_error"
+metadata_empty_status=$?
+set -e
+if [ "$metadata_empty_status" -ne 0 ] || [ -s "$metadata_empty_output" ] ||
+    [ -s "$metadata_empty_error" ]; then
+    fail_check metadata-empty-table
+fi
+main_client bind-key -T zzmetadata F6 display-message -p replaced
+expect_binding_metadata metadata-command-replacement zzmetadata F6 \
+    'F6=|0|display-message -p replaced'
+
+check_count=$((check_count + 1))
 main_client set-environment -gu BIND_CONTROL_REJECT_FORBIDDEN
 main_client set-environment -gu BIND_CONTROL_ACCEPT_FORBIDDEN
 control_reject_raw="$work/control-reject.raw"
@@ -375,8 +418,8 @@ expect_absent_environment dispatch-string-group BIND_DISPATCH_STRING
 cleanup_outer
 main_client resize-window -t w -x 80 -y 23
 
-if [ "$failed" -eq 0 ] && [ "$check_count" -eq 16 ]; then
-    main_client set-environment -g ARGS_PARSE_BIND_KEY clean:16
+if [ "$failed" -eq 0 ] && [ "$check_count" -eq 17 ]; then
+    main_client set-environment -g ARGS_PARSE_BIND_KEY clean:17
 elif [ -s "$work/failures" ]; then
     failure_labels="$(paste -sd, "$work/failures")"
     failure_side="${ZZ_SMOKE_CANARY:-missing-canary}"

@@ -118,7 +118,10 @@ remains tracked under `keys.strict-validation`.
 # bind / unbind semantics
 
 `bind-key` inserts into a table (`prefix` by default; `-n` → `root`; `-T <table>` → named), carrying
-`-r` (repeat) and `-N` (note). `unbind-key` removes a key from a table (`prefix` default, `-n`/`-T`
+`-r` (repeat) and `-N` (note). With no command, it ensures the selected table and mutates only an
+existing binding: `-N` replaces its note, `-r` sets repeat without clearing it later, and commands
+plus unspecified metadata remain unchanged. An absent key is a silent no-op. A later command-bearing
+bind replaces the complete binding normally. `unbind-key` removes a key from a table (`prefix` default, `-n`/`-T`
 selectors); `-a` removes the selected table and `-q` suppresses handler errors while preserving
 parser and arity errors. Removing a table resets every client using it to its session's configured
 default table. If that default is the removed table, the daemon recreates it empty. Bare
@@ -141,6 +144,12 @@ tmux config or typed at `prefix :`, creates a plain terminal split like tmux. zz
 bindings name the zz-native `split-picker` verb instead, which opens the pane-kind picker.
 
 # Default bindings (seeded in `KeyTables::default`)
+
+The pinned 303 defaults and zz's 251 defaults contain 193 shared keys. The live manifest owns 110
+missing keys, 58 zz-native keys, and 51 shared command-or-repeat divergences. The remaining 142
+shared entries match structurally: 49 in `copy-mode`, 61 in `copy-mode-vi`, and 32 in `prefix`.
+That structural equality does not claim complete command or action behavior; the existing consumer
+groups retain those runtime contracts.
 
 Prefix table (partial, the canonical zz set):
 

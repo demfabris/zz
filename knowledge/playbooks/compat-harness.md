@@ -161,12 +161,13 @@ precede arity, targets, and effects. Recursive printing preserves same-line `;` 
 normalization. Canonical names, built-in aliases, unique prefixes, preexisting user aliases, inner
 aliases, `--`, late flags, a real command option, stored bindings, source-file, and direct Control
 paths finish `ARGS_PARSE_SET_OPTION=clean:21` on both servers.
-The strict three-step `smoke/args-parse-bind-key` scenario runs 16 internal checks. Every positional
+The strict three-step `smoke/args-parse-bind-key` scenario runs 17 internal checks. Every positional
 accepts strings or typed blocks while `-T` and `-N` values remain strings, with option scanning
 ending at the first positional or `--`. It covers exact typed and string tails, empty and variadic
 typed tails, aliases, boundary flags, child-failure preservation,
-Control routing, and physical-group execution through a real attached client. Both sides publish
-`ARGS_PARSE_BIND_KEY=clean:16`. The fixture does not invoke or claim `send-keys -K` behavior.
+Control routing, bare-key metadata mutation, absent-key table creation, command replacement, and
+physical-group execution through a real attached client. Both sides publish
+`ARGS_PARSE_BIND_KEY=clean:17`. The fixture does not invoke or claim `send-keys -K` behavior.
 The strict three-step `smoke/args-parse-confirm-before` scenario runs 19 internal checks. It covers
 the one command positional as a typed block or string, string-only `-c`, `-p`, and `-t` values,
 the first-positional and `--` boundaries, canonical readback, aliases, target and child parser
@@ -310,9 +311,10 @@ and background execution, aliases, Control transport, and stored-command preserv
 `smoke/args-parse-set-option` contributes three harness steps around 21 internal checks for typed
 option values, exact rejection and state preservation, recursive command printing, format order,
 aliases, source-file, and direct Control behavior across both set-option commands.
-`smoke/args-parse-bind-key` contributes three harness steps around 16 internal checks for typed
+`smoke/args-parse-bind-key` contributes three harness steps around 17 internal checks for typed
 option and key positions, exact typed and string tails, aliases, flag boundaries, child rejection,
-Control routing, and physical-group execution through a real attached client.
+Control routing, bare-key metadata mutation, and physical-group execution through a real attached
+client.
 `smoke/args-parse-confirm-before` contributes three harness steps around 19 internal checks for
 recursive typed and string construction, string-only option values, nested canonical readback,
 per-path alias budgets, self-recursion safety, physical groups, invalid replacement preservation,

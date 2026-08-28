@@ -61,6 +61,9 @@ struct OracleKey {
     command: String,
 }
 
+const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] =
+    &[("copy-mode", 49), ("copy-mode-vi", 61), ("prefix", 32)];
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -844,8 +847,12 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .list(None)
         .map(|(table, key, _)| (table, item_key(key)))
         .collect::<BTreeSet<_>>();
-    let untracked_keys = upstream_keys
+    let missing_keys = upstream_keys
         .difference(&zz_keys)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let untracked_keys = missing_keys
+        .iter()
         .map(|(table, key)| format!("key:{table}:{key}"))
         .filter(|item| !items.contains_key(item))
         .collect::<Vec<_>>();
@@ -917,5 +924,61 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     assert_eq!(
         tracked_bindings, divergent_bindings,
         "divergent shared default bindings and tracked binding items differ"
+    );
+
+    let shared_keys = upstream_keys
+        .intersection(&zz_keys)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let structurally_matching_bindings = shared_keys
+        .iter()
+        .filter(|(table, key)| !divergent_bindings.contains(&format!("binding:{table}:{key}")))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let matching_by_table = structurally_matching_bindings.iter().fold(
+        BTreeMap::<&str, usize>::new(),
+        |mut counts, (table, _)| {
+            *counts.entry(table).or_default() += 1;
+            counts
+        },
+    );
+    assert_eq!(
+        oracle.key_bindings.len(),
+        303,
+        "pinned binding count changed"
+    );
+    assert_eq!(zz_keys.len(), 251, "zz default binding count changed");
+    assert_eq!(
+        shared_keys.len(),
+        193,
+        "shared default binding count changed"
+    );
+    assert_eq!(
+        missing_keys.len(),
+        110,
+        "missing default binding count changed"
+    );
+    assert_eq!(
+        native_keys.len(),
+        58,
+        "native default binding count changed"
+    );
+    assert_eq!(
+        divergent_bindings.len(),
+        51,
+        "divergent shared binding count changed"
+    );
+    assert_eq!(
+        structurally_matching_bindings.len(),
+        142,
+        "structurally matching shared binding count changed"
+    );
+    assert_eq!(
+        matching_by_table,
+        STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE
+            .iter()
+            .copied()
+            .collect(),
+        "structurally matching shared binding tables changed"
     );
 }

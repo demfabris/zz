@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 87 active groups, 583 classified active items, 93 closed groups, and two known
+The live tracker has 87 active groups, 582 classified active items, 94 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -64,10 +64,12 @@ and both positional-bound closures each add one fail-closed three-step canonical
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,
 GEO, FMT, OUT, or WARN differences.
-Slice 10l registers the pinned hook-producer partition in source without changing runtime behavior
-or the differential corpus, so the canonical artifact remains 98 scenarios and 1,517 steps with
-that digest. Shared key behavior is the next source-owned tracker partition in slice 10m. The
-nonconstant format, open context-format, and option-consumer partitions follow as separate slices.
+Slice 10l registers the pinned hook-producer partition in source. Slice 10m then makes the full
+default-key structural partition explicit and matches tmux's bare key-only `bind-key` mutation.
+Neither adds a scenario step, so the canonical artifact remains 98 scenarios and 1,517 steps with
+that digest. The existing bind-key row now runs 17 internal checks. A fresh practical rerank puts
+raw-TUI confirm consumption next; nonconstant formats, open context formats, and option consumers
+remain three independent discovery slices.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
@@ -118,9 +120,10 @@ with `ARGS_PARSE_SET_OPTION=clean:21`.
 string-only. Option scanning stops at the first positional or `--`. Typed keys expand the live mux
 environment and print recursively before lookup. One typed tail preserves physical source groups,
 one string tail reparses as one group, and a typed first tail with extra arguments stores an empty
-binding. Stored child failures leave the prior binding intact. Its strict three-step scenario runs
-16 internal checks through a real attached client and finishes `ARGS_PARSE_BIND_KEY=clean:16` on
-both servers.
+binding. Stored child failures leave the prior binding intact. Bare key-only mutation preserves
+commands and unspecified metadata, applies only requested note and repeat changes, and leaves an
+absent key unbound. Its strict three-step scenario runs 17 internal checks through a real attached
+client and finishes `ARGS_PARSE_BIND_KEY=clean:17` on both servers.
 `confirm-before` accepts a typed block or string at its one command positional while `-c`, `-p`,
 and `-t` values stay strings. Every lexical typed block constructs recursively before its parent's
 name, callback type, or arity validation. Recursive paths carry independent one-layer user-alias
@@ -567,9 +570,15 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    names. The source roster names 27 explicit event producers, while the test derives 37 generic
    `after-<command>` producers from implemented canonical commands. It requires those 64 produced
    names plus the four active gaps, `after-queue`, `pane-focus-in`, `pane-focus-out`, and
-   `pane-set-clipboard`, to equal the oracle. `tracker.semantic-coverage` now tracks open-ended or
-   dynamic context formats, nonconstant formats, shared binding runtime behavior, and option
-   `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
+   `pane-set-clipboard`, to equal the oracle. Slice 10m makes the default-key structural partition
+   explicit: 303 pinned bindings and 251 zz defaults yield 193 shared keys, 110 tracked omissions,
+   58 tracked native keys, 51 tracked command-or-repeat divergences, and 142 structural matches.
+   The matches split into 49 copy-mode, 61 copy-mode-vi, and 32 prefix entries without claiming
+   complete runtime parity. Bare key-only `bind-key` now also preserves commands and unspecified
+   metadata, replaces a note only with `-N`, sets repeat with `-r`, and leaves an absent key
+   unbound while creating its table. `tracker.semantic-coverage` now tracks open-ended or dynamic
+   context formats, nonconstant formats, and option `BEHAVES` consumer truth. Daemon invalid-flag
+   coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
    partial roster and routed daemon preflight through the catalog parser used by mux execution.
    The first eight positional maximum mismatches closed later that day, followed by all fourteen
@@ -1104,8 +1113,9 @@ permanent product decision has been recorded for them.
   live mux environment and print recursively before lookup. Exact typed and string tails preserve
   their distinct grouping rules; a typed first tail with extras stores an empty binding. Child
   failures preserve the prior binding, and failed typed physical groups do not suppress later
-  physical groups. The strict three-step scenario drives a real attached client, runs 16 internal
-  checks, and finishes `ARGS_PARSE_BIND_KEY=clean:16` on zz and the pin. Three callback rules across
+  physical groups. The strict three-step scenario now drives a real attached client, runs 17
+  internal checks including bare-key mutation, and finishes `ARGS_PARSE_BIND_KEY=clean:17` on zz
+  and the pin. Three callback rules across
   seven implemented commands remain.
 - 2026-08-28: The existing protocol v84 metadata closed `tracker.args-parse-confirm-before`
   without a wire change. Its one command positional accepts a typed block or string while `-c`,
@@ -1202,6 +1212,14 @@ permanent product decision has been recorded for them.
   test and runs it through `--exact`. The source-registration closure leaves the canonical 98
   scenarios, 1,517 steps, attached-client `PASS`, two registered GEO rows, and summary digest
   unchanged.
+- 2026-08-28: Slice 10m closed `tracker.key-binding-behavior` without a protocol change. The
+  manifest test pins the 303/251/193/110/58/51/142 default-binding partition and the 49/61/32 table
+  split for structural matches. Those matches remain structural evidence only; their command and
+  action consumers keep their existing owners. Runtime handling now accepts bare `bind-key KEY`,
+  ensures the selected table, mutates only an existing binding's requested note and repeat fields,
+  and silently leaves an absent key unbound. The strict three-step bind-key row grows from 16 to 17
+  internal checks and reports zero differences. Its harness step count and the canonical summary
+  digest remain unchanged.
 
 # Related
 

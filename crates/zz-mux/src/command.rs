@@ -6546,7 +6546,10 @@ impl MuxEngine {
         let key = parse_tmux_key(&key)
             .filter(|key| key != "None")
             .ok_or_else(|| ServerError::InvalidCommand(format!("unknown key: {key}")))?;
-        required_arg(&positional, 1, "command")?;
+        if positional.len() == 1 {
+            self.keys.update_binding_metadata(table, &key, note, repeat);
+            return Ok(Execution::default());
+        }
         let tail_start = positional_start + 1;
         let commands = bound_commands(self, command, tail_start)?;
         self.keys.bind(
@@ -31061,6 +31064,110 @@ mod tests {
                 .output,
             ""
         );
+    }
+
+    #[test]
+    fn bind_key_without_a_command_only_updates_existing_metadata() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let prefix_commands = engine
+            .keys
+            .get("prefix", "c")
+            .expect("default prefix binding")
+            .commands
+            .clone();
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["-N", "prefix-note", "c"]),
+            )
+            .expect("default table metadata update");
+        let prefix = engine.keys.get("prefix", "c").expect("prefix binding");
+        assert_eq!(prefix.commands, prefix_commands);
+        assert_eq!(prefix.note.as_deref(), Some("prefix-note"));
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["-n", "F3", "display-message", "root"]),
+            )
+            .expect("root binding");
+        engine
+            .execute(&mut context, &command("bind-key", &["-n", "-r", "F3"]))
+            .expect("root metadata update");
+        assert!(engine.keys.get("root", "F3").expect("root binding").repeat);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &[
+                        "-T",
+                        "metadata",
+                        "-N",
+                        "original",
+                        "F1",
+                        "display-message",
+                        "preserved",
+                    ],
+                ),
+            )
+            .expect("baseline binding");
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["-T", "metadata", "F1"]),
+            )
+            .expect("bare binding");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &["-T", "metadata", "-N", "replacement", "-r", "F1"],
+                ),
+            )
+            .expect("metadata update");
+        let binding = engine.keys.get("metadata", "F1").expect("binding remains");
+        assert_eq!(
+            binding.commands,
+            vec![CommandInvocation::new("display-message", ["preserved"])]
+        );
+        assert_eq!(binding.note.as_deref(), Some("replacement"));
+        assert!(binding.repeat);
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["-T", "metadata-empty", "-r", "F2"]),
+            )
+            .expect("missing binding is a no-op");
+        assert!(
+            engine
+                .keys
+                .table_names()
+                .any(|table| table == "metadata-empty")
+        );
+        assert!(engine.keys.get("metadata-empty", "F2").is_none());
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &["-T", "metadata", "F1", "display-message", "replaced"],
+                ),
+            )
+            .expect("command replacement");
+        let binding = engine.keys.get("metadata", "F1").expect("replacement");
+        assert_eq!(
+            binding.commands,
+            vec![CommandInvocation::new("display-message", ["replaced"])]
+        );
+        assert_eq!(binding.note, None);
+        assert!(!binding.repeat);
     }
 
     #[test]

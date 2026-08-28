@@ -92,16 +92,21 @@ the catalog minus the pinned oracle, then checks every pinned canonical prefix a
 resolver. It pairs every
 constant-backed format with a manifest item and tracks every missing default key across `root`,
 `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. For each shared default key, it reconciles the
-rendered command and repeat bit or requires a named `binding:` divergence.
+rendered command and repeat bit or requires a named `binding:` divergence. Slice 10m pins the exact
+303 pinned, 251 zz, 193 shared, 110 missing, 58 native, 51 divergent, and 142 structurally matching
+counts. The structural matches divide into 49 copy-mode, 61 copy-mode-vi, and 32 prefix entries.
 
 Slice 10l closes hook-producer discovery with a daemon-owned source invariant. It names 27 explicit
 event producers and derives 37 generic `after-<command>` producers whose suffix names an implemented
 canonical command. The test requires those 64 produced hooks plus the four active gaps,
 `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, to equal all 68 pinned
-names. It also rejects duplicate explicit names and produced-versus-tracked overlap. The gate still
-does not prove open-ended or dynamic context-format names, nonconstant format behavior, runtime
-behavior for shared bindings, or consumer truth for option `BEHAVES`. `tracker.semantic-coverage`
-owns those four gaps. Protocol v84 closes all six runtime rules
+names. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
+closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves commands and
+unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
+unbound after ensuring its table. Structural key equality still does not prove every downstream
+command or copy action. Those consumers retain their existing owners. The gate still does not prove
+open-ended or dynamic context-format names, nonconstant format behavior, or consumer truth for
+option `BEHAVES`. `tracker.semantic-coverage` owns those three gaps. Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.
 `choose-client` and `switch-mode` remain covered by their unimplemented command items. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions

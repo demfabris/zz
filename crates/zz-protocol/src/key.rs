@@ -491,6 +491,26 @@ impl KeyTables {
             .insert(canonical_key(key), binding);
     }
 
+    pub fn update_binding_metadata(
+        &mut self,
+        table: &str,
+        key: &str,
+        note: Option<String>,
+        repeat: bool,
+    ) {
+        let binding = self
+            .tables
+            .entry(table.to_owned())
+            .or_default()
+            .get_mut(&canonical_key(key));
+        if let Some(binding) = binding {
+            if let Some(note) = note {
+                binding.note = Some(note);
+            }
+            binding.repeat |= repeat;
+        }
+    }
+
     pub fn unbind(&mut self, table: &str, key: &str) -> bool {
         let removed = self
             .tables
@@ -1491,6 +1511,45 @@ mod tests {
             Some(vec![CommandInvocation::new("new-window", [] as [&str; 0])])
         );
         assert!(tables.get("prefix", "C-a").is_none());
+    }
+
+    #[test]
+    fn metadata_updates_preserve_commands_and_unspecified_fields() {
+        let mut tables = KeyTables::empty();
+        let commands = vec![CommandInvocation::new("display-message", ["preserved"])];
+        tables.bind(
+            "metadata",
+            "C-Space",
+            Binding {
+                commands: commands.clone(),
+                repeat: false,
+                note: Some("original".to_owned()),
+            },
+        );
+
+        tables.update_binding_metadata("metadata", "C- ", None, false);
+        assert_eq!(
+            tables.get("metadata", "C-Space"),
+            Some(&Binding {
+                commands: commands.clone(),
+                repeat: false,
+                note: Some("original".to_owned()),
+            })
+        );
+
+        tables.update_binding_metadata("metadata", "C-Space", Some("replacement".to_owned()), true);
+        assert_eq!(
+            tables.get("metadata", "C- "),
+            Some(&Binding {
+                commands,
+                repeat: true,
+                note: Some("replacement".to_owned()),
+            })
+        );
+
+        tables.update_binding_metadata("created-empty", "F1", None, true);
+        assert!(tables.table_names().any(|table| table == "created-empty"));
+        assert!(tables.get("created-empty", "F1").is_none());
     }
 
     #[test]

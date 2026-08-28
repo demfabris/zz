@@ -319,16 +319,17 @@ binding when the first tail value is typed and more arguments follow. Typed comm
 a longer tail are omitted. Child validation completes before replacement, so exact type, syntax,
 and unknown-command failures leave the previous binding unchanged.
 
-The strict three-step `smoke/args-parse-bind-key` scenario runs 16 internal source-file and Control
+The strict three-step `smoke/args-parse-bind-key` scenario runs 17 internal source-file and Control
 checks. It covers canonical, built-in, unique-prefix, and preexisting user aliases; typed keys,
 unknown-command construction, option values, exact typed and string tails, nested callbacks, empty
 blocks, `--`, late flags, recursive printing, Control framing, and preserved
 state. A temporary attached client selects the test key table and sends real F-keys, proving that
 failure drops only the current typed physical-line group while a quoted multiline string remains
-one group. Both servers finish with
-`ARGS_PARSE_BIND_KEY=clean:16`.
+one group. It also proves that bare `bind-key KEY` preserves commands and unspecified metadata,
+replaces a note only with `-N`, sets repeat with `-r`, creates an empty selected table for an absent
+key, and lets a later command-bearing bind replace the metadata. Both servers finish with
+`ARGS_PARSE_BIND_KEY=clean:17`.
 
-Bare `bind-key KEY` note and repeat mutation remains under `semantic:tracker-key-binding-behavior`.
 Eager whole-file and parse-only `source-file -n` child validation, aliases created earlier in one
 source, and the outer-user-alias plus nested-user-alias suppression case retain their existing
 parser and alias owners. The fixture does not dispatch the pin's crashing `confirm-before {}`

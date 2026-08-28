@@ -2744,7 +2744,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "semantic:tracker-key-binding-behavior",
         "semantic:tracker-nonconstant-format-behavior",
         "semantic:tracker-open-context-format-vocabulary",
         "semantic:tracker-option-consumer-registration"
@@ -2756,10 +2755,10 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "acceptance": [
-        "Consumer-owned inventories reconcile shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
+        "Consumer-owned inventories reconcile nonconstant and open-ended context formats plus option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "All six `args_parse` rules and the pinned hook producer partition now have source-owned registrations. Option consumption, nonconstant and open-ended formats, and shared binding behavior remain the four discovery blind spots."
+      "reason": "All six `args_parse` rules, the pinned hook producer partition, and the shared default-binding structural partition now have source-owned registrations. Bare key-only bind mutation also matches the pin. Option consumption plus nonconstant and open-ended formats remain the three discovery blind spots."
     }
   ],
   "closed": [
@@ -3939,7 +3938,7 @@
         "scenario:compat/scenarios/smoke/args-parse-bind-key.txt",
         "resource:knowledge/playbooks/compat-harness.md"
       ],
-      "resolution": "Protocol v84 lexical command-block positions now drive `bind-key`'s pinned command-or-string rule without another wire change. Every positional accepts a string or typed block while `-T` and `-N` remain string-only, option scanning stops at the first positional or `--`, exact typed and string tails take their distinct construction paths, and typed command-name groups are omitted from variadic chains. Typed keys expand the live mux environment and use recursive canonical printing before key validation. Daemon dispatch stops the failed source group but continues later physical groups, while a string tail remains one group. Empty blocks, the pin's typed-first variadic oddity, aliases, nested callbacks, multiline groups, exact diagnostics, Control framing, and prior-binding preservation are covered by a strict 16-check source-file and Control fixture. Bare key-only mutation remains under `semantic:tracker-key-binding-behavior`; eager whole-file validation, parse-only `source-file -n`, same-source alias creation, and nested user-alias suppression remain with their existing parser and alias owners. Seven implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
+      "resolution": "Protocol v84 lexical command-block positions now drive `bind-key`'s pinned command-or-string rule without another wire change. Every positional accepts a string or typed block while `-T` and `-N` remain string-only, option scanning stops at the first positional or `--`, exact typed and string tails take their distinct construction paths, and typed command-name groups are omitted from variadic chains. Typed keys expand the live mux environment and use recursive canonical printing before key validation. Daemon dispatch stops the failed source group but continues later physical groups, while a string tail remains one group. Empty blocks, the pin's typed-first variadic oddity, aliases, nested callbacks, multiline groups, exact diagnostics, Control framing, and prior-binding preservation were covered by the initial 16-check source-file and Control fixture. The later `tracker.key-binding-behavior` closure grew it to 17 checks and closed bare key-only mutation. Eager whole-file validation, parse-only `source-file -n`, same-source alias creation, and nested user-alias suppression remain with their existing parser and alias owners."
     },
     {
       "id": "tracker.args-parse-choose-buffer",
@@ -4143,6 +4142,21 @@
         "resource:knowledge/tmux/tmux-compat.md"
       ],
       "resolution": "A daemon-owned invariant now partitions all 68 pinned hook names without changing runtime behavior. The source roster names 27 explicit event producers, while the test derives 37 generic `after-<command>` producers from pinned hook names whose suffix is an implemented canonical command. It reads the four active `hook:` items from the live tracker, rejects duplicate explicit names and produced-versus-tracked overlap, and requires the 64 produced names plus those four gaps to equal the pinned oracle exactly. `just compat-check` requires and runs the exact daemon partition test after the full mux suite. `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard` remain open under their runtime owners."
+    },
+    {
+      "id": "tracker.key-binding-behavior",
+      "title": "Register shared key structure and match bare bind mutation",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/key.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-bind-key.sh",
+        "scenario:compat/scenarios/smoke/args-parse-bind-key.txt",
+        "resource:knowledge/tmux/key-tables.md",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "The manifest invariant now makes the default-binding structural partition explicit: 303 pinned bindings and 251 zz defaults yield 193 shared keys, 110 tracked omissions, 58 tracked native keys, 51 tracked command-or-repeat divergences, and 142 structurally matching shared bindings. Those 142 divide into 49 copy-mode, 61 copy-mode-vi, and 32 prefix entries. Matching rendered commands and repeat bits are recorded only as structural evidence; command consumers, copy actions, prefix timing, prompts, and native behavior retain their existing owners. Runtime inspection also exposed and closed the bare key-only `bind-key` contract. The command now ensures the selected table, silently leaves an absent key unbound, preserves an existing binding's commands and unspecified metadata, replaces its note only with `-N`, and sets repeat monotonically with `-r`; a later command-bearing bind replaces all metadata normally. The focused source-file fixture grew from 16 to 17 checks and reports zero differences. No protocol change was needed."
     }
   ],
   "known_differentials": [

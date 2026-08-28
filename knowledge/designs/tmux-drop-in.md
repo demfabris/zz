@@ -210,7 +210,7 @@ daemon invariant names 27 explicit event producers and derives 37 generic `after
 producers from implemented canonical commands. It requires those 64 names plus the four active
 `hook:` items, `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, to equal
 all 68 pinned hooks. `just compat-check` requires and runs the exact daemon partition test. The
-tracker now has 87 active groups, 583 classified active items, and 93 closed-history entries.
+tracker now has 87 active groups, 582 classified active items, and 94 closed-history entries.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -227,10 +227,12 @@ catalog-declared pairs, inventoried in the matrix and enforced by
 flag gap, but accepted semantic divergences remain outside that count.
 
 **The current queue** is dependency-ordered in the
-[tmux superset roadmap](/designs/tmux-superset-roadmap.md): close the four remaining source-owned
-tracker partitions as separate milestones, starting with shared key behavior in slice 10m, then
-take the three raw-TUI overlay contracts one at a time. Regenerate and re-rank the full live tracker before every
-slice so a newly exposed practical gate can move ahead of that forecast. Client targeting and ordinary detach are complete;
+[tmux superset roadmap](/designs/tmux-superset-roadmap.md). Shared key structure and bare bind
+mutation closed in slice 10m. The fresh practical rerank puts raw-TUI confirm consumption next,
+followed by menu and popup consumption as separate slices. Nonconstant formats, open context
+formats, and option consumers remain three independent discovery milestones. Regenerate and
+re-rank the full live tracker before every slice so a newly exposed practical gate can move ahead
+of that forecast. Client targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading
 `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order
 collision precedence. Native aliases remain. Unsupported `command-prompt -t`, `show-messages -t`,

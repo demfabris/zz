@@ -1,14 +1,14 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **PAUSED before slice 10p**
+> Campaign state: **SLICE 10P COMPLETE LOCALLY, AWAITING AUTHORIZED COMMIT**
 >
-> Tracker resolution progress: **63.6% (117 of 184 known groups)**
+> Tracker resolution progress: **63.8% (118 of 185 known groups)**
 >
-> Campaign base verified: **2026-08-28** at `1a0f59e8dd6b3885421afb38dad5e5a2ee824aec`
+> Audited prechange base: **2026-08-28** at `7cad19e78fae2356b42832a48257ed17ddfa4b1b`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
-campaign should read this file, run the preflight below, and resume the current slice without
-reconstructing the history from chat.
+campaign should read this file, run the preflight below, and resume from the current checkpoint
+without reconstructing the history from chat.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -32,22 +32,23 @@ percentage is a ledger health metric, not a compatibility claim.
 
 | Fact | Current value |
 | --- | --- |
-| Repository | `/Users/demfabris/dev/zz` |
+| Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited campaign base | `1a0f59e8dd6b3885421afb38dad5e5a2ee824aec` |
-| Published delivery | Every milestone listed below and this tracker are on remote `main` |
+| Audited prechange base | `7cad19e78fae2356b42832a48257ed17ddfa4b1b` |
+| Published delivery | Remote `main` contains the campaign through 10o; 10p is uncommitted and unpushed |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Pause point | Slice 10p, raw-TUI popup, has not started |
-| Live registry | 88 active groups, 589 active items, 96 closed records |
+| Pause point | Slice 10p is implemented and proven; final rereview is clean; no next slice is frozen |
+| Live registry | 88 active groups, 594 active items, 97 closed records |
 | Active status | 47 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The audited base was clean before this file was created. Resolve the commit containing the latest
-tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and resolve live remote
-`main` with `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the
-live worktree before acting because other agents may share it.
+The audited prechange base matched `origin/main` before slice 10p began. Resolve the commit
+containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
+resolve live remote `main` with
+`git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
+before acting because other agents may share it.
 
 ### Progress calculation
 
@@ -56,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(96 + 21) / (96 + 88) = 117 / 184 = 63.6%
+(97 + 21) / (97 + 88) = 118 / 185 = 63.8%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -101,7 +102,7 @@ old drop-in plan are not live status.
 When Fabrico asks to resume the campaign, begin here:
 
 ```sh
-cd /Users/demfabris/dev/zz
+cd "$HOME/dev/zz"
 git status --short --branch
 git worktree list
 git fetch https://github.com/demfabris/zz.git main:refs/remotes/origin/main
@@ -112,8 +113,8 @@ Preserve unrelated changes in the standard checkout. If it is dirty or shared, c
 dedicated worktree from the verified `origin/main` instead of changing or committing those edits:
 
 ```sh
-git worktree add -b codex/tmux-compat-next /Users/demfabris/dev/zz-tmux-compat origin/main
-cd /Users/demfabris/dev/zz-tmux-compat
+git worktree add -b codex/tmux-compat-next "$HOME/dev/zz-tmux-compat" origin/main
+cd "$HOME/dev/zz-tmux-compat"
 ```
 
 If that path or branch already exists, inspect and reuse it safely rather than overwriting it. From
@@ -148,11 +149,12 @@ Work one bounded milestone at a time:
    current task authorizes commits.
 9. Never push unless Fabrico explicitly asks.
 
-The current pause stops implementation. This document does not grant commit or push authority.
+Slice 10p stops before a commit or another implementation slice. This document does not grant
+commit or push authority.
 
-## Accepted evidence at the pause point
+## Accepted evidence at the 10p checkpoint
 
-The persisted 10o artifact is the current accepted checkpoint:
+The fresh strict-plus-attached 10p artifact is the current accepted checkpoint:
 
 | Evidence | Result |
 | --- | --- |
@@ -164,21 +166,21 @@ The persisted 10o artifact is the current accepted checkpoint:
 | Summary SHA-256 | `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832` |
 | Stored-artifact check | `compat/run.sh --check-summary` passes |
 
-The complete attached-client fixture passed directly after slice 10o. Strict workspace clippy,
-affected package tests, both client convergence seeds, formatting, tracker generation, shell
-syntax, diff checks, and OKF validation also passed.
+`just compat --strict-geometry --attached-client` completed on the final 10p code and fixture tree.
+All 98 scenarios and 1,517 steps ran, the attached-client fixture passed, and the stored summary
+check confirmed the digest above. Focused package tests, workspace clippy, formatting, tracker and
+OKF validation, shell syntax, and diff checks also passed.
 
-A later fresh 98-scenario run was stopped during `lane2-store` when the campaign was wrapped. Every
-completed cohort was clean, but that run did not finish and is not acceptance evidence. Do not
-describe it as a completed rerun. The persisted summary above remains the accepted artifact.
+This run supersedes the earlier replacement run that stopped during `lane2-store`.
 
-The latest completed workspace test sweep reported three daemon failures under parallel load. Each
-exact test passed alone, matching the timing-sensitive classification in `AGENTS.md`. Preserve that
-qualification until a newer complete sweep supersedes it.
+The fresh workspace test sweep stopped in `zz-daemon` after 706 of 708 tests passed. The two failing
+mode-key tests passed immediately when rerun alone, matching the parallel-load classification in
+`AGENTS.md`. Cargo therefore did not continue through every later workspace package; affected
+package tests and the full compatibility checkpoint remain green.
 
 ## Shipped history
 
-The 96 entries under the generated report's
+The 97 entries under the generated report's
 [`Closed history`](knowledge/tmux/gaps.md#closed-history) section are the complete item-level record.
 The table below is the milestone rollup an agent needs for orientation.
 
@@ -218,52 +220,54 @@ The table below is the milestone rollup an agent needs for orientation.
 | Count correction | Unsupported flag inventory corrected to 70 pairs across 20 commands | `aad3923` |
 | 10o | Raw-TUI menu rendering, shared resolver, lifecycle, and attached proof | `1a0f59e` |
 
+Slice 10p is locally complete but absent from this shipped table until an authorized commit exists.
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
-correction is documentation maintenance, not a compatibility slice. Slices 10n and 10o expand the
-attached fixture without adding differential scenario rows.
+correction is documentation maintenance, not a compatibility slice. Slices 10n, 10o, and the local
+10p checkpoint expand the attached fixture without adding differential scenario rows.
 
-## Current slice: 10p raw-TUI popup
+## Completed slice: 10p raw-TUI popup
 
-Tracker owner: [`clients.tui-overlay-consumption`](knowledge/tmux/gaps.md#clientstui-overlay-consumption-render-and-consume-popup-overlays-in-zz-tui)
+The tracker moved `semantic:tui-display-popup-overlay` from
+`clients.tui-overlay-consumption` into closed history as
+`clients.tui-display-popup-overlay`. No protocol or snapshot change was needed.
 
-Exact current item: `semantic:tui-display-popup-overlay`
+Raw zz-tui now:
 
-Goal: raw attach must render and own a daemon-published `display-popup` terminal session without
-letting keyboard, paste, pointer, scroll, focus, or close lifecycle events escape to the pane under
-it.
-
-The protocol, daemon popup session, `ClientCore`, and GPUI reference path already carry the needed
-descriptor and viewport state. The raw TUI retains synthetic frames but drops `PopupChanged` and
-has no popup state, rendering, or input owner. Keep 10p on the raw-TUI consumption path unless fresh
-evidence disproves that boundary.
-
-### Expected owned paths
-
-- `crates/zz-tui/src/layout.rs`
-- `crates/zz-tui/src/state.rs`
-- `crates/zz-tui/src/app.rs`
-- `crates/zz-tui/src/input.rs`
-- `crates/zz-tui/src/render.rs`
-- `compat/attached-client.sh`
-- `compat/tmux-gaps.json` and its generated report
-- Campaign knowledge pages changed by the closure
-
-### In-scope acceptance
-
-- Seed, update, reconnect, replace, close, and reset popup state from `ClientCore`.
-- Render the popup descriptor, border, title, styles, terminal viewport, cursor, and bounded geometry
-  above the workspace and below higher-priority menu or confirmation state.
-- Route popup keys, key lifecycle, paste, mouse, scroll, and focus before global shortcuts, prefix
-  handling, prompts, choosers, browsers, or pane input.
-- Keep all popup input out of the underlying pane. Prove it with a one-byte pane sentinel.
-- Remove the synthetic viewport and renderer caches on close or replacement, then repaint the latest
+- seeds, updates, reconnects, replaces, closes, and resets popup state from `ClientCore`;
+- centers and clamps one shared floating layout, with borderless content using the full frame and
+  bordered content inset beneath the title;
+- renders the popup terminal, styles, border, title, and cursor above the workspace and below menu
+  and confirmation overlays;
+- routes popup keys, paste, pointer, tracked wheel, and focus before global shortcuts, prefix
+  handling, prompts, choosers, browsers, or underlay terminal input;
+- tracks held keys only when the outer terminal advertises Kitty release events, while the popup
+  application's own Kitty mode controls whether release events reach that application;
+- removes synthetic frames and renderer caches on close or replacement, then repaints the latest
   underlay.
-- Add focused raw-TUI tests and one attached fixture that runs against both zz and the pin.
 
-### Explicitly outside 10p
+The daemon now evaluates popup mouse acceptance against the owning popup terminal's per-client
+viewport. Tracked popup mouse therefore works while the global mouse option is off. One physical
+tracked wheel notch emits one application report; local and Shift scrolling keep the three-line
+step.
 
-Create or retain a separate `display-popup.behavior-fidelity` group for these six contracts:
+The attached fixture adds three popup cases. They cover bordered rendering and update-in-place,
+bracketed paste, an exact click press and release, one tracked wheel report, a retained dead popup,
+close-on-key behavior, external focus ownership, and a final one-byte underlay sentinel. Coordinates
+derive from the outer terminal cursor so centering and Unicode width cannot turn the mouse proof
+into a false positive. Pinned tmux emits three internal underlay focus-out/focus-in pairs during the
+fixture; zz emits none. Explicit external focus still stays popup-owned on both.
+
+Focused proof passed:
+
+- `cargo test -p zz-tui`: 154 tests;
+- popup-focused `zz-client` and `zz-daemon` tests, including global-mouse-off popup tracking;
+- `cargo clippy -p zz-tui --all-targets --all-features --no-deps -- -D warnings`;
+- `cargo build -p zz`, formatting, shell syntax, and `git diff --check`;
+- the complete attached-client fixture twice on the final binary and fixture tree.
+
+Review findings were addressed; the final rereview found no remaining actionable issue. The broader
+contracts below remain open under `display-popup.behavior-fidelity`:
 
 - `semantic:display-popup-resize-lifecycle`
 - `semantic:display-popup-style-refresh`
@@ -275,37 +279,11 @@ Create or retain a separate `display-popup.behavior-fidelity` group for these si
 Real mouse/status format facts remain under `formats.mouse-context`. Control-mode popup
 presentation and read-only popup actions also remain outside this slice.
 
-### Planned tracker movement
+## Candidate queue after 10p
 
-Close only `semantic:tui-display-popup-overlay`, moving the completed raw-TUI consumption contract
-to closed history as `clients.tui-display-popup-overlay`. Do not close broader popup fidelity from
-the bounded raw-TUI proof. Regenerate the report and advance the queue to 10q.
-
-### 10p proof ladder
-
-```sh
-cargo test -p zz-tui
-cargo test -p zz-client popup
-cargo test -p zz-daemon popup
-cargo clippy -p zz-tui --all-targets --all-features -- -D warnings
-cargo fmt --all -- --check
-cargo build -p zz
-bash -n compat/attached-client.sh
-compat/attached-client.sh target/debug/zz "$(compat/fetch-tmux.sh)"
-just compat-check
-```
-
-The full checkpoint is due now because 10n and 10o completed after the last full accepted run, and
-the attempted replacement run was interrupted. Before committing 10p, complete:
-
-```sh
-just compat --strict-geometry --attached-client
-compat/run.sh --check-summary
-```
-
-## Dependency queue after 10p
-
-This is a forecast, not permission to skip the live rerank.
+This is a dependency forecast, not a frozen next slice. The post-10p rerank also surfaced
+`clients.no-detach-on-destroy` and `mux.chain-parse-abort` as practical contenders. Recheck the live
+registry and acceptance cost before choosing among them and the 10q registration slice.
 
 | Order | Slice | Exact owner | Boundary |
 | --- | --- | --- | --- |
@@ -320,13 +298,13 @@ This is a forecast, not permission to skip the live rerank.
 | 9 | 16 | `prompt.command-fidelity` | Resolve or reclassify the interactive-refresh dependency first |
 | 10 | 17 | `keys.copy-mode-prompt-defaults` | Add ten defaults only after generic prompt fidelity |
 
-The three active groups marked `next` in the generated report are not themselves execution order.
+The two active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity` and therefore stays
 at slice 15.
 
 Before selecting every later milestone, explicitly recheck attach-dependent and daily-use groups,
 including buffer file context, source-file client cwd variants, detach execution, parent-HUP exit,
-raw-TUI overlays, menu fidelity, `active-pane`, and `no-detach-on-destroy`.
+`display-popup.behavior-fidelity`, menu fidelity, `active-pane`, and `no-detach-on-destroy`.
 
 ## Validation and closure gates
 

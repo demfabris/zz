@@ -126,6 +126,10 @@ impl TerminalGuard {
         self.pixel_mouse
     }
 
+    pub const fn kitty_keyboard(&self) -> bool {
+        self.kitty_keyboard
+    }
+
     pub const fn activate_kitty_graphics(&mut self) {
         self.kitty_graphics = true;
     }

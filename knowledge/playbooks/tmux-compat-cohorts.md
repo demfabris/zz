@@ -143,8 +143,16 @@ attached fixture covers a title, shortcut-before-cancel behavior, disabled and s
 Escape, an unusable PageUp landing plus stay-open Enter, nonactivating paste, and a one-byte pane
 sentinel. Focused resolver coverage pins exact raw-row-zero and all-disabled boundary behavior.
 This closure stays bounded to descriptor consumption and shared keyboard ownership. The nine
-broader menu behavior classes remain under `display-menu.behavior-fidelity`; popup consumption
-remains under `clients.tui-overlay-consumption`.
+broader menu behavior classes remain under `display-menu.behavior-fidelity`.
+
+The twenty-eighth milestone closes slice 10p. Raw zz-tui now retains the daemon-published popup,
+centers and clamps its terminal viewport, renders its border, title, styles, and cursor, and gives it
+keyboard, paste, pointer, scroll, and focus ownership before every underlay input path. Popup close
+and replacement remove the synthetic viewport and renderer caches before repainting the underlay.
+The attached fixture compares bordered update-in-place, bracketed paste and tracked mouse, retained
+dead popups, focus ownership, and a pane sentinel against pinned tmux. Broader resize, style,
+context-menu, border-drag, popup-to-pane, and Kitty-image behavior remains under
+`display-popup.behavior-fidelity`.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -167,7 +175,7 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The 10o checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
+The 10p checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
 is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
@@ -177,6 +185,8 @@ is
 The 10l and 10m milestones add no differential step. Slice 10n extends the attached fixture with seven
 confirmation cases and a pane sentinel without adding a scenario row, leaving the digest unchanged.
 Slice 10o adds the bounded menu cases without adding a scenario row, so the same digest remains.
+Slice 10p adds three popup cases and a pane sentinel to the attached fixture without adding a
+scenario row, so the same digest remains.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
@@ -218,7 +228,8 @@ and Control channels, and rejected-binding preservation. Nested bind and confirm
 preflight parse errors. The constructed confirm callback remains frozen through execution; stored
 bindings and hooks likewise perform no execution-time user-alias lookup. Raw zz-tui reply handling
 later closed under `clients.tui-confirm-before-overlay`; menu descriptor consumption later closed
-under `clients.tui-display-menu-overlay`, while popup state remains open. Eager
+under `clients.tui-display-menu-overlay`; popup state and input ownership later closed under
+`clients.tui-display-popup-overlay`. Eager
 whole-file source construction plus the broader replay-channel placement difference also remain.
 Late focused regressions also prove that typed `if-shell`, `run-shell`, and structured
 `command-prompt` callbacks stop the failed physical group and continue later physical lines, while
@@ -322,7 +333,7 @@ closure is that exception.
 | 10m | Shared key structure and bare bind mutation | Closed under `tracker.key-binding-behavior` on 2026-08-28 | Complete | Exact structural counts stay distinct from runtime proof; bare key-only bind mutation now matches the pin |
 | 10n | Raw TUI confirmation | Closed under `clients.tui-confirm-before-overlay` on 2026-08-28 | Complete | State, rendering, input capture, reply lifecycle, and seven attached cases close independently |
 | 10o | Raw TUI menu | Closed under `clients.tui-display-menu-overlay` on 2026-08-28 | Complete | Daemon-published descriptor consumption, rendering order, shared keyboard ownership, and bounded attached cases close without absorbing broader menu fidelity |
-| 10p | Raw TUI popup | `semantic:tui-display-popup-overlay` in `clients.tui-overlay-consumption` | Hard | ClientCore already retains popup state; rendering and input remain independently closable |
+| 10p | Raw TUI popup | Closed under `clients.tui-display-popup-overlay` on 2026-08-28 | Complete | Popup state, rendering, input ownership, cleanup, and three attached cases close without absorbing broader popup fidelity |
 | 10q-10s | Remaining source-owned tracker registrations | Nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Three unrelated owners remain three independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | 12a-12f | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -332,11 +343,11 @@ closure is that exception.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10o are closed; raw-TUI popup presentation in slice 10p is next. Before choosing each later milestone,
-regenerate the report
-and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
-attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
-`clients.detach-exec`, `clients.parent-hup-exit`, `clients.tui-overlay-consumption`, and
+Slices 9a through 9f and 10a through 10p are closed. Slice 10q is the forecast, but no next slice is
+frozen. Before choosing each later milestone, regenerate the report and re-rank every active daily,
+script, remote, or silent-mismatch group. That audit must include attach-dependent work such as
+`buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
+`clients.detach-exec`, `clients.parent-hup-exit`, `display-popup.behavior-fidelity`, and
 `display-menu.behavior-fidelity`. Rows 4 and
 later are a dependency forecast,
 not permission to skip a newly unblocked practical gate. Keep formats, hooks,
@@ -396,9 +407,9 @@ Commit each slice after code review, proof, tracker generation, and OKF validati
 paths or hunks because the shared checkout may contain unrelated work. Ask before the first commit
 unless Fabrico has already authorized continuous campaign commits. Do not push unless he asks.
 
-Resolve the `codex/tmux-compat` branch and `/Users/demfabris/dev/zz-tmux-compat` path with read-only
-checks first. If both are absent, create the dedicated worktree from the current clean campaign base
-after verifying that the Alert commit is its ancestor. If either exists, inspect and reuse it safely;
+Resolve the live checkout, branch, and `$HOME/dev/zz-tmux-compat` worktree path with read-only checks
+first. If no campaign worktree exists, create one only from the verified campaign base and only when
+the shared checkout cannot safely host the slice. Inspect and reuse any existing path or branch;
 never overwrite it. Leave unrelated shared-checkout edits intact.
 
 # Practical exit gate
@@ -421,8 +432,8 @@ surprise.
 Paste this prompt into the next session:
 
 ```text
-Continue the tmux compatibility campaign in /Users/demfabris/dev/zz-tmux-compat on
-codex/tmux-compat. Preserve unrelated work and do not push.
+Continue the tmux compatibility campaign from the live tracker in the current verified checkout.
+Preserve unrelated work and do not push.
 
 Verify that the session-cwd, requested-client-flags, retained-client-sizing, client-environment,
 client-formats, client-hooks, asynchronous copy-pipe, daemon-invalid-flag, positional-maximum, and

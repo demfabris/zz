@@ -1,4 +1,4 @@
-use zz_protocol::{Axis, LayoutNode, PaneId};
+use zz_protocol::{Axis, LayoutNode, PaneId, PopupBorderLines};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Rect {
@@ -24,6 +24,64 @@ impl Rect {
             height: self.height.saturating_sub(1),
         }
     }
+
+    pub fn inset(self, amount: u16) -> Self {
+        Self {
+            x: self.x.saturating_add(amount.min(self.width)),
+            y: self.y.saturating_add(amount.min(self.height)),
+            width: self.width.saturating_sub(amount.saturating_mul(2)),
+            height: self.height.saturating_sub(amount.saturating_mul(2)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FloatingSpec {
+    pub left: u16,
+    pub top: u16,
+    pub width: u16,
+    pub height: u16,
+    pub client_columns: u16,
+    pub client_rows: u16,
+    pub border_lines: PopupBorderLines,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FloatingLayout {
+    pub frame: Rect,
+    pub content: Rect,
+}
+
+pub(crate) fn resolve_floating(spec: FloatingSpec, bounds: Rect) -> Option<FloatingLayout> {
+    let width = spec.width.min(bounds.width);
+    let height = spec.height.min(bounds.height);
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let grid_left = bounds
+        .x
+        .saturating_add(bounds.width.saturating_sub(spec.client_columns) / 2);
+    let grid_top = bounds
+        .y
+        .saturating_add(bounds.height.saturating_sub(spec.client_rows) / 2);
+    let frame = Rect {
+        x: grid_left
+            .saturating_add(spec.left)
+            .min(bounds.x.saturating_add(bounds.width.saturating_sub(width))),
+        y: grid_top.saturating_add(spec.top).min(
+            bounds
+                .y
+                .saturating_add(bounds.height.saturating_sub(height)),
+        ),
+        width,
+        height,
+    };
+    let content = if spec.border_lines == PopupBorderLines::None {
+        frame
+    } else {
+        frame.inset(1)
+    };
+    Some(FloatingLayout { frame, content })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -279,5 +337,99 @@ mod tests {
         assert_eq!(resolved.dividers[0].rect.width, 0);
         assert_eq!(resolved.panes[0].rect.x, 7);
         assert_eq!(resolved.panes[1].rect.x, 7);
+    }
+
+    #[test]
+    fn floating_geometry_centres_the_published_grid_and_clamps_to_bounds() {
+        let spec = FloatingSpec {
+            left: 2,
+            top: 1,
+            width: 10,
+            height: 4,
+            client_columns: 20,
+            client_rows: 10,
+            border_lines: PopupBorderLines::Single,
+        };
+        assert_eq!(
+            resolve_floating(
+                spec,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 30,
+                    height: 16,
+                }
+            ),
+            Some(FloatingLayout {
+                frame: Rect {
+                    x: 7,
+                    y: 4,
+                    width: 10,
+                    height: 4,
+                },
+                content: Rect {
+                    x: 8,
+                    y: 5,
+                    width: 8,
+                    height: 2,
+                },
+            })
+        );
+        assert_eq!(
+            resolve_floating(
+                spec,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 8,
+                    height: 3,
+                }
+            )
+            .map(|layout| layout.frame),
+            Some(Rect {
+                x: 0,
+                y: 0,
+                width: 8,
+                height: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn borderless_floating_content_uses_the_full_frame() {
+        let bounds = Rect {
+            width: 8,
+            height: 4,
+            ..Rect::default()
+        };
+        let spec = FloatingSpec {
+            left: 0,
+            top: 0,
+            width: 8,
+            height: 4,
+            client_columns: 8,
+            client_rows: 4,
+            border_lines: PopupBorderLines::None,
+        };
+        let borderless = resolve_floating(spec, bounds).expect("borderless layout");
+        assert_eq!(borderless.content, borderless.frame);
+
+        let bordered = resolve_floating(
+            FloatingSpec {
+                border_lines: PopupBorderLines::Padded,
+                ..spec
+            },
+            bounds,
+        )
+        .expect("padded layout");
+        assert_eq!(
+            bordered.content,
+            Rect {
+                x: 1,
+                y: 1,
+                width: 6,
+                height: 2,
+            }
+        );
     }
 }

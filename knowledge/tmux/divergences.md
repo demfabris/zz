@@ -116,11 +116,11 @@ Still unimplemented and skipped from config:
 5d-1/5d-2 for the GPUI client: daemon state and GPUI behavior are pinned, but the
 surfaces render as native zz-design-language floating panes (`FloatingSurface`) instead of
 cell-drawn overlays. This accepted presentation choice applies to the GUI. Raw zz-tui now renders
-confirmations and menus and intercepts their input under the closed
-`clients.tui-confirm-before-overlay` and `clients.tui-display-menu-overlay` records. It still drops
-`PopupChanged`; that path remains under `clients.tui-overlay-consumption`. GPUI and raw-TUI menus
-share one keyboard resolver, including shortcut precedence, wrapped steps, raw-row page movement,
-cancel keys, and stay-open Enter behavior.
+and owns all three daemon-published overlay descriptors under the closed
+`clients.tui-confirm-before-overlay`, `clients.tui-display-menu-overlay`, and
+`clients.tui-display-popup-overlay` records. GPUI and raw-TUI menus share one keyboard resolver,
+including shortcut precedence, wrapped steps, raw-row page movement, cancel keys, and stay-open
+Enter behavior.
 
 Raw zz-tui confirmation input deliberately owns bracketed paste and pointer events until the daemon
 clears the prompt. Pinned tmux routes bracketed paste to pane input before prompt dispatch, so this
@@ -136,6 +136,22 @@ proves those inputs do not reach the pane. The raw renderer layers the menu afte
 command-output bases. `display-menu.behavior-fidelity` keeps selected-action
 context and errors, mouse policy, paste-close and command-queue ordering, rendered width, resize
 lifecycle, shortcut display and grammar, and style refresh open.
+
+Slice 10p closes raw-TUI popup consumption without claiming the broader popup feature set. The TUI
+retains the current synthetic viewport, centres and clamps the published client grid, paints the
+workspace then popup then higher menu or confirmation state, and purges frame and renderer caches
+on close, replacement, attachment change, or reconnect. Popup keys, all held-key lifecycles,
+bracketed paste, tracked content-relative pointer and wheel events, and external focus resolve
+before chrome or pane input; border, outside, and nontracking pointer events are consumed. The
+daemon's sized-client mouse gate now checks the popup terminal's per-client viewport, and one
+decoded tracked wheel notch produces one application report while local scrolling keeps its
+three-line step. The attached A/B/C cases prove title-only live modification with unchanged job and
+geometry, exact SGR click and wheel coordinates at content cell `3,3`, dead `-k` retention, and a
+final decimal-122 underlay sentinel. Pinned tmux emits three internal underlay FocusOut/FocusIn
+pairs; zz emits none, while explicit external focus probes remain popup-owned on both sides. The
+six resize, style, context-menu, border-drag, popup-to-pane, and Kitty-image contracts remain under
+`display-popup.behavior-fidelity`; real mouse and status formats remain under
+`formats.mouse-context`.
 
 | Command | What it does in tmux |
 | --- | --- |
@@ -376,8 +392,8 @@ and confirm failures as preflight parse errors. Both servers finish with
 This fixture proves construction, parser, readback, and output channels. Accept, reject,
 `-y` Enter-default, blocking, and background reply paths are covered by daemon and GPUI unit tests.
 Raw zz-tui confirmation replies later closed under `clients.tui-confirm-before-overlay`; menu
-descriptor consumption closed under `clients.tui-display-menu-overlay`; popup presentation remains
-under `clients.tui-overlay-consumption`.
+descriptor consumption closed under `clients.tui-display-menu-overlay`; popup consumption later
+closed under `clients.tui-display-popup-overlay`.
 It also does not close eager whole-file source construction or the broader replay-channel
 placement difference, which remain with the existing parser and command-chain owners.
 
@@ -701,10 +717,10 @@ middle column — the mode flags turned out to be daemon-owned rather than clien
 is why they landed with a state machine in `zz-daemon` and only a key-relay branch in each
 client. **The middle column is now empty for these 27 flag pairs**, so everything left in this
 table belongs to F and G. This flag roster does not inventory consumption of daemon overlay state.
-Raw zz-tui now handles `confirm-before` and consumes `display-menu` descriptors. `display-popup`
-rendering and input remain under `clients.tui-overlay-consumption`, while the nine broader menu
-behavior items remain under `display-menu.behavior-fidelity`. None moves daemon-owned command
-semantics into the client.
+Raw zz-tui now handles `confirm-before` and consumes both `display-menu` and `display-popup`
+descriptors. Broader menu behavior remains under `display-menu.behavior-fidelity`, and the six
+remaining popup behavior contracts stay under `display-popup.behavior-fidelity`. None moves
+daemon-owned command semantics into the client.
 
 # Implemented-surface measurements through 2026-08-24
 
@@ -1008,7 +1024,7 @@ described above and the separately tracked long key-modifier spelling overaccept
 | Control mode `-CC` | What iTerm2 integration speaks. | SHIPPED (phase 6 complete 2026-08-18): a stdio front-end speaking the full CC protocol — framing, notifications, `%output` with flow control (pause/age-kill/pacing), `refresh-client -A/-B/-C/-f`. Deliberate divergences, all reviewer-endorsed: blocks are COMPLETE (WAIT commands keep output in-block; after-hooks add no extra block; `%pause`/`%continue` land after the triggering block, not inside); per-client monotonic `n`; zz-lax unquoted `%`-words on the control stdin; automatic-rename transients single-fire. |
 | Session groups | `new-session -t`. | Cataloged, rejected. |
 | `StatusLine.customized` | No equivalent — tmux has no wire and no explicit-write ledger. | zz-native v71 field: true while any explicit `status`, `status-*`, or `status-format` write is in force for the recipient's scope (even when the value equals the default); scalar and whole-array unsets clear their mark, an indexed `status-format[N]` unset keeps it. It gates only the TUI's `Ctrl-\ detach` hint. GUI visibility instead follows whether the native status model is empty, so `customized` has no GUI appearance effect. |
-| Presentation | Status line, prompts, choosers drawn as terminal escapes. | The TUI renders the daemon's personalized `status-format[]` rows through the shared `zz-client` compositor that reproduces `format-draw.c` alignment sections, `fill=`, list focus/truncation, blank-row base style, and hit ranges. It places that authoritative block at `status-position`, replaces the selected `message_line` row with messages or a prompt, and routes window-range clicks. The GUI never paints those rows as tmux-authored cells: its always-native surface uses `status.left`/`status.right`, snapshot-backed window controls, and only the row list-alignment directive. Its top or bottom placement follows the app chrome mode, visibility does not depend on `customized`, and `status-position` has no GUI placement authority. Prompts and choosers stay native on both where implemented. Raw zz-tui handles command prompts, confirmations, menus, choose trees, choose buffers, and display-panes. `clients.tui-overlay-consumption` owns the missing popup path; `display-menu.behavior-fidelity` owns the nine open menu behavior classes. |
+| Presentation | Status line, prompts, choosers drawn as terminal escapes. | The TUI renders the daemon's personalized `status-format[]` rows through the shared `zz-client` compositor that reproduces `format-draw.c` alignment sections, `fill=`, list focus/truncation, blank-row base style, and hit ranges. It places that authoritative block at `status-position`, replaces the selected `message_line` row with messages or a prompt, and routes window-range clicks. The GUI never paints those rows as tmux-authored cells: its always-native surface uses `status.left`/`status.right`, snapshot-backed window controls, and only the row list-alignment directive. Its top or bottom placement follows the app chrome mode, visibility does not depend on `customized`, and `status-position` has no GUI placement authority. Prompts and choosers stay native on both where implemented. Raw zz-tui handles command prompts, confirmations, menus, popups, choose trees, choose buffers, and display-panes. `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity` own the broader behavior classes outside those presentation closures. |
 
 # Related
 

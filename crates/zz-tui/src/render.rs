@@ -6,7 +6,7 @@ use std::{
 
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
-    Axis, MenuState, PaneId, PaneKindSnapshot, PopupBorderLines, StyledSegment, TmuxAttributeState,
+    Axis, PaneId, PaneKindSnapshot, PopupBorderLines, StyledSegment, TmuxAttributeState,
     TmuxColour, TmuxStyle, parse_style, parse_styled_segments,
 };
 use zz_terminal::{
@@ -17,7 +17,7 @@ use zz_terminal::{
 use crate::{
     browser::{BROWSER_IMAGE_ID, BrowserFrameUpdate},
     kitty::{FrameTransport, KittyBridge, KittyImageData},
-    layout::Rect,
+    layout::{FloatingSpec, Rect, resolve_floating},
     picker, sidebar,
     state::Model,
 };
@@ -241,7 +241,11 @@ impl Renderer {
             .remove_images(pane, image_ids, &mut self.queued_control);
     }
 
-    pub fn remove_kitty_pane(&mut self, pane: PaneId) {
+    pub fn forget_pane(&mut self, pane: PaneId) {
+        self.painted.remove(&pane);
+        self.headers.remove(&pane);
+        self.picker_cards.remove(&pane);
+        self.damage.remove(&pane);
         self.browser_placements.remove(&pane);
         self.browser_painted.remove(&pane);
         self.kitty.remove_pane(pane, &mut self.queued_control);
@@ -256,6 +260,8 @@ impl Renderer {
     pub fn paint(&mut self, model: &Model, force: bool) -> io::Result<()> {
         self.output.clear();
         self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
+        let popup_visible = model.popup.is_some();
+        let floating_input = popup_visible || model.menu.is_some() || model.confirm.is_some();
         if model.status.title != self.last_title {
             if !model.status.title.is_empty() {
                 self.output.extend_from_slice(b"\x1b]2;");
@@ -297,7 +303,7 @@ impl Renderer {
             self.paint_status_block_in(model, 0, model.size.columns, force);
             self.output.append(&mut self.queued_control);
             self.kitty.suspend(&mut self.output);
-            if model.menu.is_none() {
+            if !floating_input {
                 self.place_command_output_cursor(*pane, viewport, rect, model);
             }
         } else {
@@ -307,14 +313,31 @@ impl Renderer {
             }
             self.paint_status_block(model, force);
             self.output.append(&mut self.queued_control);
-            if model.menu.is_none() {
+            if !floating_input {
                 self.reconcile_kitty_images(model);
                 self.place_active_cursor(model);
+            }
+        }
+        if popup_visible {
+            self.kitty.suspend(&mut self.output);
+            self.paint_popup(model, true);
+            if model.menu.is_none() && model.confirm.is_none() {
+                self.place_popup_cursor(model);
             }
         }
         if model.menu.is_some() {
             self.kitty.suspend(&mut self.output);
             self.paint_menu(model);
+            self.hide_cursor();
+        } else if model.confirm.is_some() {
+            self.kitty.suspend(&mut self.output);
+            if model.sidebar_visible() && model.command_output.is_none() {
+                self.paint_sidebar(model, true);
+            } else if model.command_output.is_some() {
+                self.paint_status_block_in(model, 0, model.size.columns, true);
+            } else {
+                self.paint_status_block(model, true);
+            }
             self.hide_cursor();
         }
 
@@ -323,12 +346,30 @@ impl Renderer {
     }
 
     pub fn paint_frames(&mut self, model: &Model) -> io::Result<()> {
+        if let Some(popup) = model.popup.as_ref()
+            && model.menu.is_none()
+            && model.confirm.is_none()
+        {
+            if self.damage.keys().any(|pane| *pane != popup.pane) {
+                return self.paint(model, false);
+            }
+            self.output.clear();
+            self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
+            self.output.append(&mut self.queued_control);
+            self.kitty.suspend(&mut self.output);
+            self.paint_popup(model, false);
+            self.place_popup_cursor(model);
+            self.output.extend_from_slice(b"\x1b[?2026l");
+            return self.flush_output();
+        }
         self.output.clear();
         self.output.extend_from_slice(b"\x1b[?2026h\x1b[?25l");
         if model.choose_tree.is_none()
             && model.choose_buffer.is_none()
             && model.command_output.is_none()
+            && model.popup.is_none()
             && model.menu.is_none()
+            && model.confirm.is_none()
         {
             self.paint_workspace(model, false);
             self.paint_status_area(model);
@@ -458,10 +499,13 @@ impl Renderer {
                 _ => {}
             }
         }
-        self.painted
-            .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
-        self.damage
-            .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
+        let popup = model.popup.as_ref().map(|popup| popup.pane);
+        self.painted.retain(|pane, _| {
+            popup == Some(*pane) || model.layout.panes.iter().any(|entry| entry.pane == *pane)
+        });
+        self.damage.retain(|pane, _| {
+            popup == Some(*pane) || model.layout.panes.iter().any(|entry| entry.pane == *pane)
+        });
         self.picker_cards
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
         self.browser_painted
@@ -912,14 +956,83 @@ impl Renderer {
         );
     }
 
+    fn paint_popup(&mut self, model: &Model, force: bool) {
+        let Some(state) = model.popup.as_ref() else {
+            return;
+        };
+        let Some(layout) = model.popup_layout() else {
+            self.painted.remove(&state.pane);
+            self.damage.remove(&state.pane);
+            return;
+        };
+        if force {
+            let style = parse_style(&state.style).unwrap_or_default();
+            let mut line = StyledLine::default();
+            line.push_segment(&" ".repeat(usize::from(layout.frame.width)), style);
+            for row in 0..layout.frame.height {
+                write_styled_text(
+                    &mut self.output,
+                    layout.frame.x,
+                    layout.frame.y.saturating_add(row),
+                    &line,
+                    model.appearance.foreground,
+                    model.appearance.background,
+                    &model.appearance,
+                );
+            }
+            if state.border_lines != PopupBorderLines::None {
+                paint_floating_border(
+                    &mut self.output,
+                    layout.frame,
+                    state.border_lines,
+                    &state.border_style,
+                    &state.title,
+                    model,
+                );
+            }
+        }
+        if layout.content.width == 0 || layout.content.height == 0 {
+            self.painted.remove(&state.pane);
+            self.damage.remove(&state.pane);
+            return;
+        }
+        if let Some(viewport) = model.viewports.get(&state.pane) {
+            let damage = self.damage.remove(&state.pane);
+            self.paint_terminal(state.pane, viewport, layout.content, force, damage.as_ref());
+        } else {
+            self.painted.remove(&state.pane);
+            self.damage.remove(&state.pane);
+        }
+    }
+
     fn paint_menu(&mut self, model: &Model) {
         let Some(state) = model.menu.as_ref() else {
             return;
         };
-        let Some(rect) = menu_rect(state, model.size.columns, model.size.rows) else {
+        let Some(layout) = resolve_floating(
+            FloatingSpec {
+                left: state.left,
+                top: state.top,
+                width: state.width,
+                height: state.height,
+                client_columns: state.client_columns,
+                client_rows: state.client_rows,
+                border_lines: state.border_lines,
+            },
+            Rect {
+                x: 0,
+                y: 0,
+                width: model.size.columns,
+                height: model.size.rows,
+            },
+        ) else {
             return;
         };
-        let border = menu_border(state.border_lines);
+        let rect = layout.frame;
+        if rect.width < 4 || rect.height < 2 {
+            return;
+        }
+        let border = floating_border(state.border_lines);
         let border_style = parse_style(&state.border_style).unwrap_or_default();
         let horizontal = border
             .horizontal
@@ -1372,6 +1485,22 @@ impl Renderer {
         self.place_viewport_cursor(pane, viewport, entry.rect.content(), model);
     }
 
+    fn place_popup_cursor(&mut self, model: &Model) {
+        let Some(popup) = model.popup.as_ref() else {
+            self.hide_cursor();
+            return;
+        };
+        let Some(layout) = model.popup_layout() else {
+            self.hide_cursor();
+            return;
+        };
+        let Some(viewport) = model.viewports.get(&popup.pane) else {
+            self.hide_cursor();
+            return;
+        };
+        self.place_viewport_cursor(popup.pane, viewport, layout.content, model);
+    }
+
     fn place_command_output_cursor(
         &mut self,
         pane: PaneId,
@@ -1678,7 +1807,7 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
 }
 
 #[derive(Clone, Copy)]
-struct MenuBorder {
+struct FloatingBorder {
     top_left: &'static str,
     top_right: &'static str,
     bottom_left: &'static str,
@@ -1689,9 +1818,9 @@ struct MenuBorder {
     separator_right: &'static str,
 }
 
-fn menu_border(lines: PopupBorderLines) -> MenuBorder {
+fn floating_border(lines: PopupBorderLines) -> FloatingBorder {
     match lines {
-        PopupBorderLines::Single => MenuBorder {
+        PopupBorderLines::Single => FloatingBorder {
             top_left: "┌",
             top_right: "┐",
             bottom_left: "└",
@@ -1701,7 +1830,7 @@ fn menu_border(lines: PopupBorderLines) -> MenuBorder {
             separator_left: "├",
             separator_right: "┤",
         },
-        PopupBorderLines::Double => MenuBorder {
+        PopupBorderLines::Double => FloatingBorder {
             top_left: "╔",
             top_right: "╗",
             bottom_left: "╚",
@@ -1711,7 +1840,7 @@ fn menu_border(lines: PopupBorderLines) -> MenuBorder {
             separator_left: "╠",
             separator_right: "╣",
         },
-        PopupBorderLines::Heavy => MenuBorder {
+        PopupBorderLines::Heavy => FloatingBorder {
             top_left: "┏",
             top_right: "┓",
             bottom_left: "┗",
@@ -1721,7 +1850,7 @@ fn menu_border(lines: PopupBorderLines) -> MenuBorder {
             separator_left: "┣",
             separator_right: "┫",
         },
-        PopupBorderLines::Simple => MenuBorder {
+        PopupBorderLines::Simple => FloatingBorder {
             top_left: "+",
             top_right: "+",
             bottom_left: "+",
@@ -1731,7 +1860,7 @@ fn menu_border(lines: PopupBorderLines) -> MenuBorder {
             separator_left: "+",
             separator_right: "+",
         },
-        PopupBorderLines::Rounded => MenuBorder {
+        PopupBorderLines::Rounded => FloatingBorder {
             top_left: "╭",
             top_right: "╮",
             bottom_left: "╰",
@@ -1741,7 +1870,7 @@ fn menu_border(lines: PopupBorderLines) -> MenuBorder {
             separator_left: "├",
             separator_right: "┤",
         },
-        PopupBorderLines::Padded | PopupBorderLines::None => MenuBorder {
+        PopupBorderLines::Padded | PopupBorderLines::None => FloatingBorder {
             top_left: " ",
             top_right: " ",
             bottom_left: " ",
@@ -1754,24 +1883,104 @@ fn menu_border(lines: PopupBorderLines) -> MenuBorder {
     }
 }
 
-fn menu_rect(state: &MenuState, columns: u16, rows: u16) -> Option<Rect> {
-    let width = state.width.min(columns);
-    let height = state.height.min(rows);
-    if width < 4 || height < 2 {
-        return None;
+fn paint_floating_border(
+    output: &mut Vec<u8>,
+    rect: Rect,
+    lines: PopupBorderLines,
+    border_style: &str,
+    title: &str,
+    model: &Model,
+) {
+    if rect.width == 0 || rect.height == 0 {
+        return;
     }
-    let grid_left = columns.saturating_sub(state.client_columns) / 2;
-    let grid_top = rows.saturating_sub(state.client_rows) / 2;
-    Some(Rect {
-        x: grid_left
-            .saturating_add(state.left)
-            .min(columns.saturating_sub(width)),
-        y: grid_top
-            .saturating_add(state.top)
-            .min(rows.saturating_sub(height)),
-        width,
-        height,
-    })
+    let border = floating_border(lines);
+    let style = parse_style(border_style).unwrap_or_default();
+    let top_text = floating_border_line(
+        border.top_left,
+        border.horizontal,
+        border.top_right,
+        rect.width,
+    );
+    let mut top = StyledLine::default();
+    top.push_segment(&top_text, style.clone());
+    write_styled_text(
+        output,
+        rect.x,
+        rect.y,
+        &top,
+        model.appearance.foreground,
+        model.appearance.background,
+        &model.appearance,
+    );
+    for offset in 1..rect.height.saturating_sub(1) {
+        let row = rect.y.saturating_add(offset);
+        let mut left = StyledLine::default();
+        left.push_segment(border.vertical, style.clone());
+        write_styled_text(
+            output,
+            rect.x,
+            row,
+            &left,
+            model.appearance.foreground,
+            model.appearance.background,
+            &model.appearance,
+        );
+        if rect.width > 1 {
+            write_styled_text(
+                output,
+                rect.x.saturating_add(rect.width.saturating_sub(1)),
+                row,
+                &left,
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
+        }
+    }
+    if rect.height > 1 {
+        let bottom_text = floating_border_line(
+            border.bottom_left,
+            border.horizontal,
+            border.bottom_right,
+            rect.width,
+        );
+        let mut bottom = StyledLine::default();
+        bottom.push_segment(&bottom_text, style);
+        write_styled_text(
+            output,
+            rect.x,
+            rect.y.saturating_add(rect.height.saturating_sub(1)),
+            &bottom,
+            model.appearance.foreground,
+            model.appearance.background,
+            &model.appearance,
+        );
+    }
+    let title_width = rect.width.saturating_sub(4);
+    if !title.is_empty() && title_width > 0 {
+        let title = zz_client::compose_status_row(title, title_width, border_style);
+        write_styled_text(
+            output,
+            rect.x.saturating_add(2),
+            rect.y,
+            &StyledLine::from_segments(title.segments),
+            model.appearance.foreground,
+            model.appearance.background,
+            &model.appearance,
+        );
+    }
+}
+
+fn floating_border_line(left: &str, horizontal: &str, right: &str, width: u16) -> String {
+    match width {
+        0 => String::new(),
+        1 => left.to_owned(),
+        _ => format!(
+            "{left}{}{right}",
+            horizontal.repeat(usize::from(width.saturating_sub(2)))
+        ),
+    }
 }
 
 fn overlay_style(appearance: &TerminalAppearance) -> TmuxStyle {
@@ -2178,7 +2387,8 @@ mod tests {
 
     use super::*;
     use crate::state::ClientMessage;
-    use zz_terminal::{CellWidth, SessionStatus, TerminalDictionary};
+    use zz_protocol::MenuState;
+    use zz_terminal::{CellWidth, Cursor, SessionStatus, TerminalDictionary};
 
     fn styled_viewport() -> TerminalViewport {
         let mut viewport = TerminalViewport::blank(3, 1, SessionStatus::Running);
@@ -2386,47 +2596,190 @@ mod tests {
         }
     }
 
-    #[test]
-    fn menu_geometry_centres_the_published_grid_and_clamps_after_resize() {
-        let state = MenuState {
-            left: 2,
-            top: 1,
-            width: 10,
-            height: 4,
-            client_columns: 20,
-            client_rows: 10,
-            ..menu_state()
-        };
-        assert_eq!(
-            menu_rect(&state, 30, 16),
-            Some(Rect {
-                x: 7,
-                y: 4,
-                width: 10,
-                height: 4,
-            })
-        );
-        assert_eq!(
-            menu_rect(&state, 8, 3),
-            Some(Rect {
-                x: 0,
-                y: 0,
-                width: 8,
-                height: 3,
-            })
-        );
-        assert_eq!(menu_rect(&state, 3, 3), None);
+    fn popup_state(border_lines: PopupBorderLines) -> zz_protocol::PopupState {
+        zz_protocol::PopupState {
+            pane: PaneId(u64::MAX - 1),
+            left: 5,
+            top: 2,
+            width: 12,
+            height: 5,
+            client_columns: 40,
+            client_rows: 12,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Popup title".to_owned(),
+            style: "fg=white,bg=blue".to_owned(),
+            border_style: "fg=red,bold".to_owned(),
+            border_lines,
+            close_on_exit: false,
+            close_on_exit_zero: false,
+            close_on_any_key: false,
+            dead: false,
+        }
+    }
+
+    fn popup_model(border_lines: PopupBorderLines, with_frame: bool) -> Model {
+        let mut model = block_model(40, 12);
+        let state = popup_state(border_lines);
+        if with_frame {
+            let mut viewport = TerminalViewport::blank(10, 3, SessionStatus::Running);
+            let mut cells = viewport.cells.as_ref().to_vec();
+            cells[0] = PackedCell::new('p' as u32, 0, CellWidth::Narrow);
+            cells[1] = PackedCell::new('o' as u32, 0, CellWidth::Narrow);
+            cells[2] = PackedCell::new('p' as u32, 0, CellWidth::Narrow);
+            viewport.cells = Arc::from(cells);
+            viewport.cursor = Some(Cursor::new(
+                1,
+                0,
+                true,
+                false,
+                false,
+                CursorStyle::Bar,
+                viewport.foreground,
+            ));
+            model.viewports.insert(state.pane, viewport);
+        }
+        model.popup = Some(state);
+        model
     }
 
     #[test]
-    fn menu_border_tables_cover_every_published_line_style() {
-        assert_eq!(menu_border(PopupBorderLines::Single).top_left, "┌");
-        assert_eq!(menu_border(PopupBorderLines::Double).separator_left, "╠");
-        assert_eq!(menu_border(PopupBorderLines::Heavy).bottom_right, "┛");
-        assert_eq!(menu_border(PopupBorderLines::Simple).vertical, "|");
-        assert_eq!(menu_border(PopupBorderLines::Rounded).top_right, "╮");
-        assert_eq!(menu_border(PopupBorderLines::Padded).horizontal, " ");
-        assert_eq!(menu_border(PopupBorderLines::None).top_left, " ");
+    fn popup_paints_bounded_title_styles_border_content_and_cursor() {
+        let model = popup_model(PopupBorderLines::Single, true);
+        let mut renderer = Renderer::new();
+        renderer.paint_popup(&model, true);
+        renderer.place_popup_cursor(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+        let red = model.appearance.palette[1];
+        let blue = model.appearance.palette[4];
+
+        assert!(output.contains("\x1b[3;6H"), "{output:?}");
+        assert!(output.contains("Popup ti"), "{output:?}");
+        assert!(output.contains('┌'));
+        assert!(output.contains('┐'));
+        assert!(output.contains('└'));
+        assert!(output.contains('┘'));
+        assert!(output.contains("pop"));
+        assert!(output.contains("\x1b[1m"));
+        assert!(output.contains(&format!("38;2;{};{};{}", red.r, red.g, red.b)));
+        assert!(output.contains(&format!("48;2;{};{};{}", blue.r, blue.g, blue.b)));
+        assert!(output.contains("\x1b[4;8H"), "{output:?}");
+        assert!(output.contains("\x1b[6 q\x1b]12;"));
+    }
+
+    #[test]
+    fn borderless_popup_uses_its_full_frame_and_missing_frame_hides_the_underlay_cursor() {
+        let model = popup_model(PopupBorderLines::None, false);
+        let layout = model.popup_layout().expect("popup layout");
+        assert_eq!(layout.content, layout.frame);
+        let mut renderer = Renderer::new();
+        renderer.paint_popup(&model, true);
+        renderer.place_popup_cursor(&model);
+        let output = String::from_utf8(renderer.output).unwrap();
+
+        assert!(output.contains("\x1b[3;6H"), "{output:?}");
+        assert!(!output.contains('┌'));
+        assert!(!output.contains("Popup title"));
+        assert!(output.ends_with("\x1b[?25l"));
+        assert!(
+            !renderer
+                .painted
+                .contains_key(&popup_state(PopupBorderLines::None).pane)
+        );
+    }
+
+    #[test]
+    fn popup_damage_survives_workspace_retention_and_repaints_only_changed_rows() {
+        let mut model = popup_model(PopupBorderLines::Single, true);
+        let pane = model.popup.as_ref().expect("popup").pane;
+        let content = model.popup_layout().expect("layout").content;
+        let mut renderer = Renderer::new();
+        renderer.paint_popup(&model, true);
+        renderer.output.clear();
+        renderer.note_frame(pane, FrameDamage::Rows(vec![1]));
+        renderer.paint_workspace(&model, false);
+        assert_eq!(
+            renderer.damage.get(&pane),
+            Some(&FrameDamage::Rows(vec![1]))
+        );
+        assert!(renderer.painted.contains_key(&pane));
+
+        let viewport = model.viewports.get_mut(&pane).expect("popup frame");
+        let mut cells = viewport.cells.as_ref().to_vec();
+        cells[usize::from(viewport.columns)] = PackedCell::new('x' as u32, 0, CellWidth::Narrow);
+        viewport.cells = Arc::from(cells);
+        renderer.paint_popup(&model, false);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains('x'));
+        assert!(output.contains(&format!(
+            "\x1b[{};{}H",
+            content.y.saturating_add(2),
+            content.x.saturating_add(1)
+        )));
+        assert!(!output.contains(&format!(
+            "\x1b[{};{}H",
+            content.y.saturating_add(1),
+            content.x.saturating_add(1)
+        )));
+    }
+
+    #[test]
+    fn higher_menu_paints_after_popup_and_suppresses_its_cursor() {
+        let mut model = popup_model(PopupBorderLines::Single, true);
+        model.menu = Some(menu_state());
+        model.menu_selection = Some(0);
+        let mut renderer = Renderer::new();
+        renderer.paint_popup(&model, true);
+        renderer.paint_menu(&model);
+        renderer.hide_cursor();
+        let output = String::from_utf8(renderer.output).unwrap();
+        let popup = output.find("Popup ti").expect("popup title");
+        let menu = output.rfind("Actions").expect("menu title");
+        assert!(popup < menu);
+        assert!(output.rfind("\x1b[?25l").is_some_and(|hide| hide > menu));
+    }
+
+    #[test]
+    fn forgetting_a_popup_purges_terminal_damage_and_image_caches() {
+        let model = popup_model(PopupBorderLines::Single, true);
+        let pane = model.popup.as_ref().expect("popup").pane;
+        let mut renderer = Renderer::new();
+        renderer.paint_popup(&model, true);
+        renderer.note_frame(pane, FrameDamage::Rows(vec![0]));
+        renderer.headers.insert(pane, "header".to_owned());
+        renderer.picker_cards.insert(pane, (Rect::default(), 0));
+        renderer.enable_kitty_graphics();
+        renderer.install_kitty_image(KittyImageData {
+            pane,
+            image_id: 9,
+            generation: 1,
+            width: 1,
+            height: 1,
+            bytes: vec![0, 0, 0, 255],
+        });
+        renderer.queued_control.clear();
+
+        renderer.forget_pane(pane);
+
+        assert!(!renderer.painted.contains_key(&pane));
+        assert!(!renderer.damage.contains_key(&pane));
+        assert!(!renderer.headers.contains_key(&pane));
+        assert!(!renderer.picker_cards.contains_key(&pane));
+        assert!(String::from_utf8_lossy(&renderer.queued_control).contains("\x1b_Ga=d,d=I"));
+    }
+
+    #[test]
+    fn floating_border_tables_cover_every_published_line_style() {
+        assert_eq!(floating_border(PopupBorderLines::Single).top_left, "┌");
+        assert_eq!(
+            floating_border(PopupBorderLines::Double).separator_left,
+            "╠"
+        );
+        assert_eq!(floating_border(PopupBorderLines::Heavy).bottom_right, "┛");
+        assert_eq!(floating_border(PopupBorderLines::Simple).vertical, "|");
+        assert_eq!(floating_border(PopupBorderLines::Rounded).top_right, "╮");
+        assert_eq!(floating_border(PopupBorderLines::Padded).horizontal, " ");
+        assert_eq!(floating_border(PopupBorderLines::None).top_left, " ");
     }
 
     #[test]

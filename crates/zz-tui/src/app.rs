@@ -225,6 +225,14 @@ impl FrameInbox {
         state.pending.clear();
         state.wake_pending = false;
     }
+
+    fn remove(&self, pane: PaneId) {
+        self.0
+            .lock()
+            .expect("frame inbox poisoned")
+            .pending
+            .remove(&pane);
+    }
 }
 
 enum KittyImageUpdate {
@@ -498,6 +506,7 @@ pub(crate) fn run(
     let mut terminal = TerminalGuard::enter(mouse_option_enabled(lock_core(&core).mux_options()))
         .map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
+    let key_releases = terminal.kitty_keyboard();
     let mut model = Model::new(
         &lock_core(&core),
         size,
@@ -570,6 +579,11 @@ pub(crate) fn run(
                     continue;
                 }
                 for (pane, frame) in frames.take() {
+                    if !model.accepts_viewport(pane) {
+                        model.viewports.remove(&pane);
+                        renderer.forget_pane(pane);
+                        continue;
+                    }
                     model.viewports.insert(pane, frame.viewport);
                     renderer.note_frame(pane, frame.damage);
                 }
@@ -639,7 +653,14 @@ pub(crate) fn run(
                 if probe_update.consumed {
                     continue;
                 }
-                match input::handle(&mut model, &client, &mut browser, event, pixel_mouse)? {
+                match input::handle(
+                    &mut model,
+                    &client,
+                    &mut browser,
+                    event,
+                    pixel_mouse,
+                    key_releases,
+                )? {
                     InputOutcome::None => {}
                     InputOutcome::Repaint => renderer
                         .paint(&model, false)
@@ -754,14 +775,10 @@ pub(crate) fn run(
                 if connection != connection_id {
                     continue;
                 }
-                match &*event {
-                    CoreEvent::Attached { .. } => {
-                        browser.reset_connection();
-                        renderer.reset_kitty_images();
-                        reconnect_available = true;
-                    }
-                    CoreEvent::PaneRemoved { pane } => renderer.remove_kitty_pane(*pane),
-                    _ => {}
+                if let CoreEvent::Attached { .. } = &*event {
+                    browser.reset_connection();
+                    renderer.reset_kitty_images();
+                    reconnect_available = true;
                 }
                 if matches!(
                     &*event,
@@ -771,7 +788,18 @@ pub(crate) fn run(
                 ) {
                     refresh_terminal_options(&mut model, &core, &escape_time);
                 }
-                match handle_core_event(
+                let popup_lifecycle_changed = matches!(
+                    &*event,
+                    CoreEvent::PopupChanged | CoreEvent::Attached { .. }
+                );
+                let previous_popup = popup_lifecycle_changed
+                    .then(|| model.popup.as_ref().map(|popup| popup.pane))
+                    .flatten();
+                if let CoreEvent::PaneRemoved { pane } = &*event {
+                    frames.remove(*pane);
+                    renderer.forget_pane(*pane);
+                }
+                let outcome = handle_core_event(
                     &mut model,
                     &core,
                     &client,
@@ -779,7 +807,15 @@ pub(crate) fn run(
                     &mut attempt,
                     &mut creating_default,
                     &mut browser,
-                )? {
+                )?;
+                if popup_lifecycle_changed
+                    && previous_popup != model.popup.as_ref().map(|popup| popup.pane)
+                    && let Some(pane) = previous_popup
+                {
+                    frames.remove(pane);
+                    renderer.forget_pane(pane);
+                }
+                match outcome {
                     ProtocolOutcome::None => {}
                     ProtocolOutcome::Repaint => renderer
                         .paint(&model, false)
@@ -965,10 +1001,20 @@ fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_
 /// The pin's `server_client_reset_state`: outer mouse modes follow the option,
 /// or the active pane's own request while the option is off.
 fn sync_mouse_modes(model: &mut Model, pixel_mouse: bool) -> Option<Vec<u8>> {
-    let desired = model.mouse_option
-        || model
-            .active_viewport()
-            .is_some_and(|viewport| viewport.mouse_tracking);
+    let viewport_tracks_mouse = model.popup.as_ref().map_or_else(
+        || {
+            model
+                .active_viewport()
+                .is_some_and(|viewport| viewport.mouse_tracking)
+        },
+        |popup| {
+            model
+                .viewports
+                .get(&popup.pane)
+                .is_some_and(|viewport| viewport.mouse_tracking)
+        },
+    );
+    let desired = model.mouse_option || viewport_tracks_mouse;
     if desired == model.mouse_modes_active {
         return None;
     }
@@ -1296,6 +1342,8 @@ fn handle_core_event(
             model.attached_session = Some(session);
             model.viewports.clear();
             model.set_command_output(None, None);
+            model.set_popup(None);
+            model.popup_keys_down.clear();
             model.set_menu(None);
             model.confirm = None;
             model.confirm_reply_pending = false;
@@ -1354,6 +1402,10 @@ fn handle_core_event(
         }
         CoreEvent::DisplayPanesChanged => {
             model.display_panes = lock_core(core).display_panes().cloned();
+            Ok(ProtocolOutcome::RepaintAll)
+        }
+        CoreEvent::PopupChanged => {
+            model.set_popup(lock_core(core).popup().cloned());
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::MenuChanged => {
@@ -1462,7 +1514,6 @@ fn handle_core_event(
         | CoreEvent::Detached { .. }
         | CoreEvent::ViewportChanged { .. }
         | CoreEvent::MuxOptionsChanged
-        | CoreEvent::PopupChanged
         | CoreEvent::KeyTablesChanged
         | CoreEvent::PrefixCancelled { .. }
         | CoreEvent::Bell { .. }
@@ -1831,6 +1882,7 @@ fn command_output_resize_message(model: &Model) -> Option<((u16, u16, u32, u32),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zz_protocol::{PopupBorderLines, PopupState};
     use zz_terminal::SearchDirection;
 
     fn paned_model() -> (Model, zz_protocol::PaneId) {
@@ -2055,6 +2107,28 @@ mod tests {
         viewport
     }
 
+    fn popup_state(pane: PaneId) -> PopupState {
+        PopupState {
+            pane,
+            left: 4,
+            top: 3,
+            width: 20,
+            height: 8,
+            client_columns: 79,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Popup".to_owned(),
+            style: "default".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            close_on_exit: false,
+            close_on_exit_zero: false,
+            close_on_any_key: false,
+            dead: false,
+        }
+    }
+
     #[test]
     fn app_requested_mouse_lights_the_outer_modes_while_the_option_is_off() {
         let (mut model, pane) = paned_model();
@@ -2082,6 +2156,40 @@ mod tests {
         assert_eq!(
             sync_mouse_modes(&mut model, true).as_deref(),
             Some(b"\x1b[?1003h\x1b[?1006h\x1b[?1016h".as_slice())
+        );
+    }
+
+    #[test]
+    fn popup_descriptor_owns_outer_mouse_tracking_even_before_its_frame() {
+        let (mut model, pane) = paned_model();
+        model.mouse_option = false;
+        model.mouse_modes_active = true;
+        model.viewports.insert(pane, tracking_viewport(true));
+        let popup = PaneId(u64::MAX - 1);
+        model.popup = Some(popup_state(popup));
+
+        assert_eq!(
+            sync_mouse_modes(&mut model, false).as_deref(),
+            Some(crate::tty::MOUSE_DISABLE_SEQUENCE)
+        );
+        assert!(!model.mouse_modes_active);
+
+        model.viewports.insert(popup, tracking_viewport(true));
+        assert_eq!(
+            sync_mouse_modes(&mut model, false).as_deref(),
+            Some(b"\x1b[?1003h\x1b[?1006h".as_slice())
+        );
+        assert!(model.mouse_modes_active);
+
+        model.viewports.insert(popup, tracking_viewport(false));
+        assert_eq!(
+            sync_mouse_modes(&mut model, false).as_deref(),
+            Some(crate::tty::MOUSE_DISABLE_SEQUENCE)
+        );
+        model.popup = None;
+        assert_eq!(
+            sync_mouse_modes(&mut model, false).as_deref(),
+            Some(b"\x1b[?1003h\x1b[?1006h".as_slice())
         );
     }
 
@@ -2197,6 +2305,32 @@ mod tests {
         let pending = inbox.take();
         assert_eq!(pending[&PaneId(1)].viewport.columns, 120);
         assert_eq!(pending[&PaneId(1)].damage, FrameDamage::Rows(vec![1, 2]));
+    }
+
+    #[test]
+    fn frame_inbox_removes_a_retired_synthetic_pane_before_delivery() {
+        let inbox = FrameInbox::default();
+        let (events, incoming) = mpsc::channel();
+        inbox.publish(
+            PaneId(1),
+            TerminalViewport::blank(20, 8, zz_terminal::SessionStatus::Running),
+            FrameDamage::All,
+            7,
+            &events,
+        );
+        inbox.publish(
+            PaneId(2),
+            TerminalViewport::blank(30, 10, zz_terminal::SessionStatus::Running),
+            FrameDamage::All,
+            7,
+            &events,
+        );
+        inbox.remove(PaneId(1));
+
+        assert!(matches!(incoming.recv().unwrap(), MainEvent::Frames(7)));
+        let pending = inbox.take();
+        assert!(!pending.contains_key(&PaneId(1)));
+        assert!(pending.contains_key(&PaneId(2)));
     }
 
     #[test]

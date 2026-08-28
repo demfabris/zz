@@ -199,9 +199,9 @@ while string templates and free input form one group. Both sides publish
 output channels. Accept, reject, `-y` Enter-default, blocking, and background replies have daemon
 and GPUI unit coverage. Raw zz-tui confirmation replies later closed under
 `clients.tui-confirm-before-overlay` with focused and attached-client proof. Bounded raw-TUI menu
-descriptor consumption later closed under `clients.tui-display-menu-overlay`; popup state remains
-open. This row does not close eager whole-file source construction or the broader
-replay-channel placement difference.
+descriptor consumption later closed under `clients.tui-display-menu-overlay`, and popup
+consumption later closed under `clients.tui-display-popup-overlay`. This row does not close eager
+whole-file source construction or the broader replay-channel placement difference.
 
 The strict three-step `smoke/args-parse-command-prompt` scenario drives a real attached client and
 runs 43 internal checks. It covers zero, typed, string, and empty templates; string-only `-I`,
@@ -252,15 +252,17 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. The 10o checkpoint
+`compat/results/summary.md` is the persisted acceptance artifact. The 10p checkpoint
 from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
 row is clean.
 Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven confirmation cases and
 a pane-input sentinel to the attached fixture. Slice 10o adds bounded menu cases for a visible
 title, shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
-Enter, nonactivating paste, and pane-input isolation. Focused resolver coverage pins exact
-raw-row-zero and all-disabled boundary behavior. Neither slice adds a differential row, so the
-scenario count, step count, attached-client result, and digest stay unchanged.
+Enter, nonactivating paste, and pane-input isolation. Slice 10p adds three bounded popup cases for
+live modification, terminal input, dead retention, focus ownership, and pane-input isolation.
+Focused resolver coverage pins exact raw-row-zero and all-disabled menu behavior. None adds a
+differential row, so the scenario count, step count, attached-client result, and digest stay
+unchanged.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -508,6 +510,19 @@ or display, live style or resize refresh, Interactive queue ordering, selected-a
 error ordering, or close-mid-paste ordering. The raw renderer places menus after chooser and
 command-output bases.
 
+The popup probe runs three cases against each attached client. Case A opens a bordered `-E` popup,
+modifies its title while requesting different geometry and a replacement command, then requires the
+original terminal body, job, and frame geometry to remain before a scratch marker proves `q` reached
+that popup. Case B requires bracketed paste, one physical SGR left-button press/release pair, and one
+tracked wheel event to arrive at exact content-relative cell `3,3`; outer cursor coordinates keep
+the proof independent from native sidebar geometry and locale width rules. Case C retains a dead
+`-k` popup until a key closes it. Pinned tmux emits three internal underlay FocusOut/FocusIn pairs
+around those lifecycles, while zz emits none. Explicit external OUT/IN probes while the popups are
+live remain isolated from the underlay on both sides, and a final `z` must be the underlay's only
+ordinary byte, reported as decimal 122. The closure covers raw-TUI rendering, state, cleanup, and
+bounded input ownership. Live resize, style refresh, context menu, border drag, popup-to-pane,
+popup Kitty images, and real mouse or status format facts remain outside it.
+
 The alert-lifecycle probe uses fresh non-current monitored windows. It replaces a 1,500 ms sticky
 message with a 5,000 ms Bell alert, writes new terminal output behind it, and proves the current
 screen stays frozen for 1.8 seconds across the old deadline. One elapsed endpoint capture requires
@@ -525,7 +540,7 @@ incremental TTY freeze. A forced structural redraw may expose the latest parsed 
 This focused proof does not cover command-output
 mouse behavior, OS clipboard delivery, ordinary TUI pane copy-search editing, SSH transport, pixel
 comparison, or the 29 unsupported window-copy actions. It does not update the canonical summary on
-its own. The 2026-08-26 strict-plus-attached run persisted this fixture as `PASS`.
+its own. The 2026-08-28 strict-plus-attached run persisted this fixture as `PASS`.
 Failure output includes both
 outer screens and zz daemon stderr; cleanup removes outer servers before inner servers.
 `--attached-client` runs it after the headless scenarios and includes it in the overall exit status

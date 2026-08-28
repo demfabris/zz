@@ -8,13 +8,15 @@ use zz_client::ClientCore;
 use zz_daemon::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, CommandPromptState, ConfirmState, DisplayPanesState,
-    InputMessage, MenuState, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId,
-    SessionSnapshot, StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
+    InputMessage, MenuState, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, PopupState,
+    SessionId, SessionSnapshot, StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{KeyCode, SearchQuery, TerminalAppearance, TerminalViewport};
 
 use crate::{
-    layout::{PaneRect, Rect, ResolvedLayout, resolve},
+    layout::{
+        FloatingLayout, FloatingSpec, PaneRect, Rect, ResolvedLayout, resolve, resolve_floating,
+    },
     picker,
     sidebar::{
         self, Edit as SidebarEdit, EditKind as SidebarEditKind, Row as SidebarRow,
@@ -101,6 +103,8 @@ pub(crate) struct Model {
     pub choose_tree: Option<ChooseTreeState>,
     pub choose_buffer: Option<ChooseBufferState>,
     pub display_panes: Option<DisplayPanesState>,
+    pub popup: Option<PopupState>,
+    pub popup_keys_down: Vec<(PaneId, KeyCode)>,
     pub menu: Option<MenuState>,
     pub menu_selection: Option<usize>,
     pub menu_action_pending: bool,
@@ -141,7 +145,15 @@ impl Model {
             current_endpoint,
             snapshot: Arc::clone(core.snapshot()),
             attached_session: core.attached_session(),
-            viewports: HashMap::new(),
+            viewports: core
+                .popup()
+                .and_then(|popup| {
+                    core.viewport(popup.pane)
+                        .cloned()
+                        .map(|viewport| (popup.pane, viewport))
+                })
+                .into_iter()
+                .collect(),
             appearance: core.appearance().cloned().unwrap_or_default(),
             status: core.status().clone(),
             prefix_armed: core.prefix_armed(),
@@ -153,6 +165,8 @@ impl Model {
             choose_tree: core.choose_tree().cloned(),
             choose_buffer: core.choose_buffer().cloned(),
             display_panes: core.display_panes().cloned(),
+            popup: core.popup().cloned(),
+            popup_keys_down: Vec::new(),
             menu: core.menu().cloned(),
             menu_selection: core
                 .menu()
@@ -200,6 +214,13 @@ impl Model {
         self.choose_tree = core.choose_tree().cloned();
         self.choose_buffer = core.choose_buffer().cloned();
         self.display_panes = core.display_panes().cloned();
+        self.popup = core.popup().cloned();
+        self.popup_keys_down.clear();
+        if let Some(popup) = core.popup()
+            && let Some(viewport) = core.viewport(popup.pane)
+        {
+            self.viewports.insert(popup.pane, viewport.clone());
+        }
         self.set_menu(core.menu().cloned());
         self.menu_action_pending = false;
         self.menu_swallowed_key = None;
@@ -315,6 +336,48 @@ impl Model {
             .and_then(|selected| usize::try_from(selected).ok());
         self.menu = menu;
         self.menu_action_pending = action_pending;
+    }
+
+    pub fn set_popup(&mut self, popup: Option<PopupState>) -> Option<PaneId> {
+        let previous = self.popup.as_ref().map(|popup| popup.pane);
+        let next = popup.as_ref().map(|popup| popup.pane);
+        let evicted = previous.filter(|pane| Some(*pane) != next);
+        if let Some(pane) = evicted {
+            self.viewports.remove(&pane);
+        }
+        self.popup = popup;
+        evicted
+    }
+
+    pub fn popup_layout(&self) -> Option<FloatingLayout> {
+        let popup = self.popup.as_ref()?;
+        resolve_floating(
+            FloatingSpec {
+                left: popup.left,
+                top: popup.top,
+                width: popup.width,
+                height: popup.height,
+                client_columns: popup.client_columns,
+                client_rows: popup.client_rows,
+                border_lines: popup.border_lines,
+            },
+            Rect {
+                x: 0,
+                y: 0,
+                width: self.size.columns,
+                height: self.size.rows,
+            },
+        )
+    }
+
+    pub fn accepts_viewport(&self, pane: PaneId) -> bool {
+        self.popup.as_ref().is_some_and(|popup| popup.pane == pane)
+            || self.snapshot.sessions.iter().any(|session| {
+                session
+                    .windows
+                    .iter()
+                    .any(|window| window.panes.contains_key(&pane))
+            })
     }
 
     /// Adopts a fresh status publication. Returns whether the block's
@@ -791,6 +854,96 @@ mod tests {
             selected,
             stay_open: false,
         }
+    }
+
+    fn popup_state(pane: PaneId) -> PopupState {
+        PopupState {
+            pane,
+            left: 4,
+            top: 3,
+            width: 20,
+            height: 8,
+            client_columns: 80,
+            client_rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Popup".to_owned(),
+            style: "default".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines: PopupBorderLines::Single,
+            close_on_exit: false,
+            close_on_exit_zero: false,
+            close_on_any_key: false,
+            dead: false,
+        }
+    }
+
+    #[test]
+    fn popup_state_seeds_updates_closes_replaces_and_resets_with_the_connection() {
+        let pane = PaneId(u64::MAX - 1);
+        let replacement = PaneId(u64::MAX - 2);
+        let initial = popup_state(pane);
+        let viewport = TerminalViewport::blank(18, 6, zz_terminal::SessionStatus::Running);
+        let mut core = ClientCore::new();
+        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 1,
+            payload: zz_protocol::EventPayload::Popup {
+                state: Some(initial.clone()),
+            },
+        }));
+        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+            sequence: 2,
+            payload: zz_protocol::EventPayload::TerminalViewport {
+                pane,
+                viewport: viewport.clone(),
+            },
+        }));
+        let endpoint = Endpoint::parse("unix:///tmp/zz-state-popup-test.sock").unwrap();
+        let mut model = Model::new(
+            &core,
+            TerminalSize {
+                columns: 80,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        assert_eq!(model.popup, Some(initial.clone()));
+        assert_eq!(model.viewports.get(&pane), Some(&viewport));
+        assert!(model.accepts_viewport(pane));
+
+        let mut updated = initial.clone();
+        updated.title = "Updated".to_owned();
+        assert_eq!(model.set_popup(Some(updated.clone())), None);
+        assert_eq!(model.popup, Some(updated));
+        assert_eq!(model.viewports.get(&pane), Some(&viewport));
+
+        model.popup_keys_down.push((pane, KeyCode::Escape));
+        assert_eq!(model.set_popup(None), Some(pane));
+        assert!(!model.viewports.contains_key(&pane));
+        assert_eq!(model.popup_keys_down, [(pane, KeyCode::Escape)]);
+
+        model.set_popup(Some(initial));
+        model.viewports.insert(pane, viewport);
+        assert_eq!(model.set_popup(Some(popup_state(replacement))), Some(pane));
+        assert!(!model.viewports.contains_key(&pane));
+        assert_eq!(
+            model.popup.as_ref().map(|popup| popup.pane),
+            Some(replacement)
+        );
+        assert!(!model.accepts_viewport(pane));
+        assert!(model.accepts_viewport(replacement));
+        assert_eq!(model.popup_keys_down, [(pane, KeyCode::Escape)]);
+
+        model.reset_connection(&ClientCore::new());
+        assert!(model.popup.is_none());
+        assert!(model.popup_keys_down.is_empty());
+        assert!(model.viewports.is_empty());
     }
 
     #[test]

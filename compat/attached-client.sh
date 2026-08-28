@@ -299,6 +299,10 @@ cleanup() {
   local status=$?
   trap - EXIT ERR INT TERM
   set +e
+  if [ -n "${DISPLAY_POPUP_PID:-}" ]; then
+    kill "$DISPLAY_POPUP_PID" >/dev/null 2>&1
+    wait "$DISPLAY_POPUP_PID" >/dev/null 2>&1
+  fi
   tmux_outer_command kill-server >/dev/null 2>&1
   zz_command kill-server >/dev/null 2>&1
   tmux_inner_command kill-server >/dev/null 2>&1
@@ -396,6 +400,26 @@ wait_for_nested_probe_status() {
     sleep 0.05
   done
   fixture_failure "$side nested probe $label did not finish within 10 seconds"
+}
+
+wait_for_file_line() {
+  local side="$1"
+  local path="$2"
+  local expected="$3"
+  local label="$4"
+  local attempt
+  local actual=""
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if [ -f "$path" ]; then
+      actual="$(<"$path")"
+      if [ "$actual" = "$expected" ]; then
+        return 0
+      fi
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side $label did not become $expected within 10 seconds; last value: ${actual:-<empty>}"
 }
 
 LAST_CLIENT_STATE=""
@@ -583,6 +607,25 @@ wait_for_output_mode() {
   else
     wait_for_mode_state tmux copy-mode
   fi
+}
+
+wait_for_output_search_prompt() {
+  local side="$1"
+  local screen
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+    if [ "$side" = zz ]; then
+      if grep -Eq '^/[[:space:]]*$' <<<"$screen"; then
+        return 0
+      fi
+    elif grep -Fq '(search down)' <<<"$screen"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side command-output search prompt did not open within 10 seconds"
 }
 
 assert_output_mode_stays() {
@@ -793,6 +836,39 @@ wait_for_pane_marker() {
     sleep 0.05
   done
   fixture_failure "$side pane did not contain $marker within 10 seconds"
+}
+
+assert_pane_marker_absent() {
+  local side="$1"
+  local marker="$2"
+  local captured
+
+  captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_PANE_TARGET" 2>/dev/null || true)"
+  if grep -Fq -- "$marker" <<<"$captured"; then
+    fixture_failure "$side pane unexpectedly contained $marker"
+  fi
+}
+
+assert_popup_underlay_result() {
+  local side="$1"
+  local captured
+  local markers
+
+  captured="$(side_command "$side" capture-pane -p -J -S - -t "$INNER_PANE_TARGET" 2>/dev/null || true)"
+  markers="$(grep -Eo 'UNDERLAY_BYTE_[0-9]+' <<<"$captured" || true)"
+  if [ "$markers" != "UNDERLAY_BYTE_122" ]; then
+    fixture_failure "$side popup underlay byte result was ${markers:-<empty>}"
+  fi
+}
+
+wait_for_popup_underlay_focus() {
+  local side="$1"
+  local direction="$2"
+  local ordinal="$3"
+
+  if [ "$side" = tmux ]; then
+    wait_for_pane_marker "$side" "ATTACHED_POPUP_UNDERLAY_FOCUS_${direction}_${ordinal}"
+  fi
 }
 
 pane_flattened_substring_count() {
@@ -1109,6 +1185,7 @@ probe_confirm_before() {
 }
 
 DISPLAY_MENU_PID=""
+DISPLAY_POPUP_PID=""
 
 open_display_menu() {
   local side="$1"
@@ -1224,6 +1301,267 @@ probe_display_menu() {
     side_command "$side" set-option -gu "$option" ||
       fixture_failure "$side could not remove $option"
   done
+}
+
+open_display_popup() {
+  local side="$1"
+  local client_name="$2"
+  local title="$3"
+  shift 3
+
+  if [ -n "$DISPLAY_POPUP_PID" ]; then
+    fixture_failure "$side display-popup command was already waiting"
+  fi
+  side_command "$side" display-popup -c "$client_name" -T "$title" "$@" &
+  DISPLAY_POPUP_PID=$!
+  wait_for_current_marker "$side" "$title"
+}
+
+finish_display_popup() {
+  local side="$1"
+
+  if [ -z "$DISPLAY_POPUP_PID" ]; then
+    fixture_failure "$side display-popup command was not waiting"
+  fi
+  if ! wait "$DISPLAY_POPUP_PID"; then
+    fixture_failure "$side display-popup command failed"
+  fi
+  DISPLAY_POPUP_PID=""
+}
+
+resolve_popup_frame_geometry() {
+  local side="$1"
+  local title="$2"
+  local screen
+  local line
+  local prefix
+  local tail
+  local inside
+  local frame
+  local row=0
+  local left=""
+  local top=""
+  local width=""
+  local bottom=""
+
+  screen="$(capture_current_screen "$side")" ||
+    fixture_failure "$side could not capture popup geometry for $title"
+  while IFS= read -r line; do
+    row=$((row + 1))
+    if [ -z "$top" ] && [[ "$line" == *"┌─$title"* ]]; then
+      prefix="${line%%"┌─$title"*}"
+      tail="${line:${#prefix}}"
+      inside="${tail%%┐*}"
+      left=${#prefix}
+      top=$row
+      width=$((${#inside} + 1))
+      continue
+    fi
+    if [ -n "$top" ]; then
+      frame="${line:left:width}"
+      if [[ "$frame" == └*┘ ]]; then
+        bottom=$row
+        break
+      fi
+    fi
+  done <<<"$screen"
+  if [ -z "$bottom" ]; then
+    fixture_failure "$side could not resolve popup frame geometry for $title"
+  fi
+  POPUP_FRAME_GEOMETRY="$left,$top,$width,$((bottom - top + 1))"
+}
+
+probe_display_popup() {
+  local side="$1"
+  local client_name
+  local underlay_script
+  local underlay_command
+  local title
+  local updated_title
+  local key_file
+  local focus_pairs=0
+  local cursor_position
+  local cursor_column
+  local cursor_row
+  local popup_column
+  local popup_row
+  local mouse_sequence
+  local original_geometry
+
+  client_name="$(side_command "$side" list-clients -F '#{client_name}')"
+  if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
+    fixture_failure "$side did not report exactly one popup target client"
+  fi
+  if [ "$side" = tmux ]; then
+    focus_pairs=3
+  fi
+  side_command "$side" set-option -g focus-events on ||
+    fixture_failure "$side could not enable popup focus routing"
+
+  underlay_script='
+saved=$(stty -g)
+cleanup_underlay() {
+  printf "\033[?1000l\033[?1006l\033[?1004l\033[?2004l"
+  stty "$saved"
+}
+read_decimal() {
+  UNDERLAY_DECIMAL=$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d "[:space:]")
+}
+report_byte() {
+  printf "UNDERLAY_%s_%s\r\n" BYTE "${1:-0}"
+}
+read_focus() {
+  expected=$1
+  label=$2
+  ordinal=$3
+  read_decimal
+  first=$UNDERLAY_DECIMAL
+  if [ "$first" != 27 ]; then
+    report_byte "$first"
+    exit 1
+  fi
+  stty min 0 time 5
+  read_decimal
+  second=$UNDERLAY_DECIMAL
+  read_decimal
+  third=$UNDERLAY_DECIMAL
+  stty min 1 time 0
+  if [ "$second" != 91 ] || [ "$third" != "$expected" ]; then
+    report_byte "$first"
+    exit 1
+  fi
+  printf "ATTACHED_POPUP_UNDERLAY_FOCUS_%s_%s\r\n" "$label" "$ordinal"
+}
+trap cleanup_underlay EXIT
+stty raw -echo min 1 time 0
+printf "\033[?1000h\033[?1006h\033[?1004h\033[?2004hATTACHED_POPUP_UNDERLAY_%s\r\n" READY
+focus_pairs=$1
+ordinal=1
+while [ "$ordinal" -le "$focus_pairs" ]; do
+  read_focus 79 OUT "$ordinal"
+  read_focus 73 IN "$ordinal"
+  ordinal=$((ordinal + 1))
+done
+read_decimal
+report_byte "$UNDERLAY_DECIMAL"
+cleanup_underlay
+trap - EXIT
+printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
+'
+  printf -v underlay_command '/bin/bash -c %q popup-underlay %q' \
+    "$underlay_script" "$focus_pairs"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$underlay_command"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_pane_marker "$side" ATTACHED_POPUP_UNDERLAY_READY
+
+  title="POPUP_A_ONE_$side"
+  key_file="$SCRATCH_DIR/popup-a-$side.key"
+  rm -f -- "$key_file"
+  open_display_popup "$side" "$client_name" "$title" \
+    -E -b single -x 9 -y 12 -w 38 -h 9 \
+    /bin/bash -c \
+    'saved=$(stty -g); trap '\''stty "$saved"'\'' EXIT; stty raw -echo min 1 time 0; printf "POPUP_A_READY_%s\r\nPOPUP_A_BODY_%s\r\n" "$1" "$1"; key=$(dd bs=1 count=1 2>/dev/null); marker="POPUP_A_KEY_${1}_${key}"; printf "%s\r\n" "$marker"; printf "%s\n" "$marker" >"$2"' \
+    popup-a "$side" "$key_file"
+  wait_for_popup_underlay_focus "$side" OUT 1
+  wait_for_current_marker "$side" "POPUP_A_READY_$side"
+  wait_for_current_marker "$side" "POPUP_A_BODY_$side"
+  wait_for_current_marker "$side" "┌─$title"
+  wait_for_current_marker "$side" "└────"
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  resolve_popup_frame_geometry "$side" "$title"
+  original_geometry="$POPUP_FRAME_GEOMETRY"
+
+  updated_title="POPUP_A_TWO_$side"
+  side_command "$side" display-popup -E -c "$client_name" \
+    -x 2 -y 18 -w 24 -h 6 -T "$updated_title" \
+    /bin/bash -c 'printf "POPUP_A_REPLACEMENT_WRONG\n"' ||
+    fixture_failure "$side could not modify its live popup"
+  wait_for_current_marker "$side" "┌─$updated_title"
+  wait_for_current_marker "$side" "POPUP_A_BODY_$side"
+  wait_for_current_marker_absent "$side" POPUP_A_REPLACEMENT_WRONG
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  resolve_popup_frame_geometry "$side" "$updated_title"
+  if [ "$POPUP_FRAME_GEOMETRY" != "$original_geometry" ]; then
+    fixture_failure "$side changed live popup geometry from $original_geometry to $POPUP_FRAME_GEOMETRY"
+  fi
+
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" $'\033[O\033[I'
+  wait_for_current_marker "$side" "$updated_title"
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_current_marker_absent "$side" "$updated_title"
+  finish_display_popup "$side"
+  wait_for_file_line "$side" "$key_file" "POPUP_A_KEY_${side}_q" \
+    "popup key marker"
+  wait_for_popup_underlay_focus "$side" IN 1
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+
+  title="POPUP_B_$side"
+  open_display_popup "$side" "$client_name" "$title" \
+    -E -b single -x 12 -y 15 -w 36 -h 10 \
+    /bin/bash -c \
+    'saved=$(stty -g); cleanup_popup() { printf "\033[?1000l\033[?1006l\033[?2004l"; stty "$saved"; }; trap cleanup_popup EXIT; stty raw -echo min 1 time 0; printf "\033[?1000h\033[?1006h\033[?2004hPOPUP_B_READY_%s\r\n" "$1"; expected=$'\''\033[200~popup-b\033[201~'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_PASTE_%s\r\n" "$1"; else printf "POPUP_B_INVALID_PASTE_%s\r\n" "$1"; exit 1; fi; expected=$'\''\033[<0;3;3M\033[<0;3;3m'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_MOUSE_%s_3_3\r\n" "$1"; else printf "POPUP_B_INVALID_MOUSE_%s\r\n" "$1"; exit 1; fi; expected=$'\''\033[<64;3;3M'\''; actual=$(dd bs=1 count="${#expected}" 2>/dev/null); if [ "$actual" = "$expected" ]; then printf "POPUP_B_SCROLL_%s_3_3\r\n" "$1"; else printf "POPUP_B_INVALID_SCROLL_%s\r\n" "$1"; exit 1; fi; dd bs=1 count=1 >/dev/null 2>&1' \
+    popup-b "$side"
+  wait_for_popup_underlay_focus "$side" OUT 2
+  wait_for_current_marker "$side" "POPUP_B_READY_$side"
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+
+  cursor_position="$(tmux_outer_command display-message -p \
+    -t "$OUTER_SESSION:$side" '#{cursor_x},#{cursor_y}')" ||
+    fixture_failure "$side could not read its popup cursor position"
+  if [[ ! "$cursor_position" =~ ^[0-9]+,[0-9]+$ ]]; then
+    fixture_failure "$side reported invalid popup cursor position: ${cursor_position:-<empty>}"
+  fi
+  cursor_column="${cursor_position%%,*}"
+  cursor_row="${cursor_position#*,}"
+  popup_column=$((cursor_column + 3))
+  popup_row=$((cursor_row + 2))
+
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" $'\033[O\033[I'
+  wait_for_current_marker "$side" "$title"
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" \
+    $'\033[200~popup-b\033[201~'
+  wait_for_current_marker "$side" "POPUP_B_PASTE_$side"
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  printf -v mouse_sequence '\033[<0;%d;%dM\033[<0;%d;%dm' \
+    "$popup_column" "$popup_row" "$popup_column" "$popup_row"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$mouse_sequence"
+  wait_for_current_marker "$side" "POPUP_B_MOUSE_${side}_3_3"
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  printf -v mouse_sequence '\033[<64;%d;%dM' "$popup_column" "$popup_row"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$mouse_sequence"
+  wait_for_current_marker "$side" "POPUP_B_SCROLL_${side}_3_3"
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_current_marker_absent "$side" "$title"
+  finish_display_popup "$side"
+  wait_for_popup_underlay_focus "$side" IN 2
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+
+  title="POPUP_C_$side"
+  open_display_popup "$side" "$client_name" "$title" \
+    -k -b single -x 16 -y 14 -w 32 -h 7 \
+    /bin/bash -c 'printf "POPUP_C_DEAD_%s\n" "$1"' popup-c "$side"
+  wait_for_popup_underlay_focus "$side" OUT 3
+  wait_for_current_marker "$side" "┌─$title"
+  wait_for_current_marker "$side" "POPUP_C_DEAD_$side"
+  if ! kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
+    fixture_failure "$side did not retain its dead popup command"
+  fi
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_current_marker_absent "$side" "$title"
+  finish_display_popup "$side"
+  wait_for_popup_underlay_focus "$side" IN 3
+  assert_pane_marker_absent "$side" UNDERLAY_BYTE_
+
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" z
+  wait_for_pane_marker "$side" UNDERLAY_BYTE_122
+  wait_for_pane_marker "$side" ATTACHED_POPUP_UNDERLAY_DRAINED
+  assert_popup_underlay_result "$side"
+  side_command "$side" set-option -gu focus-events ||
+    fixture_failure "$side could not restore popup focus routing"
 }
 
 probe_choose_tree() {
@@ -1751,6 +2089,7 @@ probe_command_output_navigation() {
   assert_output_mode_stays "$side" copy-mode-vi
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" g /
+  wait_for_output_search_prompt "$side"
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" ATTACHED_NAV_CANCEL
   wait_for_current_marker "$side" ATTACHED_NAV_CANCEL
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Escape
@@ -1758,6 +2097,7 @@ probe_command_output_navigation() {
   assert_output_mode_stays "$side" copy-mode-vi
 
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" /
+  wait_for_output_search_prompt "$side"
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" ATTACHED_NAV_MATX
   wait_for_current_marker "$side" ATTACHED_NAV_MATX
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" BSpace
@@ -2590,6 +2930,8 @@ probe_confirm_before zz
 probe_confirm_before tmux
 probe_display_menu zz
 probe_display_menu tmux
+probe_display_popup zz
+probe_display_popup tmux
 probe_choose_tree zz
 probe_choose_tree tmux
 probe_chooser_filter_fallback zz

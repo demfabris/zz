@@ -5,7 +5,7 @@ use zz_daemon::{
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, CommandInvocation, CommandPromptAction,
     CommandPromptMode, ConfirmAction, ConfirmState, DisplayPanesAction, InputMessage,
-    MAX_COMMAND_PROMPT_BYTES, MenuAction, MenuState, PaneKindSnapshot,
+    MAX_COMMAND_PROMPT_BYTES, MenuAction, MenuState, PaneKindSnapshot, PopupAction,
 };
 use zz_terminal::{
     KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalMouseButton,
@@ -46,6 +46,7 @@ pub(crate) fn handle(
     browser: &mut BrowserState,
     event: TerminalEvent,
     pixel_mouse: bool,
+    key_releases: bool,
 ) -> Result<InputOutcome, String> {
     let event = match menu_input_route(
         model.menu.as_ref(),
@@ -94,6 +95,34 @@ pub(crate) fn handle(
             return Ok(InputOutcome::None);
         }
     };
+    let event = match event {
+        TerminalEvent::Key(event) => {
+            let popup = model.popup.as_ref().map(|popup| popup.pane);
+            let popup_kitty_keyboard = popup.is_some_and(|pane| {
+                model
+                    .viewports
+                    .get(&pane)
+                    .is_some_and(|viewport| viewport.kitty_keyboard)
+            });
+            match popup_key_route(
+                popup,
+                popup_kitty_keyboard,
+                key_releases,
+                &mut model.popup_keys_down,
+                event,
+            ) {
+                PopupKeyRoute::Forward(event) => TerminalEvent::Key(event),
+                PopupKeyRoute::Consume => return Ok(InputOutcome::None),
+                PopupKeyRoute::Action(action) => {
+                    client
+                        .send_input(InputMessage::Popup { action })
+                        .map_err(|error| error.to_string())?;
+                    return Ok(InputOutcome::None);
+                }
+            }
+        }
+        event => event,
+    };
     match event {
         TerminalEvent::CellSize {
             width_px,
@@ -112,9 +141,95 @@ pub(crate) fn handle(
             send_focus(model, client, false)?;
             Ok(InputOutcome::None)
         }
-        TerminalEvent::Paste(text) => handle_paste(model, client, text),
+        TerminalEvent::Paste(text) => match popup_paste_input(model.popup.is_some(), &text) {
+            Some(input) => {
+                client
+                    .send_input(input)
+                    .map_err(|error| error.to_string())?;
+                Ok(InputOutcome::None)
+            }
+            None => handle_paste(model, client, text),
+        },
+        TerminalEvent::Mouse(event) if model.popup.is_some() => {
+            if let Some(action) = popup_mouse_action(model, event, pixel_mouse) {
+                client
+                    .send_input(InputMessage::Popup {
+                        action: PopupAction::TerminalView(action),
+                    })
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(InputOutcome::None)
+        }
         TerminalEvent::Mouse(event) => handle_mouse(model, client, browser, event, pixel_mouse),
         TerminalEvent::Key(event) => handle_key(model, client, browser, event),
+    }
+}
+
+fn popup_paste_input(active: bool, text: &str) -> Option<InputMessage> {
+    active.then_some(InputMessage::Popup {
+        action: PopupAction::TerminalView(TerminalViewAction::Paste(text.to_owned())),
+    })
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum PopupKeyRoute {
+    Forward(KeyEvent),
+    Consume,
+    Action(PopupAction),
+}
+
+fn popup_key_route(
+    popup: Option<zz_protocol::PaneId>,
+    kitty_keyboard: bool,
+    key_releases: bool,
+    keys_down: &mut Vec<(zz_protocol::PaneId, KeyCode)>,
+    event: KeyEvent,
+) -> PopupKeyRoute {
+    let code = key_code(event.code);
+    if let Some(index) = keys_down
+        .iter()
+        .position(|(owner, key)| Some(*owner) != popup && *key == code)
+    {
+        return match event.kind {
+            KeyEventKind::Repeat => PopupKeyRoute::Consume,
+            KeyEventKind::Release => {
+                keys_down.swap_remove(index);
+                PopupKeyRoute::Consume
+            }
+            KeyEventKind::Press => {
+                keys_down.swap_remove(index);
+                popup_key_route(popup, kitty_keyboard, key_releases, keys_down, event)
+            }
+        };
+    }
+    let Some(pane) = popup else {
+        return PopupKeyRoute::Forward(event);
+    };
+    match event.kind {
+        KeyEventKind::Press | KeyEventKind::Repeat => {
+            if key_releases && !keys_down.contains(&(pane, code)) {
+                keys_down.push((pane, code));
+            }
+            PopupKeyRoute::Action(PopupAction::Key {
+                input: key_input(event),
+                text_follows: false,
+            })
+        }
+        KeyEventKind::Release => {
+            let forwarded_press = keys_down
+                .iter()
+                .position(|tracked| *tracked == (pane, code))
+                .map(|index| keys_down.swap_remove(index))
+                .is_some();
+            if kitty_keyboard && forwarded_press {
+                PopupKeyRoute::Action(PopupAction::Key {
+                    input: key_input(event),
+                    text_follows: false,
+                })
+            } else {
+                PopupKeyRoute::Consume
+            }
+        }
     }
 }
 
@@ -1005,21 +1120,8 @@ fn handle_mouse(
     if model.command_output.is_some() {
         return Ok(InputOutcome::None);
     }
-    let (global_column, global_row, global_x, global_y) = if pixel_mouse {
-        (
-            u16::try_from(u32::from(event.column) / model.size.cell_width_px).unwrap_or(u16::MAX),
-            u16::try_from(u32::from(event.row) / model.size.cell_height_px).unwrap_or(u16::MAX),
-            u32::from(event.column),
-            u32::from(event.row),
-        )
-    } else {
-        (
-            event.column,
-            event.row,
-            u32::from(event.column).saturating_mul(model.size.cell_width_px),
-            u32::from(event.row).saturating_mul(model.size.cell_height_px),
-        )
-    };
+    let (global_column, global_row, global_x, global_y) =
+        global_mouse_position(model, event, pixel_mouse);
     match mouse_route_owner(
         model.command_output.is_some(),
         model.mouse_option,
@@ -1159,6 +1261,58 @@ fn handle_mouse(
     })
 }
 
+fn popup_mouse_action(
+    model: &Model,
+    event: MouseEvent,
+    pixel_mouse: bool,
+) -> Option<TerminalViewAction> {
+    let popup = model.popup.as_ref()?;
+    let content = model.popup_layout()?.content;
+    let (global_column, global_row, global_x, global_y) =
+        global_mouse_position(model, event, pixel_mouse);
+    if !content.contains(global_column, global_row) {
+        return None;
+    }
+    let viewport = model.viewports.get(&popup.pane)?;
+    if !viewport.mouse_tracking {
+        return None;
+    }
+    pane_mouse_action(
+        &model.size,
+        event,
+        content,
+        global_column,
+        global_row,
+        global_x,
+        global_y,
+        event.modifiers.contains(KeyModifiers::SHIFT),
+    )
+}
+
+fn global_mouse_position(
+    model: &Model,
+    event: MouseEvent,
+    pixel_mouse: bool,
+) -> (u16, u16, u32, u32) {
+    if pixel_mouse {
+        (
+            u16::try_from(u32::from(event.column) / model.size.cell_width_px.max(1))
+                .unwrap_or(u16::MAX),
+            u16::try_from(u32::from(event.row) / model.size.cell_height_px.max(1))
+                .unwrap_or(u16::MAX),
+            u32::from(event.column),
+            u32::from(event.row),
+        )
+    } else {
+        (
+            event.column,
+            event.row,
+            u32::from(event.column).saturating_mul(model.size.cell_width_px),
+            u32::from(event.row).saturating_mul(model.size.cell_height_px),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum MouseRouteOwner {
     CommandOutput,
@@ -1250,9 +1404,16 @@ fn pane_mouse_action(
         modifiers(event.modifiers),
         force_selection,
     );
+    let scroll_lines = if force_selection { 3 } else { 1 };
     match event.kind {
-        MouseEventKind::ScrollUp => Some(TerminalViewAction::ScrollWheel { lines: -3, input }),
-        MouseEventKind::ScrollDown => Some(TerminalViewAction::ScrollWheel { lines: 3, input }),
+        MouseEventKind::ScrollUp => Some(TerminalViewAction::ScrollWheel {
+            lines: -scroll_lines,
+            input,
+        }),
+        MouseEventKind::ScrollDown => Some(TerminalViewAction::ScrollWheel {
+            lines: scroll_lines,
+            input,
+        }),
         MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => None,
         _ => Some(TerminalViewAction::Mouse(input)),
     }
@@ -1279,12 +1440,31 @@ fn send_focus(model: &mut Model, client: &InteractiveClient, focused: bool) -> R
             .pane_snapshot(pane)
             .map(|snapshot| (pane, &snapshot.kind))
     });
-    if let Some(input) = pane_focus_input(active_pane, focused) {
+    if let Some(input) = surface_focus_input(
+        model.popup.as_ref().map(|popup| popup.pane),
+        active_pane,
+        focused,
+    ) {
         client
             .send_input(input)
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+fn surface_focus_input(
+    popup: Option<zz_protocol::PaneId>,
+    active_pane: Option<(zz_protocol::PaneId, &PaneKindSnapshot)>,
+    focused: bool,
+) -> Option<InputMessage> {
+    popup.map_or_else(
+        || pane_focus_input(active_pane, focused),
+        |_| {
+            Some(InputMessage::Popup {
+                action: PopupAction::TerminalView(TerminalViewAction::Focus(focused)),
+            })
+        },
+    )
 }
 
 fn pane_focus_input(
@@ -1462,7 +1642,289 @@ const fn modifiers(value: KeyModifiers) -> Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_protocol::{MenuItem, PopupBorderLines};
+    use zz_protocol::{MenuItem, PopupBorderLines, PopupState};
+
+    fn popup_model(border_lines: PopupBorderLines, mouse_tracking: bool) -> Model {
+        let core = zz_client::ClientCore::new();
+        let endpoint =
+            Endpoint::parse("unix:///tmp/zz-input-popup-test.sock").expect("test endpoint");
+        let mut model = Model::new(
+            &core,
+            crate::tty::TerminalSize {
+                columns: 40,
+                rows: 20,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        let pane = zz_protocol::PaneId(u64::MAX - 1);
+        model.popup = Some(PopupState {
+            pane,
+            left: 10,
+            top: 5,
+            width: 12,
+            height: 8,
+            client_columns: 40,
+            client_rows: 20,
+            cell_width_px: 8,
+            cell_height_px: 16,
+            title: "Popup".to_owned(),
+            style: "default".to_owned(),
+            border_style: "default".to_owned(),
+            border_lines,
+            close_on_exit: false,
+            close_on_exit_zero: false,
+            close_on_any_key: false,
+            dead: false,
+        });
+        let mut viewport =
+            zz_terminal::TerminalViewport::blank(12, 8, zz_terminal::SessionStatus::Running);
+        viewport.mouse_tracking = mouse_tracking;
+        model.viewports.insert(pane, viewport);
+        model
+    }
+
+    #[test]
+    fn popup_press_repeat_and_kitty_release_use_the_popup_key_lane() {
+        let pane = zz_protocol::PaneId(u64::MAX - 1);
+        let mut keys_down = Vec::new();
+        for (kind, expected) in [
+            (KeyEventKind::Press, KeyAction::Press),
+            (KeyEventKind::Repeat, KeyAction::Repeat),
+        ] {
+            let route = popup_key_route(
+                Some(pane),
+                false,
+                true,
+                &mut keys_down,
+                KeyEvent {
+                    code: TerminalKeyCode::Char('x'),
+                    modifiers: KeyModifiers::NONE,
+                    kind,
+                },
+            );
+            assert!(matches!(
+                route,
+                PopupKeyRoute::Action(PopupAction::Key {
+                    input,
+                    text_follows: false,
+                }) if input.action == expected
+                    && input.key == KeyCode::Character('x')
+                    && input.text.as_deref() == Some("x")
+            ));
+            assert_eq!(keys_down, [(pane, KeyCode::Character('x'))]);
+        }
+
+        let release = popup_key_route(
+            Some(pane),
+            true,
+            true,
+            &mut keys_down,
+            KeyEvent {
+                code: TerminalKeyCode::Char('x'),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Release,
+            },
+        );
+        assert!(matches!(
+            release,
+            PopupKeyRoute::Action(PopupAction::Key {
+                input,
+                text_follows: false,
+            }) if input.action == KeyAction::Release
+        ));
+        assert!(keys_down.is_empty());
+
+        let mut legacy = vec![(pane, KeyCode::Character('x'))];
+        assert_eq!(
+            popup_key_route(
+                Some(pane),
+                false,
+                true,
+                &mut legacy,
+                KeyEvent {
+                    code: TerminalKeyCode::Char('x'),
+                    modifiers: KeyModifiers::NONE,
+                    kind: KeyEventKind::Release,
+                },
+            ),
+            PopupKeyRoute::Consume
+        );
+        assert!(legacy.is_empty());
+
+        assert!(matches!(
+            popup_key_route(
+                Some(pane),
+                false,
+                false,
+                &mut legacy,
+                KeyEvent::new(TerminalKeyCode::Char('x'), KeyModifiers::NONE),
+            ),
+            PopupKeyRoute::Action(_)
+        ));
+        assert!(legacy.is_empty());
+    }
+
+    #[test]
+    fn popup_close_and_replacement_swallow_the_triggering_key_lifecycle() {
+        let old = zz_protocol::PaneId(u64::MAX - 1);
+        let new = zz_protocol::PaneId(u64::MAX - 2);
+        let press = KeyEvent::new(TerminalKeyCode::Esc, KeyModifiers::NONE);
+        let mut keys_down = Vec::new();
+        assert!(matches!(
+            popup_key_route(Some(old), false, true, &mut keys_down, press),
+            PopupKeyRoute::Action(_)
+        ));
+
+        assert_eq!(
+            popup_key_route(
+                Some(new),
+                true,
+                true,
+                &mut keys_down,
+                KeyEvent {
+                    kind: KeyEventKind::Repeat,
+                    ..press
+                },
+            ),
+            PopupKeyRoute::Consume
+        );
+        assert_eq!(keys_down, [(old, KeyCode::Escape)]);
+        assert_eq!(
+            popup_key_route(
+                None,
+                false,
+                true,
+                &mut keys_down,
+                KeyEvent {
+                    kind: KeyEventKind::Release,
+                    ..press
+                },
+            ),
+            PopupKeyRoute::Consume
+        );
+        assert!(keys_down.is_empty());
+        assert_eq!(
+            popup_key_route(None, false, true, &mut keys_down, press),
+            PopupKeyRoute::Forward(press)
+        );
+    }
+
+    #[test]
+    fn popup_close_preserves_every_held_key_until_its_release() {
+        let pane = zz_protocol::PaneId(u64::MAX - 1);
+        let mut keys_down = Vec::new();
+        let a = KeyEvent::new(TerminalKeyCode::Char('a'), KeyModifiers::NONE);
+        let escape = KeyEvent::new(TerminalKeyCode::Esc, KeyModifiers::NONE);
+        assert!(matches!(
+            popup_key_route(Some(pane), false, true, &mut keys_down, a),
+            PopupKeyRoute::Action(_)
+        ));
+        assert!(matches!(
+            popup_key_route(Some(pane), false, true, &mut keys_down, escape),
+            PopupKeyRoute::Action(_)
+        ));
+        assert_eq!(
+            keys_down,
+            [(pane, KeyCode::Character('a')), (pane, KeyCode::Escape)]
+        );
+        for event in [
+            KeyEvent {
+                kind: KeyEventKind::Release,
+                ..escape
+            },
+            KeyEvent {
+                kind: KeyEventKind::Release,
+                ..a
+            },
+        ] {
+            assert_eq!(
+                popup_key_route(None, false, true, &mut keys_down, event),
+                PopupKeyRoute::Consume
+            );
+        }
+        assert!(keys_down.is_empty());
+    }
+
+    #[test]
+    fn popup_paste_uses_terminal_view_and_inactive_paste_does_not() {
+        assert_eq!(
+            popup_paste_input(true, "pasted"),
+            Some(InputMessage::Popup {
+                action: PopupAction::TerminalView(TerminalViewAction::Paste("pasted".to_owned())),
+            })
+        );
+        assert_eq!(popup_paste_input(false, "pasted"), None);
+    }
+
+    #[test]
+    fn popup_pointer_and_scroll_are_content_relative_and_tracking_gated() {
+        let model = popup_model(PopupBorderLines::Single, true);
+        let layout = model.popup_layout().expect("popup layout");
+        let pointer = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: layout.content.x.saturating_add(2),
+            row: layout.content.y.saturating_add(1),
+            modifiers: KeyModifiers::SHIFT,
+        };
+        let Some(TerminalViewAction::Mouse(input)) = popup_mouse_action(&model, pointer, false)
+        else {
+            panic!("tracked popup pointer was not routed");
+        };
+        assert_eq!(input.cell.column, 2);
+        assert_eq!(input.cell.row, 1);
+        assert_eq!((input.x, input.y), (16, 16));
+        assert_eq!(
+            (input.screen_width, input.screen_height),
+            (
+                u32::from(layout.content.width) * 8,
+                u32::from(layout.content.height) * 16,
+            )
+        );
+        assert!(input.force_selection());
+
+        let scroll = MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            modifiers: KeyModifiers::NONE,
+            ..pointer
+        };
+        assert!(matches!(
+            popup_mouse_action(&model, scroll, false),
+            Some(TerminalViewAction::ScrollWheel { lines: -1, input })
+                if input.cell.column == 2 && input.cell.row == 1
+        ));
+
+        let border = MouseEvent {
+            column: layout.frame.x,
+            row: layout.frame.y,
+            ..pointer
+        };
+        assert_eq!(popup_mouse_action(&model, border, false), None);
+        let outside = MouseEvent {
+            column: layout.frame.x.saturating_sub(1),
+            row: layout.frame.y,
+            ..pointer
+        };
+        assert_eq!(popup_mouse_action(&model, outside, false), None);
+
+        let untracked = popup_model(PopupBorderLines::Single, false);
+        assert_eq!(popup_mouse_action(&untracked, pointer, false), None);
+
+        let borderless = popup_model(PopupBorderLines::None, true);
+        let frame = borderless.popup_layout().expect("borderless layout").frame;
+        let edge = MouseEvent {
+            column: frame.x,
+            row: frame.y,
+            modifiers: KeyModifiers::NONE,
+            ..pointer
+        };
+        assert!(popup_mouse_action(&borderless, edge, false).is_some());
+    }
 
     fn menu_state(selected: Option<u32>, stay_open: bool) -> MenuState {
         MenuState {
@@ -2399,6 +2861,17 @@ mod tests {
                 true,
             ),
             None
+        );
+
+        assert_eq!(
+            surface_focus_input(
+                Some(zz_protocol::PaneId(u64::MAX - 1)),
+                Some((zz_protocol::PaneId(7), &PaneKindSnapshot::Terminal)),
+                false,
+            ),
+            Some(InputMessage::Popup {
+                action: PopupAction::TerminalView(TerminalViewAction::Focus(false)),
+            })
         );
     }
 

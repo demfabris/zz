@@ -166,8 +166,9 @@ rendering and keyboard ownership now close for raw zz-tui under
 `clients.tui-display-menu-overlay`: the client consumes the daemon-published descriptor and uses
 the shared menu resolver. Action context and errors, mouse policy, paste-close ordering, queue
 ordering, rendered width, resize lifecycle, shortcut display and grammar, and style refresh remain
-under `display-menu.behavior-fidelity`. Popup rendering and input remain under
-`clients.tui-overlay-consumption`.
+under `display-menu.behavior-fidelity`. Raw zz-tui popup rendering and input ownership later closed
+under `clients.tui-display-popup-overlay`; the six broader popup behavior classes remain under
+`display-popup.behavior-fidelity`.
 `display-panes` accepts an optional string or typed template while `-d` and `-t` values remain
 strings. Typed children construct before parent option-type or arity validation. Aliases and
 prefixes retain typed positions and canonical stored readback. Targetless routing resolves an
@@ -253,9 +254,9 @@ cells. zz publishes daemon-owned state and renders it in its clients:
   status. Native sidebar and titlebar presentation remain at defaults.
 - The GPUI client uses native surfaces for prompts, choosers, menus, popups, copy mode, and pane
   indicators.
-- The raw TUI consumes command prompts, confirmations, menus, choose trees, choose buffers, and
-  display-panes. `clients.tui-overlay-consumption` owns its missing popup path, while
-  `display-menu.behavior-fidelity` owns the nine open menu behavior classes.
+- The raw TUI consumes command prompts, confirmations, menus, popups, choose trees, choose buffers,
+  and display-panes. `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity` retain
+  the broader behavior classes outside those presentation closures.
 - A native surface may look different. Its command, key, target, exit, and state semantics remain
   part of the compatibility contract for every client that presents it.
 

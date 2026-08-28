@@ -25747,11 +25747,14 @@ fn terminal_view_action_is_mouse(action: &zz_terminal::TerminalViewAction) -> bo
 }
 
 fn terminal_mouse_rejected(inner: &ServerState, client: ClientId, input: &InputMessage) -> bool {
-    let (pane, action) = match input {
-        InputMessage::TerminalView { pane, action } => (Some(*pane), action),
+    let (terminal, action) = match input {
+        InputMessage::TerminalView { pane, action } => (inner.terminals.get(pane), action),
         InputMessage::Popup {
             action: PopupAction::TerminalView(action),
-        } => (None, action),
+        } => (
+            inner.popups.get(&client).map(|popup| &popup.terminal),
+            action,
+        ),
         _ => return false,
     };
     if !terminal_view_action_is_mouse(action)
@@ -25762,13 +25765,11 @@ fn terminal_mouse_rejected(inner: &ServerState, client: ClientId, input: &InputM
     {
         return false;
     }
-    !pane.is_some_and(|pane| {
-        inner.terminals.get(&pane).is_some_and(|terminal| {
-            terminal
-                .latest_viewport_for(TerminalViewId(client.0))
-                .unwrap_or_else(|| terminal.latest_viewport())
-                .mouse_tracking
-        })
+    !terminal.is_some_and(|terminal| {
+        terminal
+            .latest_viewport_for(TerminalViewId(client.0))
+            .unwrap_or_else(|| terminal.latest_viewport())
+            .mouse_tracking
     })
 }
 
@@ -66140,6 +66141,82 @@ bind - split-window -v -c "#{pane_current_path}"
                 "an app-requested mouse pane accepts forwarded events while the option is off"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tracked_popup_mouse_is_accepted_when_the_global_mouse_option_is_off() {
+        let (shared, client, _, mut context) = popup_test_workspace("popup-mouse");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "mouse", "off"]),
+            )
+            .expect("turn mouse off");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", [] as [&str; 0]),
+            )
+            .expect("open popup shell");
+        shared.inner.lock().client_sizes.insert(client, (80, 24));
+        let terminal = Arc::clone(&shared.inner.lock().popups[&client].terminal);
+        let wheel = InputMessage::Popup {
+            action: PopupAction::TerminalView(TerminalViewAction::ScrollWheel {
+                lines: 3,
+                input: TerminalMouseInput::new(
+                    TerminalMousePhase::Press,
+                    Some(TerminalMouseButton::ScrollDown),
+                    PointerCellEvent {
+                        column: 1,
+                        row: 1,
+                        click_count: 1,
+                        rectangle: false,
+                    },
+                    24,
+                    18,
+                    128,
+                    72,
+                    8,
+                    18,
+                    Modifiers::default(),
+                    false,
+                ),
+            }),
+        };
+        {
+            let inner = shared.inner.lock();
+            assert!(terminal_mouse_rejected(&inner, client, &wheel));
+        }
+        terminal.send_text("printf '\\033[?1002hMOUSEON\\n'\n");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !terminal
+            .latest_viewport_for(TerminalViewId(client.0))
+            .unwrap_or_else(|| terminal.latest_viewport())
+            .mouse_tracking
+        {
+            assert!(
+                Instant::now() < deadline,
+                "popup never reported mouse tracking"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        {
+            let inner = shared.inner.lock();
+            assert!(!terminal_mouse_rejected(&inner, client, &wheel));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-C"]),
+            )
+            .expect("close popup");
     }
 
     #[test]

@@ -91,7 +91,7 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current 10o acceptance inventory contains 98 differential scenarios and
+The current 10p acceptance inventory contains 98 differential scenarios and
 1,517 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
@@ -104,8 +104,10 @@ differential row, so the stored artifact and digest remain unchanged.
 Slice 10o adds bounded raw-TUI menu cases without adding a differential row. They cover a visible
 title, shortcut precedence, disabled and separator skipping, Escape, an unusable PageUp landing with
 stay-open Enter, nonactivating paste, and pane-input isolation. Focused resolver coverage pins exact
-raw-row-zero and all-disabled boundary behavior. The stored artifact and digest still
-remain unchanged.
+raw-row-zero and all-disabled boundary behavior. Slice 10p adds three bounded popup cases for live
+title modification without job or geometry replacement, bracketed paste plus exact content-relative
+mouse and wheel input, dead `-k` retention, focus ownership, and pane-input isolation. These attached
+cases add no differential row, so the stored artifact and digest remain unchanged.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -126,10 +128,11 @@ mode, command-output navigation, choosers, prompts, prefix tables, buffers, and 
 bindings, and both mode-key tables as local terminal semantics. The Cargo launcher and a verified
 built-bundle smoke both pass the six bare/new/attach × empty/existing cases through a spaced path.
 Gate 0 provides durable evidence for the surfaces it exercises. The live tracker still records CLI
-and TUI gaps, including ordinary TUI pane copy-search editing, typed Control diagnostics, and raw
-TUI consumption of `display-popup` state. Raw-TUI confirmation closed in slice 10n, and bounded
-consumption of daemon-published `display-menu` descriptors closed in slice 10o. Nine broader menu
-behavior classes remain under `display-menu.behavior-fidelity`.
+and TUI gaps, including ordinary TUI pane copy-search editing and typed Control diagnostics.
+Raw-TUI confirmation closed in slice 10n, bounded menu consumption in slice 10o, and bounded popup
+consumption in slice 10p. Broader menu behavior remains under `display-menu.behavior-fidelity`; six
+resize, style, pointer-affordance, transfer, and image contracts remain under
+`display-popup.behavior-fidelity`.
 Protocol v80 closes startup config cause delivery. Protocol v81 closes targetless and invalid-target
 foreground Control shell-output placement; resolved targets and ordinary background jobs keep zz's
 native per-Interactive command-output view. The
@@ -220,7 +223,7 @@ daemon invariant names 27 explicit event producers and derives 37 generic `after
 producers from implemented canonical commands. It requires those 64 names plus the four active
 `hook:` items, `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, to equal
 all 68 pinned hooks. `just compat-check` requires and runs the exact daemon partition test. The
-tracker now has 88 active groups, 589 classified active items, and 96 closed-history entries.
+tracker now has 88 active groups, 594 classified active items, and 97 closed-history entries.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -239,8 +242,7 @@ flag gap, but accepted semantic divergences remain outside that count.
 **The current queue** is dependency-ordered in the
 [tmux superset roadmap](/designs/tmux-superset-roadmap.md). Shared key structure and bare bind
 mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
-menu descriptor consumption in slice 10o. The fresh practical rerank puts popup consumption next.
-Nonconstant formats, open context
+menu descriptor consumption in slice 10o and popup consumption in slice 10p. Nonconstant formats, open context
 formats, and option consumers remain three independent discovery milestones. Regenerate and
 re-rank the full live tracker before every slice so a newly exposed practical gate can move ahead
 of that forecast. Client targeting and ordinary detach are complete;
@@ -1642,9 +1644,10 @@ All waves shipped, each reviewed to CONFIRMED-CLOSED against the pin:
   (maintainer): blocking retvals, close matrix, input capture above the
   prefix, dead-job modify, -C cross-client, position letters, -e/-d live.
 
-  Current qualification: daemon and GPUI popup behavior remain shipped. Raw zz-tui still drops the
-  retained popup state and does not render or intercept it; `clients.tui-overlay-consumption` owns
-  that client path.
+  Current qualification: daemon and GPUI popup behavior remain shipped. Raw zz-tui popup rendering,
+  lifecycle, and bounded input ownership shipped in slice 10p under
+  `clients.tui-display-popup-overlay`; the six broader behavior classes remain under
+  `display-popup.behavior-fidelity`.
 
 - **Wave 5d-2** (`01096c2` + `30d4daa`, CONFIRMED-CLOSED 2026-08-18; closes
   phase 5) — `display-menu`/`menu`, `confirm-before`/`confirm`, and the lock
@@ -1734,9 +1737,9 @@ Original phase-5 tiering, kept for the record:
   and control-mode notifications (phase 6) are fed by the same events (~1 week).
 - `display-popup`, `display-menu`, `confirm-before`, the `lock-*` trio: daemon execution and GPUI
   surfaces shipped. Raw TUI confirmation handling shipped in slice 10n, and bounded menu descriptor
-  consumption shipped in slice 10o. Popup consumption remains active under
-  `clients.tui-overlay-consumption`; the nine broader menu behavior classes remain under
-  `display-menu.behavior-fidelity`. Popup support is important for tmux-fzf
+  consumption shipped in slice 10o. Bounded popup descriptor, terminal, and input consumption
+  shipped in slice 10p. Broader menu and popup behavior remain under
+  `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity`. Popup support is important for tmux-fzf
   and `fzf-tmux -p`.
 
 **The consent gate, rebuilt on verified facts.** Config already executes shell ungated today:

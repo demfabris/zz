@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 88 active groups, 589 classified active items, 96 closed groups, and two known
+The live tracker has 88 active groups, 594 classified active items, 97 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,7 +53,7 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The 10o checkpoint covers 98 scenarios and 1,517 steps.
+The 10p checkpoint covers 98 scenarios and 1,517 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
@@ -74,9 +74,12 @@ daemon-published menu descriptor and shared keyboard ownership. Its attached cas
 shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
 Enter, nonactivating paste, and pane-input isolation without adding a differential row. Focused
 resolver coverage pins exact raw-row-zero and all-disabled boundary behavior. Popup presentation
-in slice 10p is next. Nine broader menu behavior classes remain under
-`display-menu.behavior-fidelity`; nonconstant
-formats, open context formats, and option consumers remain three independent discovery slices.
+closed in slice 10p. Its attached A/B/C cases cover live title-only modification, bracketed paste,
+exact content-relative pointer and wheel input, dead `-k` retention, external focus ownership, and
+pane-input isolation. Six broader popup contracts remain under
+`display-popup.behavior-fidelity`, while broader menu behavior stays under
+`display-menu.behavior-fidelity`. Nonconstant formats, open context formats, and option consumers
+remain three independent discovery slices.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
@@ -931,9 +934,9 @@ the same pane-kind operation as the picker. Do not give `split-window` an agent 
 - `%` and `"` may open `split-picker` in the zz default table.
 - `s` and `w` may focus the native sidebar instead of drawing tmux's tree.
 - The GPUI client uses native presentation for prompts, menus, popups, copy mode, status, and
-  choosers. Raw zz-tui handles confirmations and daemon-published menu descriptors.
-  `clients.tui-overlay-consumption` owns the remaining popup path, and
-  `display-menu.behavior-fidelity` owns the nine open menu behavior classes.
+  choosers. Raw zz-tui handles confirmations plus daemon-published menu and popup descriptors.
+  `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity` own the remaining behavior
+  classes.
 - Current window may remain per client rather than per session.
 - GUI defaults may keep the persistent-daemon lifecycle until a config explicitly selects tmux
   lifecycle behavior.
@@ -1146,9 +1149,8 @@ permanent product decision has been recorded for them.
   preflight parse errors. Eager whole-file source construction and the broader replay-channel
   placement difference remain open. Three callback rules across six implemented commands remain.
   The same audit registered `clients.tui-overlay-consumption` because raw zz-tui then dropped
-  confirmation, menu, and popup state changes. The later `clients.tui-confirm-before-overlay`
-  closure shipped confirmation handling. Slice 10o later closed menu descriptor consumption, while
-  popup consumption remains active.
+  confirmation, menu, and popup state changes. Later closures shipped confirmation handling in
+  10n, menu descriptor consumption in 10o, and popup consumption in 10p.
 - 2026-08-28: Protocol v84 closed `tracker.args-parse-command-prompt` without another wire change.
   The command accepts zero or one typed-block-or-string template while `-I`, `-p`, `-t`, and `-T`
   values remain strings. Typed templates preserve their recursively constructed command list and
@@ -1264,6 +1266,21 @@ permanent product decision has been recorded for them.
   `clients.tui-overlay-consumption`. The tracker now has 88 active groups, 589 classified active
   items, and 96 closed entries. The stored acceptance artifact remains 98 scenarios and 1,517 steps
   with attached-client `PASS` and SHA-256
+  `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+- 2026-08-28: Slice 10p closed `clients.tui-display-popup-overlay` without a protocol change. Raw
+  zz-tui now retains popup descriptors and synthetic terminal frames, centres and clamps the
+  published grid, renders every border family and style between the workspace and higher overlays,
+  and purges popup caches across close, replacement, attachment change, and reconnect. Popup keys,
+  held-key lifecycles, paste, tracked content-relative pointer and wheel input, and external focus
+  resolve before chrome or pane input. The daemon mouse gate now admits tracked popup input when the
+  global mouse option is off, and one decoded tracked wheel notch produces one application report.
+  Attached cases A/B/C prove unchanged live job and geometry, exact click and wheel reports at cell
+  `3,3`, dead `-k` retention, and a final decimal-122 underlay sentinel. Pinned tmux emits three
+  internal underlay focus pairs; zz emits none, while external focus stays popup-owned on both.
+  `display-popup.behavior-fidelity` retains resize, style, pointer-affordance, popup-to-pane, and
+  Kitty-image work. The tracker now has 88 active groups, 594 classified active items, and 97 closed
+  entries. The acceptance artifact remains 98 scenarios and 1,517 steps with attached-client
+  `PASS` and SHA-256
   `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 
 # Related

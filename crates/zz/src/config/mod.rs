@@ -69,6 +69,7 @@ const DEFAULT_TRAY: bool = true;
 const DEFAULT_SHOW_FPS: bool = false;
 const DEFAULT_QUIT_DAEMON_ON_EXIT: bool = false;
 const DEFAULT_AUTO_RESTART_STALE_DAEMON: bool = false;
+const DEFAULT_CHECK_FOR_UPDATES: bool = true;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) const DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY: &str = "cmd-shift-c";
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
@@ -129,6 +130,7 @@ pub enum ConfigKey {
     ShowFps,
     QuitDaemonOnExit,
     AutoRestartStaleDaemon,
+    CheckForUpdates,
     ExperimentalAgentPane,
     ExperimentalEditorPane,
     PaneGaps,
@@ -162,6 +164,7 @@ impl ConfigKey {
             Self::ShowFps => "show-fps",
             Self::QuitDaemonOnExit => "quit-daemon-on-exit",
             Self::AutoRestartStaleDaemon => "auto-restart-stale-daemon",
+            Self::CheckForUpdates => "check-for-updates",
             Self::ExperimentalAgentPane => "experimental-agent-pane",
             Self::ExperimentalEditorPane => "experimental-editor-pane",
             Self::PaneGaps => "pane-gaps",
@@ -195,6 +198,7 @@ impl ConfigKey {
             "show-fps" => Some(Self::ShowFps),
             "quit-daemon-on-exit" => Some(Self::QuitDaemonOnExit),
             "auto-restart-stale-daemon" => Some(Self::AutoRestartStaleDaemon),
+            "check-for-updates" => Some(Self::CheckForUpdates),
             "experimental-agent-pane" => Some(Self::ExperimentalAgentPane),
             "experimental-editor-pane" => Some(Self::ExperimentalEditorPane),
             "pane-gaps" => Some(Self::PaneGaps),
@@ -238,6 +242,7 @@ impl ConfigKey {
             | Self::ShowFps
             | Self::QuitDaemonOnExit
             | Self::AutoRestartStaleDaemon
+            | Self::CheckForUpdates
             | Self::ExperimentalAgentPane
             | Self::ExperimentalEditorPane
             | Self::PaneGaps
@@ -307,6 +312,7 @@ pub struct AppConfig {
     pub show_fps: ConfigValue<bool>,
     pub quit_daemon_on_exit: ConfigValue<bool>,
     pub auto_restart_stale_daemon: ConfigValue<bool>,
+    pub check_for_updates: ConfigValue<bool>,
     pub experimental_agent_pane: ConfigValue<bool>,
     pub experimental_editor_pane: ConfigValue<bool>,
     pub pane_gaps: ConfigValue<bool>,
@@ -342,6 +348,7 @@ impl Default for AppConfig {
             show_fps: ConfigValue::from_default(DEFAULT_SHOW_FPS),
             quit_daemon_on_exit: ConfigValue::from_default(DEFAULT_QUIT_DAEMON_ON_EXIT),
             auto_restart_stale_daemon: ConfigValue::from_default(DEFAULT_AUTO_RESTART_STALE_DAEMON),
+            check_for_updates: ConfigValue::from_default(DEFAULT_CHECK_FOR_UPDATES),
             experimental_agent_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_AGENT_PANE),
             experimental_editor_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_EDITOR_PANE),
             pane_gaps: ConfigValue::from_default(DEFAULT_PANE_GAPS),
@@ -376,6 +383,7 @@ impl AppConfig {
             ConfigKey::ShowFps => Some(&mut self.show_fps),
             ConfigKey::QuitDaemonOnExit => Some(&mut self.quit_daemon_on_exit),
             ConfigKey::AutoRestartStaleDaemon => Some(&mut self.auto_restart_stale_daemon),
+            ConfigKey::CheckForUpdates => Some(&mut self.check_for_updates),
             ConfigKey::ExperimentalAgentPane => Some(&mut self.experimental_agent_pane),
             ConfigKey::ExperimentalEditorPane => Some(&mut self.experimental_editor_pane),
             ConfigKey::PaneGaps => Some(&mut self.pane_gaps),
@@ -562,7 +570,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
 
     log::info!(
         target: "zz::config",
-        "application configuration path={} pane_gaps={} pane_inactive_opacity={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} agent_working_directory={:?} daemon_override_entries={}",
+        "application configuration path={} pane_gaps={} pane_inactive_opacity={} pane_corner_radius={} pane_margin={} pane_border_width={} widget_corner_radius={} window_corner_radius={} editor_font_size={} editor_line_numbers={} editor_relative_line_numbers={} editor_soft_wrap={} editor_vim_mode={} browser_element_selector_hotkey={} browser_search_provider={} browser_egress={} use_system_titlebar={} window_background_blur={} animations={} tray={} show_fps={} quit_daemon_on_exit={} auto_restart_stale_daemon={} check_for_updates={} agent_working_directory={:?} daemon_override_entries={}",
         path.display(),
         parsed.config.pane_gaps.value,
         parsed.config.pane_inactive_opacity.value,
@@ -586,6 +594,7 @@ fn install_config(path: Option<&Path>, parsed: Option<io::Result<ParsedConfig>>,
         parsed.config.show_fps.value,
         parsed.config.quit_daemon_on_exit.value,
         parsed.config.auto_restart_stale_daemon.value,
+        parsed.config.check_for_updates.value,
         parsed.agent.working_directory,
         parsed.daemon_entries.len(),
     );
@@ -650,6 +659,12 @@ pub(crate) fn quit_daemon_on_exit(cx: &App) -> bool {
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn auto_restart_stale_daemon(cx: &App) -> bool {
     resolved_config(cx).auto_restart_stale_daemon.value
+}
+
+/// Whether the GUI looks up the newest release once a day and offers it.
+#[cfg_attr(target_os = "ios", allow(dead_code))]
+pub(crate) fn check_for_updates(cx: &App) -> bool {
+    resolved_config(cx).check_for_updates.value
 }
 
 /// Whether to put zz in the system tray. Read once at startup.
@@ -1397,6 +1412,7 @@ fn parse_config(source: &str) -> ParsedConfig {
             | ConfigKey::ShowFps
             | ConfigKey::QuitDaemonOnExit
             | ConfigKey::AutoRestartStaleDaemon
+            | ConfigKey::CheckForUpdates
             | ConfigKey::ExperimentalAgentPane
             | ConfigKey::ExperimentalEditorPane
             | ConfigKey::PaneGaps
@@ -2479,6 +2495,7 @@ mod tests {
              show-fps = true\n\
              quit-daemon-on-exit = true\n\
              auto-restart-stale-daemon = true\n\
+             check-for-updates = false\n\
              experimental-agent-pane = true\n\
              experimental-editor-pane = true\n\
              editor-font-size = 15\n\
@@ -2577,6 +2594,12 @@ mod tests {
             ConfigProvenance::Override
         );
         assert!(!AppConfig::default().auto_restart_stale_daemon.value);
+        assert!(!parsed.config.check_for_updates.value);
+        assert_eq!(
+            parsed.config.check_for_updates.provenance,
+            ConfigProvenance::Override
+        );
+        assert!(AppConfig::default().check_for_updates.value);
     }
 
     #[test]

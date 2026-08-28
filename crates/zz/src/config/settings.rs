@@ -289,6 +289,8 @@ impl SettingsView {
         let mut subscriptions = vec![
             cx.observe(&mux, |_, _, cx| cx.notify()),
             cx.observe_global::<config::FleetHosts>(|_, cx| cx.notify()),
+            #[cfg(not(target_os = "ios"))]
+            cx.observe_global::<crate::update::UpdateState>(|_, cx| cx.notify()),
             browser_hotkey_subscription(&browser_element_selector_hotkey, window, cx),
             search_provider_subscription(&browser_search_provider, window, cx),
             ui_zoom_subscription(&ui_zoom, window, cx),
@@ -1199,9 +1201,97 @@ impl SettingsView {
             .into_any_element()
     }
 
+    /// `Option` mirrors the iOS variant, which has no update surface.
+    #[cfg(not(target_os = "ios"))]
+    #[allow(clippy::unnecessary_wraps)]
+    fn updates_stack(cx: &Context<Self>) -> Option<SettingsStack> {
+        use crate::update::{self, CheckState};
+
+        let resolved = config::resolved_config(cx);
+        let status = update::status(cx);
+        let check = status.as_ref().map(|status| &status.check);
+        let checking = matches!(check, Some(CheckState::Checking));
+        let check_button = Button::new("settings-update-check")
+            .small()
+            .label(if checking { "Checking…" } else { "Check now" })
+            .bg(settings_control_fill(cx))
+            .disabled(checking)
+            .on_click(|_, _, cx| update::check_now(cx))
+            .into_any_element();
+        let (description, control): (SharedString, AnyElement) = match (status.as_ref(), check) {
+            (Some(status), Some(CheckState::Available(release))) => {
+                let notes_url = release.url.clone();
+                (
+                    format!(
+                        "zz {} is out; you are running {}. Update opens a terminal window that \
+                         runs the installer.",
+                        release.version, status.current
+                    )
+                    .into(),
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("settings-update-install")
+                                .primary()
+                                .small()
+                                .label(format!("Update to {}", release.version))
+                                .on_click(|_, window, cx| update::install(window, cx)),
+                        )
+                        .child(
+                            Button::new("settings-update-notes")
+                                .small()
+                                .icon(zz_ui::IconName::ExternalLink)
+                                .label("What's new")
+                                .bg(settings_control_fill(cx))
+                                .on_click(move |_, _, cx| cx.open_url(&notes_url)),
+                        )
+                        .into_any_element(),
+                )
+            }
+            (Some(status), Some(CheckState::UpToDate)) => (
+                format!(
+                    "zz {} is the newest {} release.",
+                    status.current,
+                    status.channel.label()
+                )
+                .into(),
+                check_button,
+            ),
+            (_, Some(CheckState::Failed(error))) => (
+                format!("The last check failed: {error}").into(),
+                check_button,
+            ),
+            (_, Some(CheckState::Checking)) => {
+                ("Asking GitHub for the newest release.".into(), check_button)
+            }
+            _ => (
+                "Releases are looked up shortly after launch and once a day after that.".into(),
+                check_button,
+            ),
+        };
+        Some(
+            SettingsStack::titled("Updates")
+                .child(Self::boolean_setting(
+                    ConfigKey::CheckForUpdates,
+                    "Check for updates",
+                    "Look up the newest release on GitHub once a day and offer it here. One \
+                     anonymous request; nothing about you or your sessions leaves the machine.",
+                    resolved.check_for_updates,
+                    cx,
+                ))
+                .child(SettingEntry::new("Latest release", description).control(control)),
+        )
+    }
+
+    #[cfg(target_os = "ios")]
+    fn updates_stack(_cx: &Context<Self>) -> Option<SettingsStack> {
+        None
+    }
+
     fn about_section(cx: &Context<Self>) -> AnyElement {
         Self::scroll_column("settings-about")
             .child(about_hero(cx))
+            .when_some(Self::updates_stack(cx), gpui::ParentElement::child)
             .child(
                 SettingsStack::titled("Build")
                     .description("What to quote in a bug report.")
@@ -2108,6 +2198,7 @@ fn numeric_config_value(config: AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::ShowFps
         | ConfigKey::QuitDaemonOnExit
         | ConfigKey::AutoRestartStaleDaemon
+        | ConfigKey::CheckForUpdates
         | ConfigKey::ExperimentalAgentPane
         | ConfigKey::ExperimentalEditorPane
         | ConfigKey::PaneGaps

@@ -73,6 +73,8 @@ rustix.workspace = true
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 gpui_platform.workspace = true
 mimalloc.workspace = true
+semver = "1"
+ureq = "3"
 wgpu.workspace = true
 zz-browser = { path = "../zz-browser" }
 zz-chrome-import = { path = "../zz-chrome-import" }

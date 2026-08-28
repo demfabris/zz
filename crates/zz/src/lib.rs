@@ -27,6 +27,8 @@ mod theme;
 #[cfg(not(target_os = "ios"))]
 mod tray;
 mod ui_scale;
+#[cfg(not(target_os = "ios"))]
+mod update;
 mod user_data;
 mod window;
 mod workspace;
@@ -1905,6 +1907,7 @@ fn run_app(
 
                     diagnostics::start_app_state_sampler(controller.clone(), mux.clone(), cx);
                     diagnostics::init_debug_mark(controller.clone(), mux.clone(), cx);
+                    update::start(mux.clone(), cx);
 
                     let shutdown_controller = controller.clone();
                     let shutdown_agent_controller = agent_controller.clone();

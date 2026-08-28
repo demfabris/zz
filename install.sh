@@ -164,8 +164,10 @@ install_macos() {
         target="$HOME/Applications/zz.app"
     fi
 
+    relaunch=
     if [ -n "$(gui_pids "$target/Contents/MacOS/zz")" ]; then
         say "quitting the running zz (the daemon keeps your sessions)"
+        relaunch=1
         osascript -e 'tell application id "dev.zz.app" to quit' >/dev/null 2>&1 || true
         i=0
         while [ -n "$(gui_pids "$target/Contents/MacOS/zz")" ]; do
@@ -181,6 +183,9 @@ install_macos() {
     mount=
     link_cli "$target/Contents/MacOS/cli"
     say "installed zz $version -> $target"
+    if [ -n "$relaunch" ]; then
+        open "$target" && say "reopened zz" && return 0
+    fi
     say "open it from Launchpad or run: zz"
 }
 

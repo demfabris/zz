@@ -159,8 +159,9 @@ steps.
 # Application configuration (`config/mod.rs`)
 
 On GUI startup, the app loads the first bounded [`zz/config`](/configuration/app-config.md) file from
-the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-three
-client-local knobs: fifteen switches (including `auto-restart-stale-daemon`), six lengths, one pane
+the platform's user configuration roots into GPUI globals. `ConfigKey` enumerates thirty-four
+client-local knobs: sixteen switches (including `auto-restart-stale-daemon` and
+`check-for-updates`), six lengths, one pane
 opacity factor, four enumerated selectors, the browser element-selector hotkey, and six `chrome-*`
 palette overrides.
 `AppConfig` stays `Copy`;

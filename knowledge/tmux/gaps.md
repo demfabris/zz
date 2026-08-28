@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **87**. Classified items: **593**.
+Tracked gap groups: **87**. Classified items: **595**.
 
 - Status: open: 46, blocked: 20, accepted: 21.
 - Decision: adopt: 51, native: 15, park: 15, never: 6.
-- Priority: next: 2, later: 64, none: 21.
+- Priority: next: 3, later: 63, none: 21.
 - Closed history entries: 98.
-- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 74, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 111, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 74, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 113, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -50,6 +50,7 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `mux.chain-parse-abort` | Abort invalid command groups before effects | adopt | open | medium | mux | scripts | none |
 | `tracker.semantic-coverage` | Close the remaining semantic discovery blind spots | adopt | open | medium | protocol | scripts | none |
 | `keys.copy-mode-binding-fidelity` | Match shared copy-mode binding commands | adopt | open | hard | protocol | daily, remote, scripts | copy-mode.command-fidelity |
 
@@ -72,7 +73,6 @@ structure as proof.
 | `hooks.queue` | Produce after-queue hooks | adopt | open | medium | daemon | scripts | none |
 | `keys.copy-mode-prompt-defaults` | Add prompt-backed emacs copy-mode defaults | adopt | open | medium | daemon | daily, remote, scripts | prompt.command-fidelity |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
-| `mux.chain-parse-abort` | Abort invalid command groups before effects | adopt | open | medium | mux | scripts | none |
 | `options.option-name-format-coverage` | Complete option-name format coverage | adopt | open | medium | mux | scripts | none |
 | `options.pane-chrome` | Consume pane chrome options | adopt | open | medium | client | daily, gui | none |
 | `options.theme-palette` | Map tmux theme palette options | park | blocked | medium | client | gui | none |
@@ -1230,14 +1230,14 @@ These flags depend on the input event that invoked the command.
 
 ### `mux.chain-parse-abort`: Abort invalid command groups before effects
 
-Protocol v76 separates parse and preparation failures as ServerError::CommandParse from target and runtime failures, and an already-running compatible local daemon rejects typed name or alias-body preparation errors before preprocessing or execution. Cold or failed preparation falls open to static routing, so an autospawn verb may still run before a later unknown command. Flag, arity, and other argument validation still happens per command, while config and source-file replay retain a dispatch-at-a-time boundary.
+Protocol v76 separates parse and preparation failures as ServerError::CommandParse from target and runtime failures, and an already-running compatible local daemon rejects typed name or alias-body preparation errors before preprocessing or execution. Cold or failed preparation falls open to static routing, so an autospawn verb may still run before a later unknown name, bad flag, bad arity, or invalid startup alias body. Pinned tmux first validates the raw client group to decide whether the server may start, without expanding arbitrary startup aliases, then reparses the full group on the server after config loading. The frozen 10r slice owns only that local cold-start seam. Generic warm argument validation and config or source-file replay are separate items rather than hidden acceptance clauses.
 
 - Decision: `adopt`
 - Status: `open`
-- Priority and ease: `later` / `medium`
+- Priority and ease: `next` / `medium`
 - Owner: `mux`
 - User impact: scripts
-- Items: `semantic:command-chain-parse-abort`
+- Items: `semantic:command-group-argument-parse-abort`, `semantic:config-source-group-parse-abort`, `semantic:local-cli-autospawn-parse-abort`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/message.rs`
@@ -1248,7 +1248,9 @@ Protocol v76 separates parse and preparation failures as ServerError::CommandPar
   - `scenario:compat/scenarios/smoke/cli-chain-parse-abort.txt`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `Every command group is parsed and validated before its first effect, including a local CLI chain whose first verb may autospawn a missing daemon, so a later parse or preparation error aborts the whole group while runtime command errors retain tmux queue ordering.`
+  - `Against a missing local daemon, the raw command vector receives a whole-group static syntax pass before routing or autospawn, then the started daemon authoritatively prepares one immutable vector after startup config but before effects; a raw syntax error or startup alias and callback preparation error leaves no earlier mutation or surviving server.`
+  - `Generic flag, arity, option-value, and other command-argument preparation errors abort a command group before its first effect, while runtime target and effect errors retain tmux queue ordering.`
+  - `Config and source-file replay construct and validate tmux's required command-group boundary before its first effect while preserving exact first-diagnostic and source-location behavior.`
 
 ### `options.lock-program`: Defer tmux lock process execution
 

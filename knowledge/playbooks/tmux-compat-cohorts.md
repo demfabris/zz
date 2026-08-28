@@ -341,7 +341,8 @@ closure is that exception.
 | 10o | Raw TUI menu | Closed under `clients.tui-display-menu-overlay` on 2026-08-28 | Complete | Daemon-published descriptor consumption, rendering order, shared keyboard ownership, and bounded attached cases close without absorbing broader menu fidelity |
 | 10p | Raw TUI popup | Closed under `clients.tui-display-popup-overlay` on 2026-08-28 | Complete | Popup state, rendering, input ownership, cleanup, and three attached cases close without absorbing broader popup fidelity |
 | 10q | Per-client no-detach-on-destroy fallback | Closed under `clients.no-detach-on-destroy` on 2026-08-28 | Complete | The configured primary remains shared, while only flagged clients use the bounded newest-session fallback |
-| Next rerank | Chain parsing and source-owned tracker registrations | Not frozen | Small to medium | Re-rank chain abort, nonconstant formats, open context formats, and option consumers after 10q |
+| 10r | Local cold-start CLI parse abort | Frozen under `semantic:local-cli-autospawn-parse-abort` on 2026-08-28 | Medium | Validate the complete missing-daemon command vector before routing or spawn, then require authoritative whole-vector daemon preparation before any effect |
+| Post-10r | Source-owned tracker registrations | `semantic:tracker-nonconstant-format-behavior`, then open context formats and option consumers | Small research | Register every claimed producer before returning to broader behavior slices |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | Post-rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
 | Post-rerank | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Medium after action fidelity | Seven keys become honest only after their five actions exist |
@@ -358,11 +359,21 @@ still exits both. Direct `off`, `previous`, and `next` selection stays unchanged
 active-pane routing, detach execution, parent-HUP exit, resize-hook ordering, client cwd, and overlay
 residue.
 
-Before freezing the next milestone, regenerate the report and re-rank every active daily, script,
-remote, or silent-mismatch group. That audit must include attach-dependent work such as
+The post-10q rerank froze 10r on `semantic:local-cli-autospawn-parse-abort`. The old chain-abort
+item was too broad, so generic command-group argument preparation and config or source-file group
+preparation now remain explicit sibling items. The frozen slice covers only a local CLI vector
+against a missing daemon: raw built-in syntax must fail before routing, stdin, TUI handoff, spawn,
+startup config, or effects. Arbitrary startup alias names cannot trigger autospawn, while canonical
+spellings remain eligible for startup shadowing. A vector that passes the raw gate receives
+authoritative whole-vector daemon preparation after config loading and before execution. Warm
+generic flag and arity atomicity, config and source replay, remote hosts, Control mode, and runtime
+rollback stay outside 10r.
+
+Before freezing every later milestone, regenerate the report and re-rank every active daily,
+script, remote, or silent-mismatch group. That audit must include attach-dependent work such as
 `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, `clients.parent-hup-exit`, `display-popup.behavior-fidelity`, and
-`display-menu.behavior-fidelity`. Every row after 10q is a dependency forecast,
+`display-menu.behavior-fidelity`. Every row after 10r is a dependency forecast,
 not permission to skip a newly unblocked practical gate. Keep formats, hooks, and `active-pane` as
 separate slices.
 

@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10Q CLOSED; RERANKING THE NEXT SLICE**
+> Campaign state: **SLICE 10R FROZEN: LOCAL COLD-START CLI PARSE ABORT**
 >
 > Tracker resolution progress: **64.3% (119 of 185 known groups)**
 >
-> Committed milestone base: **2026-08-28** at `9c05f4592549c6cb06b3224d9f6cd95512c0a3d4`
+> Committed milestone base: **2026-08-28** at `8310fb79b330b5d8f7eb2824ebcee14d81be38f7`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Committed milestone base | `9c05f4592549c6cb06b3224d9f6cd95512c0a3d4` |
-| Delivery | Local `main` contains the 10q closure; `origin/main` remains at `7cad19e` until an explicit push |
+| Committed milestone base | `8310fb79b330b5d8f7eb2824ebcee14d81be38f7` |
+| Delivery | Local `main` contains the committed 10q closure and frozen 10r plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10q is closed; the post-close rerank has not frozen its successor |
-| Live registry | 87 active groups, 593 active items, 98 closed records |
+| Campaign point | Slice 10r is frozen on the local cold-start CLI preparation seam |
+| Live registry | 87 active groups, 595 active items, 98 closed records |
 | Active status | 46 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10q closure descends from the verified `origin/main` base. Resolve the commit
+The 10r plan descends from the committed 10q milestone above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -231,7 +231,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10o | Raw-TUI menu rendering, shared resolver, lifecycle, and attached proof | `1a0f59e` |
 | 10p | Raw-TUI popup state, rendering, input ownership, and attached proof | `587ce54` |
 | 10p proof repair | Live-popup focus suppression, dead `-k` focus-close, and C-locale frame proof | `c909406` |
-| 10q | Per-client no-detach-on-destroy fallback and attached proof | Current milestone commit; resolve after creation |
+| 10q | Per-client no-detach-on-destroy fallback and attached proof | `8310fb7` |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -315,24 +315,61 @@ both zz and pinned tmux.
 Active-pane routing, detach execution, parent-HUP exit, resize-hook ordering, buffer and source-file
 cwd, and popup or menu residue remain separate.
 
-## Candidate queue after 10q
+## Frozen slice: 10r local cold-start CLI parse abort
 
-No successor is frozen yet. The table is a dependency forecast for the live post-10q rerank.
+The post-10q rerank confirmed `mux.chain-parse-abort` as the only top candidate with a reproduced
+silent mutation, no dependency, an existing fixture, and a narrow client seam. It also rejected the
+old omnibus item. The group now owns three explicit contracts; 10r freezes only
+`semantic:local-cli-autospawn-parse-abort`. Generic command-group argument preparation and config or
+source-file group preparation remain active sibling items.
+
+Current zz attempts whole-vector preparation only through a compatible live daemon. With a missing
+local socket, that attempt returns no result and routing falls back to the first command. A
+start-server verb can therefore spawn and mutate state before a later command fails to parse.
+Pinned tmux parses the whole raw client argument group before setting its start-server flag, without
+expanding arbitrary startup aliases, then parses the whole group again on the server after loading
+startup config and before queue insertion. A canonical command spelling may therefore be shadowed
+by a startup alias, while an arbitrary alias name cannot itself trigger autospawn.
+
+Slice 10r acceptance is:
+
+- against a missing local socket, the complete raw vector receives built-in name, alias, prefix,
+  flag, arity, and callback-type validation before routing, stdin consumption, TUI handoff, daemon
+  spawn, startup config, or effects;
+- the raw pass does not expand arbitrary user aliases: those cannot trigger autospawn, while a
+  canonical spelling remains eligible for startup-config shadowing;
+- after that static gate succeeds, the started daemon authoritatively prepares the complete vector
+  under one post-config alias snapshot, recursively constructs callbacks, and has every result
+  checked before the first command runs;
+- a raw syntax failure or startup alias and callback preparation failure exits nonzero without an
+  earlier session, environment, or buffer mutation or a surviving local server;
+- a successfully prepared vector retains current tmux queue behavior for runtime target or effect
+  errors: earlier effects remain and later commands do not run;
+- focused binary tests cover routing-sensitive first verbs, canonical startup shadowing, an
+  arbitrary startup alias name, and invalid nested alias bodies; the strict fixture covers warm and
+  cold sockets without a protocol or snapshot change.
+
+The slice excludes warm generic flag and arity atomicity, config or source-file replay, remote
+`--host` preparation, Control mode, runtime rollback, and queue cancellation. Those boundaries must
+not be smuggled into 10r merely because they also involve a command group.
+
+## Candidate queue after 10r
+
+The table is a dependency forecast, not permission to skip the rerank after 10r closes.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |
-| 1 | `mux.chain-parse-abort` | Abort a locally autospawned command group before any effect when a later command cannot parse or prepare |
-| 2 | `semantic:tracker-nonconstant-format-behavior` | Discover and register nonconstant format behavior |
-| 3 | `semantic:tracker-open-context-format-vocabulary` | Discover and register open context formats |
-| 4 | `semantic:tracker-option-consumer-registration` | Discover and register option consumers |
-| 5 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
-| 6 | Remaining `copy-mode.action-fidelity` items | Cursor, logical line, goto, selection, jump/prompt, and copy effects as separate slices |
-| 7 | `keys.copy-mode-unsupported-default-actions` | Add seven defaults only after their actions exist |
-| 8 | `copy-mode.command-fidelity` | Resolve or reclassify the interactive-refresh dependency first |
-| 9 | `keys.copy-mode-binding-fidelity` | Match the 15 divergent shared command shapes |
-| 10 | `prompt.command-fidelity` and then `keys.copy-mode-prompt-defaults` | Land generic prompt behavior before its ten copy-mode defaults |
+| 1 | `semantic:tracker-nonconstant-format-behavior` | Discover and register nonconstant format behavior |
+| 2 | `semantic:tracker-open-context-format-vocabulary` | Discover and register open context formats |
+| 3 | `semantic:tracker-option-consumer-registration` | Discover and register option consumers |
+| 4 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
+| 5 | Remaining `copy-mode.action-fidelity` items | Cursor, logical line, goto, selection, jump/prompt, and copy effects as separate slices |
+| 6 | `keys.copy-mode-unsupported-default-actions` | Add seven defaults only after their actions exist |
+| 7 | `copy-mode.command-fidelity` | Resolve or reclassify the interactive-refresh dependency first |
+| 8 | `keys.copy-mode-binding-fidelity` | Match the 15 divergent shared command shapes |
+| 9 | `prompt.command-fidelity` and then `keys.copy-mode-prompt-defaults` | Land generic prompt behavior before its ten copy-mode defaults |
 
-The two active groups marked `next` in the generated report are not themselves execution order.
+The active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are
 assigned only when a slice is frozen.
 

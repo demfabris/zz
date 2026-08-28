@@ -1940,14 +1940,16 @@
       "title": "Abort invalid command groups before effects",
       "decision": "adopt",
       "status": "open",
-      "priority": "later",
+      "priority": "next",
       "ease": "medium",
       "impact": [
         "scripts"
       ],
       "owner": "mux",
       "items": [
-        "semantic:command-chain-parse-abort"
+        "semantic:command-group-argument-parse-abort",
+        "semantic:config-source-group-parse-abort",
+        "semantic:local-cli-autospawn-parse-abort"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/message.rs",
@@ -1959,10 +1961,12 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Every command group is parsed and validated before its first effect, including a local CLI chain whose first verb may autospawn a missing daemon, so a later parse or preparation error aborts the whole group while runtime command errors retain tmux queue ordering."
+        "Against a missing local daemon, the raw command vector receives a whole-group static syntax pass before routing or autospawn, then the started daemon authoritatively prepares one immutable vector after startup config but before effects; a raw syntax error or startup alias and callback preparation error leaves no earlier mutation or surviving server.",
+        "Generic flag, arity, option-value, and other command-argument preparation errors abort a command group before its first effect, while runtime target and effect errors retain tmux queue ordering.",
+        "Config and source-file replay construct and validate tmux's required command-group boundary before its first effect while preserving exact first-diagnostic and source-location behavior."
       ],
       "depends_on": [],
-      "reason": "Protocol v76 separates parse and preparation failures as ServerError::CommandParse from target and runtime failures, and an already-running compatible local daemon rejects typed name or alias-body preparation errors before preprocessing or execution. Cold or failed preparation falls open to static routing, so an autospawn verb may still run before a later unknown command. Flag, arity, and other argument validation still happens per command, while config and source-file replay retain a dispatch-at-a-time boundary."
+      "reason": "Protocol v76 separates parse and preparation failures as ServerError::CommandParse from target and runtime failures, and an already-running compatible local daemon rejects typed name or alias-body preparation errors before preprocessing or execution. Cold or failed preparation falls open to static routing, so an autospawn verb may still run before a later unknown name, bad flag, bad arity, or invalid startup alias body. Pinned tmux first validates the raw client group to decide whether the server may start, without expanding arbitrary startup aliases, then reparses the full group on the server after config loading. The frozen 10r slice owns only that local cold-start seam. Generic warm argument validation and config or source-file replay are separate items rather than hidden acceptance clauses."
     },
     {
       "id": "options.lock-program",

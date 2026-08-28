@@ -96,10 +96,16 @@ interactive `notarytool store-credentials` setup.
 
 Pushing a `v*` tag runs the same sequence on `macos-15` and builds the Linux and Windows packages.
 The one-off squashed initial commit already declares `0.2.0-beta.1` and takes that tag directly.
-Afterward, `beta` advances the prerelease counter. The workflow publishes one GitHub release with
-every artifact, then updates the `demfabris/homebrew-zz` tap and the AUR by channel: a tag with a
-hyphen is a GitHub prerelease and renders only the beta channel (`zz@beta` cask, `zz-beta-bin`,
-pkgver with the hyphen stripped); a stable tag renders both channels, so beta users move up to it.
+Afterward, `beta` advances the prerelease counter. The macOS job creates the GitHub release as a
+draft and every platform uploads into it; a final `publish` job takes it out of draft once all of
+them have succeeded, and the tap and AUR pushes hang off that. The draft is load-bearing: the
+unauthenticated releases API never lists drafts, so `install.sh` cannot resolve a version whose
+Linux tarballs are still building, and a cask or PKGBUILD is never published pointing at an asset
+that does not exist yet. A failed platform leg leaves the draft a draft, so nothing ships
+half-published and rerunning that leg finishes the release. The tap and the AUR then update by
+channel: a tag with a hyphen is a GitHub prerelease and renders only the beta channel (`zz@beta`
+cask, `zz-beta-bin`, pkgver with the hyphen stripped); a stable tag renders both channels, so beta
+users move up to it.
 Stable Homebrew users install with `brew install --cask demfabris/zz/zz`, beta users with
 `demfabris/zz/zz@beta`; the two casks conflict.
 
@@ -113,7 +119,8 @@ a Caskroom entry owns the install; on Linux it hands the `.deb` to `apt-get` whe
 `usr/` tree under `~/.local`, which is already the XDG layout, patching the desktop entry's `Exec`
 to the absolute launcher. `site/public/install.sh` is a symlink to it; the Astro build copies the
 file, so the site deploy is what publishes a change.
-Render the cask by hand with the same script the workflow uses:
+Render the cask by hand with the same script the workflow uses. It takes the disk image or, as the
+workflow passes now that it renders on a runner that never held the DMG, that image's sha256:
 
 ```sh
 scripts/render-cask.sh 0.1.0 dist/zz-0.1.0-macos-arm64.dmg

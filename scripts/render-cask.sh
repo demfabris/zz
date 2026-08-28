@@ -10,18 +10,20 @@ die() { echo "error: $*" >&2; exit 1; }
 
 if [[ $# -lt 2 || $# -gt 3 ]]; then
     cat >&2 <<'EOF'
-usage: render-cask.sh <version> <disk-image> [stable|beta]
+usage: render-cask.sh <version> <disk-image-or-sha256> [stable|beta]
 
 Print the Homebrew cask for a released DMG. The version must match the tag
-without its leading `v`, and the disk image is the artifact the cask points at.
-The stable channel renders the `zz` cask; beta renders `zz@beta`, the cask
-prereleases publish to and stable releases keep current.
+without its leading `v`. The second argument is the disk image the cask points
+at, or its sha256 directly, which is what the release workflow passes now that
+it renders the cask on a runner that never held the DMG. The stable channel
+renders the `zz` cask; beta renders `zz@beta`, the cask prereleases publish to
+and stable releases keep current.
 EOF
     exit 2
 fi
 
 version="$1"
-dmg="$2"
+image="$2"
 channel="${3:-stable}"
 
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || \
@@ -29,11 +31,15 @@ channel="${3:-stable}"
 [[ "$channel" == stable || "$channel" == beta ]] || die "channel must be stable or beta: $channel"
 [[ "$channel" == beta || "$version" != *-* ]] || \
     die "prerelease versions render only the beta channel: $version"
-[[ -s "$dmg" ]] || die "disk image does not exist: $dmg"
 [[ -s "$TEMPLATE" ]] || die "cask template is missing: $TEMPLATE"
 
-sha256="$(shasum -a 256 "$dmg" | cut -d' ' -f1)"
-[[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || die "could not compute the disk image checksum"
+if [[ "$image" =~ ^[0-9a-f]{64}$ ]]; then
+    sha256="$image"
+else
+    [[ -s "$image" ]] || die "disk image does not exist: $image"
+    sha256="$(shasum -a 256 "$image" | cut -d' ' -f1)"
+    [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || die "could not compute the disk image checksum"
+fi
 
 cask="$(sed \
     -e "s/\"$PLACEHOLDER_VERSION\"/\"$version\"/" \

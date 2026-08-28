@@ -21,7 +21,6 @@ jobs:
       CEF_PATH: ${{ github.workspace }}/.cef-cache
       MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
       MACOS_NOTARY_PROFILE: zz-notary
-      TAP_REPOSITORY: demfabris/homebrew-zz
       ZZ_MACOS_BUILD_VERSION: ${{ github.run_number }}
 
     steps:
@@ -116,7 +115,11 @@ jobs:
           (cd dist && shasum -a 256 "$(basename "$ZZ_DMG")" > "$(basename "$ZZ_DMG").sha256")
           cat "$ZZ_DMG.sha256"
 
-      - name: Publish the GitHub release
+      # The release is born a draft and stays one until every platform has
+      # uploaded. Drafts are invisible to the unauthenticated releases API, so
+      # install.sh keeps resolving the previous version rather than naming this
+      # one and then 404ing on a Linux tarball that is still building.
+      - name: Create the draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -132,55 +135,16 @@ jobs:
               --title "zz $ZZ_VERSION" \
               --generate-notes \
               --verify-tag \
+              --draft \
               "${prerelease[@]}"
           fi
-
-      # Two casks, two channels: prereleases publish only to `zz@beta`, so
-      # `brew upgrade` never hands a stable user an rc, while a stable release
-      # refreshes both so beta users move up to it.
-      - name: Update the Homebrew tap
-        env:
-          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
-        shell: bash
-        run: |
-          tap="$RUNNER_TEMP/tap"
-          key="$RUNNER_TEMP/tap-deploy-key"
-          known_hosts="$RUNNER_TEMP/tap-known-hosts"
-          trap 'rm -f "$key" "$known_hosts"' EXIT
-
-          install -m 600 /dev/null "$key"
-          printf '%s\n' "$TAP_DEPLOY_KEY" > "$key"
-          # Pinned from api.github.com/meta rather than ssh-keyscan: trust on
-          # first use authenticates nothing on a runner that is always first use.
-          printf '%s %s\n' github.com \
-            'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
-            > "$known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts"
-
-          git clone --depth 1 "git@github.com:$TAP_REPOSITORY.git" "$tap"
-          mkdir -p "$tap/Casks"
-          if [[ "$ZZ_VERSION" != *-* ]]; then
-            scripts/render-cask.sh "$ZZ_VERSION" "$ZZ_DMG" stable > "$tap/Casks/zz.rb"
-          fi
-          scripts/render-cask.sh "$ZZ_VERSION" "$ZZ_DMG" beta > "$tap/Casks/zz@beta.rb"
-
-          git -C "$tap" add Casks
-          if git -C "$tap" diff --cached --quiet; then
-            echo "the tap already carries these casks"
-            exit 0
-          fi
-          git -C "$tap" \
-            -c user.name='github-actions[bot]' \
-            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit --message "zz $ZZ_VERSION"
-          git -C "$tap" push
 
       - name: Remove the signing keychain
         if: ${{ always() && env.ZZ_KEYCHAIN != '' }}
         run: security delete-keychain "$ZZ_KEYCHAIN"
 
-  # The macOS job owns creating the release and validating the tag against the
-  # workspace version, so this job and the Windows one below only upload.
+  # The macOS job owns creating the draft release and validating the tag against
+  # the workspace version, so this job and the Windows one below only upload.
   # Serializing on it also keeps anyone from racing to create the same release
   # object. The aarch64 leg rides GitHub's arm runners, which are free only
   # while the repository is public.
@@ -367,6 +331,88 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "$ZZ_ZIP" "$ZZ_ZIP.sha256" "$ZZ_SETUP" "$ZZ_SETUP.sha256" --clobber
 
+  # The one gate that makes the release real. Every platform has uploaded by
+  # the time this runs, so the moment the draft flips, install.sh resolves the
+  # new version and finds every asset it names. A failed platform leg leaves
+  # the draft a draft: nothing is half-published, and rerunning that leg
+  # finishes the release.
+  publish:
+    name: Publish
+    runs-on: ubuntu-24.04
+    needs: [linux, windows]
+    permissions:
+      contents: write
+
+    steps:
+      # No checkout, so gh needs the repository named outright.
+      - name: Take the release out of draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"
+
+  # Two casks, two channels: prereleases publish only to `zz@beta`, so
+  # `brew upgrade` never hands a stable user an rc, while a stable release
+  # refreshes both so beta users move up to it. This waits on the release being
+  # live because a cask pointing into a draft downloads nothing.
+  homebrew:
+    name: Homebrew tap
+    runs-on: ubuntu-24.04
+    needs: publish
+    env:
+      TAP_REPOSITORY: demfabris/homebrew-zz
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Render and push the casks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          # The DMG was built on a runner that is long gone, so the cask's
+          # checksum comes from the sidecar that shipped beside it.
+          sums="$RUNNER_TEMP/sums"
+          mkdir -p "$sums"
+          gh release download "$GITHUB_REF_NAME" --dir "$sums" \
+            --pattern 'zz-*-macos-arm64.dmg.sha256'
+          dmg_sha256="$(cut -d' ' -f1 "$sums/zz-$version-macos-arm64.dmg.sha256")"
+
+          tap="$RUNNER_TEMP/tap"
+          key="$RUNNER_TEMP/tap-deploy-key"
+          known_hosts="$RUNNER_TEMP/tap-known-hosts"
+          trap 'rm -f "$key" "$known_hosts"' EXIT
+
+          install -m 600 /dev/null "$key"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$key"
+          # Pinned from api.github.com/meta rather than ssh-keyscan: trust on
+          # first use authenticates nothing on a runner that is always first use.
+          printf '%s %s\n' github.com \
+            'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts"
+
+          git clone --depth 1 "git@github.com:$TAP_REPOSITORY.git" "$tap"
+          mkdir -p "$tap/Casks"
+          if [[ "$version" != *-* ]]; then
+            scripts/render-cask.sh "$version" "$dmg_sha256" stable > "$tap/Casks/zz.rb"
+          fi
+          scripts/render-cask.sh "$version" "$dmg_sha256" beta > "$tap/Casks/zz@beta.rb"
+
+          git -C "$tap" add Casks
+          if git -C "$tap" diff --cached --quiet; then
+            echo "the tap already carries these casks"
+            exit 0
+          fi
+          git -C "$tap" \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit --message "zz $version"
+          git -C "$tap" push
+
   # Two packages, two channels, mirroring the tap: prereleases publish only
   # to zz-beta-bin, stable releases refresh zz-bin and zz-beta-bin both.
   # Publishing needs an SSH key registered on the AUR account, stored as the
@@ -375,7 +421,7 @@ jobs:
   aur:
     name: AUR
     runs-on: ubuntu-24.04
-    needs: linux
+    needs: publish
     env:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 

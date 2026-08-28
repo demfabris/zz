@@ -93,14 +93,11 @@ constant-backed format with a manifest item and tracks every missing default key
 `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. For each shared default key, it reconciles the
 rendered command and repeat bit or requires a named `binding:` divergence.
 
-The gate does not prove that the runtime parser applies each inventoried `args_parse` rule,
-open-ended or dynamic context-format names, nonconstant format behavior, hook production, runtime
-behavior for shared bindings, or consumer truth for option `BEHAVES`.
-`tracker.semantic-coverage` owns those six blind spots. Its command-specific `args-parse:` items name the
-implemented callback commands; `choose-client` and `switch-mode` remain covered by their
-unimplemented command items. Protocol v84 closes four complete runtime rules plus `bind-key`,
-`command-prompt`, `confirm-before`, and `display-panes` within the `commands-or-string` rule, plus `set-hook`'s
-lexical monitor-or-value callback. `if-shell`
+The gate does not prove open-ended or dynamic context-format names, nonconstant format behavior,
+hook production, runtime behavior for shared bindings, or consumer truth for option `BEHAVES`.
+`tracker.semantic-coverage` owns those five blind spots. Protocol v84 closes all six runtime rules
+across the 12 implemented callback commands; no command-specific `args-parse:` item remains.
+`choose-client` and `switch-mode` remain covered by their unimplemented command items. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions
 and option values before effects, and leaves quoted braces as strings. `run-shell` accepts typed
 positionals only when a leading `-C` enables command mode; option values and all positionals without
@@ -164,14 +161,26 @@ Custom template execution remains parked because mux runtime rejects the positio
 of substituting the selected `%pane` for `%%%` and executing with the original queue state. Tmux
 uses `select-pane -t "%%%"` when the template is omitted; queue blocking and presentation stay
 separate.
-Two `args-parse:` items under one effective rule remain.
+`choose-buffer` and `choose-tree` closed together as a deliberate exception to the planned separate
+10j and 10k milestones. They share one callback rule, one chooser-template execution path, and one
+attached-client fixture. Each accepts zero or one string-or-typed template while `-F`, `-f`, `-K`,
+`-O`, and `-t` values stay strings. Typed children construct before parent type, arity, target, or
+effects. A typed template stores canonical command text before opening; a quoted template stays
+raw. Selection substitutes the exact buffer name or tree target, reparses against the current alias
+table, and executes in the invoking client's live context after closing the chooser. The first
+`%%` and every `%1` receive the selected value, and a trailing `%` applies the pinned quoting rule.
+Empty and stale buffer selections run no custom action. Attached parse and command errors begin
+with an uppercase character. The strict three-step fixture completes 26 checks and ends with
+`ARGS_PARSE_CHOOSERS=clean:26` on both servers with zero differential channels.
 Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option
 diagnostics, then stops scanning at its positional-session extension. The focused differential
 compares 516 probes against both zz and the pin, including unknown and invalid flags, help usage,
 missing values, required-value absorption, and optional-value lookahead. Parser-group atomicity and
-the remaining custom `args_parse` behavior stay separate tracker work. Differential scenarios,
+eager whole-file construction stay separate tracker work. Positional bounds run after option
+grammar and before recognized parked capability rejection on direct, daemon-preflight, and stored
+command paths. Differential scenarios,
 attached-client fixtures, unit tests, and manual GUI checks supply behavioral evidence.
 
 The [2026-08-22 CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)

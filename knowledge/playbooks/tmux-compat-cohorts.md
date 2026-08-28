@@ -101,6 +101,23 @@ strict three-step, 34-check fixture covers state transitions, type boundaries, a
 aliases, stored readback and preservation, client-before-completeness precedence, incomplete
 runtime groups, source-file diagnostics, and PID-unique FIFO Control framing.
 
+The twenty-second milestone reuses protocol v84 for `display-panes`. Its optional template accepts
+a string or typed block while `-d` and `-t` values remain strings. Targetless routing resolves an
+attached client before duration validation. The strict three-step fixture runs 22 internal checks
+with zero differential channels. Custom selection-template execution remains parked under
+`display-panes.command-template`.
+
+The twenty-third milestone closes `choose-buffer` and `choose-tree` together. This is the deliberate
+exception to the planned one-command 10j and 10k split: both commands use the same
+commands-or-string callback, the same chooser-template preparation and selection executor, and one
+26-check attached-client fixture. Splitting them would duplicate the production change and the
+proof without producing an independent closure. Both commands accept zero or one string-or-typed
+template. Typed templates freeze constructed aliases before opening; string templates parse
+against the current alias table after selection. The daemon closes the chooser first, substitutes
+the exact buffer name or tree target, and executes against the invoking client's live context.
+Direct and stored commands now validate positional bounds before rejecting a recognized parked
+capability. The tracker has no remaining command-specific `args-parse:` item.
+
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
 and TUI reconnect. `resize-window -A` and `-a` now aggregate retained client geometry once and
@@ -122,14 +139,17 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The final 10i canonical checkpoint covers 97 scenarios and 1,514 steps. Every ordinary row is clean.
+The combined 10j/10k canonical checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
+is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
-rows remain. The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
+rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
+`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
+The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
 `75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
 The historical 10g checkpoint remains 95 scenarios and 1,508 steps at SHA-256
 `15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
@@ -139,8 +159,10 @@ The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
-The final 10i artifact comes from a fresh full strict suite run. Its display-panes row contributes
-three harness steps and 22 internal checks with zero TOPO, GEO, FMT, OUT, or WARN differences.
+The combined 10j/10k artifact comes from a fresh full strict suite run. Its chooser row contributes
+three harness steps and 26 internal checks with zero TOPO, GEO, FMT, OUT, or WARN differences. The
+historical 10i display-panes row contributed three harness steps and 22 internal checks with the
+same clean channels.
 The two positional-bound scenarios prove canonical and alias diagnostics, the
 first-positional flag boundary, target-error precedence, and effect suppression. The expanded
 maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
@@ -206,6 +228,14 @@ template execution remains parked because mux runtime rejects a positional value
 substituting the selected `%pane` for `%%%` and executing with the original queue state. Tmux uses
 `select-pane -t "%%%"` when the template is omitted; queue blocking and presentation keep their
 existing owners.
+The focused three-step `args-parse-choosers` row runs 26 internal checks across `choose-buffer` and
+`choose-tree`. It covers string-only option values, typed and string alias timing, exact `%1` and
+`%%` substitution with trailing-percent quoting, live invoking-client context, tree target
+spellings, stale and empty buffers, chooser-close ordering, uppercase attached errors, and direct
+plus stored arity precedence over recognized parked flags. Both sides finish with
+`ARGS_PARSE_CHOOSERS=clean:26` and zero TOPO, GEO, FMT, OUT, or WARN differences. Broader chooser
+flags, presentation, eager whole-source construction, same-source alias mutation, generic alias
+recursion, and raw-TUI overlay parity retain their owners.
 
 # Cohorts
 
@@ -224,7 +254,8 @@ unrelated production paths. Do not merge slices to save a commit.
 
 The queue separates execution order from apparent ease. A blocked medium item does not jump ahead of
 the hard state contract that makes its proof meaningful. A range such as `10a-10f` means one
-milestone per letter, never one combined commit.
+milestone per letter unless a row records a shared-rule exception. The combined 10j/10k chooser
+closure is that exception.
 
 | Order | Slice | Current tracker ownership | Relative effort | Why it is bounded |
 |---|---|---|---|---|
@@ -251,7 +282,7 @@ milestone per letter, never one combined commit.
 | 10g | `set-hook` monitor-or-value argument rule | Closed under `tracker.args-parse-set-hook` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; lexical `-B` typing is closed while unsupported monitor runtime behavior retains its owner |
 | 10h | `display-menu` repeating item argument rule | Closed under `tracker.args-parse-display-menu` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; data-dependent NAME, KEY, and ACTION typing closes without absorbing menu presentation or selected-action execution |
 | 10i | `display-panes` commands-or-string argument rule | Closed under `tracker.args-parse-display-panes` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; parsing and client-routing precedence close while custom selection-template execution remains parked |
-| 10j-10k | Remaining `args_parse` runtime rules | Two `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | One shared source rule, never all callback commands at once |
+| 10j/10k | `choose-buffer` and `choose-tree` commands-or-string rule | Closed under `tracker.args-parse-choose-buffer` and `tracker.args-parse-choose-tree` on 2026-08-28 | Complete | One deliberate combined milestone for one callback rule, one chooser-template executor, and one attached 26-check proof |
 | 10l-10p | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 10q-10s | Raw TUI daemon overlays | Three items in `clients.tui-overlay-consumption`, one confirm, menu, or popup surface per slice | Hard | ClientCore already retains state; each client renderer and input contract remains independently closable |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -262,7 +293,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10i are closed; slice 10j is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through the combined 10j/10k milestone are closed; slice 10l is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

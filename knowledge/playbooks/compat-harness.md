@@ -113,19 +113,22 @@ dispatch now match the pin.
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
 `CommandInvocation`, and `COMMAND_ARGS_PARSE_BEHAVES` contains `bind-key`, `command-prompt`,
-`confirm-before`, `display-menu`, `display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
-`set-window-option` after source-file, Control, stored-command, parser, postcard, mux, and daemon
-proofs. The manifest carries two remaining `args-parse:` items under one effective rule. The unimplemented
-`choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
-the whole command.
+`choose-buffer`, `choose-tree`, `confirm-before`, `display-menu`, `display-panes`, `if-shell`,
+`run-shell`, `set-hook`, `set-option`, and `set-window-option` after source-file, Control,
+stored-command, parser, postcard, mux, and daemon proofs. All 12 implemented callback commands now
+apply their pinned rules. The unimplemented `choose-client` and `switch-mode` callbacks need no
+`args-parse:` item because their `command:` items cover the whole command.
 
-Six semantic gaps remain: runtime adoption of the inventoried argument rules, open-ended or dynamic
-context-format names, nonconstant format behavior, hook production, runtime behavior for shared
-bindings, and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns that
-work. Shared command-flag diagnostics closed on 2026-08-28 without retaining the earlier partial
+Five semantic gaps remain: open-ended or dynamic context-format names, nonconstant format
+behavior, hook production, runtime behavior for shared bindings, and consumer truth for names in
+option `BEHAVES`. `tracker.semantic-coverage` owns that work. Shared command-flag diagnostics
+closed on 2026-08-28 without retaining the earlier partial
 daemon roster. The catalog parser covers 83 implemented upstream canonical commands and 74 aliases
 through mux execution, daemon preflight, and stored commands. Exact native attach shares the
-leading-option diagnostics while keeping its positional-session boundary and extensions. The
+leading-option diagnostics while keeping its positional-session boundary and extensions. After
+option grammar, the common paths validate positional minima and maxima before rejecting a
+recognized parked capability. A too-short or too-long command therefore reports the pin's arity
+diagnostic even when it also names an unsupported flag. The
 `smoke/command-flag-errors` fixture byte-compares 516 probes on each server: 513 failures covering
 unknown and invalid flags, help usage, missing required values, and unsupported-before-unknown
 ordering, plus three successes proving required-value absorption. It checks pane, buffer, file,
@@ -236,8 +239,9 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The final 10i checkpoint from
-2026-08-28 contains 97 scenarios and 1,514 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`compat/results/summary.md` is the persisted canonical artifact. The combined 10j/10k checkpoint
+from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
+row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -328,6 +332,18 @@ still rejects a positional selection template instead of substituting the select
 `%%%` and executing with the original queue state. Tmux uses `select-pane -t "%%%"` when the
 template is omitted. This stays tracked under `display-panes.command-template`; queue blocking and
 presentation remain separate.
+The strict three-step `smoke/args-parse-choosers` scenario runs 26 internal checks across
+`choose-buffer` and `choose-tree`. Both commands accept zero or one string-or-typed template while
+`-F`, `-f`, `-K`, `-O`, and `-t` values stay strings. Typed children construct before parent type,
+arity, target, or effects. Typed templates freeze their constructed aliases before the chooser
+opens; string templates parse against the current alias table after selection. The daemon closes
+the chooser, substitutes the exact selected buffer or tree target, and executes against the
+invoking client's live context. The fixture covers placeholder quoting, stale and empty buffer
+behavior, uppercase attached-client errors, and direct plus stored arity precedence over
+recognized parked flags. Both sides publish `ARGS_PARSE_CHOOSERS=clean:26` with zero TOPO, GEO,
+FMT, OUT, or WARN differences. Broader chooser flags, presentation, eager whole-source
+construction, same-source alias mutation, generic alias recursion, and raw-TUI overlay parity keep
+their existing owners.
 Typed `if-shell`, `run-shell`, and structured `command-prompt` callbacks stop the failed physical
 group and continue later physical lines, while string callbacks stay one group. Structured prompt
 substitution preserves leaf-argument boundaries against quote or semicolon injection. Raw string
@@ -344,9 +360,12 @@ Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
-`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
-The 10i display-panes row contributes three harness steps and 22 internal checks with zero TOPO,
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,
 GEO, FMT, OUT, or WARN differences to the complete strict and attached artifact.
+The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
+`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`; its display-panes row
+contributed three harness steps and 22 internal checks with the same clean channels.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
 `75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
 The historical 10g checkpoint remains 95 scenarios and 1,508 steps at SHA-256

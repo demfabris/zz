@@ -2742,8 +2742,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "args-parse:choose-buffer",
-        "args-parse:choose-tree",
         "semantic:tracker-hook-producer-partition",
         "semantic:tracker-key-binding-behavior",
         "semantic:tracker-nonconstant-format-behavior",
@@ -2757,11 +2755,10 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "acceptance": [
-        "Each args-parse item moves to COMMAND_ARGS_PARSE_BEHAVES after tests prove that the runtime parser applies its pinned rule.",
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and two per-command callback items remain under the shared commands-or-string rule. `display-panes` accepts an optional string or typed template while `-d` and `-t` values remain strings; its custom selection-template runtime stays explicit under `display-panes.command-template`. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, and all 12 now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`. `choose-client` and `switch-mode` remain covered by their unimplemented-command items. Runtime adoption has no remaining command-specific `args-parse:` item. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3668,7 +3665,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "The old eight-command runtime gate is gone. Every implemented upstream command with a finite maximum now consumes its catalog maximum after leading option validation and the required minimum, before target resolution or effects. The pinned oracle contains 80 finite maxima: eight belong to explicitly unimplemented commands and all 72 executable commands use the shared validator. The daemon's common parser covers its finite roster, confirm-before now uses that parser, and all three lock commands share it without changing native target-only parsers. Stored bind-key and set-hook commands validate child minima and maxima after alias and option validation but before replacing prior state. One exhaustive daemon-path test executes every canonical name and built-in alias with maximum plus one arguments and proves the canonical diagnostic and unchanged state. The strict three-step fixture checks all 71 generic-CLI-routed finite commands and 62 aliases at exit 1 with empty stdout, exact stderr, and unchanged pane, buffer, and file state. Exact native attach keeps its positional-session extension and remains outside this generic CLI proof. Variadic commands, eight catalogued unimplemented commands, zz-native commands, and inner callback grammar are unchanged. No protocol change was needed."
+      "resolution": "The old eight-command runtime gate is gone. Every implemented upstream command with a finite maximum now consumes its catalog maximum after leading option grammar and the required minimum, before unsupported-capability rejection, target resolution, or effects. The pinned oracle contains 80 finite maxima: eight belong to explicitly unimplemented commands and all 72 executable commands use the shared validator. The daemon's common parser covers its finite roster, confirm-before now uses that parser, and all three lock commands share it without changing native target-only parsers. Stored bind-key and set-hook commands validate child minima and maxima after alias expansion and option grammar but before unsupported-capability rejection or prior-state replacement. One exhaustive daemon-path test executes every canonical name and built-in alias with maximum plus one arguments and proves the canonical diagnostic and unchanged state. The strict three-step fixture checks all 71 generic-CLI-routed finite commands and 62 aliases at exit 1 with empty stdout, exact stderr, and unchanged pane, buffer, and file state. Exact native attach keeps its positional-session extension and remains outside this generic CLI proof. Variadic commands, eight catalogued unimplemented commands, zz-native commands, and inner callback grammar are unchanged. No protocol change was needed."
     },
     {
       "id": "mux.command-flag-errors",
@@ -3687,7 +3684,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "One catalog-driven tmux option parser now covers all 83 implemented upstream canonical commands and 74 built-in aliases across mux execution, the daemon's preempted command paths, and stored bind-key and set-hook children. Exact native attach uses the same leading-option diagnostics while retaining its positional-session and --restart-daemon extensions; its first positional ends flag scanning. The parser emits canonical unknown-flag, invalid-flag, usage, and missing-value diagnostics, preserves required-value absorption and optional-value lookahead, and scans the full option grammar before reporting a catalogued unsupported capability. The catalog keeps product-truthful usage strings for list-commands and completion while exposing the pinned usage text only for diagnostics. The strict three-step fixture runs 516 byte-compared probes against zz and the pin: 513 exact failures plus three required-value absorption successes. It also proves unchanged panes, buffers, files, bindings, and hooks. Inner args_parse callback grammar, zz-native commands, and whole-command-group prevalidation remain with their existing tracker owners. No wire protocol or version change was needed."
+      "resolution": "One catalog-driven tmux option parser now covers all 83 implemented upstream canonical commands and 74 built-in aliases across mux execution, the daemon's preempted command paths, and stored bind-key and set-hook children. Exact native attach uses the same leading-option diagnostics while retaining its positional-session and --restart-daemon extensions; its first positional ends flag scanning. The parser emits canonical unknown-flag, invalid-flag, usage, and missing-value diagnostics, preserves required-value absorption and optional-value lookahead, and scans the full option grammar before positional arity and catalogued unsupported-capability rejection. Recognized parked flags therefore lose to a too-few or too-many diagnostic, matching the pin. The catalog keeps product-truthful usage strings for list-commands and completion while exposing the pinned usage text only for diagnostics. The strict three-step fixture runs 516 byte-compared probes against zz and the pin: 513 exact failures plus three required-value absorption successes. It also proves unchanged panes, buffers, files, bindings, and hooks. Inner args_parse callback grammar, zz-native commands, and whole-command-group prevalidation remain with their existing tracker owners. No wire protocol or version change was needed."
     },
     {
       "id": "mux.error-shapes",
@@ -3942,6 +3939,40 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "resolution": "Protocol v84 lexical command-block positions now drive `bind-key`'s pinned command-or-string rule without another wire change. Every positional accepts a string or typed block while `-T` and `-N` remain string-only, option scanning stops at the first positional or `--`, exact typed and string tails take their distinct construction paths, and typed command-name groups are omitted from variadic chains. Typed keys expand the live mux environment and use recursive canonical printing before key validation. Daemon dispatch stops the failed source group but continues later physical groups, while a string tail remains one group. Empty blocks, the pin's typed-first variadic oddity, aliases, nested callbacks, multiline groups, exact diagnostics, Control framing, and prior-binding preservation are covered by a strict 16-check source-file and Control fixture. Bare key-only mutation remains under `semantic:tracker-key-binding-behavior`; eager whole-file validation, parse-only `source-file -n`, same-source alias creation, and nested user-alias suppression remain with their existing parser and alias owners. Seven implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
+    },
+    {
+      "id": "tracker.args-parse-choose-buffer",
+      "title": "Apply choose-buffer command-or-string argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-choosers.sh",
+        "scenario:compat/scenarios/smoke/args-parse-choosers.txt",
+        "resource:knowledge/tmux/choose-tree.md",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `choose-buffer`'s pinned command-or-string rule without another wire change. The command accepts zero or one template positional as a string or typed block, while `-F`, `-f`, `-K`, `-O`, and `-t` values remain strings. Every typed child constructs before parent type, arity, target, or effects. Command preparation constructs and serializes a typed template before the chooser opens, using ` ; ` inside a physical group and ` ;; ` between groups; a quoted template remains raw. Selection parses the resulting text against the current alias table, so typed aliases retain their earlier construction while string aliases observe later changes. The daemon closes the overlay, confirms that the selected buffer still exists, substitutes its exact name for the first `%%` and every `%1` with the pin's trailing-percent quoting, and executes in the invoking client's live context. Parse and command errors reach the attached client with an uppercase first character. An empty buffer store opens no chooser and runs no custom action; a buffer removed after opening closes the stale chooser without running its template. The focused three-step, 26-check differential reports zero TOPO, GEO, FMT, OUT, and WARN differences; both sides set `ARGS_PARSE_CHOOSERS=clean:26`. It covers typed and string alias timing, exact substitution and quoting, attached selection, uppercase parse and runtime errors, close ordering, empty-store behavior, and direct plus stored arity precedence over recognized parked flags. `-F`, `-k`, and `-y`, tagging and editor behavior, broader chooser presentation, eager whole-source construction, same-source alias mutation, generic alias recursion, and raw-TUI overlay parity retain their existing owners."
+    },
+    {
+      "id": "tracker.args-parse-choose-tree",
+      "title": "Apply choose-tree command-or-string argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-choosers.sh",
+        "scenario:compat/scenarios/smoke/args-parse-choosers.txt",
+        "resource:knowledge/tmux/choose-tree.md",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `choose-tree`'s pinned command-or-string rule without another wire change. The command accepts zero or one template positional as a string or typed block, while `-F`, `-f`, `-K`, `-O`, and `-t` values remain strings. Every typed child constructs before parent type, arity, target, or effects. Command preparation constructs and serializes a typed template before the chooser opens, preserving ` ; ` and ` ;; ` group boundaries; a quoted template remains raw until selection. The daemon closes the overlay, substitutes the selected session as `=name:`, window as `=name:index.`, or pane as `=name:index.%id`, then parses the resulting text against the current alias table. Typed aliases retain their earlier construction, while string aliases observe later changes. The selected row supplies the replacement string without retargeting execution; the action keeps the invoking client's live session, window, and pane context. Parse and command errors reach the attached client with an uppercase first character. The focused three-step, 26-check differential reports zero TOPO, GEO, FMT, OUT, and WARN differences; both sides set `ARGS_PARSE_CHOOSERS=clean:26`. It covers typed and string timing, exact substitution, live source-context execution, attached selection, error delivery, close ordering, and direct plus stored arity precedence over recognized parked flags; mux and daemon tests cover every target spelling and physical-group serialization. `-F`, `-G`, `-h`, `-k`, and `-y`, tagging, previews, kill and swap actions, broader chooser presentation, eager whole-source construction, same-source alias mutation, generic alias recursion, and raw-TUI overlay parity retain their existing owners."
     },
     {
       "id": "tracker.args-parse-command-prompt",

@@ -42,8 +42,10 @@ accepted usage strings, flags/options, and completion value kinds; `canonical_co
 uses catalog flag arity, stops at the first positional or bare `--`, splits short clusters, consumes
 attached or separated required values, and applies the pin's lookahead to optional values. It emits
 the canonical command name in unknown-flag, invalid-flag, usage, and missing-value errors before a
-handler reports an unsupported capability. Mux execution, daemon-preempted commands, stored
-bindings and hooks use this contract. Exact native attach uses the same leading-option diagnostics,
+handler reports an unsupported capability. After option grammar, those consumers validate
+positional minima and maxima before unsupported-capability rejection. A recognized parked flag
+therefore cannot hide the pin's arity diagnostic. Mux execution, daemon-preempted commands, stored
+bindings, and hooks use this contract. Exact native attach uses the same leading-option diagnostics,
 then stops scanning at its positional-session extension while still accepting trailing
 `--restart-daemon`. zz-native commands keep their local parsers. `CommandSpec::pinned_tmux_usage`
 supplies the diagnostic text for 24 commands whose honest
@@ -68,8 +70,8 @@ accepts six rules and fails when a callback body falls outside them:
 
 `COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
 remain unimplemented and need no sidecar entry. `COMMAND_ARGS_PARSE_BEHAVES` now contains
-`bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `display-panes`, `if-shell`, `run-shell`, `set-hook`,
-`set-option`, and `set-window-option`. Every `bind-key`
+`bind-key`, `choose-buffer`, `choose-tree`, `command-prompt`, `confirm-before`, `display-menu`,
+`display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option`. Every `bind-key`
 positional accepts a string or typed block while `-T` and `-N` values remain strings. Scanning
 stops at the first positional or `--`; a typed key expands the live mux environment and is
 recursively printed before key lookup. Unknown typed-key commands keep their source diagnostic.
@@ -140,8 +142,16 @@ attached client reports `no current client`, while a Command client can select a
 Interactive client. This closes the parser rule, not the custom action: mux execution still rejects
 a positional template instead of substituting the selected `%pane` for `%%%` and executing with
 the original queue state. Tmux uses `select-pane -t "%%%"` when the template is omitted. This is tracked under
-`display-panes.command-template`. `tracker.semantic-coverage` owns the remaining two
-command-specific `args-parse:` items under one effective rule.
+`display-panes.command-template`. `choose-buffer` and `choose-tree` each accept zero or one
+string-or-typed template while `-F`, `-f`, `-K`, `-O`, and `-t` values stay strings. Every typed
+child constructs before parent type, arity, target, or effects. A typed template stores constructed
+canonical command text before opening; a string template stays raw. Selection substitutes the
+exact buffer name or tree target, parses against the current alias table, and executes in the
+invoking client's live context after closing the chooser. Tree values use `=name:`, `=name:index.`,
+or `=name:index.%id`. The first `%%` and every `%1` receive the value; a trailing `%` applies the
+pin's quoting. Empty and stale buffers run no custom action, and attached parse or command errors
+start with an uppercase character. All 12 implemented callback commands now apply their pinned
+rule, leaving no command-specific `args-parse:` item.
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |
@@ -225,8 +235,8 @@ terminal; piped Control stdin contributes none.
 | `command-prompt` | . | Open the native command prompt (`-p`, `-I`, `%%` template). `-b` is accepted and already true: the prompt never blocks its caller. `-T command\|search` picks the history ring; the mode flags resolve in the pin's order `-1`, `-N`, `-i`, `-k`, `-e` with `-C` orthogonal. `-1` submits one key, `-k` submits that key's NAME, `-N` collects digits and lets the first non-digit both submit and reach the key tables, `-i` runs the template on every edit with an `=`/`-`/`+` prefix, `-e` exits on a backspace at an empty buffer, and `-C` keeps terminal frames flowing where a plain prompt freezes them. The template positional accepts a typed block or string. Typed templates retain their structured constructed command lists through submission; string templates substitute raw source and then parse and construct the full result against the current alias table. Both paths replace the first `%%` and every `%1`, with trailing-percent quoting. Typed substitution preserves argument boundaries against quote or semicolon injection. Typed physical groups retain their boundaries, while string templates and free input form one group. String failures keep the originating source path and line. Prompt chaining and multi-answer `%2` retain their separate owner. `-l`, `-F`, `-t` and `-P` are still rejected. |
 | `show-prompt-history` / `clear-prompt-history` | `showphist` / `clearphist` | Show or clear the separate command and search prompt rings. `-T command` or `-T search` selects one ring; omitting it shows or clears both. Show output numbers entries oldest first with the pin's header and blank lines. Invalid types error, and clears rewrite the configured `history-file`. Runtime saves serialize record/clear races so stale history cannot reappear on disk. |
 | `focus-sidebar` | . | *zz-native:* show and focus the workspace sidebar (`-t`). |
-| `choose-tree` | . | Open the native hierarchy chooser: panes by default, windows with `-w`, sessions with `-s`. `-f` filters in pane context, `-O` sorts each hierarchy level, and `-r` reverses the default index order or the explicit sort. Zero matches restore the unfiltered tree and show `filter: no matches`. `-Z` is accepted and already true: the full-window overlay has nothing left to zoom. The default `C-b s`/`C-b w` bindings still call zz-native `focus-sidebar` directly. |
-| `choose-buffer` | . | Open the paste-buffer chooser (`-Z`,`-t`,`-f`,`-O`,`-r`). It defaults to creation order newest first, preserves source-pane context for filters, and falls back to the unfiltered list with `filter: no matches` on zero matches. `-Z` is accepted and already true, as for `choose-tree`. |
+| `choose-tree` | . | Open the native hierarchy chooser: panes by default, windows with `-w`, sessions with `-s`. `-f` filters in pane context, `-O` sorts each hierarchy level, and `-r` reverses the default index order or the explicit sort. Zero matches restore the unfiltered tree and show `filter: no matches`. An optional string-or-typed template substitutes the selected exact session, window, or pane target and executes against the invoking client's live context; without one, selection keeps the native activation. `-Z` is accepted and already true: the full-window overlay has nothing left to zoom. The default `C-b s`/`C-b w` bindings still call zz-native `focus-sidebar` directly. |
+| `choose-buffer` | . | Open the paste-buffer chooser (`-Z`,`-t`,`-f`,`-O`,`-r`). It defaults to creation order newest first, preserves source-pane context for filters, and falls back to the unfiltered list with `filter: no matches` on zero matches. An optional string-or-typed template substitutes the selected exact buffer name; without one, selection pastes. An empty store opens nothing, and a selected buffer removed while the chooser is open closes it without executing the template. `-Z` is accepted and already true, as for `choose-tree`. |
 | `show-messages` | `showmsgs` | Print the daemon's message ring newest first with tmux's timestamps. The server-scoped `message-limit` bounds retention at insertion time and defaults to 1,000. Successful command-client invocations produce `command:` entries; failures produce one `message:` entry with the error. `display-message` without `-p` also adds an entry. |
 | `display-message` | `display` | Expands a pane-scoped format. With no message or `-F`, ordinary calls use the pin's timestamp-bearing default and `-l` preserves it as literal text. `-p` prints to the caller; a nonprinting call delivers to the supported `-c` client and owns that destination's duration, freeze, replacement, and sticky `-N` state. The `-t` pane remains independent. Client formats use `-c` only when that client belongs to the retained target session; otherwise they use that session's highest-activity attached client. A valid unattached target widens to the highest-activity client across sessions. The oldest-created client wins either tie. Protocol v83 supplies the complete retained client fact record in explicit and implicit cases. Missing sessions and zero attached clients leave client facts empty. CANFAIL target lookup retains each valid component before a later miss. `-d` accepts `0..=4294967295`; omitted duration comes from the destination's attached session. Positive Interactive messages can freeze publication and set or clear ignore-keys; zero waits for writable input. `-C` keeps frames flowing. Read-only callers still fail authorization, while a writable caller may target a read-only client. `-a`, `-v`, `-I`, mouse `-t =`, and relative or special pane targets retain their tracker groups. |
 | `display-panes` | `displayp` | Pane-number overlay (`-d` duration). `-t` uses the supported attached-client selector above. The overlay uses that client's current window, and client lookup precedes `-d` validation. An omitted `-d` uses the target session's effective `display-panes-time`; zero installs no deadline. The optional positional selection template now accepts a string or typed block and constructs before parent option-type or arity validation. Runtime still rejects that positional value instead of substituting the selected `%pane` for `%%%` and executing with the original queue state; tmux uses `select-pane -t "%%%"` when the template is omitted. `display-panes.command-template` keeps this loud gap separate from parsing. `-N` disables pane selection: the first key closes the overlay and continues through ordinary input handling. `-b` is accepted, but zz always returns immediately; unlike tmux, omitting it does not block the command queue until the overlay closes. |

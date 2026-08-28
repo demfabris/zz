@@ -181,8 +181,9 @@ report. `just compat-check` runs the full gate.
 ## Command positional bounds
 
 All 72 implemented pinned commands with a finite upper bound now use the catalog's maximum after
-leading options and the required minimum, but before targets or effects. The oracle contains 80
-finite maxima; the other eight belong to explicitly unimplemented commands. Mux and daemon paths
+leading option grammar and the required minimum, but before unsupported-capability rejection,
+targets, or effects. The oracle contains 80 finite maxima; the other eight belong to explicitly
+unimplemented commands. Mux and daemon paths
 format the exact `command <canonical-name>: too many arguments (need at most N)` diagnostic.
 `confirm-before` and the three lock commands use the daemon's common parser, while stored
 `bind-key` and `set-hook` children validate both bounds before replacing prior state. Variadic
@@ -217,8 +218,10 @@ overrides so `list-commands` and completion continue to describe zz's implemente
 
 The strict three-step `smoke/command-flag-errors` fixture compares 516 probes on each server. It
 contains 513 exact failures and three required-value absorption successes, then checks pane,
-buffer, file, binding, and hook sentinels. The remaining six custom `args_parse` command items,
-semantic value validation, and parser-group atomicity stay under their existing owners.
+buffer, file, binding, and hook sentinels. Positional bounds now run after that option grammar and
+before recognized parked capabilities, so direct and stored commands return the pin's arity error
+for the combined case. All implemented custom `args_parse` command items have since closed;
+semantic value validation and parser-group atomicity stay under their existing owners.
 
 ## `if-shell` argument blocks
 
@@ -488,6 +491,36 @@ state; an omitted template uses `select-pane -t "%%%"`. Mux execution still reje
 template, and its native overlay has a fixed select-pane action. The loud runtime gap is parked under
 `display-panes.command-template`; overlay queue blocking and presentation retain separate owners.
 
+## `choose-buffer` and `choose-tree` argument blocks
+
+The final two implemented members of the shared commands-or-string rule closed together on
+2026-08-28 without a wire change. This is a deliberate exception to the planned separate 10j and
+10k milestones: both commands use the same callback rule, the same chooser-template execution path,
+and one attached-client fixture. Each accepts zero or one string-or-typed template. Values for
+`-F`, `-f`, `-K`, `-O`, and `-t` stay strings. Every lexical typed child constructs before parent
+type, arity, target, or effects. Direct and stored commands also validate positional bounds before
+rejecting a recognized parked capability.
+
+A typed template resolves its aliases and stores canonical text before the chooser opens, with
+` ; ` inside one physical group and ` ;; ` between groups. A quoted template stays raw. Selection
+parses the substituted text against the current alias table, so a typed alias stays frozen while a
+string alias observes later changes. The first `%%` and every `%1` receive the selected value; a
+trailing `%` quotes double quotes, backslashes, dollar signs, semicolons, and tildes.
+
+Tree rows supply `=name:` for sessions, `=name:index.` for windows, and `=name:index.%id` for panes.
+Buffer rows supply the exact buffer name. The row does not retarget execution: the action uses the
+invoking client's live session, window, and pane context. The daemon closes the chooser before
+execution and capitalizes the first character of attached parse and command errors. An empty buffer
+store opens no chooser, and a selected buffer removed after opening closes without running its
+template.
+
+The strict three-step `smoke/args-parse-choosers` fixture runs 26 internal checks and ends with
+`ARGS_PARSE_CHOOSERS=clean:26` on both servers. It reports zero TOPO, GEO, FMT, OUT, or WARN
+differences. Broader chooser flags, tagging, previews, editor behavior, tree kill and swap actions,
+presentation, eager whole-source construction, same-source alias mutation, generic alias recursion,
+and raw-TUI overlay parity retain their existing owners. No command-specific `args-parse:` item
+remains for an implemented command.
+
 ## Accepted grammar divergence evidence
 
 The catalog count does not include syntax zz accepts or parses before diverging:
@@ -732,7 +765,7 @@ client.
 | Command-name abbreviation | Closed 2026-08-24. Exact canonical names and aliases resolve first. Non-exact lookup searches the pinned tmux canonical namespace before the guarded 19-name native roster, so every pinned prefix keeps its tmux result while native names stay exact and noncolliding native abbreviations such as `capture-b` remain available. The manifest gate derives the roster from catalog minus oracle and checks every prefix of all 92 pinned names. A strict 29-step differential scenario covers the 25 prefixes that native names had changed, exact tmux aliases, a user `command-alias` named `split`, and ambiguous `list-commands` exit parity. The daemon resolves one alias layer for a direct invocation before read-only authorization and reuses that invocation through dispatch and hooks. Stored bind-key and set-hook commands execute their constructed lists without another user-alias lookup, and read-only clients authorize that frozen chain before any effect. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks remain frozen after lexical construction. Set-hook and command-valued native set-option keep their documented second construction stage; display-menu selection begins a fresh stage. Matched unsupported bodies refuse without falling through to canonical or catalog-alias lookup. Protocol v74 closes Control's former static unknown-name precheck: the client asks the daemon to prepare the whole initial argv unit or LF line under one lock before allocating frames, then executes the returned invocations without a second alias lookup and with normal authorization. Local ordinary CLI commands now use the same prepared canonical identity and alias-match state for attach, new-session, stdin, and kill recovery routing, including immutable TUI handoff. Remote `--host` preprocessing remains static under `aliases.remote-client-preflight`. Prefixes resolving to catalogued-but-unimplemented commands still answer `unsupported command: <canonical>`. | closed |
 | `set prefix` key validation | zz rejects unresolvable bare keys with the pin's `bad key: <value>` but silently accepts unresolvable `C-`/`M-` keys the pin rejects (`C-zz`): a typo'd prefix is accepted and never fires. Full strictness needs the pin's `key_string_table` breadth (`^a` caret form, `BTab`, the KP family) — a partial tightening would loudly reject pin-valid keys instead, so this waits for a key-string parity wave. | **silent** edge |
 | `resize-pane` direction amount metadata | Closed 2026-08-25 as a catalog-only reconciliation. Runtime already accepted bare `-D`/`-L`/`-R`/`-U` with amount 1 plus attached and separated integer amounts. The four catalog entries now mark their values optional, and the manifest compares that shape with the pin. No handler, effect, or wire contract changed. The strict 16-step `resize-directions` differential is clean with no skips. `-M` and `-T` remain open under their existing owners. | closed metadata gap; runtime unchanged |
-| Error-shape residue (post-7b) | Grep-facing error classes are pin-bare and byte-exact since wave 7b (2026-08-18): the twelve `options-values.sh` regress strings, `can't find session/window/pane:`, `unknown command:`, `already set:`, `open terminal failed: not a terminal`, show-messages pairs, `%config-error <file>:<line>:`. Catalogued-but-unimplemented commands/options answer `unsupported command: <name>`, a zz-only condition the pin would instead run. Positional minimum and maximum diagnostics closed on 2026-08-27 across all 72 implemented finite commands, their built-in aliases, and stored `bind-key` and `set-hook` children. Shared flag diagnostics and usage fallbacks closed on 2026-08-28 across all 83 implemented upstream commands and 74 aliases, replacing the earlier 24-command daemon-only rejection roster. Nested non-detached `new-session` precedence also closed on 2026-08-28, leaving no active `mux.error-shapes` item. Command-specific semantic value diagnostics retain their existing owners. | arity, shared flag text, and nested `new-session` precedence closed; semantic value families remain |
+| Error-shape residue (post-7b) | Grep-facing error classes are pin-bare and byte-exact since wave 7b (2026-08-18): the twelve `options-values.sh` regress strings, `can't find session/window/pane:`, `unknown command:`, `already set:`, `open terminal failed: not a terminal`, show-messages pairs, `%config-error <file>:<line>:`. Catalogued-but-unimplemented commands/options answer `unsupported command: <name>`, a zz-only condition the pin would instead run. Positional minimum and maximum diagnostics closed on 2026-08-27 across all 72 implemented finite commands, their built-in aliases, and stored `bind-key` and `set-hook` children. Shared flag diagnostics and usage fallbacks closed on 2026-08-28 across all 83 implemented upstream commands and 74 aliases, replacing the earlier 24-command daemon-only rejection roster. The chooser close then made positional bounds outrank recognized parked capabilities on direct, daemon-preflight, and stored-command paths. Nested non-detached `new-session` precedence also closed on 2026-08-28, leaving no active `mux.error-shapes` item. Command-specific semantic value diagnostics retain their existing owners. | arity, shared flag text, parked-capability precedence, and nested `new-session` precedence closed; semantic value families remain |
 | Alerts | Full alerts.c behavior closed on 2026-08-26. `monitor-bell` gates the bell path, `monitor-activity` raises the activity flag from PTY output, and `monitor-silence` arms per-window daemon deadlines that re-arm on output and expiry. Every successful silence-option write, including a same-value write or repeated global reset, resets every live window timer; a missing local `-u` and a rejected `-o` do not. Window selection clears alerts and requeues activity like `session_set_current`. Attach clears the mux-visible bell, activity, and silence flags only on the session's active window before snapshotting. The alert action and label are evaluated once against that active window, then the same ring or message decision fans to every eligible Interactive client. Flags surface through `#{window_flags}` (`#`/`!`/`~` in pin order), the window flag formats, `session_alert`/`session_alerts`, and `session_activity_flag`/`session_silence_flag`, whose misleading names mirror the resolved target window. Visual alerts use the daemon-owned message lifecycle. Every eligible attached Interactive client owns its message identity, replacement record, timer, terminal-publication freeze, and full-viewport thaw. Full-frame repair, resync, and popup viewport publication obey the same gate. Its exact bounded log entry is `<client> message: <text>`, using the registered name or `device-<id>` fallback. Control clients can receive pane BEL bytes through `%output` but receive no alert message or alert log entry. `TerminalSession` publishes one reliable `TerminalEvent::Bell` per BEL callback, matching pinned `alerts.c:196-215`; the mux owns the visible alert flag, so a repeated Bell can notify while `#{window_bell_flag}` remains 1 until selection or attach clears it. The attached fixture replaces a 1,500 ms sticky message with a 5,000 ms alert, proves 1.8 seconds of freeze, repeats the Bell on the same unvisited pane, waits 5.2 seconds for the pin's stale timer, and proves zero-duration dismissal. zz deliberately cancels and identity-checks old timers instead of letting one clear a newer zero-duration alert. The narrow TUI status surface may show only the stable `Bell in window` prefix because its detach hint truncates the trailing index. | closed; stale-timer cancellation remains deliberately safer than the pin |
 | `select-layout main-*` with 2 panes | The pin never sizes the lone "other" pane (layout-set.c:264-269, :458-463), leaving stale geometry that fails tmux's own `layout_check`; zz sizes it (80x24 → main 80x22 + other 80x1). Deliberate: zz refuses to reproduce an upstream bug. | **silent**, zz more correct |
 | `select-layout -E` on a mixed parent | The pin spreads only leaf children (layout.c `layout_cell_is_tiled`) but divides the parent's full extent among them, so a parent mixing leaves with nested nodes gets corrupt sums (observed: 40+42+39 in an 80-wide window, last pane at xoff 84). Every later operation on that corrupted window keeps diverging: one `-E` produced four geometry divergences, three downstream, so the known scenario has one causal step but the divergence is not bounded to it. zz refuses that spread and stops the walk where the pin stops. All-leaf parents are exact (48 pin fixtures + `known/known-spread-mixed.txt`). | **silent**, zz more correct |

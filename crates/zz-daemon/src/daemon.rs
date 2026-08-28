@@ -4694,7 +4694,9 @@ impl Shared {
             && let Some(spec) = zz_protocol::catalog_command_spec(canonical)
             && spec.uses_tmux_option_grammar()
         {
-            zz_protocol::parse_tmux_command_options(spec, command)?;
+            let parsed = zz_protocol::parse_tmux_command_options(spec, command)?;
+            spec.validate_positional_minimum(parsed.positionals.len())?;
+            spec.validate_positional_maximum(parsed.positionals.len())?;
         }
         let unattached_watch = {
             let inner = self.inner.lock();
@@ -5988,6 +5990,7 @@ impl Shared {
                         filter,
                         sort,
                         key_format,
+                        template,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -5999,7 +6002,7 @@ impl Shared {
                         }
                         let attached_session = client_attached_session(&inner, client);
                         let facts = format_hook_facts(&inner);
-                        let chooser = ChooseTreeSession::new(
+                        let mut chooser = ChooseTreeSession::new(
                             *tree_kind,
                             *sessions_only,
                             *pane,
@@ -6010,6 +6013,7 @@ impl Shared {
                             *sort,
                             key_format.clone(),
                         )?;
+                        chooser.template.clone_from(template);
                         if attached_session != Some(chooser.source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -6032,6 +6036,7 @@ impl Shared {
                         filter,
                         sort,
                         key_format,
+                        template,
                     } => {
                         if kind != ClientKind::Interactive
                             || !inner.subscribers.contains_key(&client)
@@ -6043,7 +6048,7 @@ impl Shared {
                         }
                         let attached_session = client_attached_session(&inner, client);
                         let facts = format_hook_facts(&inner);
-                        let Some(chooser) = ChooseBufferSession::new(
+                        let Some(mut chooser) = ChooseBufferSession::new(
                             *pane,
                             &inner.engine,
                             &inner.paste_buffers,
@@ -6056,6 +6061,7 @@ impl Shared {
                         else {
                             continue;
                         };
+                        chooser.template.clone_from(template);
                         if attached_session != Some(chooser.source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -11924,7 +11930,7 @@ impl Shared {
                     self.input_choose_tree(client, kind, context, action)?;
                 }
                 InputMessage::ChooseBuffer { action } => {
-                    self.input_choose_buffer(client, kind, action)?;
+                    self.input_choose_buffer(client, kind, context, action)?;
                 }
                 InputMessage::DisplayPanes { action } => {
                     self.input_display_panes(client, kind, context, action, false)?;
@@ -12177,6 +12183,17 @@ impl Shared {
         command: &str,
         title: &str,
     ) {
+        self.execute_overlay_source_with_error_case(client, context, command, title, false);
+    }
+
+    fn execute_overlay_source_with_error_case(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        command: &str,
+        title: &str,
+        uppercase_error: bool,
+    ) {
         let source = InsertedCommandSource::String(command.to_owned());
         match self.execute_inserted_commands(
             client,
@@ -12192,7 +12209,9 @@ impl Shared {
                 title.to_owned(),
                 &result.output,
             ),
-            Err(error) => self.publish_background_command_error(client, context, &error, false),
+            Err(error) => {
+                self.publish_background_command_error(client, context, &error, uppercase_error);
+            }
         }
     }
 
@@ -12783,7 +12802,12 @@ impl Shared {
                     &input,
                     text_follows,
                 );
-                return self.input_choose_buffer(client, kind, ChooseBufferAction::Key(input));
+                return self.input_choose_buffer(
+                    client,
+                    kind,
+                    context,
+                    ChooseBufferAction::Key(input),
+                );
             }
             if !read_only {
                 return self.input_display_panes(
@@ -12982,7 +13006,7 @@ impl Shared {
         if read_only {
             return Ok(());
         }
-        let (result, state, delta) = {
+        let (result, state, delta, command) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.choose_trees.remove(&client) else {
                 return Ok(());
@@ -13020,10 +13044,16 @@ impl Shared {
                 .then(|| chooser.rendered.clone());
             let delta = (result == ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta))
                 .then(|| (chooser.rendered.selected, chooser.rendered.search.clone()));
+            let command = match (result, chooser.template.clone()) {
+                (ChooseTreeResult::Activate(target), Some(template)) => {
+                    Some((template, choose_tree_command_target(&inner.engine, target)))
+                }
+                _ => None,
+            };
             if matches!(result, ChooseTreeResult::Updated(_)) {
                 inner.choose_trees.insert(client, chooser);
             }
-            (result, state, delta)
+            (result, state, delta, command)
         };
 
         match result {
@@ -13039,7 +13069,23 @@ impl Shared {
             }
             ChooseTreeResult::Activate(target) => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state: None });
-                self.activate_choose_tree_target(client, kind, context, target)?;
+                if let Some((template, replacement)) = command {
+                    match replacement {
+                        Ok(replacement) => self.execute_chooser_command(
+                            client,
+                            context,
+                            &template,
+                            &replacement,
+                            "choose-tree",
+                        ),
+                        Err(error) => {
+                            let error = DaemonError::from(error);
+                            self.publish_background_command_error(client, context, &error, true);
+                        }
+                    }
+                } else {
+                    self.activate_choose_tree_target(client, kind, context, target)?;
+                }
             }
         }
         Ok(())
@@ -13049,6 +13095,7 @@ impl Shared {
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
+        context: &mut ExecutionContext,
         action: ChooseBufferAction,
     ) -> Result<(), DaemonError> {
         if kind != ClientKind::Interactive {
@@ -13145,11 +13192,18 @@ impl Shared {
                             ChooseBufferInputOutcome::Full(Some(state))
                         }
                     }
-                    ChooseBufferResult::Paste(name) => ChooseBufferInputOutcome::Paste {
-                        pane: chooser.source_pane,
-                        name,
-                    },
-                    ChooseBufferResult::Close => ChooseBufferInputOutcome::Close,
+                    ChooseBufferResult::Paste(name)
+                        if inner.paste_buffers.iter().any(|buffer| buffer.name == name) =>
+                    {
+                        ChooseBufferInputOutcome::Select {
+                            pane: chooser.source_pane,
+                            name,
+                            template: chooser.template.clone(),
+                        }
+                    }
+                    ChooseBufferResult::Paste(_) | ChooseBufferResult::Close => {
+                        ChooseBufferInputOutcome::Close
+                    }
                 };
                 (outcome, deleted)
             }
@@ -13173,20 +13227,34 @@ impl Shared {
                 self.publish_to_client(client, EventPayload::ChooseBuffer { state });
                 self.refresh_choose_buffers_except(Some(client));
             }
-            ChooseBufferInputOutcome::Paste { pane, name } => {
+            ChooseBufferInputOutcome::Select {
+                pane,
+                name,
+                template,
+            } => {
                 self.publish_to_client(client, EventPayload::ChooseBuffer { state: None });
-                self.paste_buffer_to_pane(
-                    pane,
-                    PasteBufferPaste {
-                        requested_name: Some(&name),
-                        delete: false,
-                        bracketed: true,
-                        separator: b"\r",
-                        literal: false,
-                        expected_client: Some(client),
-                        event_hooks_enabled: true,
-                    },
-                )?;
+                if let Some(template) = template {
+                    self.execute_chooser_command(
+                        client,
+                        context,
+                        &template,
+                        &name,
+                        "choose-buffer",
+                    );
+                } else {
+                    self.paste_buffer_to_pane(
+                        pane,
+                        PasteBufferPaste {
+                            requested_name: Some(&name),
+                            delete: false,
+                            bracketed: true,
+                            separator: b"\r",
+                            literal: false,
+                            expected_client: Some(client),
+                            event_hooks_enabled: true,
+                        },
+                    )?;
+                }
             }
             ChooseBufferInputOutcome::Close => {
                 self.publish_to_client(client, EventPayload::ChooseBuffer { state: None });
@@ -13495,6 +13563,18 @@ impl Shared {
             )?;
         }
         Ok(())
+    }
+
+    fn execute_chooser_command(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        template: &str,
+        replacement: &str,
+        title: &str,
+    ) {
+        let command = MuxEngine::substitute_command_prompt_template(template, replacement);
+        self.execute_overlay_source_with_error_case(client, context, &command, title, true);
     }
 
     fn execute_key_commands(
@@ -20604,9 +20684,10 @@ enum ChooseBufferInputOutcome {
         selected: u32,
     },
     Full(Option<ChooseBufferState>),
-    Paste {
+    Select {
         pane: PaneId,
         name: String,
+        template: Option<String>,
     },
     Close,
 }
@@ -20618,6 +20699,7 @@ struct ChooseBufferSession {
     filter: Option<String>,
     sort: TmuxSort,
     key_format: Option<String>,
+    template: Option<String>,
     names: Vec<String>,
     selected: Option<String>,
     search: Option<ChooseBufferSearchState>,
@@ -20650,6 +20732,7 @@ impl ChooseBufferSession {
             filter,
             sort,
             key_format,
+            template: None,
             names: Vec::new(),
             selected: None,
             search: None,
@@ -20969,6 +21052,52 @@ fn bounded_choose_buffer_preview(data: &[u8]) -> String {
     preview
 }
 
+fn choose_tree_command_target(
+    engine: &MuxEngine,
+    target: ChooseTreeTarget,
+) -> Result<String, ServerError> {
+    match target {
+        ChooseTreeTarget::Session(session) => {
+            let session = engine
+                .state
+                .sessions
+                .get(&session)
+                .ok_or_else(|| ServerError::MissingTarget(session.to_string()))?;
+            Ok(format!("={}:", session.name))
+        }
+        ChooseTreeTarget::Window(window) => {
+            let window_state = engine
+                .state
+                .windows
+                .get(&window)
+                .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+            let session = engine
+                .state
+                .sessions
+                .get(&window_state.session)
+                .ok_or_else(|| ServerError::MissingTarget(window_state.session.to_string()))?;
+            Ok(format!("={}:{}.", session.name, window_state.index))
+        }
+        ChooseTreeTarget::Pane(pane) => {
+            let window = engine
+                .state
+                .window_for_pane(pane)
+                .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+            let window_state = engine
+                .state
+                .windows
+                .get(&window)
+                .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+            let session = engine
+                .state
+                .sessions
+                .get(&window_state.session)
+                .ok_or_else(|| ServerError::MissingTarget(window_state.session.to_string()))?;
+            Ok(format!("={}:{}.{}", session.name, window_state.index, pane))
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChooseTreeResult {
     Updated(ChooseTreeUpdateKind),
@@ -20991,6 +21120,7 @@ struct ChooseTreeSession {
     filter: Option<String>,
     sort: TmuxSort,
     key_format: Option<String>,
+    template: Option<String>,
     expanded_sessions: BTreeSet<SessionId>,
     expanded_windows: BTreeSet<zz_protocol::WindowId>,
     selected: Option<ChooseTreeTarget>,
@@ -21045,6 +21175,7 @@ impl ChooseTreeSession {
             filter,
             sort,
             key_format,
+            template: None,
             expanded_sessions,
             expanded_windows,
             selected,
@@ -47712,6 +47843,38 @@ mod tests {
                 );
             }
         }
+        for (spelling, canonical, arguments, maximum) in [
+            (
+                "capturep",
+                "capture-pane",
+                vec!["-C".to_owned(), argument.clone()],
+                0,
+            ),
+            (
+                "loadb",
+                "load-buffer",
+                vec!["-w".to_owned(), argument.clone(), argument.clone()],
+                1,
+            ),
+        ] {
+            let error = shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(spelling, arguments),
+                )
+                .expect_err("positional maximum before parked capability");
+            let DaemonError::Server(error) = error else {
+                panic!("unexpected error for {spelling}: {error:?}");
+            };
+            assert_eq!(
+                error,
+                ServerError::CommandParse(format!(
+                    "command {canonical}: too many arguments (need at most {maximum})"
+                ))
+            );
+        }
 
         assert!(!output.exists());
         let inner = shared.inner.lock();
@@ -47737,7 +47900,7 @@ mod tests {
             ),
             ("findw", "find-window", vec!["-t", "=missing"], 1),
             ("if", "if-shell", vec!["-t", "=missing", "condition"], 2),
-            ("loadb", "load-buffer", vec!["-t", "missing"], 1),
+            ("loadb", "load-buffer", vec!["-w"], 1),
             ("rename", "rename-session", vec!["-t", "=missing"], 1),
             ("renamew", "rename-window", vec!["-t", "=missing"], 1),
             ("saveb", "save-buffer", vec![], 1),
@@ -56675,6 +56838,197 @@ bind - split-window -v -c "#{pane_current_path}"
                 .expect("paste selected"),
             ChooseBufferResult::Paste(name) if name == "older"
         ));
+    }
+
+    #[test]
+    fn chooser_templates_substitute_targets_and_resolve_aliases_at_selection() {
+        let (shared, client, mailbox, mut context) = popup_test_workspace("chooser-templates");
+        let source_session = context.session.expect("source session");
+        let source_window = context.window.expect("source window");
+        let source_pane = context.pane.expect("source pane");
+        let (target_session, _, target_pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("target-session")
+            .expect("target session");
+        let run = |context: &mut ExecutionContext, command: CommandInvocation| {
+            shared
+                .execute(client, ClientKind::Interactive, context, &command)
+                .expect("chooser command")
+        };
+        let select_buffer = |context: &mut ExecutionContext| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::ChooseBuffer {
+                        action: ChooseBufferAction::Paste,
+                    },
+                )
+                .expect("select chooser buffer");
+        };
+
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                choose_tree_command_target(
+                    &inner.engine,
+                    ChooseTreeTarget::Session(source_session)
+                )
+                .unwrap(),
+                "=popup-test:"
+            );
+            assert_eq!(
+                choose_tree_command_target(&inner.engine, ChooseTreeTarget::Window(source_window))
+                    .unwrap(),
+                "=popup-test:0."
+            );
+            assert_eq!(
+                choose_tree_command_target(&inner.engine, ChooseTreeTarget::Pane(source_pane))
+                    .unwrap(),
+                format!("=popup-test:0.{source_pane}")
+            );
+        }
+
+        let set_alias = |value: &str| {
+            shared
+                .inner
+                .lock()
+                .engine
+                .execute(
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("set-option", ["-s", "command-alias[98]", value]),
+                )
+                .expect("set chooser alias");
+        };
+        run(
+            &mut context,
+            CommandInvocation::new("set-buffer", ["-b", "picked", "payload"]),
+        );
+
+        set_alias("pick10j=set-environment -g CHOOSER_TYPED");
+        run(
+            &mut context,
+            CommandInvocation::new("choose-buffer", ["{ pick10j %% }"]).with_command_blocks([0]),
+        );
+        set_alias("pick10j=set-environment -g CHOOSER_REPLACED");
+        select_buffer(&mut context);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.global_environment_variable("CHOOSER_TYPED"),
+                Some("picked".to_owned())
+            );
+            assert_eq!(
+                inner.engine.global_environment_variable("CHOOSER_REPLACED"),
+                None
+            );
+        }
+
+        set_alias("pick10j=set-environment -g CHOOSER_OLD");
+        run(
+            &mut context,
+            CommandInvocation::new("choose-buffer", ["pick10j %%"]),
+        );
+        set_alias("pick10j=set-environment -g CHOOSER_FRESH");
+        select_buffer(&mut context);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.global_environment_variable("CHOOSER_FRESH"),
+                Some("picked".to_owned())
+            );
+            assert_eq!(
+                inner.engine.global_environment_variable("CHOOSER_OLD"),
+                None
+            );
+        }
+
+        run(
+            &mut context,
+            CommandInvocation::new(
+                "choose-tree",
+                ["-s", "-O", "index", "set-option -p @TREE %1"],
+            ),
+        );
+        let target_row = shared.inner.lock().choose_trees[&client]
+            .rendered
+            .items
+            .iter()
+            .position(|item| item.target == ChooseTreeTarget::Session(target_session))
+            .and_then(|row| u32::try_from(row).ok())
+            .expect("target row");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ChooseTree {
+                    action: ChooseTreeAction::ActivateIndex(target_row),
+                },
+            )
+            .expect("run tree template");
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), client),
+            Some(source_session)
+        );
+        let source_pane = source_pane.to_string();
+        let target_pane = target_pane.to_string();
+        assert_eq!(
+            run(
+                &mut context,
+                CommandInvocation::new("display-message", ["-p", "-t", &source_pane, "#{@TREE}"],),
+            )
+            .output,
+            "=target-session:"
+        );
+        assert_eq!(
+            run(
+                &mut context,
+                CommandInvocation::new("display-message", ["-p", "-t", &target_pane, "#{@TREE}"],),
+            )
+            .output,
+            ""
+        );
+
+        take_reliable_messages(&mailbox);
+        run(
+            &mut context,
+            CommandInvocation::new("choose-buffer", ["unknownchooser %%"]),
+        );
+        take_reliable_messages(&mailbox);
+        select_buffer(&mut context);
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Error,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text == "Unknown command: unknownchooser"
+            )
+        }));
+
+        run(
+            &mut context,
+            CommandInvocation::new("choose-buffer", ["set-environment -g CHOOSER_STALE %%"]),
+        );
+        shared.inner.lock().paste_buffers.clear();
+        select_buffer(&mut context);
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("CHOOSER_STALE"),
+            None
+        );
     }
 
     fn chooser_key_press(name: &str) -> KeyInput {

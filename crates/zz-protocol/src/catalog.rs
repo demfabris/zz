@@ -464,6 +464,8 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
 
 pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "bind-key",
+    "choose-buffer",
+    "choose-tree",
     "command-prompt",
     "confirm-before",
     "display-menu",
@@ -3325,6 +3327,35 @@ mod tests {
                     .tmux_message(),
                 format!("command display-panes: {option} argument must be a string")
             );
+        }
+    }
+
+    #[test]
+    fn chooser_args_parse_accepts_a_command_or_string_template() {
+        for (name, flags) in [("choose-buffer", "-kNrZ"), ("choose-tree", "-GhkNrswZ")] {
+            let spec = catalog_command_spec(name).expect("chooser");
+            for command in [
+                CommandInvocation::new(name, ["{ display-message action }"])
+                    .with_command_blocks([0]),
+                CommandInvocation::new(name, [flags, "{ display-message action }"])
+                    .with_command_blocks([1]),
+                CommandInvocation::new(name, ["--", "{ display-message action }"])
+                    .with_command_blocks([1]),
+                CommandInvocation::new(name, ["{ display-message quoted }"]),
+            ] {
+                parse_tmux_command_options(spec, &command).expect("command-or-string template");
+            }
+
+            for option in ["-F", "-f", "-K", "-O", "-t"] {
+                let command = CommandInvocation::new(name, [option, "{ display-message option }"])
+                    .with_command_blocks([1]);
+                assert_eq!(
+                    parse_tmux_command_options(spec, &command)
+                        .expect_err("typed option value")
+                        .tmux_message(),
+                    format!("command {name}: {option} argument must be a string")
+                );
+            }
         }
     }
 

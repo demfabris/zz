@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-choosers.sh ~/args-parse-choosers.sh
+out: set-environment -gu ARGS_PARSE_CHOOSERS
+run-shell 'sh ~/args-parse-choosers.sh'
+out: show-environment -g ARGS_PARSE_CHOOSERS

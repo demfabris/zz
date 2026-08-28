@@ -227,7 +227,9 @@ environment change persists after replay. Under `-n`, a bare assignment does not
 and neither kind of assignment persists.
 This is no-effect source parsing, not full tmux parse validation: tmux validates command names and
 arguments while building its command list, while zz performs those checks during replay. Shared flag
-and arity diagnostics match at dispatch. `config.parser-edge-cases` and `mux.chain-parse-abort`
+and arity diagnostics match at dispatch. Once option grammar succeeds, replay validates positional
+bounds before rejecting a recognized parked capability, so the pin's arity diagnostic wins in that
+combined case. `config.parser-edge-cases` and `mux.chain-parse-abort`
 retain the parse-unit boundary.
 The protocol-v84 callback closures do not claim tmux's eager nested-command construction. Pinned
 tmux recursively builds `{ ... }` bodies before it applies the outer callback, including under
@@ -355,7 +357,15 @@ Aliases and prefixes retain typed positions and canonical stored readback.
 Targetless daemon routing resolves the current attached client before duration validation. The
 custom selection template remains a runtime gap because mux execution rejects a positional value
 instead of substituting the selected `%pane` for `%%%` and executing with the original queue state.
-Tmux uses `select-pane -t "%%%"` when the template is omitted. These rules do not yet make source-file parse and
+Tmux uses `select-pane -t "%%%"` when the template is omitted. `choose-buffer` and `choose-tree`
+accept zero or one string-or-typed template while their valued options remain strings. Typed
+children construct before parent type, arity, target, or effects. A typed template stores its
+constructed canonical text before opening, while a quoted template remains raw. Selection
+substitutes the exact buffer name or tree target and reparses the text against the current alias
+table in the invoking client's live context. The chooser closes before execution. Empty and stale
+buffers run no custom action, and attached parse or command errors begin with an uppercase
+character. All 12 implemented callback commands now apply their pinned rules. These rules do not
+yet make source-file parse and
 construction atomic for the whole file, provide aliases
 defined earlier in the same source during construction, place multiline inner-source diagnostics,
 or close the broader replay-channel difference.

@@ -91,12 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The final 10i canonical acceptance inventory contains 97 differential scenarios and 1,514 executable
-steps against pinned tmux `d77c9dc6`, including the config/plugin smoke corpus. The complete strict and
+The current combined 10j/10k canonical acceptance inventory contains 98 differential scenarios and
+1,517 executable steps against pinned tmux `d77c9dc6`, including the config/plugin smoke corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
 `75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
@@ -126,8 +128,8 @@ OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still
 visual smoke evidence.
 
 Protocol v84 carries lexical command-block positions. `if-shell`, `run-shell`, both set-option
-commands, `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `display-panes`, and `set-hook` now apply
-their pinned callback rules.
+commands, `bind-key`, `choose-buffer`, `choose-tree`, `command-prompt`, `confirm-before`,
+`display-menu`, `display-panes`, and `set-hook` now apply their pinned callback rules.
 The strict three-step confirm scenario runs 19 construction, parser, readback, alias, and exact source-file
 plus Control channel checks on both servers. Every lexical typed block recursively constructs
 before parent name, callback type, or arity validation. Recursive paths carry independent one-layer
@@ -173,7 +175,23 @@ and `-y` Enter-default behavior are daemon and GPUI unit proof, not raw TUI proo
 source construction, same-source alias mutation, multiline inner-source placement, generic alias
 recursion, selected-action runtime errors, and the broader replay-channel placement difference
 remain open. Attached-client menu rendering, input, geometry, styles, targets, formats, and raw-TUI
-overlay parity retain their existing owners. `display-panes` accepts an optional string or typed
+overlay parity retain their existing owners. `choose-buffer` and `choose-tree` accept zero or one
+selection template as a string or typed block; their `-F`, `-f`, `-K`, `-O`, and `-t` values stay
+strings. Typed children construct before parent type, arity, target, or effects. A typed template
+resolves aliases and serializes canonical commands before the chooser opens, retaining ` ; ` and ` ;; `
+group boundaries. A string template remains raw and observes the current alias table when the user
+selects a row. Selection closes the overlay, substitutes the selected value, then parses and executes
+the result with the invoking client's live context. Tree replacements use `=name:`, `=name:index.`,
+and `=name:index.%id`; buffer replacement uses the exact name. Attached parse and command errors
+capitalize their first character. An empty buffer store opens no chooser, and a selected buffer that
+disappears before activation closes the stale chooser without running its action. The focused
+three-step, 26-check differential reports zero TOPO, GEO, FMT, OUT, and WARN differences; both sides
+set `ARGS_PARSE_CHOOSERS=clean:26`. It covers typed and string alias timing, substitution and quoting,
+live source context, attached selection, uppercase errors, close ordering, empty-buffer behavior, and
+direct plus stored arity precedence over recognized parked flags.
+Chooser flags, tagging, editor actions, broader presentation, eager whole-source construction,
+same-source alias mutation, generic alias recursion, and raw-TUI overlay parity retain their existing
+owners. `display-panes` accepts an optional string or typed
 selection template while `-d` and `-t` values stay strings. Typed children construct before parent
 option-type or arity validation. Aliases and prefixes retain typed positions and canonical
 stored readback. Targetless daemon routing resolves an attached client before duration validation.
@@ -181,8 +199,9 @@ The strict three-step fixture runs 22 internal checks with zero differential cha
 selection-template execution remains parked because mux runtime rejects the positional value and
 does not substitute the selected `%pane` for `%%%` before execution with the original queue state.
 The omitted tmux template remains `select-pane -t "%%%"`; queue blocking and presentation remain
-separate. Two
-command-specific `args-parse:` items under one rule remain.
+separate. All 12 implemented callback-bearing commands now appear in
+`COMMAND_ARGS_PARSE_BEHAVES`, so no command-specific `args-parse:` item remains. `choose-client` and
+`switch-mode` stay classified by their unimplemented-command items.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -199,9 +218,10 @@ catalog-declared pairs, inventoried in the matrix and enforced by
 flag gap, but accepted semantic divergences remain outside that count.
 
 **The current queue** is dependency-ordered in the
-[tmux superset roadmap](/designs/tmux-superset-roadmap.md): mine real config hits for the next
-rank-4/5 slice, then repair script-visible output before
-closing the remaining bounded client contracts. Client targeting and ordinary detach are complete;
+[tmux superset roadmap](/designs/tmux-superset-roadmap.md): register the hook-producer partition in
+slice 10l, close the other four source-owned tracker partitions independently, then take the three
+raw-TUI overlay contracts one at a time. Regenerate and re-rank the full live tracker before every
+slice so a newly exposed practical gate can move ahead of that forecast. Client targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading
 `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order
 collision precedence. Native aliases remain. Unsupported `command-prompt -t`, `show-messages -t`,
@@ -218,7 +238,7 @@ paths. Session cwd and requested flag retention have shipped. On
 component-wise largest or smallest eligible attached-client sizes, select manual mode, freeze the
 chosen extent, follow the global `ignore-size` fallback, apply per-window Control ceilings, and use
 the session `default-size` when no eligible client contributes. zz and pinned tmux pass the full
-attached-client fixture. Environment refresh, detach exec, and parent-HUP exit remain separate;
+attached-client fixture. Protocol v82 closed bounded environment refresh. Detach exec and parent-HUP exit remain separate;
 `active-pane` and `no-detach-on-destroy` consumers stay tracked. Binary
 streaming and process control require a separate design. Floating panes stay parked; linked windows and real socket interop stay permanently
 excluded; ACLs remain parked outside the practical alias gate.

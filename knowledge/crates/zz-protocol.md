@@ -144,8 +144,8 @@ Protocol v84 appends `CommandInvocation.command_blocks`. Config and Control pars
 zero-based positions of standalone unquoted command blocks while quoted brace text stays an
 ordinary string. Alias expansion and key-table publication retain the positions. The
 command-aware option parser applies the adopted callback rules to `bind-key`, `command-prompt`,
-`confirm-before`, `display-menu`, `display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
-`set-window-option`. Every
+`choose-buffer`, `choose-tree`, `confirm-before`, `display-menu`, `display-panes`, `if-shell`,
+`run-shell`, `set-hook`, `set-option`, and `set-window-option`. Every
 `bind-key` positional accepts a typed block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
 block only at value position 1. `confirm-before` accepts either type for its one command positional
 while `-c`, `-p`, and `-t` remain strings. The mux constructs every lexical typed block
@@ -194,9 +194,19 @@ attached client reports `no current client`, while an ordinary Command uses an a
 Interactive client. The strict 22-check fixture covers the exact parser and routing boundary. The
 custom selection template remains a runtime gap because mux execution rejects the positional value
 instead of substituting the selected `%pane` for `%%%` and executing with the original queue state;
-tmux's omitted template is `select-pane -t "%%%"`. All ten behaving commands reuse the same
-protocol v84 metadata. Eager whole-file source construction and its replay-channel placement
-remain a separate parser contract.
+tmux's omitted template is `select-pane -t "%%%"`. `choose-buffer` and `choose-tree` each accept
+zero or one string-or-typed template while `-F`, `-f`, `-K`, `-O`, and `-t` values remain strings.
+Typed children construct before parent type, arity, target, or effects. Typed templates store their
+constructed canonical text; string templates stay raw until selection. Both paths substitute the
+selected value and parse against the current alias table in the invoking client's live context.
+The daemon closes the chooser before execution and reports attached errors with an uppercase first
+character. Empty and stale buffer selections run no custom action. All 12 behaving commands reuse
+the same protocol v84 metadata, leaving no command-specific `args-parse:` item. Eager whole-file
+source construction and its replay-channel placement remain a separate parser contract.
+
+The catalog's positional validators remain wire-neutral. Mux, daemon, and stored-command consumers
+run them after option grammar and before unsupported-capability rejection, so a recognized parked
+flag cannot hide the pin's too-few or too-many diagnostic.
 
 `MuxSnapshot` carries two per-recipient fields the daemon stamps for each subscriber:
 `focused_window`, that client's own window focus, and `SessionSnapshot::viewers`, a

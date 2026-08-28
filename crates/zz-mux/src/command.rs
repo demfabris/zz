@@ -492,6 +492,7 @@ pub enum MuxEffect {
         filter: Option<String>,
         sort: TmuxSort,
         key_format: Option<String>,
+        template: Option<String>,
     },
     FocusSidebar {
         pane: PaneId,
@@ -501,6 +502,7 @@ pub enum MuxEffect {
         filter: Option<String>,
         sort: TmuxSort,
         key_format: Option<String>,
+        template: Option<String>,
     },
     DisplayPanes {
         pane: PaneId,
@@ -3189,8 +3191,8 @@ impl MuxEngine {
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
             "command-prompt" => self.command_prompt(context, command)?,
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
-            "choose-tree" => self.choose_tree(context, &command.args)?,
-            "choose-buffer" => self.choose_buffer(context, &command.args)?,
+            "choose-tree" => self.choose_tree(context, command)?,
+            "choose-buffer" => self.choose_buffer(context, command)?,
             "display-message" => self.display_message(context, &command.args, hooks)?,
             "display-panes" => self.display_panes(context, &command.args)?,
             "clear-history" => self.clear_history(context, &command.args)?,
@@ -6287,15 +6289,15 @@ impl MuxEngine {
     fn choose_tree(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        invocation: &CommandInvocation,
     ) -> Result<Execution, ServerError> {
+        let args = &invocation.args;
+        let spec = command_spec("choose-tree").expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = args.len().saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("choose-tree", args)?;
+        spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
-                "choose-tree command templates are not supported yet".to_owned(),
-            ));
-        }
         reject_large_preview("choose-tree", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
@@ -6313,6 +6315,7 @@ impl MuxEngine {
             filter: options.value("-f").map(str::to_owned),
             sort,
             key_format: options.value("-K").map(str::to_owned),
+            template: chooser_command_template(invocation, positional_start, &positional),
         }))
     }
 
@@ -6334,15 +6337,15 @@ impl MuxEngine {
     fn choose_buffer(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        invocation: &CommandInvocation,
     ) -> Result<Execution, ServerError> {
+        let args = &invocation.args;
+        let spec = command_spec("choose-buffer").expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = args.len().saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("choose-buffer", args)?;
+        spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        if !positional.is_empty() {
-            return Err(ServerError::InvalidCommand(
-                "choose-buffer command templates are not supported yet".to_owned(),
-            ));
-        }
         reject_large_preview("choose-buffer", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
@@ -6354,6 +6357,7 @@ impl MuxEngine {
             filter: options.value("-f").map(str::to_owned),
             sort,
             key_format: options.value("-K").map(str::to_owned),
+            template: chooser_command_template(invocation, positional_start, &positional),
         }))
     }
 
@@ -12382,11 +12386,11 @@ fn parse_command_options(
 ) -> Result<(Options, Vec<String>), ServerError> {
     let spec = command_spec(command).expect("executable command has catalog metadata");
     let (options, positional) = parse_options_for_spec(args, spec)?;
-    validate_options(command, spec, &options)?;
     spec.validate_positional_minimum(positional.len())?;
     if !NATIVE_COMMAND_NAMES.contains(&spec.name) {
         spec.validate_positional_maximum(positional.len())?;
     }
+    validate_options(command, spec, &options)?;
     Ok((options, positional))
 }
 
@@ -12552,6 +12556,23 @@ fn reject_large_preview(command: &str, options: &Options) -> Result<(), ServerEr
         return Err(ServerError::UnsupportedCommand(format!("{command} -NN")));
     }
     Ok(())
+}
+
+fn chooser_command_template(
+    invocation: &CommandInvocation,
+    positional_start: usize,
+    positional: &[String],
+) -> Option<String> {
+    positional.first().map(|template| {
+        if invocation.argument_is_command_block(positional_start) {
+            crate::parser::command_block_body(template)
+                .unwrap_or(template)
+                .trim()
+                .replace('\n', " ;; ")
+        } else {
+            template.clone()
+        }
+    })
 }
 
 fn reject_positionals(command: &str, positional: &[String]) -> Result<(), ServerError> {
@@ -13648,11 +13669,11 @@ fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<()
             parse_tmux_command_options(spec, command)?;
         }
         let (options, positional) = parse_options_for_spec(&command.args, spec)?;
-        validate_options(name, spec, &options)?;
         spec.validate_positional_minimum(positional.len())?;
         if !NATIVE_COMMAND_NAMES.contains(&spec.name) {
             spec.validate_positional_maximum(positional.len())?;
         }
+        validate_options(name, spec, &options)?;
         return Ok(());
     }
     if name == "copy-mode-repeat" {
@@ -21089,13 +21110,13 @@ mod tests {
             (
                 "choose-buffer",
                 "choose-buffer",
-                &["-t", "=missing", "one", "two"][..],
+                &["-F", "format", "one", "two"][..],
                 1,
             ),
             (
                 "choose-tree",
                 "choose-tree",
-                &["-t", "=missing", "one", "two"][..],
+                &["-F", "format", "one", "two"][..],
                 1,
             ),
             (
@@ -21110,7 +21131,7 @@ mod tests {
                 &["-t", "missing", "one", "two"][..],
                 1,
             ),
-            ("selectp", "select-pane", &["-t", "=missing", "one"][..], 0),
+            ("selectp", "select-pane", &["-d", "one"][..], 0),
             (
                 "rename",
                 "rename-session",
@@ -21118,6 +21139,7 @@ mod tests {
                 1,
             ),
             ("lsk", "list-keys", &["one", "two"][..], 1),
+            ("attach", "attach-session", &["-x", "unexpected"][..], 0),
             ("kill-server", "kill-server", &["unexpected"][..], 0),
         ] {
             let error = engine
@@ -21161,6 +21183,21 @@ mod tests {
                 .unwrap_err(),
             ServerError::InvalidCommand(
                 "command list-sessions: too many arguments (need at most 0)".to_owned()
+            )
+        );
+        assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "bind-key",
+                        &["F8", "choose-buffer", "-F", "format", "one", "two"],
+                    ),
+                )
+                .unwrap_err(),
+            ServerError::InvalidCommand(
+                "command choose-buffer: too many arguments (need at most 1)".to_owned()
             )
         );
         assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
@@ -32219,6 +32256,7 @@ mod tests {
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
+                template: None,
             }]
         );
         assert_eq!(
@@ -32239,6 +32277,7 @@ mod tests {
                 filter: Some("#{pane_active}".to_owned()),
                 sort: TmuxSort::parse(Some("name"), true, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
+                template: None,
             }]
         );
         assert_eq!(
@@ -32261,6 +32300,7 @@ mod tests {
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
+                template: None,
             }]
         );
 
@@ -32276,14 +32316,42 @@ mod tests {
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 key_format: None,
+                template: None,
             }]
         );
+        let typed =
+            CommandInvocation::new("choose-tree", ["{ display -p %% }"]).with_command_blocks([0]);
+        let effects = engine.execute(&mut context, &typed).unwrap().effects;
+        let [MuxEffect::ChooseTree { template, .. }] = effects.as_slice() else {
+            panic!("typed tree chooser effect");
+        };
+        assert_eq!(template.as_deref(), Some("display-message -p \"%%\""));
+        let typed_groups = CommandInvocation::new(
+            "choose-tree",
+            ["{ display -p one ; display -p two\ndisplay -p three }"],
+        )
+        .with_command_blocks([0]);
+        let effects = engine.execute(&mut context, &typed_groups).unwrap().effects;
+        let [MuxEffect::ChooseTree { template, .. }] = effects.as_slice() else {
+            panic!("typed tree chooser group effect");
+        };
+        assert_eq!(
+            template.as_deref(),
+            Some("display-message -p one ; display-message -p two ;; display-message -p three")
+        );
         assert!(matches!(
-            engine.execute(
-                &mut context,
-                &command("choose-tree", &["select-pane -t %%"]),
-            ),
-            Err(ServerError::InvalidCommand(_))
+            engine
+                .execute(
+                    &mut context,
+                    &command("choose-tree", &["select-pane -t %%"]),
+                )
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::ChooseTree {
+                template: Some(template),
+                ..
+            }] if template == "select-pane -t %%"
         ));
         assert!(matches!(
             engine.execute(
@@ -32298,7 +32366,7 @@ mod tests {
     }
 
     #[test]
-    fn choose_buffer_builds_a_native_effect_and_rejects_extended_templates() {
+    fn choose_buffer_builds_native_and_command_template_effects() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -32316,6 +32384,7 @@ mod tests {
                 filter: None,
                 sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
                 key_format: None,
+                template: None,
             }]
         );
         assert!(matches!(
@@ -32326,12 +32395,51 @@ mod tests {
             Err(ServerError::UnsupportedCommand(message))
                 if message == "choose-buffer -F"
         ));
+        let typed_overflow = CommandInvocation::new(
+            "choose-buffer",
+            [
+                "-F",
+                "format",
+                "{ display-message one }",
+                "{ display-message two }",
+            ],
+        )
+        .with_command_blocks([2, 3]);
+        assert_eq!(
+            engine
+                .execute(&mut context, &typed_overflow)
+                .expect_err("typed chooser arity precedes parked flags"),
+            ServerError::CommandParse(
+                "command choose-buffer: too many arguments (need at most 1)".to_owned()
+            )
+        );
+        let typed =
+            CommandInvocation::new("choose-buffer", ["{ display -p %% }"]).with_command_blocks([0]);
+        let effects = engine.execute(&mut context, &typed).unwrap().effects;
+        let [MuxEffect::ChooseBuffer { template, .. }] = effects.as_slice() else {
+            panic!("typed buffer chooser effect");
+        };
+        assert_eq!(template.as_deref(), Some("display-message -p \"%%\""));
+        let typed_empty =
+            CommandInvocation::new("choose-buffer", ["{  }"]).with_command_blocks([0]);
+        let effects = engine.execute(&mut context, &typed_empty).unwrap().effects;
+        let [MuxEffect::ChooseBuffer { template, .. }] = effects.as_slice() else {
+            panic!("empty buffer chooser effect");
+        };
+        assert_eq!(template.as_deref(), Some(""));
         assert!(matches!(
-            engine.execute(
-                &mut context,
-                &command("choose-buffer", &["paste-buffer -b %%"]),
-            ),
-            Err(ServerError::InvalidCommand(_))
+            engine
+                .execute(
+                    &mut context,
+                    &command("choose-buffer", &["paste-buffer -b %%"]),
+                )
+                .unwrap()
+                .effects
+                .as_slice(),
+            [MuxEffect::ChooseBuffer {
+                template: Some(template),
+                ..
+            }] if template == "paste-buffer -b %%"
         ));
         assert!(matches!(
             engine.execute(

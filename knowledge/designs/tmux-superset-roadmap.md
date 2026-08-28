@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 86 active groups, 586 classified active items, 89 closed groups, and two known
+The live tracker has 87 active groups, 584 classified active items, 92 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,17 +53,21 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The final 10i canonical checkpoint covers 97 scenarios and 1,514 steps.
+The combined 10j/10k canonical checkpoint covers 98 scenarios and 1,517 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`. Requested flags, attached
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
+The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,
+GEO, FMT, OUT, or WARN differences.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
+The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
+`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
 `75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
 The historical 10f checkpoint remains 94 scenarios and 1,505 steps at SHA-256
@@ -72,8 +76,8 @@ The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
-The 10i `display-panes` row contributes three harness steps and 22 internal checks with zero TOPO,
-GEO, FMT, OUT, or WARN differences to the complete strict and attached artifact.
+The historical 10i `display-panes` row contributed three harness steps and 22 internal checks with
+zero TOPO, GEO, FMT, OUT, or WARN differences.
 
 Protocol v82 appends one bounded UTF-8 client-environment snapshot to `ClientHello`. Local and
 SSH-forwarded clients now seed fresh sessions and refresh existing sessions through the effective
@@ -89,9 +93,10 @@ bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
 closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`,
-`tracker.args-parse-set-option`, `tracker.args-parse-display-menu`, `tracker.args-parse-display-panes`, and
-`tracker.args-parse-set-hook`, plus the `bind-key`, `command-prompt`, and `confirm-before` members
-of the shared commands-or-string rule.
+`tracker.args-parse-set-option`, `tracker.args-parse-display-menu`,
+`tracker.args-parse-display-panes`, `tracker.args-parse-set-hook`,
+`tracker.args-parse-choose-buffer`, and `tracker.args-parse-choose-tree`, plus the `bind-key`,
+`command-prompt`, and `confirm-before` members of the shared commands-or-string rule.
 Source-file and Control
 parsing preserve unquoted typed arguments through wire transport, aliases, bindings, and hooks;
 quoted braces remain strings. `if-shell` accepts typed branch positions while rejecting typed
@@ -163,8 +168,15 @@ attached client before duration validation. Its strict three-step fixture runs 2
 with zero differential channels. Custom selection-template execution remains parked because mux
 runtime rejects the positional value instead of substituting the selected `%pane` for `%%%` and
 executing with the original queue state. Tmux uses `select-pane -t "%%%"` when the template is
-omitted; queue blocking and presentation stay separate. Two callback items under one effective
-rule remain. Eager whole-file
+omitted; queue blocking and presentation stay separate. `choose-buffer` and `choose-tree` accept
+zero or one string-or-typed template while their valued options stay strings. Typed children
+construct before parent type, arity, target, or effects. Typed templates freeze constructed aliases
+before opening; string templates parse against the current alias table after selection. The daemon
+closes the chooser, substitutes the exact buffer name or tree target, and executes against the
+invoking client's live context. The shared 26-check attached-client fixture covers substitution,
+alias timing, stale and empty buffers, uppercase errors, and direct plus stored arity precedence
+over recognized parked flags. All 12 implemented callback commands now apply their pinned rules,
+so no command-specific `args-parse:` item remains. Eager whole-file
 construction, same-source alias mutation, multiline inner-source placement, generic alias recursion,
 selected-action runtime errors, and broader replay placement retain their owners. Attached menu
 rendering, input, geometry, styles, targets, formats, and raw-TUI overlay parity remain separate.
@@ -540,21 +552,23 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each implemented
    callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains
-   `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `display-panes`, `if-shell`,
-   `run-shell`, `set-hook`, `set-option`, and `set-window-option`; one effective rule and two
-   command-specific items remain. The
+   `bind-key`, `choose-buffer`, `choose-tree`, `command-prompt`, `confirm-before`, `display-menu`,
+   `display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option`.
+   Every implemented callback command now appears in the behaving roster, so no command-specific
+   item remains. The
    unimplemented `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
-   `tracker.semantic-coverage` tracks runtime adoption of the remaining commands-or-string argument rule, open-ended or
-   dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
-   and option `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
+   `tracker.semantic-coverage` tracks open-ended or dynamic context formats, nonconstant formats,
+   hook production, shared binding runtime behavior, and option `BEHAVES` consumer truth. Daemon
+   invalid-flag coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
    partial roster and routed daemon preflight through the catalog parser used by mux execution.
    The first eight positional maximum mismatches closed later that day, followed by all fourteen
    required minima. The full shared arity closure then removed the partial maximum roster: all 72
-   implemented finite upstream commands now validate their catalog maximum after flags and minima
-   but before targets or effects. Stored binding and hook children use the same two bounds before
-   replacing state. The three-step `positional-maximums` fixture checks 71 generic-CLI-routed
+   implemented finite upstream commands now validate their catalog maximum after option grammar and
+   minima but before unsupported-capability rejection, targets, or effects. Stored binding and hook
+   children use the same bounds before unsupported-capability rejection or prior-state replacement.
+   The three-step `positional-maximums` fixture checks 71 generic-CLI-routed
    command-drivable canonical names and 62 aliases with exact stderr and unchanged pane, buffer, and
    file state; an exhaustive daemon test covers all 72 engine paths and aliases. The minimum fixture
    retains its exact canonical and alias proof. The shared option parser now covers all 83
@@ -843,9 +857,9 @@ Two small-looking flags are not mux-only work:
   terminal API has no atomic action for the operation. It needs a terminal-owned action and result
   contract, not another layout branch.
 
-Requested flag retention and attached sizing are closed. The remaining attach work keeps
-environment refresh and client exit actions as separate contracts; per-client active panes and
-destruction fallback are separate consumers of the retained flags. Reuse existing facts within
+Requested flag retention, attached sizing, and bounded environment refresh are closed. The remaining
+attach work keeps client exit actions separate; per-client active panes and destruction fallback are
+separate consumers of the retained flags. Reuse existing facts within
 each contract, but do not make one an artificial dependency of the others.
 
 ## Milestone 5: decide whether streams earn their cost
@@ -1156,6 +1170,20 @@ permanent product decision has been recorded for them.
   execution rejects the positional value and the native overlay has a fixed select-pane action.
   Queue blocking and presentation retain separate owners. Two callback commands under one effective
   rule remain.
+- 2026-08-28: The combined 10j/10k chooser milestone closes
+  `tracker.args-parse-choose-buffer` and `tracker.args-parse-choose-tree` without another wire
+  change. This deliberate exception to the planned one-command split uses one shared
+  commands-or-string callback, one chooser-template execution path, and one attached-client proof.
+  Both commands accept zero or one string-or-typed template while `-F`, `-f`, `-K`, `-O`, and `-t`
+  values stay strings. Typed templates freeze constructed aliases before opening; string templates
+  parse against the current alias table after selection. The daemon closes the chooser, substitutes
+  the exact buffer name or tree target, and executes against the invoking client's live context.
+  Empty and stale buffers run no custom action, and attached parse or runtime errors start with an
+  uppercase character. The strict three-step fixture runs 26 internal checks and finishes
+  `ARGS_PARSE_CHOOSERS=clean:26` with zero differential channels on both servers. The accompanying
+  parser fix makes direct and stored positional bounds outrank recognized parked capabilities.
+  All 12 implemented callback commands now apply their pinned rules; no command-specific
+  `args-parse:` item remains.
 
 # Related
 

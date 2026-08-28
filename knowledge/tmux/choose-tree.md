@@ -14,10 +14,10 @@ titlebar mode the tree leaves the layout and the native status bar moves to the 
 sidebar raises the same tree as a slideover. The default `C-b s` and `C-b w` bindings call this
 zz-native command.
 
-Every `choose-tree` form and `choose-buffer` opens a tmux-style chooser rendered as a
-daemon-owned native GPUI overlay, not terminal escape content. In
+Every `choose-tree` form and a `choose-buffer` invocation with at least one stored buffer opens a
+tmux-style chooser rendered as a daemon-owned native GPUI overlay, not terminal escape content. In
 [`crates/zz-mux`](/crates/zz-mux.md), the effects carry the target pane, chooser shape,
-filter, and parsed sort order. The [server](/crates/zz-daemon.md) builds a snapshot
+filter, parsed sort order, and optional selection command. The [server](/crates/zz-daemon.md) builds a snapshot
 (`ChooseTreeState` / `ChooseBufferState`, defined in [protocol](/crates/zz-protocol.md)) and the
 [app](/crates/zz.md) paints it above the invoking terminal *or* browser pane. The overlay blocks
 input from leaking into the covered pane, follows live mux mutations, survives protocol resync, can
@@ -38,8 +38,7 @@ Supported flags are `-s`, `-w`, `-Z` (zoom), `-t` (target pane), `-f` (format fi
 is already zz's only chooser layout; repeated `-NN`, tmux's large-preview mode, is rejected. The pin
 accepts `-s` and `-w` together and gives `-s` precedence. These flags change only the initial
 collapse depth; every form retains the complete hierarchy. A default chooser opened from a
-one-pane source window initially selects that window row. Positional command templates are
-rejected. The accepted sort names are case-insensitive:
+one-pane source window initially selects that window row. The accepted sort names are case-insensitive:
 `activity`, `creation`, `index`/`key`, `modifier`, `name`/`title`, `order`, `size`,
 and `z`. The tree defaults to index order, so `-r` alone reverses it. The same criterion
 sorts sessions, each session's windows, and each window's panes independently.
@@ -48,6 +47,30 @@ The filter is evaluated once per pane with complete session/window/pane format c
 and sessions with no matching descendant are pruned. If nothing matches, zz restores the
 unfiltered tree like tmux and shows `filter: no matches` above the still-selectable rows. That state
 is recomputed on every full daemon rebuild and survives incremental search and selection updates.
+
+# Selection command templates
+
+`choose-tree [template]` and `choose-buffer [template]` accept one optional string or unquoted
+command block. With no template, Enter keeps the native action: tree rows activate their target and
+buffer rows paste their contents. An explicit empty template closes the chooser without running the
+default action.
+
+Command preparation constructs a typed block before the chooser opens. It resolves that block's
+aliases and stores canonical command text, with ` ; ` between commands in one physical group and
+` ;; ` between groups. A quoted template stays raw. Selection substitutes the chosen value and
+parses the result against the current alias table, so later alias changes affect string templates
+while typed aliases retain their earlier construction. The parser replaces the first `%%` and every `%1`; a trailing `%`
+quotes `"`, `\`, `$`, `;`, and `~` in the inserted value.
+
+Tree selection supplies `=name:` for a session, `=name:index.` for a window, and
+`=name:index.%id` for a pane. Buffer selection supplies the exact buffer name. The selected row does
+not retarget the action: the daemon executes it with the invoking client's live session, window, and
+pane context. The daemon closes the chooser before it runs the action. It capitalizes the first
+character of parse and command errors shown to an attached client.
+
+`choose-buffer` opens no overlay when the buffer store is empty, so a custom action cannot run. If
+another command removes the selected buffer after the overlay opens, selection closes the stale
+overlay without running its action.
 
 When focused, the sidebar selects and reveals the active pane. A collapsed sidebar is expanded first,
 so the keyboard contract below is the only one. Arrow keys or `hjkl` move and collapse/expand tree
@@ -92,13 +115,13 @@ a `depth`, an optional `pane_kind` (`ChooseTreePaneKind::Terminal`/`Browser`/`Ag
 
 In the GPUI overlay these map to: arrow keys or `hjkl` navigate and collapse/expand, Enter or
 double-click activates, `/` and `?` search, `n`/`N` repeat the search, `q`/Escape closes. Custom
-row formats (`-F`), command templates, `-G`/`-h`/`-k`/`-y`, tagging, previews beyond the
+row formats (`-F`), `-G`/`-h`/`-k`/`-y`, tagging, previews beyond the
 already-previewless `-N` form,
 kill/swap actions, and `choose-client` are explicitly unsupported.
 
 # choose-buffer
 
-`choose-buffer` (default `C-b =`) accepts `-Z`, `-t`, `-f`, `-O`, and `-r` and opens a
+`choose-buffer` (default `C-b =`) accepts `-Z`, `-t`, `-f`, `-K`, `-N`, `-O`, and `-r` and opens a
 sibling overlay over the daemon's global paste-buffer store. Its wire model is deliberately
 bounded: `ChooseBufferItem` holds only a
 `name`, a single-line `preview`, `size_bytes`, and `created_unix_seconds`; full buffer contents stay
@@ -112,13 +135,14 @@ unfiltered chooser with the same `filter: no matches` status. `-K` expands one s
 and one `-N` selects the already-native previewless layout; repeated `-NN` remains unsupported.
 Both clients reserve a shortcut gutter only when at least one rendered row has a key, so a fully
 keyless list uses the full row width. Custom row formats (`-F`), `-k`/`-y`, tagging, editor
-integration, and custom command templates remain rejected.
+integration, and broader presentation behavior remain unsupported.
 
 # Key files
 
 | File | Role |
 | --- | --- |
 | `crates/zz-mux/src/command.rs` | `focus_sidebar`, `choose_tree`, and `choose_buffer` validation plus their effects. |
+| `crates/zz-daemon/src/daemon.rs` | Chooser state, live selection, template substitution, action execution, and error delivery. |
 | `crates/zz-protocol/src/message.rs` | `FocusSidebar`, `ChooseTreeKind`, `ChooseTreeItem`/`State`/`Action`, and choose-buffer types. |
 | `crates/zz/src/workspace/sidebar.rs` | Persistent tree projection, titlebar-mode slideover, focus/reveal lifecycle, vim-style navigation, selection, and activation. |
 

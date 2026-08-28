@@ -13,6 +13,7 @@ use zz_protocol::{ProtocolError, ServerError};
 
 const STARTUP_REENTRY_CAPABILITY_PREFIX: &str = "zz-startup-reentry=";
 const STARTUP_REENTRY_ENVIRONMENT_VARIABLE: &str = "ZZ_STARTUP_REENTRY";
+const COLD_START_PREPARE_ABORT_COMMAND: &str = "__zz-cold-start-prepare-abort";
 #[cfg(feature = "daemon")]
 const TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE: &str = "ZZ_TMUX_EXECUTABLE";
 

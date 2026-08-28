@@ -38,8 +38,9 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 87 active groups, 595 classified active items, 98 closed groups, and two known
-differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
+The live tracker has 87 active groups, 594 classified active items, 99 closed groups, and two known
+differentials. Accepted active groups plus closed history resolve 120 of 186 known groups (64.5%).
+The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
 obey the same gate. Each eligible attached Interactive client
@@ -53,7 +54,7 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The 10q checkpoint covers 98 scenarios and 1,517 steps.
+The 10r checkpoint covers 98 scenarios and 1,517 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
@@ -80,6 +81,15 @@ suppression, dead focus-close, and pane-input isolation. Six broader popup contr
 `display-popup.behavior-fidelity`, while broader menu behavior stays under
 `display-menu.behavior-fidelity`. Nonconstant formats, open context formats, and option consumers
 remain three independent discovery slices.
+Slice 10q closes the per-client `no-detach-on-destroy` fallback with two real raw clients and no new
+differential row. Slice 10r closes the cold local CLI parse-abort contract. An alias-free raw pass
+validates the complete vector against all 83 implemented and nine recognized parked tmux verbs,
+including exact native attach tails and `-N`, before routing, stdin, TUI handoff, or daemon spawn. A
+startup alias name cannot trigger autospawn, while a canonical spelling can be shadowed in the
+daemon pass. A successful pass starts a generation-tagged daemon, which prepares the complete vector under one
+post-config alias snapshot. Its exclusive bootstrap lease survives startup reentry, becomes
+sticky when a second external client connects, commits before a pipelined command can race the
+worker, and shuts down after a failed preparation only when the owner disconnects uncontested.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
@@ -563,14 +573,21 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    execution remains under `aliases.command-bodies`.
    Protocol v74 closes Control's static unknown-name precheck by preparing each complete input unit
    under one daemon lock before framing. Prepared execution freezes only that alias lookup and still
-   reauthorizes normally. Local ordinary CLI commands now prepare the complete vector against an
-   existing compatible daemon. Canonical identity and alias-match state drive exact attach, TUI,
-   stdin, and kill recovery routing, and the TUI carries the immutable vector across its reconnect.
-   A typed name or alias-body error anywhere in the local prepared vector aborts before
-   preprocessing or execution; runtime failures retain tmux queue ordering. Remote `--host` routing
-   remains under `aliases.remote-client-preflight`; config replay alias snapshots stay under
-   `aliases.config-parse-unit`, while local argument validation and replay-group parse abort stay
-   under `mux.chain-parse-abort`.
+   reauthorizes normally. A local CLI with a compatible daemon prepares the complete vector before
+   exact attach, TUI, stdin, and kill-recovery routing, then carries the immutable vector across a TUI
+   reconnect. Slice 10r closes the missing-daemon seam with a raw alias-free syntax pass over the 83
+   implemented and nine recognized parked tmux verbs. Canonical names, built-in aliases, unique
+   prefixes, flags, arity, typed callbacks, exact native attach tails, and `-N` validate before
+   routing or spawn. An arbitrary startup alias cannot trigger autospawn, while a canonical spelling
+   remains eligible for startup-config shadowing. A generation tag then binds the spawned daemon to one exclusive first-external
+   bootstrap lease. The daemon prepares the full vector under one post-config alias snapshot before
+   effects; a failed preparation stops it after the owner's response and disconnect only while the
+   lease remains uncontested. Startup reentry does not contest it, a second external client contests
+   it permanently, a pipelined command commits it before worker scheduling, and a stopping daemon
+   rejects registration. Runtime failures retain tmux queue ordering. Remote `--host` routing remains
+   under `aliases.remote-client-preflight`; config replay alias snapshots stay under
+   `aliases.config-parse-unit`; warm unaliased argument groups and config or source-file replay groups
+   remain under `mux.chain-parse-abort`.
 
    `tracker.args-parse-inventory` closed callback discovery on 2026-08-25. The oracle rejects an
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
@@ -1287,6 +1304,29 @@ permanent product decision has been recorded for them.
   entries. The acceptance artifact remains 98 scenarios and 1,517 steps with attached-client
   `PASS` and SHA-256
   `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+- 2026-08-28: Slice 10q closed `clients.no-detach-on-destroy` without a protocol or snapshot change.
+  The daemon freezes the configured primary and newest-session fallback before moving any client.
+  The primary applies to every client, while only a client retaining `no-detach-on-destroy` may use
+  the fallback under `on`, or under `no-detached` when no detached primary exists. The attached
+  fixture gives two real raw clients one victim session, flags one by exact tty, and proves that it
+  survives on the newest fallback while its unflagged peer exits on zz and pinned tmux. The accepted
+  artifact remains 98 scenarios and 1,517 steps with the same attached `PASS` and digest.
+- 2026-08-28: Slice 10r closed `semantic:local-cli-autospawn-parse-abort` without a protocol or
+  snapshot change. The raw gate validates canonical names, built-in aliases, unique prefixes, flag
+  grammar, arity, and typed callbacks across all 83 implemented and nine recognized parked tmux
+  verbs before a cold local route can read stdin, enter an exact native attach or TUI path, or spawn.
+  Exact attach validates its later commands, and `-N` cannot autospawn. The spawned daemon receives a
+  private generation identifier and prepares the complete vector under one post-config alias
+  snapshot. Its first external client owns a one-shot exclusive bootstrap lease. Startup reentry is
+  ignored, a competing external client makes contention sticky, a pipelined command commits
+  it before worker scheduling, and an uncontested preparation failure stops the daemon only after the
+  owner receives the result and disconnects. An arbitrary startup alias cannot trigger autospawn,
+  while a canonical spelling remains eligible for startup-config shadowing. The 11 cold fixture probes pass on zz and pinned tmux.
+  The 111 CLI, 640 app-library, 711 daemon, 422 mux, and 206 protocol tests pass, as does strict
+  affected-crate clippy. The full strict and attached checkpoint remains 98 scenarios and 1,517 steps
+  with attached-client `PASS` and SHA-256
+  `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`. Warm unaliased argument groups
+  and config or source-file replay remain under `mux.chain-parse-abort`.
 
 # Related
 

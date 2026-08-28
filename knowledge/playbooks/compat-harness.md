@@ -102,14 +102,27 @@ tests do not claim tmux-compatible empty or multi-command alias bodies. The stri
 whole-line preparation error that aborts before either surrounding effect. The strict
 `smoke/cli-chain-parse-abort` fixture proves that a local CLI unknown-name parse failure aborts
 before an earlier mutation while a runtime command failure keeps the earlier effect and prunes the
-later command. This atomicity requires a live compatible daemon. When preparation fails open before
-autospawn, an earlier starting command may take effect before a later unknown name. Only the
-unknown-name error shape is pinned here; malformed alias-body text remains zz-defined while
-`aliases.command-bodies` is open.
-Local attach, stdin, kill, and malformed-alias preprocessing also has focused binary coverage.
-Remote `--host` preparation and whole-vector flag or arity prevalidation remain explicit tracker
-gaps, as does config or source-file replay-group abort. Per-command flag and arity diagnostics at
-dispatch now match the pin.
+later command. Its three harness steps now include eleven cold probes on each engine. Those probes
+cover implemented and parked command syntax through canonical and alias spellings, exact native
+attach tails, and `-N` no-spawn routing.
+
+Against a missing local socket, the CLI validates the complete raw vector without user aliases
+before routing, stdin capture, TUI handoff, daemon spawn, startup config, or effects. The pass covers
+canonical names, built-in aliases, unique prefixes, flags, arity, callback argument types, and nested
+typed blocks for all 83 implemented plus nine parked upstream commands. It parses exact native
+attach first and validates the tail, which still executes after attach. Arbitrary user-alias names
+cannot trigger autospawn, while startup config may shadow a canonical spelling. A successful raw
+pass generation-identifies the spawned daemon, then prepares the full vector under one post-config
+alias snapshot before execution. A failed preparation and owner disconnect stop only the
+exclusively owned new daemon. Startup reentry cannot claim or contest the lease; another external
+client or any command commits it.
+
+Only the unknown-name error shape is pinned here; malformed alias-body text remains zz-defined while
+`aliases.command-bodies` is open. Focused binary coverage also exercises routing-sensitive
+new-session and attach forms, `-N`, startup shadows, arbitrary startup aliases, invalid nested alias
+bodies, contender and pipeline races, and parked syntax. Warm unaliased argument groups plus config
+and source-file replay remain under `mux.chain-parse-abort`. Remote `--host`, Control mode, runtime
+rollback, and native zz command grammar fall outside this closure.
 
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
@@ -252,7 +265,7 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. The 10q checkpoint
+`compat/results/summary.md` is the persisted acceptance artifact. The 10r checkpoint
 from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
 row is clean.
 Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven confirmation cases and
@@ -262,7 +275,9 @@ Enter, nonactivating paste, and pane-input isolation. Slice 10p adds three bound
 live modification, terminal input, dead retention, live focus suppression, dead focus-close, and
 pane-input isolation. Slice 10q adds two temporary raw clients on one destroyed session: the
 flagged client survives on the newest fallback, while its unflagged peer exits.
-Focused resolver coverage pins exact raw-row-zero and all-disabled menu behavior. None adds a
+Slice 10r keeps `smoke/cli-chain-parse-abort` at three harness steps and adds eleven cold probes on
+each engine for the two-pass local autospawn contract. Focused resolver coverage pins exact
+raw-row-zero and all-disabled menu behavior. None adds a
 differential row, so the scenario count, step count, attached-client result, and digest stay
 unchanged.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented

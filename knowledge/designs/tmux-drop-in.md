@@ -91,7 +91,7 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current 10q acceptance inventory contains 98 differential scenarios and
+The current 10r acceptance inventory contains 98 differential scenarios and
 1,517 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
@@ -109,6 +109,18 @@ title modification without job or geometry replacement, bracketed paste plus exa
 mouse and wheel input, dead `-k` retention, live focus suppression, dead focus-close, and pane-input
 isolation. Focus-enabled popup applications and C-locale ACS frame capture harden those assertions. These attached
 cases add no differential row, so the stored artifact and digest remain unchanged.
+Slice 10q adds the mixed-client `no-detach-on-destroy` fallback proof without adding a differential
+row. Slice 10r closes cold local CLI parse atomicity without changing the protocol or snapshot. Its
+raw pass validates the full vector against all 83 implemented and nine recognized parked tmux verbs,
+including canonical names, built-in aliases, unique prefixes, typed callbacks, exact native attach
+tails, and `-N`, before routing or spawning. Arbitrary startup aliases cannot trigger autospawn, but
+a canonical spelling can still be shadowed during daemon preparation. A successful raw pass starts a generation-tagged daemon,
+which prepares the full vector under one post-config alias snapshot before the first effect. The
+generation-owned bootstrap lease shuts down after a preparation failure only when the first external
+client still owns the daemon exclusively. Startup reentry does not contest the lease, a second
+external client makes contention sticky, a pipelined command commits it before worker scheduling,
+and a stopping daemon rejects new registration. Eleven cold fixture probes and focused race tests
+cover those boundaries. The stored artifact and digest remain unchanged.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -244,7 +256,10 @@ flag gap, but accepted semantic divergences remain outside that count.
 **The current queue** is dependency-ordered in the
 [tmux superset roadmap](/designs/tmux-superset-roadmap.md). Shared key structure and bare bind
 mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
-menu descriptor consumption in slice 10o and popup consumption in slice 10p. Nonconstant formats, open context
+menu descriptor consumption in slice 10o, popup consumption in slice 10p, per-client destruction
+fallback in slice 10q, and cold local CLI parse atomicity in slice 10r. The live registry now has 87
+active groups, 594 classified active items, and 99 closed records; 120 of 186 groups are resolved
+(64.5%). Nonconstant formats, open context
 formats, and option consumers remain three independent discovery milestones. Regenerate and
 re-rank the full live tracker before every slice so a newly exposed practical gate can move ahead
 of that forecast. Client targeting and ordinary detach are complete;
@@ -751,23 +766,30 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    the immutable returned invocations without a second alias lookup. The protocol-internal
    `prepared` bit freezes alias observation only: daemon authorization still runs for every command,
    including forged read-only requests. The six stored defaults match the pin; no catalog alias
-   deletion was needed. Ledgered: exact native attach spellings enter client-owned routing before
-   live server aliases, arbitrary live aliases cannot request stdin capture, and a valid one-command
-   Local default and explicit-socket CLI invocations now prepare their complete vector through v74
-   before those three decisions. Exact attach shadows stay in command mode, arbitrary aliases to
-   attach or attaching new-session enter the TUI with the immutable vector, stdin follows the
-   prepared canonical command, and kill recovery requires an unaliased transport or handshake
-   failure. Raw `--kill-server` remains unaliasable, and a failed preparation falls open to the old
-   static route so `--restart-daemon` can recover. The local path scans every prepared result before
+   deletion was needed. Local default and explicit-socket invocations prepare their complete vector
+   through v74 before routing. Exact attach shadows stay in command mode, arbitrary aliases to attach
+   or attaching `new-session` enter the TUI with the immutable vector, stdin follows the prepared
+   canonical command, and kill recovery requires an unaliased transport or handshake failure. Raw
+   `--kill-server` remains unaliasable, while `--restart-daemon` can recover from a failed live
+   preparation. The local path scans every prepared result before
    stdin capture, attach or TUI routing, and execution, so a later typed name or alias-body error
    aborts the vector before any earlier effect. Runtime command failures keep tmux's sequential
    queue behavior. The pin proves the unknown-name diagnostic shape; zz's malformed alias-body
    diagnostic remains a local choice while `aliases.command-bodies` is open. If preparation cannot
-   reach a live compatible daemon, the static fail-open path remains: an autospawn command may run
-   before a later unknown command. Remote `--host` preparation remains under
-   `aliases.remote-client-preflight`;
-   local flag or arity validation, config replay groups, config alias snapshots, and actual empty or
-   multi-command bodies remain under their separate tracker entries.
+   reach a live compatible daemon, slice 10r applies an alias-free raw syntax pass before any routing
+   decision. It validates canonical names, built-in aliases, unique prefixes, flags, arity, and typed
+   callback positions across the 83 implemented and nine recognized parked tmux verbs. Exact native
+   attach validates the rest of its command vector, and `-N` cannot enter TUI routing or autospawn.
+   Arbitrary startup aliases cannot trigger autospawn; a canonical spelling may be shadowed in the
+   daemon pass.
+   After the raw pass, a generation-tagged daemon prepares the complete vector under one post-config
+   alias snapshot. Its first external client owns an exclusive bootstrap lease until preparation
+   commits, a normal command arrives, or another external client contests it. Startup reentry is
+   excluded from contention. A preparation failure sends its response before owner disconnect stops
+   an uncontested daemon, and registration fails once shutdown begins. Remote `--host` preparation
+   remains under `aliases.remote-client-preflight`; warm unaliased argument groups and config or
+   source-file replay groups remain under `mux.chain-parse-abort`; config alias snapshots and actual
+   empty or multi-command bodies retain their separate owners.
 7. `update-environment`: **shipped 2026-08-21.** `seed_session_environment` and
    `global_tmux_option_value` both read the stored array; the frozen constant is gone from
    `command.rs`. Creation-time `new-session -e/-E` shipped 2026-08-22. Protocol v82 later added the
@@ -1234,8 +1256,9 @@ flag ledger is untouched at 127 pairs across 29 commands — diagnostics are beh
    option parser centralize pinned unknown and invalid flags, missing values, too-few and too-many
    arguments, aliases, and usage diagnostics. The focused flag fixture compares 516 probes on zz
    and the pin. Nested `new-session` now follows the pin's creation-validation order before its
-   mutation-free nesting refusal. Whole-command-group prevalidation, callback-specific grammar,
-   and semantic value validation retain separate owners.
+   mutation-free nesting refusal. Cold local CLI group prevalidation shipped in slice 10r. Warm
+   unaliased groups, config or source-file replay, and semantic value validation retain separate
+   owners.
 2. Key grammar and tables: add a fallible canonical key parser, reject malformed modifier
    tails and pin the supported stock copy-table metadata,
    repeat flags, and actions. Preserve zz-native product bindings. Bare `list-keys` alignment
@@ -2100,7 +2123,8 @@ this list is the campaign-level index of it plus the items that never got a matr
   grows choose-tree sort commands, the loop default must track the mutable criteria
   (choose-tree work).
 - Positional arity and leading option diagnostics now use catalog contracts across mux and daemon
-  execution. Whole-command-group prevalidation remains under `mux.chain-parse-abort`. zz rejects
+  execution. Cold local CLI vectors prevalidate before autospawn. Warm unaliased argument groups and
+  config or source-file replay groups remain under `mux.chain-parse-abort`. zz rejects
   tmux-invalid `move-pane -p` and accepts the pin's `move-pane -l` grammar.
 - The TTY attach contract closed 2026-08-20 (phase 8); protocol v70 then closed
   `switch-client` and the client-exit notice seam. Control mode is phase 6; `tmux -V`/`$TMUX`

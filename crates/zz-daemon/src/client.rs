@@ -302,7 +302,28 @@ impl CommandClient {
         &mut self,
         commands: Vec<CommandInvocation>,
     ) -> Result<Vec<PreparedCommand>, DaemonError> {
+        self.prepare_commands_with_count(commands, None)
+    }
+
+    pub fn prepare_commands_or_stop_empty(
+        &mut self,
+        mut commands: Vec<CommandInvocation>,
+        server_id: u64,
+    ) -> Result<Vec<PreparedCommand>, DaemonError> {
         let command_count = commands.len();
+        commands.push(CommandInvocation::new(
+            crate::COLD_START_PREPARE_ABORT_COMMAND,
+            [server_id.to_string()],
+        ));
+        self.prepare_commands_with_count(commands, Some(command_count))
+    }
+
+    fn prepare_commands_with_count(
+        &mut self,
+        commands: Vec<CommandInvocation>,
+        command_count: Option<usize>,
+    ) -> Result<Vec<PreparedCommand>, DaemonError> {
+        let command_count = command_count.unwrap_or(commands.len());
         let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         self.writer.send(&ProtocolMessage::PrepareCommandList {
             request_id,

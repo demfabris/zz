@@ -26,7 +26,7 @@ use zz_mux::{
     TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
     copy_mode_action_is_read_only_safe, display_width, expand_format_values, expand_status,
     format_command, format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
-    send_keys_is_read_only_safe,
+    send_keys_is_read_only_safe, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -982,6 +982,7 @@ pub struct Daemon {
     socket_path: PathBuf,
     load_user_config: bool,
     mux_config_files: Option<Vec<PathBuf>>,
+    server_id: Option<u64>,
 }
 
 impl Daemon {
@@ -991,6 +992,7 @@ impl Daemon {
             socket_path: socket_path.into(),
             load_user_config: true,
             mux_config_files: None,
+            server_id: None,
         }
     }
 
@@ -998,6 +1000,12 @@ impl Daemon {
     pub fn with_mux_config_files(mut self, files: impl IntoIterator<Item = PathBuf>) -> Self {
         let files = files.into_iter().collect::<Vec<_>>();
         self.mux_config_files = (!files.is_empty()).then_some(files);
+        self
+    }
+
+    #[must_use]
+    pub fn with_server_id(mut self, server_id: u64) -> Self {
+        self.server_id = Some(server_id);
         self
     }
 
@@ -1044,7 +1052,8 @@ impl Daemon {
         log_appearance_load("startup", &load);
         let (appearance, provenance) = (Arc::new(load.appearance), load.provenance);
         let shared = Arc::new(Shared::configured(
-            server_id(),
+            self.server_id.unwrap_or_else(server_id),
+            self.server_id.is_some(),
             appearance,
             provenance,
             self.load_user_config,
@@ -3176,6 +3185,7 @@ impl Shared {
 
     fn configured(
         server_id: u64,
+        bootstrap: bool,
         appearance: Arc<TerminalAppearance>,
         appearance_provenance: AppearanceProvenance,
         load_user_config: bool,
@@ -3185,7 +3195,7 @@ impl Shared {
         let visual = std::env::var_os("VISUAL");
         let editor = std::env::var_os("EDITOR");
         let default_editor = editor_from_environment(visual.as_deref(), editor.as_deref());
-        Self::configured_with_boot_environment(
+        let shared = Self::configured_with_boot_environment(
             server_id,
             appearance,
             appearance_provenance,
@@ -3195,7 +3205,11 @@ impl Shared {
             mode_keys_from_environment(visual.as_deref(), editor.as_deref()),
             &default_editor,
             daemon_environment(),
-        )
+        );
+        if bootstrap {
+            shared.inner.lock().cold_bootstrap = ColdBootstrapLease::AwaitingFirstExternal;
+        }
+        shared
     }
 
     fn configured_with_boot_environment<I, K, V>(
@@ -3985,11 +3999,16 @@ impl Shared {
         device_name: Option<String>,
         color_scheme: Option<TerminalColorScheme>,
         client_has_terminal: bool,
-    ) -> (ClientId, ServerHello) {
+        startup_reentry: bool,
+    ) -> Option<(ClientId, ServerHello)> {
         let mut inner = self.inner.lock();
+        if self.stopping.load(Ordering::Acquire) {
+            return None;
+        }
         inner.engine.set_format_now(unix_timestamp());
         let client = ClientId(inner.next_client_id);
         inner.next_client_id = inner.next_client_id.saturating_add(1);
+        inner.cold_bootstrap.register(client, startup_reentry);
         inner.client_instances.insert(client, client_instance_id);
         inner.client_kinds.insert(client, kind);
         let now = unix_timestamp();
@@ -4065,7 +4084,7 @@ impl Shared {
         drop(inner);
         let mut hello = hello;
         hello.status = self.status.lock().render_initial(&request);
-        (client, hello)
+        Some((client, hello))
     }
 
     fn subscribe(&self, client: ClientId, outbound: Arc<OutboundMailbox>) {
@@ -4216,13 +4235,16 @@ impl Shared {
         color_scheme: Option<TerminalColorScheme>,
         outbound: Arc<OutboundMailbox>,
     ) -> (ClientId, ServerHello) {
-        let (client, hello) = self.register(
-            kind,
-            ClientInstanceId::default(),
-            device_name,
-            color_scheme,
-            kind == ClientKind::Interactive,
-        );
+        let (client, hello) = self
+            .register(
+                kind,
+                ClientInstanceId::default(),
+                device_name,
+                color_scheme,
+                kind == ClientKind::Interactive,
+                false,
+            )
+            .expect("server accepts test client");
         if matches!(kind, ClientKind::Interactive | ClientKind::Control) {
             self.subscribe(client, outbound);
         }
@@ -4314,7 +4336,11 @@ impl Shared {
                     (*owner == client).then(|| wake.clone())
                 })
                 .collect::<Vec<_>>();
-            let shutdown = self.should_shutdown_if_empty(&inner);
+            let cold_shutdown = inner.cold_bootstrap.unregister(client);
+            if cold_shutdown {
+                self.stopping.store(true, Ordering::Release);
+            }
+            let shutdown = cold_shutdown || self.should_shutdown_if_empty(&inner);
             (
                 inner.terminals.values().cloned().collect::<Vec<_>>(),
                 inner.command_outputs.remove(&client),
@@ -4486,7 +4512,8 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> Result<(CommandInvocation, bool), ServerError> {
-        let inner = self.inner.lock();
+        let mut inner = self.inner.lock();
+        inner.cold_bootstrap.command(client);
         let command = if prepared {
             command.clone()
         } else {
@@ -4496,13 +4523,45 @@ impl Shared {
         Ok((command, blocked))
     }
 
+    #[cfg(test)]
     fn prepare_command_list(&self, commands: Vec<CommandInvocation>) -> Vec<PreparedCommand> {
         let inner = self.inner.lock();
+        Self::prepare_command_list_with_engine(&inner.engine, commands)
+    }
+
+    fn prepare_command_list_for_request(
+        &self,
+        client: ClientId,
+        mut commands: Vec<CommandInvocation>,
+    ) -> Vec<PreparedCommand> {
+        let abort_server_id = commands.last().and_then(|command| {
+            (command.name == crate::COLD_START_PREPARE_ABORT_COMMAND && command.args.len() == 1)
+                .then(|| command.args[0].parse::<u64>().ok())
+                .flatten()
+        });
+        if abort_server_id.is_some() {
+            commands.pop();
+        }
+        let mut inner = self.inner.lock();
+        let commands = Self::prepare_command_list_with_engine(&inner.engine, commands);
+        if abort_server_id == Some(self.server_id) {
+            let failed = commands
+                .iter()
+                .any(|command| matches!(&command.result, PreparedCommandResult::Error(_)));
+            inner.cold_bootstrap.prepare(client, failed);
+        }
+        commands
+    }
+
+    fn prepare_command_list_with_engine(
+        engine: &MuxEngine,
+        commands: Vec<CommandInvocation>,
+    ) -> Vec<PreparedCommand> {
         commands
             .into_iter()
             .map(|typed| {
                 let (mut invocation, alias_matched, alias_error) =
-                    match inner.engine.resolve_command_alias(&typed) {
+                    match engine.resolve_command_alias(&typed) {
                         CommandAliasResolution::Miss => (typed, false, None),
                         CommandAliasResolution::Expanded(invocation) => (invocation, true, None),
                         CommandAliasResolution::MatchedUnsupported(_) => (
@@ -4538,7 +4597,7 @@ impl Shared {
                     let owner = canonical_name
                         .clone()
                         .unwrap_or_else(|| invocation.name.clone());
-                    if let Err(error) = inner.engine.prepare_expanded_callback_command(
+                    if let Err(error) = engine.prepare_expanded_callback_command(
                         &mut invocation,
                         &owner,
                         alias_matched,
@@ -4550,6 +4609,16 @@ impl Shared {
                             result: PreparedCommandResult::Error(error),
                         };
                     }
+                } else if alias_matched
+                    && let Err(error) =
+                        validate_static_command_chain(std::slice::from_ref(&invocation))
+                {
+                    return PreparedCommand {
+                        invocation,
+                        canonical_name,
+                        alias_matched,
+                        result: PreparedCommandResult::Error(error),
+                    };
                 }
                 match resolution {
                     CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
@@ -20310,9 +20379,64 @@ impl ClientFlags {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ColdBootstrapLease {
+    #[default]
+    Disabled,
+    AwaitingFirstExternal,
+    Owned(ClientId),
+    PendingAbort(ClientId),
+    Contested,
+    Committed,
+}
+
+impl ColdBootstrapLease {
+    fn register(&mut self, client: ClientId, startup_reentry: bool) {
+        if startup_reentry {
+            return;
+        }
+        *self = match *self {
+            Self::AwaitingFirstExternal => Self::Owned(client),
+            Self::Owned(_) | Self::PendingAbort(_) => Self::Contested,
+            state => state,
+        };
+    }
+
+    fn prepare(&mut self, client: ClientId, failed: bool) {
+        if *self == Self::Owned(client) {
+            *self = if failed {
+                Self::PendingAbort(client)
+            } else {
+                Self::Committed
+            };
+        }
+    }
+
+    fn command(&mut self, client: ClientId) {
+        if matches!(*self, Self::Owned(owner) | Self::PendingAbort(owner) if owner == client) {
+            *self = Self::Committed;
+        }
+    }
+
+    fn unregister(&mut self, client: ClientId) -> bool {
+        match *self {
+            Self::PendingAbort(owner) if owner == client => {
+                *self = Self::Disabled;
+                true
+            }
+            Self::Owned(owner) if owner == client => {
+                *self = Self::Committed;
+                false
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Default)]
 struct ServerState {
     engine: MuxEngine,
+    cold_bootstrap: ColdBootstrapLease,
     last_published_mux_generation: u64,
     appearance: Arc<TerminalAppearance>,
     published_style_appearance: Option<Arc<TerminalAppearance>>,
@@ -28027,7 +28151,7 @@ fn handle_connection<S: TransportStream>(
     }
 
     let outbound = OutboundMailbox::new();
-    let (client, server_hello) = shared.register(
+    let Some((client, server_hello)) = shared.register(
         hello.kind,
         hello.client_instance_id,
         hello.device_name.clone(),
@@ -28037,7 +28161,10 @@ fn handle_connection<S: TransportStream>(
                 .capabilities
                 .iter()
                 .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
-    );
+        startup_reentry,
+    ) else {
+        return Ok(());
+    };
     {
         let mut inner = shared.inner.lock();
         if let Some(origin) = hello.origin {
@@ -28170,6 +28297,7 @@ fn handle_connection<S: TransportStream>(
                 command,
                 prepared,
             }) => {
+                shared.inner.lock().cold_bootstrap.command(client);
                 if let Some(context) = context.as_mut() {
                     sync_context_with_attachment(&shared.inner.lock(), client, context);
                 }
@@ -28202,7 +28330,7 @@ fn handle_connection<S: TransportStream>(
                 request_id,
                 commands,
             } => {
-                let commands = shared.prepare_command_list(commands);
+                let commands = shared.prepare_command_list_for_request(client, commands);
                 let _ = outbound.enqueue_reliable(&ProtocolMessage::PreparedCommandList {
                     request_id,
                     commands,
@@ -36317,13 +36445,16 @@ mod tests {
     fn interactive_new_session_without_a_terminal_is_rejected_before_creation() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
-        let (client, _) = shared.register(
-            ClientKind::Interactive,
-            ClientInstanceId::default(),
-            None,
-            None,
-            false,
-        );
+        let (client, _) = shared
+            .register(
+                ClientKind::Interactive,
+                ClientInstanceId::default(),
+                None,
+                None,
+                false,
+                false,
+            )
+            .expect("register headless client");
         shared.subscribe(client, Arc::clone(&mailbox));
         let mut context = ExecutionContext::default();
 
@@ -64397,13 +64528,16 @@ bind - split-window -v -c "#{pane_current_path}"
     fn attach_flags_follow_resolution_and_precede_the_terminal_open_error() {
         let shared = Arc::new(Shared::new(1));
         switch_test_session(&shared, "target");
-        let (client, _) = shared.register(
-            ClientKind::Interactive,
-            ClientInstanceId::default(),
-            Some("headless".to_owned()),
-            None,
-            false,
-        );
+        let (client, _) = shared
+            .register(
+                ClientKind::Interactive,
+                ClientInstanceId::default(),
+                Some("headless".to_owned()),
+                None,
+                false,
+                false,
+            )
+            .expect("register headless client");
         let mut context = ExecutionContext::default();
 
         assert!(matches!(
@@ -64528,13 +64662,16 @@ bind - split-window -v -c "#{pane_current_path}"
                 _ => None,
             })
             .expect("original environment pane");
-        let (headless, _) = shared.register(
-            ClientKind::Interactive,
-            ClientInstanceId::default(),
-            Some("headless-environment".to_owned()),
-            None,
-            false,
-        );
+        let (headless, _) = shared
+            .register(
+                ClientKind::Interactive,
+                ClientInstanceId::default(),
+                Some("headless-environment".to_owned()),
+                None,
+                false,
+                false,
+            )
+            .expect("register headless client");
         shared.inner.lock().client_environments.insert(
             headless,
             client_environment_fact(&["ATTACHED_ENV=headless".to_owned()]),
@@ -64680,13 +64817,16 @@ bind - split-window -v -c "#{pane_current_path}"
             None,
             OutboundMailbox::new(),
         );
-        let (caller, _) = shared.register(
-            ClientKind::Command,
-            ClientInstanceId::default(),
-            Some("environment-caller".to_owned()),
-            None,
-            false,
-        );
+        let (caller, _) = shared
+            .register(
+                ClientKind::Command,
+                ClientInstanceId::default(),
+                Some("environment-caller".to_owned()),
+                None,
+                false,
+                false,
+            )
+            .expect("register command client");
         {
             let mut inner = shared.inner.lock();
             inner.client_environments.insert(
@@ -65510,6 +65650,191 @@ bind - split-window -v -c "#{pane_current_path}"
                 ..
             } if message == "command set-option: unknown flag -Z"
         ));
+    }
+
+    #[test]
+    fn prepared_alias_expansions_reject_static_syntax_before_ready() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(91);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
+            )
+            .expect("session");
+        for (index, value) in [
+            (60, "badflag10r=list-sessions -Z"),
+            (61, "badarity10r=list-sessions extra"),
+            (62, "list-sessions=display-message -p shadow"),
+            (
+                63,
+                "nested10r=confirm-before { if-shell -F 1 { bind-key -T { display-message bad-table } F2 display-message } }",
+            ),
+            (64, "parked10r=capture-pane -C"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("alias");
+        }
+
+        let prepared = shared.prepare_command_list(vec![
+            CommandInvocation::new("list-windows", ["-Z"]),
+            CommandInvocation::new("badflag10r", [] as [&str; 0]),
+            CommandInvocation::new("badarity10r", [] as [&str; 0]),
+            CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            CommandInvocation::new("nested10r", [] as [&str; 0]),
+            CommandInvocation::new("parked10r", [] as [&str; 0]),
+        ]);
+
+        assert!(!prepared[0].alias_matched);
+        assert_eq!(prepared[0].result, PreparedCommandResult::Ready);
+        assert_eq!(
+            prepared[1].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(
+                "command list-sessions: unknown flag -Z".to_owned()
+            ))
+        );
+        assert_eq!(
+            prepared[2].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(
+                "command list-sessions: too many arguments (need at most 0)".to_owned()
+            ))
+        );
+        assert!(prepared[3].alias_matched);
+        assert_eq!(
+            prepared[3].canonical_name.as_deref(),
+            Some("display-message")
+        );
+        assert_eq!(prepared[3].invocation.args, ["-p", "shadow"]);
+        assert_eq!(prepared[3].result, PreparedCommandResult::Ready);
+        assert_eq!(
+            prepared[4].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(
+                "command bind-key: -T argument must be a string".to_owned()
+            ))
+        );
+        assert!(prepared[5].alias_matched);
+        assert_eq!(prepared[5].canonical_name.as_deref(), Some("capture-pane"));
+        assert_eq!(prepared[5].result, PreparedCommandResult::Ready);
+    }
+
+    #[test]
+    fn cold_prepare_abort_requires_an_exclusive_owner_and_disconnect() {
+        let request = |server_id: u64| {
+            vec![
+                CommandInvocation::new("frobnicate", [] as [&str; 0]),
+                CommandInvocation::new(
+                    crate::COLD_START_PREPARE_ABORT_COMMAND,
+                    [server_id.to_string()],
+                ),
+            ]
+        };
+        let register = |shared: &Shared, startup_reentry| {
+            shared
+                .register(
+                    ClientKind::Command,
+                    ClientInstanceId::default(),
+                    None,
+                    None,
+                    false,
+                    startup_reentry,
+                )
+                .expect("register bootstrap client")
+                .0
+        };
+
+        let exclusive = Arc::new(Shared::new(71));
+        exclusive.inner.lock().cold_bootstrap = ColdBootstrapLease::AwaitingFirstExternal;
+        let owner = register(&exclusive, false);
+        let prepared = exclusive.prepare_command_list_for_request(owner, request(71));
+        assert_eq!(prepared.len(), 1);
+        assert!(matches!(
+            &prepared[0].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(message))
+                if message == "unknown command: frobnicate"
+        ));
+        assert_eq!(
+            exclusive.inner.lock().cold_bootstrap,
+            ColdBootstrapLease::PendingAbort(owner)
+        );
+        assert!(!exclusive.stopping.load(Ordering::Acquire));
+        exclusive.unregister(owner);
+        assert!(exclusive.stopping.load(Ordering::Acquire));
+
+        let wrong_generation = Arc::new(Shared::new(72));
+        wrong_generation.inner.lock().cold_bootstrap = ColdBootstrapLease::AwaitingFirstExternal;
+        let owner = register(&wrong_generation, false);
+        let _ = wrong_generation.prepare_command_list_for_request(owner, request(71));
+        wrong_generation.unregister(owner);
+        assert!(!wrong_generation.stopping.load(Ordering::Acquire));
+
+        let contested = Arc::new(Shared::new(73));
+        contested.inner.lock().cold_bootstrap = ColdBootstrapLease::AwaitingFirstExternal;
+        let owner = register(&contested, false);
+        let startup_reentry = register(&contested, true);
+        assert_eq!(
+            contested.inner.lock().cold_bootstrap,
+            ColdBootstrapLease::Owned(owner)
+        );
+        contested.unregister(startup_reentry);
+        let competitor = register(&contested, false);
+        contested.unregister(competitor);
+        assert_eq!(
+            contested.inner.lock().cold_bootstrap,
+            ColdBootstrapLease::Contested
+        );
+        let _ = contested.prepare_command_list_for_request(owner, request(73));
+        contested.unregister(owner);
+        assert!(!contested.stopping.load(Ordering::Acquire));
+
+        let pipelined = Arc::new(Shared::new(75));
+        pipelined.inner.lock().cold_bootstrap = ColdBootstrapLease::AwaitingFirstExternal;
+        let owner = register(&pipelined, false);
+        let _ = pipelined.prepare_command_list_for_request(owner, request(75));
+        pipelined.inner.lock().cold_bootstrap.command(owner);
+        pipelined.unregister(owner);
+        assert!(!pipelined.stopping.load(Ordering::Acquire));
+
+        let valid = Arc::new(Shared::new(74));
+        valid.inner.lock().cold_bootstrap = ColdBootstrapLease::AwaitingFirstExternal;
+        let owner = register(&valid, false);
+        let commands = vec![
+            CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            CommandInvocation::new(crate::COLD_START_PREPARE_ABORT_COMMAND, ["74"]),
+        ];
+        let _ = valid.prepare_command_list_for_request(owner, commands);
+        assert_eq!(
+            valid.inner.lock().cold_bootstrap,
+            ColdBootstrapLease::Committed
+        );
+        valid.unregister(owner);
+        assert!(!valid.stopping.load(Ordering::Acquire));
+
+        let stopping = Shared::new(76);
+        stopping.stopping.store(true, Ordering::Release);
+        assert!(
+            stopping
+                .register(
+                    ClientKind::Command,
+                    ClientInstanceId::default(),
+                    None,
+                    None,
+                    false,
+                    false,
+                )
+                .is_none()
+        );
     }
 
     #[test]

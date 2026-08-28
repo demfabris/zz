@@ -531,6 +531,25 @@ connection; an attaching command carries the immutable vector into the TUI's sec
 Remote `--host` intentionally skips this round trip until discovery can inspect an existing remote
 daemon without starting SSH.
 
+The cold local path adds an alias-free pass before that RPC. Before routing, stdin capture, TUI
+handoff, daemon spawn, startup config, or effects, the CLI validates the complete raw vector against
+all 83 implemented and nine parked upstream command specifications. Canonical names, built-in
+aliases, and unique prefixes receive flag, arity, callback-type, and nested typed-block validation.
+An exact native `attach` or `attach-session` uses its native parser first, then sends the validated
+tail through the TUI for execution after attach. `-N` refuses to spawn a daemon. The raw pass does
+not expand user aliases, so an arbitrary alias name cannot trigger autospawn. A canonical spelling
+can still reach a startup-config alias that shadows it.
+
+After the raw pass, the CLI gives the spawned daemon a fresh generation ID and verifies that ID in
+`ServerHello`. It then submits the complete vector for preparation under one post-config alias
+snapshot. The daemon expands one alias layer, constructs callbacks recursively, validates static
+syntax in alias expansions, and returns every result before the CLI executes the first command.
+Only a daemon started with that generation arms `ColdBootstrapLease`. Startup reentry does not claim
+the lease. The first external client owns it; a failed marked preparation moves it to pending abort,
+and the owner's disconnect stops that newly spawned empty daemon after the error response. A
+successful preparation, any command from the owner, or a competing external client commits the
+daemon instead. This path adds no protocol tag or snapshot field.
+
 Prepared execution sets `CommandRequest.prepared` so the daemon skips only another alias lookup.
 Read-only authorization and the full ordinary execution path still run. The flag is an internal
 snapshot contract, not an authority grant; a forged prepared destructive request from a read-only
@@ -540,8 +559,9 @@ kind-specific server branch.
 Protocol v76 appends `ServerError::CommandParse` at tail tag 12. Mux and daemon handlers use it for
 command-name, flag, arity, and preparation failures, while target and runtime failures keep their
 existing variants. Callers can abort a parse failure before effects without changing runtime queue
-ordering. Cold CLI preparation and full config or source prevalidation remain under
-`mux.chain-parse-abort`.
+ordering. The cold local CLI closure covers autospawn. `mux.chain-parse-abort` now retains warm
+unaliased argument groups plus config and source-file group construction. Remote `--host`, Control
+mode, and runtime rollback stay outside that closure.
 
 Protocol v76 originally appended `EventPayload::SourcedCommandGuard` at tail tag 47 for Control
 replay. Protocol v77 renames that tag in place to

@@ -38,6 +38,8 @@ use std::{
     io::{self, ErrorKind, Write as _},
     path::PathBuf,
     process::{Command, ExitCode, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use std::{
     path::Path,
@@ -104,6 +106,10 @@ const NATIVE_APP_USAGE: &str = "zz: usage: zz app";
 const FOREIGN_TMUX_ERROR: &str = "zz: TMUX is set but ZZ_SOCKET is not; refusing to treat a tmux server as zz\nUse `zz app` to open the GUI, or pass `-S` / set `ZZ_SOCKET` to target a zz daemon.";
 #[cfg(not(target_os = "ios"))]
 const APP_STARTUP_DIRECTORY_ENV: &str = "ZZ_APP_STARTUP_DIRECTORY";
+#[cfg(not(target_os = "ios"))]
+const DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT: &str = "--bootstrap-server-id";
+#[cfg(not(target_os = "ios"))]
+static DAEMON_SPAWN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(not(target_os = "ios"))]
 enum Startup {
@@ -758,8 +764,26 @@ fn run_command_mode(
     }
 
     if command == "daemon" {
-        let daemon =
+        let bootstrap_server_id = match invocation.args.as_slice() {
+            [flag, server_id] if flag == DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT => {
+                if let Ok(server_id) = server_id.parse::<u64>() {
+                    Some(server_id)
+                } else {
+                    eprintln!("zz daemon: invalid bootstrap server id");
+                    return Some(ExitCode::FAILURE);
+                }
+            }
+            [flag, ..] if flag == DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT => {
+                eprintln!("zz daemon: invalid bootstrap server id");
+                return Some(ExitCode::FAILURE);
+            }
+            _ => None,
+        };
+        let mut daemon =
             Daemon::new(socket_path).with_mux_config_files(mux_config_files.iter().cloned());
+        if let Some(server_id) = bootstrap_server_id {
+            daemon = daemon.with_server_id(server_id);
+        }
         return Some(match daemon.run_foreground() {
             Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
             Err(error) => {
@@ -806,16 +830,92 @@ fn run_command_mode(
         });
     }
 
-    let mut prepared = host
-        .is_none()
-        .then(|| prepare_cli_command_chain(socket_path, &command_chain))
-        .flatten();
+    let start_server = !no_start_server && tmux_command_starts_server(&command);
+    let native_attach_spelling = matches!(command.as_str(), "attach" | "attach-session");
+    let mut preparation_error = None;
+    let mut prepared = if host.is_none() {
+        match prepare_cli_command_chain(socket_path, &command_chain) {
+            Ok(prepared) => Some(prepared),
+            Err(error) => {
+                preparation_error = Some(classify_local_connect_error(socket_path, error));
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    if prepared.is_none() && host.is_none() {
+        let static_commands = if native_attach_spelling {
+            if let Err(error) = parse_native_attach_arguments(command_chain[0].args.clone()) {
+                print_native_attach_argument_error(error);
+                return Some(ExitCode::FAILURE);
+            }
+            &command_chain[1..]
+        } else {
+            &command_chain
+        };
+        if zz_mux::validate_static_command_chain(static_commands).is_err() {
+            let error = preparation_error.expect("missing preparation error");
+            eprintln!("{}", format_local_command_error(socket_path, error));
+            return Some(ExitCode::FAILURE);
+        }
+    }
+
+    if prepared.is_none()
+        && !start_server
+        && tmux_command_starts_server(&command)
+        && preparation_error.as_ref().is_some_and(daemon_is_spawnable)
+    {
+        let error = preparation_error.expect("missing preparation error");
+        eprintln!("{}", format_local_command_error(socket_path, error));
+        return Some(ExitCode::FAILURE);
+    }
+
+    if prepared.is_none()
+        && start_server
+        && preparation_error.as_ref().is_some_and(daemon_is_spawnable)
+    {
+        if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
+            eprintln!("{}", error.message);
+            let nested_label_new_session =
+                canonical_command(&command) == "new-session" && error.kind == ErrorKind::NotFound;
+            return Some(if nested_label_new_session {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            });
+        }
+        let (mut client, spawned_server_id) =
+            match connect_command_client_with_spawn_provenance(socket_path, mux_config_files) {
+                Ok(connected) => connected,
+                Err(error) => {
+                    eprintln!("{}", format_local_command_error(socket_path, error));
+                    return Some(ExitCode::FAILURE);
+                }
+            };
+        let commands = match spawned_server_id {
+            Some(server_id) => {
+                client.prepare_commands_or_stop_empty(command_chain.clone(), server_id)
+            }
+            None => client.prepare_commands(command_chain.clone()),
+        };
+        let commands = match commands {
+            Ok(commands) => commands,
+            Err(error) => {
+                eprintln!("{}", command_error_message(&error));
+                return Some(ExitCode::FAILURE);
+            }
+        };
+        prepared = Some(PreparedCliCommandChain { client, commands });
+    }
 
     if let Some(error) = prepared
         .as_ref()
         .and_then(|prepared| prepared_command_error(&prepared.commands))
+        .map(server_error_message)
     {
-        eprintln!("{}", server_error_message(error));
+        eprintln!("{error}");
         return Some(ExitCode::FAILURE);
     }
 
@@ -864,7 +964,8 @@ fn run_command_mode(
                 .is_some_and(|prepared| prepared_attach_uses_tui(&command, prepared))
         },
     );
-    if new_session_tui || attach_tui {
+    let tui_connection_allowed = host.is_some() || prepared.is_some() || start_server;
+    if tui_connection_allowed && (new_session_tui || attach_tui) {
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
             host: host.map(str::to_owned),
@@ -918,12 +1019,8 @@ fn run_command_mode(
     if native_attach {
         let options = match parse_native_attach_arguments(command_chain[0].args.clone()) {
             Ok(options) => options,
-            Err(NativeAttachArgumentError::Usage) => {
-                eprintln!("{NATIVE_ATTACH_USAGE}");
-                return Some(ExitCode::FAILURE);
-            }
-            Err(NativeAttachArgumentError::Command(error)) => {
-                eprintln!("{}", command_error_message(&DaemonError::Server(error)));
+            Err(error) => {
+                print_native_attach_argument_error(error);
                 return Some(ExitCode::FAILURE);
             }
         };
@@ -931,6 +1028,8 @@ fn run_command_mode(
             eprintln!("zz: --restart-daemon is only supported for the local daemon");
             return Some(ExitCode::FAILURE);
         }
+        let needs_command_attach =
+            options.no_update_environment || options.working_directory.is_some();
         let attach_command = native_attach_command(&options);
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
@@ -952,12 +1051,24 @@ fn run_command_mode(
         let request = options
             .with_browser_provider(tui_browser_provider)
             .with_local_reconnect(&reconnect);
-        if let Some(PreparedCliCommandChain { client, .. }) = prepared.take() {
-            drop(client);
-        }
-        let result = match attach_command {
-            Some(command) => zz_tui::run_new_session(request, [command]),
-            None => zz_tui::run(request),
+        let result = if command_chain.len() > 1 || needs_command_attach {
+            if let Some(PreparedCliCommandChain {
+                client,
+                mut commands,
+            }) = prepared.take()
+            {
+                drop(client);
+                commands[0].invocation = attach_command;
+                zz_tui::run_prepared_new_session(request, commands)
+            } else {
+                command_chain[0] = attach_command;
+                zz_tui::run_new_session(request, command_chain)
+            }
+        } else {
+            if let Some(PreparedCliCommandChain { client, .. }) = prepared.take() {
+                drop(client);
+            }
+            zz_tui::run(request)
         };
         return Some(match result {
             Ok(()) => ExitCode::SUCCESS,
@@ -968,7 +1079,6 @@ fn run_command_mode(
         });
     }
 
-    let start_server = !no_start_server && tmux_command_starts_server(&command);
     if let Some(error) = tmux_label_creation_error(socket_path, socket_source, start_server) {
         eprintln!("{}", error.message);
         let nested_label_new_session =
@@ -1057,10 +1167,10 @@ struct PreparedCliCommandChain {
 fn prepare_cli_command_chain(
     socket_path: &Path,
     commands: &[CommandInvocation],
-) -> Option<PreparedCliCommandChain> {
-    let mut client = CommandClient::connect(socket_path).ok()?;
-    let commands = client.prepare_commands(commands.to_vec()).ok()?;
-    Some(PreparedCliCommandChain { client, commands })
+) -> Result<PreparedCliCommandChain, DaemonError> {
+    let mut client = CommandClient::connect(socket_path)?;
+    let commands = client.prepare_commands(commands.to_vec())?;
+    Ok(PreparedCliCommandChain { client, commands })
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1418,10 +1528,17 @@ fn parse_native_attach_arguments(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn native_attach_command(options: &NativeAttachArguments) -> Option<CommandInvocation> {
-    if !options.no_update_environment && options.working_directory.is_none() {
-        return None;
+fn print_native_attach_argument_error(error: NativeAttachArgumentError) {
+    match error {
+        NativeAttachArgumentError::Usage => eprintln!("{NATIVE_ATTACH_USAGE}"),
+        NativeAttachArgumentError::Command(error) => {
+            eprintln!("{}", command_error_message(&DaemonError::Server(error)));
+        }
     }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn native_attach_command(options: &NativeAttachArguments) -> CommandInvocation {
     let mut args = Vec::new();
     if options.detach_others {
         args.push("-d".to_owned());
@@ -1441,7 +1558,7 @@ fn native_attach_command(options: &NativeAttachArguments) -> Option<CommandInvoc
     if let Some(session) = &options.session {
         args.extend(["-t".to_owned(), session.clone()]);
     }
-    Some(CommandInvocation::new("attach-session", args))
+    CommandInvocation::new("attach-session", args)
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1655,11 +1772,36 @@ fn daemon_is_missing(error: &DaemonError) -> bool {
 }
 
 #[cfg(not(target_os = "ios"))]
+fn daemon_is_spawnable(error: &DaemonError) -> bool {
+    matches!(
+        error,
+        DaemonError::Io(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::NotFound | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset
+            )
+    )
+}
+
+#[cfg(not(target_os = "ios"))]
+fn next_spawn_server_id() -> u64 {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let folded = u64::try_from(timestamp & u128::from(u64::MAX)).unwrap_or_default();
+    folded
+        ^ u64::from(std::process::id()).rotate_left(32)
+        ^ DAEMON_SPAWN_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+}
+
+#[cfg(not(target_os = "ios"))]
 fn spawn_daemon(
     path: &Path,
     color_scheme: Option<TerminalColorScheme>,
     mux_config_files: &[PathBuf],
-) -> Result<(), DaemonError> {
+) -> Result<u64, DaemonError> {
+    let server_id = next_spawn_server_id();
     let executable = std::env::current_exe()?;
     let mut command = Command::new(&executable);
     command
@@ -1669,7 +1811,10 @@ fn spawn_daemon(
     for config in mux_config_files {
         command.arg("-f").arg(config);
     }
-    command.arg("daemon");
+    command
+        .arg("daemon")
+        .arg(DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT)
+        .arg(server_id.to_string());
     if let Some(color_scheme) = color_scheme {
         command.env("ZZ_COLOR_SCHEME", color_scheme.as_str());
     }
@@ -1687,7 +1832,7 @@ fn spawn_daemon(
         path.display(),
         diagnostics::enabled(),
     );
-    Ok(())
+    Ok(server_id)
 }
 
 /// A new process group alone is not enough: it stays in the launching
@@ -1719,6 +1864,24 @@ fn connect_or_spawn_daemon<T>(
     connect: impl Fn(bool) -> Result<T, DaemonError>,
     server_hello: impl for<'a> Fn(&'a T) -> &'a ServerHello,
 ) -> Result<T, DaemonError> {
+    connect_or_spawn_daemon_with_provenance(
+        path,
+        color_scheme,
+        mux_config_files,
+        connect,
+        server_hello,
+    )
+    .map(|(client, _)| client)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn connect_or_spawn_daemon_with_provenance<T>(
+    path: &Path,
+    color_scheme: Option<TerminalColorScheme>,
+    mux_config_files: &[PathBuf],
+    connect: impl Fn(bool) -> Result<T, DaemonError>,
+    server_hello: impl for<'a> Fn(&'a T) -> &'a ServerHello,
+) -> Result<(T, Option<u64>), DaemonError> {
     match connect(false) {
         Ok(client) => {
             log::debug!(
@@ -1727,7 +1890,7 @@ fn connect_or_spawn_daemon<T>(
                 path.display(),
                 server_hello(&client),
             );
-            return Ok(client);
+            return Ok((client, None));
         }
         Err(error) => match classify_local_connect_error(path, error) {
             DaemonError::Io(error)
@@ -1739,11 +1902,15 @@ fn connect_or_spawn_daemon<T>(
         },
     }
 
-    spawn_daemon(path, color_scheme, mux_config_files)?;
+    let spawned_server_id = spawn_daemon(path, color_scheme, mux_config_files)?;
     let deadline = Instant::now() + Duration::from_secs(6);
     loop {
         match connect(true) {
-            Ok(client) => return Ok(client),
+            Ok(client) => {
+                let provenance = (server_hello(&client).server_id == spawned_server_id)
+                    .then_some(spawned_server_id);
+                return Ok((client, provenance));
+            }
             Err(error) if Instant::now() >= deadline => {
                 return Err(classify_local_connect_error(path, error));
             }
@@ -1762,6 +1929,20 @@ fn connect_command_client(
         return CommandClient::connect(path);
     }
     connect_or_spawn_daemon(
+        path,
+        None,
+        mux_config_files,
+        |_| CommandClient::connect(path),
+        CommandClient::server_hello,
+    )
+}
+
+#[cfg(not(target_os = "ios"))]
+fn connect_command_client_with_spawn_provenance(
+    path: &Path,
+    mux_config_files: &[PathBuf],
+) -> Result<(CommandClient, Option<u64>), DaemonError> {
+    connect_or_spawn_daemon_with_provenance(
         path,
         None,
         mux_config_files,
@@ -2519,6 +2700,7 @@ mod tests {
         assert!(!target.read_only);
         assert_eq!(target.working_directory, None);
         assert_eq!(target.session.as_deref(), Some("work"));
+        assert_eq!(native_attach_command(&target).args, ["-d", "-t", "work"]);
 
         let positional =
             parse_native_attach_arguments(["work", "--restart-daemon"].map(str::to_owned)).unwrap();
@@ -2541,10 +2723,7 @@ mod tests {
             parse_native_attach_arguments(["-E", "-t", "work"].map(str::to_owned)).unwrap();
         assert!(no_update.no_update_environment);
         assert_eq!(no_update.session.as_deref(), Some("work"));
-        assert_eq!(
-            native_attach_command(&no_update).unwrap().args,
-            ["-E", "-t", "work"]
-        );
+        assert_eq!(native_attach_command(&no_update).args, ["-E", "-t", "work"]);
 
         let flags = parse_native_attach_arguments(
             [
@@ -2567,7 +2746,7 @@ mod tests {
         assert_eq!(cwd.working_directory.as_deref(), Some("/tmp/work"));
         assert_eq!(cwd.session.as_deref(), Some("work"));
         assert_eq!(
-            native_attach_command(&cwd).unwrap().args,
+            native_attach_command(&cwd).args,
             ["-d", "-c", "/tmp/work", "-t", "work"]
         );
 
@@ -2578,7 +2757,7 @@ mod tests {
         assert!(bundled.detach_others);
         assert!(bundled.no_update_environment);
         assert!(bundled.read_only);
-        let command = native_attach_command(&bundled).unwrap();
+        let command = native_attach_command(&bundled);
         assert_eq!(command.name, "attach-session");
         assert_eq!(
             command.args,
@@ -2595,7 +2774,10 @@ mod tests {
             ]
         );
 
-        assert!(native_attach_command(&read_only).is_none());
+        assert_eq!(
+            native_attach_command(&read_only).args,
+            ["-d", "-r", "-t", "work"]
+        );
 
         assert!(matches!(
             parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),

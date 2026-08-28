@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10R FROZEN: LOCAL COLD-START CLI PARSE ABORT**
+> Campaign state: **SLICE 10R DELIVERED: LIVE RERANK REQUIRED**
 >
-> Tracker resolution progress: **64.3% (119 of 185 known groups)**
+> Tracker resolution progress: **64.5% (120 of 186 known groups)**
 >
-> Committed milestone base: **2026-08-28** at `8310fb79b330b5d8f7eb2824ebcee14d81be38f7`
+> Audited pre-close base: **2026-08-28** at `c85c6de4494100594922f3eb7fd10014b35d01c1`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Committed milestone base | `8310fb79b330b5d8f7eb2824ebcee14d81be38f7` |
-| Delivery | Local `main` contains the committed 10q closure and frozen 10r plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Audited pre-close base | `c85c6de4494100594922f3eb7fd10014b35d01c1` |
+| Delivery | The current local milestone closes 10r on top of its committed plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10r is frozen on the local cold-start CLI preparation seam |
-| Live registry | 87 active groups, 595 active items, 98 closed records |
+| Campaign point | Slice 10r is complete; run a live full-registry rerank before freezing its successor |
+| Live registry | 87 active groups, 594 active items, 99 closed records |
 | Active status | 46 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10r plan descends from the committed 10q milestone above. Resolve the commit
+The 10r closure descends from the committed plan above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(98 + 21) / (98 + 87) = 119 / 185 = 64.3%
+(99 + 21) / (99 + 87) = 120 / 186 = 64.5%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -152,9 +152,10 @@ Work one bounded milestone at a time:
 Fabrico granted standing authority to commit each reviewed campaign milestone and continue into the
 next reranked slice. Pushes still require an explicit request.
 
-## Accepted evidence at the 10q checkpoint
+## Accepted evidence after 10r
 
-The fresh strict-plus-attached artifact remains the current accepted checkpoint:
+The strict-plus-attached artifact remains the current accepted checkpoint. Slice 10r adds no
+differential row or step and does not change its digest:
 
 | Evidence | Result |
 | --- | --- |
@@ -175,22 +176,26 @@ the repaired 10p full-frame and focus proof. Slice 10q adds no differential scen
 does not change the digest. Focused package tests, affected clippy, formatting, tracker and OKF
 validation, shell syntax, and diff checks also passed.
 
+The 10r fixture adds 11 cold-socket probes per engine. They cover implemented and parked built-in
+syntax through canonical names, aliases, and prefixes; exact native `attach` and `attach-session`
+tails; and `-N` routes. Every invalid vector exits before spawn or mutation. The accepted artifact
+therefore stays at 98 scenarios, 1,517 steps, attached-client `PASS`, and SHA-256
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+
 This run supersedes the earlier replacement run that stopped during `lane2-store`.
 
-The fresh workspace test sweep stopped in `zz-daemon` after 706 of 708 tests passed. The two failing
-mode-key tests passed immediately when rerun alone, matching the parallel-load classification in
-`AGENTS.md`. Cargo therefore did not continue through every later workspace package; affected
-package tests and the full compatibility checkpoint remain green.
-
-The fresh 10q daemon-package sweep reached the unrelated
-`pipe_pane_has_no_gap_when_control_attaches_during_a_flood` test after the changed destruction
-cluster passed, then wedged without an assertion. Its exact solo rerun also wedged and was stopped,
-so this checkpoint does not claim a complete daemon-package pass. The focused destruction tests,
-strict daemon clippy, and full compatibility gate remain green.
+The fresh monolithic workspace run reached the unrelated
+`pipe_pane_has_no_gap_when_control_attaches_during_a_flood` test after every changed suite passed,
+then wedged under full-workspace load. Its exact solo rerun passed in 0.06 seconds. The complete
+daemon package passes 711 tests, and `cargo test --workspace --all-features --exclude zz-daemon`
+passes every remaining workspace test, including 643 all-feature app-library tests and all 111 CLI
+tests. Workspace strict clippy also passes. This is the load-induced daemon-test classification
+documented in `AGENTS.md`, not a 10r regression; the checkpoint does not claim one uninterrupted
+monolithic workspace test process.
 
 ## Shipped history
 
-The 98 entries under the generated report's
+The 99 entries under the generated report's
 [`Closed history`](knowledge/tmux/gaps.md#closed-history) section are the complete item-level record.
 The table below is the milestone rollup an agent needs for orientation.
 
@@ -232,6 +237,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10p | Raw-TUI popup state, rendering, input ownership, and attached proof | `587ce54` |
 | 10p proof repair | Live-popup focus suppression, dead `-k` focus-close, and C-locale frame proof | `c909406` |
 | 10q | Per-client no-detach-on-destroy fallback and attached proof | `8310fb7` |
+| 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | Current milestone; resolve after commit |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -315,47 +321,40 @@ both zz and pinned tmux.
 Active-pane routing, detach execution, parent-HUP exit, resize-hook ordering, buffer and source-file
 cwd, and popup or menu residue remain separate.
 
-## Frozen slice: 10r local cold-start CLI parse abort
+## Completed slice: 10r local cold-start CLI parse abort
 
-The post-10q rerank confirmed `mux.chain-parse-abort` as the only top candidate with a reproduced
-silent mutation, no dependency, an existing fixture, and a narrow client seam. It also rejected the
-old omnibus item. The group now owns three explicit contracts; 10r freezes only
-`semantic:local-cli-autospawn-parse-abort`. Generic command-group argument preparation and config or
-source-file group preparation remain active sibling items.
+The tracker moved `semantic:local-cli-autospawn-parse-abort` into closed history as
+`mux.local-cli-autospawn-parse-abort`. The old chain-abort item remains split: warm unaliased generic
+command groups and config or source-file replay keep separate active owners.
 
-Current zz attempts whole-vector preparation only through a compatible live daemon. With a missing
-local socket, that attempt returns no result and routing falls back to the first command. A
-start-server verb can therefore spawn and mutate state before a later command fails to parse.
-Pinned tmux parses the whole raw client argument group before setting its start-server flag, without
-expanding arbitrary startup aliases, then parses the whole group again on the server after loading
-startup config and before queue insertion. A canonical command spelling may therefore be shadowed
-by a startup alias, while an arbitrary alias name cannot itself trigger autospawn.
+Before 10r, a missing local daemon made whole-vector preparation fail open. Routing then inspected
+the first command, so a later syntax error could arrive after spawn and mutation. The CLI now checks
+the complete raw vector before routing, stdin, native TUI handoff, spawn, startup config, or effects.
+The static catalog covers all 83 implemented upstream commands plus nine parked commands. Canonical
+names, built-in aliases, and prefixes receive flag, arity, and callback-type validation without
+expanding arbitrary user aliases.
 
-Slice 10r acceptance is:
+Exact native `attach` and `attach-session` routes validate their command tail before handoff. The
+same gate blocks `-N new-session`, `-N attach`, and `-N attach-session` from reaching a TUI or spawn
+after a later syntax error. Canonical startup spellings still admit config shadowing; an arbitrary
+startup alias name cannot trigger autospawn.
 
-- against a missing local socket, the complete raw vector receives built-in name, alias, prefix,
-  flag, arity, and callback-type validation before routing, stdin consumption, TUI handoff, daemon
-  spawn, startup config, or effects;
-- the raw pass does not expand arbitrary user aliases: those cannot trigger autospawn, while a
-  canonical spelling remains eligible for startup-config shadowing;
-- after that static gate succeeds, the started daemon authoritatively prepares the complete vector
-  under one post-config alias snapshot, recursively constructs callbacks, and has every result
-  checked before the first command runs;
-- a raw syntax failure or startup alias and callback preparation failure exits nonzero without an
-  earlier session, environment, or buffer mutation or a surviving local server;
-- a successfully prepared vector retains current tmux queue behavior for runtime target or effect
-  errors: earlier effects remain and later commands do not run;
-- focused binary tests cover routing-sensitive first verbs, canonical startup shadowing, an
-  arbitrary startup alias name, and invalid nested alias bodies; the strict fixture covers warm and
-  cold sockets without a protocol or snapshot change.
+After the raw gate passes, the spawned daemon prepares the complete vector under one post-config
+alias snapshot. It constructs nested callbacks and checks every result before the first command
+runs. The CLI tags that daemon generation, and a one-shot lease assigns the first external client
+as owner while excluding startup reentry. Sticky contention prevents a disconnected competitor
+from restoring exclusivity. A successful prepare or pipelined command commits the lease. On a
+prepare failure, the daemon sends the error before the owner's disconnect requests shutdown, and
+the stopping state rejects later registrations.
 
-The slice excludes warm generic flag and arity atomicity, config or source-file replay, remote
-`--host` preparation, Control mode, runtime rollback, and queue cancellation. Those boundaries must
-not be smuggled into 10r merely because they also involve a command group.
+Focused tests cover startup shadowing, arbitrary and nested aliases, exact native routes, lease
+ownership, contention, pipelining, and shutdown ordering. The strict fixture runs 11 cold probes on
+each engine. Runtime target and effect errors retain queue semantics: earlier effects stay visible,
+and later commands do not run. Slice 10r changes neither protocol nor snapshot schema.
 
-## Candidate queue after 10r
+## Non-frozen forecast after 10r
 
-The table is a dependency forecast, not permission to skip the rerank after 10r closes.
+No successor is frozen. Run a full live rerank first; the table records dependencies only.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |

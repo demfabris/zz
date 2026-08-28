@@ -16,6 +16,7 @@ use zz_protocol::{
     PopupBorderLines, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
     catalog_command_spec, command_specs, normalize_browser_profile_name,
     parse_tmux_command_options, parse_tmux_options, resolve_command,
+    unimplemented_tmux_command_spec,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
@@ -13665,6 +13666,53 @@ fn expand_stored_alias(
     }
 }
 
+pub fn validate_static_command_chain(commands: &[CommandInvocation]) -> Result<(), ServerError> {
+    for command in commands {
+        validate_static_command(command)?;
+    }
+    Ok(())
+}
+
+fn validate_static_command(command: &CommandInvocation) -> Result<(), ServerError> {
+    let (name, spec) = match resolve_command(&command.name) {
+        CommandResolution::Canonical(name) => (name, catalog_command_spec(name)),
+        CommandResolution::Unimplemented(name) => (name, unimplemented_tmux_command_spec(name)),
+        CommandResolution::Ambiguous(message) => return Err(ServerError::CommandParse(message)),
+        CommandResolution::Unknown => {
+            return Err(ServerError::CommandParse(format!(
+                "unknown command: {}",
+                command.name
+            )));
+        }
+    };
+    if NATIVE_COMMAND_NAMES.contains(&name) {
+        return Ok(());
+    }
+    let Some(spec) = spec else {
+        return Err(ServerError::CommandParse(format!(
+            "unknown command: {}",
+            command.name
+        )));
+    };
+    let parsed = parse_tmux_command_options(spec, command)?;
+    spec.validate_positional_minimum(parsed.positionals.len())?;
+    spec.validate_positional_maximum(parsed.positionals.len())?;
+    for index in 0..command.args.len() {
+        if !command.argument_is_command_block(index) {
+            continue;
+        }
+        let argument = &command.args[index];
+        let body = crate::parser::command_block_body(argument).unwrap_or(argument);
+        let parsed =
+            crate::parser::parse_config_without_variable_expansion("<static-command-chain>", body);
+        if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+            return Err(ServerError::CommandParse(diagnostic.message));
+        }
+        validate_static_command_chain(&parsed.commands)?;
+    }
+    Ok(())
+}
+
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
     let name = canonical_command(&command.name);
     if let Some(spec) = catalog_command_spec(name) {
@@ -14037,6 +14085,104 @@ mod tests {
 
     fn command(name: &str, args: &[&str]) -> CommandInvocation {
         CommandInvocation::new(name, args.iter().copied())
+    }
+
+    #[test]
+    fn static_command_chain_accepts_canonical_alias_and_unique_prefix_names() {
+        let commands = [
+            command("display-message", &["canonical"]),
+            command("display", &["alias"]),
+            command("capture-pan", &["-p"]),
+        ];
+
+        validate_static_command_chain(&commands).unwrap();
+    }
+
+    #[test]
+    fn static_command_chain_rejects_later_name_option_and_arity_errors() {
+        for (invalid, expected) in [
+            (command("does-not-exist", &[]), "unknown command"),
+            (command("display-message", &["-Q"]), "unknown flag -Q"),
+            (command("display-message", &["-t"]), "expects an argument"),
+            (command("list-sessions", &["extra"]), "too many arguments"),
+            (command("kill-s", &[]), "ambiguous command"),
+        ] {
+            let commands = [command("display-message", &["before"]), invalid];
+            assert!(matches!(
+                validate_static_command_chain(&commands),
+                Err(ServerError::CommandParse(message)) if message.contains(expected)
+            ));
+        }
+    }
+
+    #[test]
+    fn static_command_chain_recurses_into_typed_callback_blocks() {
+        let command = command(
+            "if-shell",
+            &["true", "{ display-message -Q }", "display-message ok"],
+        )
+        .with_command_blocks([1]);
+
+        assert!(matches!(
+            validate_static_command_chain(&[command]),
+            Err(ServerError::CommandParse(message)) if message.contains("unknown flag -Q")
+        ));
+    }
+
+    #[test]
+    fn static_command_chain_enforces_callback_argument_types() {
+        let command =
+            command("display-message", &["{ display-message ok }"]).with_command_blocks([0]);
+
+        assert!(matches!(
+            validate_static_command_chain(&[command]),
+            Err(ServerError::CommandParse(message)) if message.contains("must be \"string\"")
+        ));
+    }
+
+    #[test]
+    fn static_command_chain_leaves_capability_and_native_checks_to_runtime() {
+        let commands = [
+            command("clock-mode", &[]),
+            command("capture-pane", &["-C", "-p"]),
+            command("agent-send", &["--submit", "hello"]),
+        ];
+
+        validate_static_command_chain(&commands).unwrap();
+    }
+
+    #[test]
+    fn static_command_chain_validates_unimplemented_tmux_syntax() {
+        for (name, args, expected) in [
+            ("clock-mode", &["-Z"][..], "unknown flag -Z"),
+            ("clock-mode", &["extra"][..], "too many arguments"),
+            ("newp", &["-B"][..], "expects an argument"),
+            ("suspend-c", &["extra"][..], "too many arguments"),
+        ] {
+            assert!(matches!(
+                validate_static_command_chain(&[command(name, args)]),
+                Err(ServerError::CommandParse(message)) if message.contains(expected)
+            ));
+        }
+
+        validate_static_command_chain(&[
+            command("clock-mode", &["-t", "%1"]),
+            command("newp", &["-d", "printf", "hello"]),
+            command("suspend-c", &["-t", "/dev/pts/1"]),
+        ])
+        .unwrap();
+    }
+
+    #[test]
+    fn static_command_chain_never_mutates_invocations() {
+        let commands = vec![
+            command("display", &["before"]),
+            command("if", &["true", "{ display -Q }"]).with_command_blocks([1]),
+        ];
+        let original = commands.clone();
+
+        assert!(validate_static_command_chain(&commands).is_err());
+        assert_eq!(commands, original);
     }
 
     fn relocated_pane_geometries(command_name: &str, args: &[&str]) -> ((u16, u16), (u16, u16)) {

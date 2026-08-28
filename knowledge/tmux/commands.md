@@ -56,6 +56,24 @@ probes. Protocol v84 adds zero-based unquoted command-block positions to `Comman
 `COMMAND_ARGS_PARSE_BEHAVES` while retaining the shared option diagnostics. Target resolution lives
 in `MuxState`:
 
+`validate_static_command_chain` applies this grammar without a live mux or user aliases. The cold
+local CLI runs it over the complete raw vector before routing, stdin capture, TUI handoff, daemon
+spawn, startup config, or effects. It resolves canonical names, built-in aliases, and unique
+prefixes; validates flags, arity, callback argument types, and nested typed blocks; and covers all 83
+implemented plus nine parked upstream commands. Exact native `attach` and `attach-session` use the
+native parser for their first invocation and validate the tail, which still executes after attach.
+`-N` cannot start a daemon. Arbitrary user-alias names cannot trigger autospawn, while startup config
+may shadow a canonical spelling.
+
+A successful raw pass generation-identifies the spawned daemon. That daemon prepares the complete
+vector under one post-config alias snapshot, including recursive callback construction and static
+syntax validation for alias expansions. The CLI checks every result before execution. A failed
+bootstrap preparation and owner disconnect retire only the exclusively owned new daemon. Startup
+reentry cannot claim or contest the lease; another external client or any command commits it.
+Runtime errors keep sequential queue
+behavior. Warm unaliased argument groups and config or source-file replay remain dispatch-at-a-time;
+remote `--host`, Control mode, and rollback fall outside the cold local contract.
+
 Oracle schema 4 extracts tmux's custom `args_parse` callbacks from the pinned source. The extractor
 accepts six rules and fails when a callback body falls outside them:
 
@@ -413,10 +431,10 @@ authority. Exact attach routing, client-side
 stdin capture, and `kill-server` recovery now consume that identity for local CLI endpoints. The
 same immutable vector crosses a TUI reconnect. Before preprocessing or execution, the local CLI
 scans the whole vector for typed preparation errors, so a later invalid command cannot follow an
-earlier effect. This covers typed name and alias-body failures. Flag and arity diagnostics now match
-the pin when each command reaches dispatch, but whole-vector argument prevalidation remains under
-`mux.chain-parse-abort`. Runtime command failures retain sequential tmux
-queue ordering. Raw `--kill-server`
+earlier effect. A warm endpoint covers typed name and alias-body failures; the cold static pass above
+adds whole-vector upstream flag, arity, and callback validation across autospawn. Warm unaliased
+argument groups remain under `mux.chain-parse-abort`, while per-command diagnostics match the pin at
+dispatch. Runtime command failures retain sequential tmux queue ordering. Raw `--kill-server`
 stays unaliasable. Remote
 `--host` routing remains under `aliases.remote-client-preflight` because classification must not
 start SSH. Command alias shadowing is not an authorization control: every prepared command still

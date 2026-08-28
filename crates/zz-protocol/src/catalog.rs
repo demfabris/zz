@@ -1,4 +1,4 @@
-//! Shared metadata for tmux-compatible commands implemented by `zz`.
+//! Shared metadata for tmux-compatible and native `zz` commands.
 
 use crate::message::{CommandInvocation, ServerError};
 
@@ -118,7 +118,7 @@ impl CommandOptionSpec {
     }
 }
 
-/// Completion and canonicalization metadata for one implemented command.
+/// Syntax, completion, and canonicalization metadata for one command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommandSpec {
     pub name: &'static str,
@@ -651,6 +651,164 @@ pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "unlink-window",
     "unlinkw",
     "switch-mode",
+];
+
+static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "choose-client",
+        aliases: &[],
+        description: "Unsupported tmux command",
+        usage: "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+        options: &[
+            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::unsupported_value("-K"),
+            CommandOptionSpec::unsupported_flag("-N"),
+            CommandOptionSpec::unsupported_value("-O"),
+            CommandOptionSpec::unsupported_flag("-Z"),
+            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::unsupported_flag("-h"),
+            CommandOptionSpec::unsupported_flag("-i"),
+            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::unsupported_flag("-r"),
+            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::unsupported_flag("-y"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "clock-mode",
+        aliases: &[],
+        description: "Unsupported tmux command",
+        usage: "[-t target-pane]",
+        options: &[CommandOptionSpec::unsupported_value("-t")],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "customize-mode",
+        aliases: &[],
+        description: "Unsupported tmux command",
+        usage: "[-kNZ] [-F format] [-f filter] [-t target-pane]",
+        options: &[
+            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::unsupported_flag("-N"),
+            CommandOptionSpec::unsupported_flag("-Z"),
+            CommandOptionSpec::unsupported_value("-f"),
+            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::unsupported_flag("-y"),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "link-window",
+        aliases: &["linkw"],
+        description: "Unsupported tmux command",
+        usage: "[-abdk] [-s src-window] [-t dst-window]",
+        options: &[
+            CommandOptionSpec::unsupported_flag("-a"),
+            CommandOptionSpec::unsupported_flag("-b"),
+            CommandOptionSpec::unsupported_flag("-d"),
+            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::unsupported_value("-s"),
+            CommandOptionSpec::unsupported_value("-t"),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "new-pane",
+        aliases: &["newp"],
+        description: "Unsupported tmux command",
+        usage: "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
+        options: &[
+            CommandOptionSpec::unsupported_value("-B"),
+            CommandOptionSpec::unsupported_flag("-E"),
+            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::unsupported_flag("-I"),
+            CommandOptionSpec::unsupported_flag("-L"),
+            CommandOptionSpec::unsupported_flag("-P"),
+            CommandOptionSpec::unsupported_value("-R"),
+            CommandOptionSpec::unsupported_value("-S"),
+            CommandOptionSpec::unsupported_value("-T"),
+            CommandOptionSpec::unsupported_flag("-W"),
+            CommandOptionSpec::unsupported_value("-X"),
+            CommandOptionSpec::unsupported_value("-Y"),
+            CommandOptionSpec::unsupported_flag("-Z"),
+            CommandOptionSpec::unsupported_flag("-b"),
+            CommandOptionSpec::unsupported_value("-c"),
+            CommandOptionSpec::unsupported_flag("-d"),
+            CommandOptionSpec::unsupported_value("-e"),
+            CommandOptionSpec::unsupported_flag("-f"),
+            CommandOptionSpec::unsupported_flag("-h"),
+            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::unsupported_value("-l"),
+            CommandOptionSpec::unsupported_value("-m"),
+            CommandOptionSpec::unsupported_value("-p"),
+            CommandOptionSpec::unsupported_value("-s"),
+            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::unsupported_flag("-v"),
+            CommandOptionSpec::unsupported_value("-x"),
+            CommandOptionSpec::unsupported_value("-y"),
+        ],
+        positionals: &[],
+        variadic: Some(FreeForm),
+    },
+    CommandSpec {
+        name: "server-access",
+        aliases: &[],
+        description: "Unsupported tmux command",
+        usage: "[-adglrw] [-t target-pane] [user|group]",
+        options: &[
+            CommandOptionSpec::unsupported_flag("-a"),
+            CommandOptionSpec::unsupported_flag("-d"),
+            CommandOptionSpec::unsupported_flag("-g"),
+            CommandOptionSpec::unsupported_flag("-l"),
+            CommandOptionSpec::unsupported_flag("-r"),
+            CommandOptionSpec::unsupported_flag("-w"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "suspend-client",
+        aliases: &["suspendc"],
+        description: "Unsupported tmux command",
+        usage: "[-t target-client]",
+        options: &[CommandOptionSpec::unsupported_value("-t")],
+        positionals: &[],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "switch-mode",
+        aliases: &[],
+        description: "Unsupported tmux command",
+        usage: "[-kswZ] [-F format] [-t target-pane] [command]",
+        options: &[
+            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::unsupported_flag("-Z"),
+            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::unsupported_flag("-s"),
+            CommandOptionSpec::unsupported_value("-t"),
+            CommandOptionSpec::unsupported_flag("-w"),
+        ],
+        positionals: &[FreeForm],
+        variadic: None,
+    },
+    CommandSpec {
+        name: "unlink-window",
+        aliases: &["unlinkw"],
+        description: "Unsupported tmux command",
+        usage: "[-k] [-t target-window]",
+        options: &[
+            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::unsupported_value("-t"),
+        ],
+        positionals: &[],
+        variadic: None,
+    },
 ];
 
 pub static NATIVE_COMMAND_NAMES: &[&str] = &[
@@ -2297,6 +2455,13 @@ pub fn catalog_command_spec(name: &str) -> Option<&'static CommandSpec> {
     })
 }
 
+#[must_use]
+pub fn unimplemented_tmux_command_spec(name: &str) -> Option<&'static CommandSpec> {
+    UNIMPLEMENTED_TMUX_COMMAND_SPECS
+        .iter()
+        .find(|spec| spec.name == name || spec.aliases.contains(&name))
+}
+
 pub fn command_specs() -> impl Iterator<Item = &'static CommandSpec> {
     COMMAND_SPECS.iter().chain(DAEMON_COMMAND_SPECS)
 }
@@ -2360,18 +2525,6 @@ fn resolved(name: &'static str, implemented: bool) -> CommandResolution {
     }
 }
 
-static UNIMPLEMENTED_TMUX_COMMAND_TABLE: &[(&str, &[&str])] = &[
-    ("choose-client", &[]),
-    ("clock-mode", &[]),
-    ("customize-mode", &[]),
-    ("link-window", &["linkw"]),
-    ("new-pane", &["newp"]),
-    ("server-access", &[]),
-    ("suspend-client", &["suspendc"]),
-    ("switch-mode", &[]),
-    ("unlink-window", &["unlinkw"]),
-];
-
 fn command_table() -> impl Iterator<Item = (&'static str, &'static [&'static str], bool)> {
     static TABLE: std::sync::OnceLock<Vec<(&'static str, &'static [&'static str], bool)>> =
         std::sync::OnceLock::new();
@@ -2382,9 +2535,9 @@ fn command_table() -> impl Iterator<Item = (&'static str, &'static [&'static str
                 .chain(DAEMON_COMMAND_SPECS)
                 .map(|spec| (spec.name, spec.aliases, true))
                 .chain(
-                    UNIMPLEMENTED_TMUX_COMMAND_TABLE
+                    UNIMPLEMENTED_TMUX_COMMAND_SPECS
                         .iter()
-                        .map(|(name, aliases)| (*name, *aliases, false)),
+                        .map(|spec| (spec.name, spec.aliases, false)),
                 )
                 .collect();
             entries.sort_unstable_by_key(|(name, _, _)| *name);
@@ -2406,9 +2559,9 @@ mod tests {
     fn unimplemented_table_matches_the_flat_list() {
         let mut flat: Vec<&str> = UNIMPLEMENTED_TMUX_COMMANDS.to_vec();
         flat.sort_unstable();
-        let mut structured: Vec<&str> = UNIMPLEMENTED_TMUX_COMMAND_TABLE
+        let mut structured: Vec<&str> = UNIMPLEMENTED_TMUX_COMMAND_SPECS
             .iter()
-            .flat_map(|(name, aliases)| std::iter::once(*name).chain(aliases.iter().copied()))
+            .flat_map(|spec| std::iter::once(spec.name).chain(spec.aliases.iter().copied()))
             .collect();
         structured.sort_unstable();
         assert_eq!(flat, structured);
@@ -2584,6 +2737,8 @@ mod tests {
         aliases: Vec<String>,
         usage: String,
         flags: BTreeMap<String, String>,
+        min_args: usize,
+        max_args: Option<usize>,
     }
 
     fn oracle_commands() -> Vec<OracleCommand> {
@@ -2681,6 +2836,38 @@ mod tests {
         );
         for spec in command_specs().filter(|spec| spec.uses_tmux_option_grammar()) {
             assert!(upstream.contains(spec.name), "{}", spec.name);
+        }
+    }
+
+    #[test]
+    fn unimplemented_tmux_syntax_matches_the_pinned_oracle() {
+        let oracle = oracle_commands()
+            .into_iter()
+            .map(|command| (command.name.clone(), command))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 9);
+        for spec in UNIMPLEMENTED_TMUX_COMMAND_SPECS {
+            let command = &oracle[spec.name];
+            assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
+            assert_eq!(spec.usage, command.usage, "usage for {}", spec.name);
+            assert_eq!(
+                catalog_flag_shapes(spec),
+                command.flags,
+                "flags for {}",
+                spec.name
+            );
+            assert_eq!(
+                spec.positional_minimum(),
+                command.min_args,
+                "minimum arguments for {}",
+                spec.name
+            );
+            assert_eq!(
+                spec.positional_maximum(),
+                command.max_args,
+                "maximum arguments for {}",
+                spec.name
+            );
         }
     }
 

@@ -166,6 +166,15 @@ mod daemon_autostart {
                 "identity was created"
             );
         }
+
+        fn assert_stopped(&self) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let identity = identity_path(&self.socket);
+            while (self.socket.exists() || identity.exists()) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            self.assert_not_started();
+        }
     }
 
     impl CargoLauncher {
@@ -2345,6 +2354,45 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn exact_native_attach_executes_a_valid_command_chain_tail() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let created = fixture.run(&["new-session", "-d", "-s", "named"]);
+        assert_eq!(created.status.code(), Some(0));
+        for (command, variable) in [
+            ("attach", "NATIVE_ATTACH_TAIL"),
+            ("attach-session", "NATIVE_ATTACH_SESSION_TAIL"),
+        ] {
+            let (rendered, captured, early_status) = capture_tui_until(
+                &fixture,
+                &[
+                    command,
+                    "-t",
+                    "named",
+                    ";",
+                    "set-environment",
+                    "-g",
+                    variable,
+                    "yes",
+                ],
+                &[b"\x1b[?1049h"],
+            );
+            assert!(
+                rendered,
+                "{command}: child exited early={early_status:?}; pty output={}",
+                String::from_utf8_lossy(&captured)
+            );
+
+            let value = fixture.run(&["show-environment", "-g", variable]);
+            assert_eq!(value.status.code(), Some(0));
+            assert_eq!(value.stdout, format!("{variable}=yes\n").as_bytes());
+            assert!(value.stderr.is_empty());
+        }
+    }
+
+    #[test]
     fn native_attach_flag_errors_match_tmux_for_both_spellings() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -2703,6 +2751,190 @@ mod daemon_autostart {
         assert_eq!(alive.status.code(), Some(0));
         assert_eq!(alive.stdout, b"atomic\n");
         assert!(alive.stderr.is_empty());
+    }
+
+    #[test]
+    fn cold_cli_parse_errors_do_not_start_or_mutate_a_daemon() {
+        let cases: &[&[&str]] = &[
+            &["new-session", "-d", "-s", "before", ";", "frobnicate"],
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "before",
+                ";",
+                "list-sessions",
+                "-Z",
+            ],
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "before",
+                ";",
+                "list-sessions",
+                "-F",
+            ],
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "before",
+                ";",
+                "list-sessions",
+                "extra",
+            ],
+            &["new", "-d", "-s", "before", ";", "lscm", "-Z"],
+            &["new-session", "-s", "before", ";", "frobnicate"],
+            &["-N", "new-session", "-s", "before", ";", "frobnicate"],
+            &["-N", "attach"],
+            &["-N", "attach-session"],
+            &["attach", ";", "frobnicate"],
+            &["attach-session", ";", "frobnicate"],
+            &["new-session", "-d", "-s", "before", ";", "clock-mode", "-Z"],
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "before",
+                ";",
+                "suspendc",
+                "extra",
+            ],
+        ];
+        for arguments in cases {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let output = fixture.run(arguments);
+            assert_missing(&output, &fixture.missing_message());
+            fixture.assert_not_started();
+        }
+    }
+
+    #[test]
+    fn cold_cli_valid_builtin_alias_chain_still_starts_and_executes() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let output = fixture.run(&[
+            "new",
+            "-d",
+            "-s",
+            "before",
+            ";",
+            "ls",
+            "-F",
+            "#{session_name}",
+        ]);
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stdout, b"before\n");
+        assert!(output.stderr.is_empty());
+    }
+
+    #[test]
+    fn arbitrary_startup_alias_cannot_trigger_cold_autostart() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        std::fs::write(
+            &fixture.config,
+            b"set-option -s command-alias[0] 'go=new-session -d -s from-alias'\n",
+        )
+        .expect("write startup alias");
+        let output = fixture.run(&["go"]);
+        assert_missing(&output, &fixture.missing_message());
+        fixture.assert_not_started();
+    }
+
+    #[test]
+    fn canonical_startup_alias_shadow_is_prepared_after_config() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        std::fs::write(
+            &fixture.config,
+            b"set-option -s command-alias[0] 'list-sessions=display-message -p STARTUP_VALID'\n",
+        )
+        .expect("write startup alias");
+        let output = fixture.run(&["new-session", "-d", "-s", "before", ";", "list-sessions"]);
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stdout, b"STARTUP_VALID\n");
+        assert!(output.stderr.is_empty());
+        let session = fixture.run(&["has-session", "-t", "=before"]);
+        assert_eq!(session.status.code(), Some(0));
+        assert!(session.stdout.is_empty());
+        assert!(session.stderr.is_empty());
+    }
+
+    #[test]
+    fn canonical_attach_startup_alias_shadow_is_prepared_after_config() {
+        for command in ["attach", "attach-session"] {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            std::fs::write(
+                &fixture.config,
+                format!(
+                    "set-option -s command-alias[0] '{command}=display-message -p STARTUP_ATTACH'\n"
+                ),
+            )
+            .expect("write startup alias");
+            let output = fixture.run(&[command]);
+            assert_eq!(output.status.code(), Some(0));
+            assert_eq!(output.stdout, b"STARTUP_ATTACH\n");
+            assert!(output.stderr.is_empty());
+        }
+    }
+
+    #[test]
+    fn failed_preflight_handshake_still_runs_the_cold_static_gate() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let listener = std::os::unix::net::UnixListener::bind(&fixture.socket)
+            .expect("bind fake preflight listener");
+        let socket = fixture.socket.clone();
+        let fake = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept preflight client");
+            std::fs::remove_file(&socket).expect("unlink fake listener");
+            drop(stream);
+        });
+        let output = fixture.run(&["new-session", "-d", "-s", "before-reset", ";", "frobnicate"]);
+        fake.join().expect("join fake listener");
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
+        fixture.assert_not_started();
+    }
+
+    #[test]
+    fn invalid_startup_alias_shadows_abort_before_cold_effects() {
+        for alias in [
+            "list-sessions=frobnicate",
+            "list-sessions=confirm-before { frobnicate }",
+        ] {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            std::fs::write(
+                &fixture.config,
+                format!("set-option -s command-alias[0] '{alias}'\n"),
+            )
+            .expect("write startup alias");
+            let output = fixture.run(&["new-session", "-d", "-s", "before", ";", "list-sessions"]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            assert_eq!(output.stderr, b"unknown command: frobnicate\n");
+            fixture.assert_stopped();
+        }
     }
 
     #[test]

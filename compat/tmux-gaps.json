@@ -1297,7 +1297,7 @@
       "title": "Match shared copy-mode binding commands",
       "decision": "adopt",
       "status": "open",
-      "priority": "next",
+      "priority": "later",
       "ease": "hard",
       "impact": [
         "daily",
@@ -1948,8 +1948,7 @@
       "owner": "mux",
       "items": [
         "semantic:command-group-argument-parse-abort",
-        "semantic:config-source-group-parse-abort",
-        "semantic:local-cli-autospawn-parse-abort"
+        "semantic:config-source-group-parse-abort"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/message.rs",
@@ -1961,12 +1960,11 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Against a missing local daemon, the raw command vector receives a whole-group static syntax pass before routing or autospawn, then the started daemon authoritatively prepares one immutable vector after startup config but before effects; a raw syntax error or startup alias and callback preparation error leaves no earlier mutation or surviving server.",
         "Generic flag, arity, option-value, and other command-argument preparation errors abort a command group before its first effect, while runtime target and effect errors retain tmux queue ordering.",
         "Config and source-file replay construct and validate tmux's required command-group boundary before its first effect while preserving exact first-diagnostic and source-location behavior."
       ],
       "depends_on": [],
-      "reason": "Protocol v76 separates parse and preparation failures as ServerError::CommandParse from target and runtime failures, and an already-running compatible local daemon rejects typed name or alias-body preparation errors before preprocessing or execution. Cold or failed preparation falls open to static routing, so an autospawn verb may still run before a later unknown name, bad flag, bad arity, or invalid startup alias body. Pinned tmux first validates the raw client group to decide whether the server may start, without expanding arbitrary startup aliases, then reparses the full group on the server after config loading. The frozen 10r slice owns only that local cold-start seam. Generic warm argument validation and config or source-file replay are separate items rather than hidden acceptance clauses."
+      "reason": "Protocol v76 separates parse and preparation failures as ServerError::CommandParse from target and runtime failures. Local CLI vectors now receive whole-group validation both against a live daemon and across cold autospawn, but an unaliased vector sent to an already-running daemon still validates generic arguments only as each command reaches dispatch. Config and source-file replay also remain dispatch-at-a-time rather than constructing and validating the full parser-owned group before effects."
     },
     {
       "id": "options.lock-program",
@@ -2835,7 +2833,7 @@
         "scenario:compat/scenarios/smoke/cli-chain-parse-abort.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "For local default and explicit socket endpoints, the CLI now asks an already-running compatible daemon to prepare the complete argv chain once without spawning. Canonical identity and alias-match metadata decide native attach, TUI new-session or attach, agent-send stdin capture, and kill-server recovery before any client-owned preprocessing. Exact attach and attach-session shadows stay in command mode, arbitrary aliases to attaching commands enter the TUI, aliases to agent-send read stdin, and an agent-send shadow does not. Command execution reuses the prepared connection; TUI carries the typed immutable vector across its second connection and sends prepared requests without a second alias lookup. The CLI scans every typed result before stdin capture, attach or TUI routing, and execution, so a later preparation error cannot fall through or follow an earlier effect. A bare unaliased kill-server enters verified incompatible-daemon recovery only for transport or handshake failure; alias errors and nonzero results return normally and leave the daemon alive. Raw --kill-server remains an unaliasable process selector, preparation failure falls open to the previous static routing, --restart-daemon still recovers after a failed preflight, and preparation never autospawns. Remote --host preprocessing remains open under aliases.remote-client-preflight, config replay snapshotting remains under aliases.config-parse-unit, and replay-group parse abort remains under mux.chain-parse-abort."
+      "resolution": "For local default and explicit socket endpoints, the CLI now asks an already-running compatible daemon to prepare the complete argv chain once without spawning. Canonical identity and alias-match metadata decide native attach, TUI new-session or attach, agent-send stdin capture, and kill-server recovery before any client-owned preprocessing. Exact attach and attach-session shadows stay in command mode, arbitrary aliases to attaching commands enter the TUI, aliases to agent-send read stdin, and an agent-send shadow does not. Command execution reuses the prepared connection; TUI carries the typed immutable vector across its second connection and sends prepared requests without a second alias lookup. The CLI scans every typed result before stdin capture, attach or TUI routing, and execution, so a later preparation error cannot fall through or follow an earlier effect. A bare unaliased kill-server enters verified incompatible-daemon recovery only for transport or handshake failure; alias errors and nonzero results return normally and leave the daemon alive. Raw --kill-server remains an unaliasable process selector, --restart-daemon still recovers after a failed preflight, and preparation never autospawns. The later mux.local-cli-autospawn-parse-abort closure supersedes the former spawnable missing-daemon fail-open path. Remote --host preprocessing remains open under aliases.remote-client-preflight, config replay snapshotting remains under aliases.config-parse-unit, and replay-group parse abort remains under mux.chain-parse-abort."
     },
     {
       "id": "aliases.control-prepare",
@@ -3791,6 +3789,23 @@
       "resolution": "Nested non-detached new-session now follows pinned tmux d77c9dc6 through generic option and arity parsing, target-plus-command or window-name conflict, expanded window-name validation, expanded session-name validation, existing-session -A delegation, duplicate detection, unresolved session-group name validation, and start-directory expansion before the nesting refusal. The refusal still precedes width and height validation, and every early path is mutation-free. A narrow routing parser admits catalogued -t only while selecting the terminal client and running this nested preflight; normal mux execution still reports new-session -t as unsupported, so session groups remain excluded. Canonical, built-in alias, unique-prefix, and user-alias forms share the path, including a later member of a CLI command list. Fresh -d creation, Control fresh creation and -A miss, and already-attached fresh creation remain allowed. Existing -A and -Ad hits still refuse through attach handling, while -Ad misses remain detached. Focused mux, daemon, and app tests cover validation order, one-time canonical format expansion, lifecycle branches, routing, and unchanged state. The real attached-client differential compares exact exit status, stderr, session roster, client count, aliases, and command-list stop behavior on zz and the pin and passes on both. No protocol, catalog capability, or wire-version change was needed."
     },
     {
+      "id": "mux.local-cli-autospawn-parse-abort",
+      "title": "Abort invalid local CLI groups before autospawn",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/client.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/lib.rs",
+        "file:crates/zz/tests/cli_binary.rs",
+        "file:compat/scenarios/smoke/fixtures/cli-chain-parse-abort.sh",
+        "scenario:compat/scenarios/smoke/cli-chain-parse-abort.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Against a missing local socket, the CLI now applies an alias-free static tmux syntax pass to the complete raw command vector before routing, stdin capture, TUI handoff, daemon spawn, startup config, or effects. The pass resolves canonical names, built-in aliases, and unique prefixes; validates flags, arity, callback argument types, and nested typed blocks for all 83 implemented and nine parked upstream commands; and parses an exact native attach before validating its tail. Arbitrary user-alias names cannot trigger autospawn, while startup config can still shadow a canonical spelling. A successful raw pass spawns a generation-identified daemon, which prepares the full vector under one post-config alias snapshot before execution. Invalid startup aliases and callbacks return nonzero before effects, and a one-shot ownership lease stops only the newly spawned empty daemon after the bootstrap client receives the error and disconnects; startup reentry, a competing external client, or any command commits the daemon. Focused CLI and daemon tests cover routing-sensitive new-session and attach forms, -N, canonical startup shadows, arbitrary startup aliases, nested alias failures, contender and pipeline races, and parked-command syntax. The strict three-step fixture retains its row and adds eleven cold probes on both engines without changing the differential artifact. Runtime failures, remote --host, Control, warm unaliased argument-group validation, config and source-file group construction, rollback, native zz command grammar, and unsupported-command execution remain outside this closure. No protocol or snapshot change was needed."
+    },
+    {
       "id": "mux.local-cli-chain-parse-abort",
       "title": "Abort typed local CLI preparation errors before effects",
       "closed_on": "2026-08-25",
@@ -3800,7 +3815,7 @@
         "scenario:compat/scenarios/smoke/cli-chain-parse-abort.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "Against an already-running compatible daemon, local default and explicit-socket CLI preflight scans the complete prepared vector for typed name and alias-body errors before stdin capture, attach or TUI routing, or command execution. A later unknown command returns exit 1 with the pinned error shape and no earlier effect; malformed alias bodies use zz's loud unknown-command shape while aliases.command-bodies remains open. Prepared runtime command failures keep sequential queue ordering, including earlier effects and pruning later commands. A focused binary regression uses a malformed live alias after a mutating command, and the strict three-step smoke scenario proves unknown-name parse atomicity and runtime-error ordering with zero differential mismatches. Cold or failed preparation falls open to static routing, so an autospawn verb may still run before a later unknown command. Remote --host remains excluded, and local flag or arity validation plus config or source-file replay remains open under mux.chain-parse-abort."
+      "resolution": "Against an already-running compatible daemon, local default and explicit-socket CLI preflight scans the complete prepared vector for typed name and alias-body errors before stdin capture, attach or TUI routing, or command execution. A later unknown command returns exit 1 with the pinned error shape and no earlier effect; malformed alias bodies use zz's loud unknown-command shape while aliases.command-bodies remains open. Prepared runtime command failures keep sequential queue ordering, including earlier effects and pruning later commands. A focused binary regression uses a malformed live alias after a mutating command, and the strict three-step smoke scenario proves unknown-name parse atomicity and runtime-error ordering with zero differential mismatches. The later mux.local-cli-autospawn-parse-abort closure extends whole-vector preparation across the missing-daemon seam. Remote --host remains excluded, and warm unaliased flag or arity validation plus config or source-file replay remains open under mux.chain-parse-abort."
     },
     {
       "id": "mux.positional-maximums",

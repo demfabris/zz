@@ -144,7 +144,7 @@ Protocol v84 appends `CommandInvocation.command_blocks`. Config and Control pars
 zero-based positions of standalone unquoted command blocks while quoted brace text stays an
 ordinary string. Alias expansion and key-table publication retain the positions. The
 command-aware option parser applies the adopted callback rules to `bind-key`, `command-prompt`,
-`confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
+`confirm-before`, `display-menu`, `display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
 `set-window-option`. Every
 `bind-key` positional accepts a typed block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
 block only at value position 1. `confirm-before` accepts either type for its one command positional
@@ -186,7 +186,15 @@ unattached command or initial Control reports `no current client`; initial Contr
 arguments` before its overlay no-op and returns a flag-1 `%error`; EOF after that frame exits 1.
 Interactive menu ordering remains unchanged. The daemon strips the structural
 wrapper only from a typed action before its fresh selection parse; a quoted brace action stays
-literal. All nine behaving commands reuse the same
+literal. `display-panes` accepts an optional string or typed template, while `-d` and `-t` values
+remain strings. Every typed child constructs before parent option-type or arity validation. Stored
+bindings retain canonical child readback across aliases and prefixes.
+Daemon targetless routing resolves the current attached client before duration validation: no
+attached client reports `no current client`, while an ordinary Command uses an available attached
+Interactive client. The strict 22-check fixture covers the exact parser and routing boundary. The
+custom selection template remains a runtime gap because mux execution rejects the positional value
+instead of substituting the selected `%pane` for `%%%` and executing with the original queue state;
+tmux's omitted template is `select-pane -t "%%%"`. All ten behaving commands reuse the same
 protocol v84 metadata. Eager whole-file source construction and its replay-channel placement
 remain a separate parser contract.
 

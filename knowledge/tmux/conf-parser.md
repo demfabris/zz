@@ -348,8 +348,15 @@ unattached command or initial Control reports `no current client`; initial Contr
 `%error` and exits 1. Once attached, Control validates an incomplete group as `not enough
 arguments` before its overlay no-op and emits a flag-1 `%error`; EOF after that frame exits 1.
 Interactive menu ordering stays unchanged. The daemon removes the structural wrapper
-only from a typed action before the fresh selection parse; quoted brace actions stay literal. These
-rules do not yet make source-file parse and construction atomic for the whole file, provide aliases
+only from a typed action before the fresh selection parse; quoted brace actions stay literal.
+`display-panes` accepts an optional string or typed template while keeping `-d` and `-t`
+values string-only. Every typed child constructs before parent option-type or arity validation.
+Aliases and prefixes retain typed positions and canonical stored readback.
+Targetless daemon routing resolves the current attached client before duration validation. The
+custom selection template remains a runtime gap because mux execution rejects a positional value
+instead of substituting the selected `%pane` for `%%%` and executing with the original queue state.
+Tmux uses `select-pane -t "%%%"` when the template is omitted. These rules do not yet make source-file parse and
+construction atomic for the whole file, provide aliases
 defined earlier in the same source during construction, place multiline inner-source diagnostics,
 or close the broader replay-channel difference.
 

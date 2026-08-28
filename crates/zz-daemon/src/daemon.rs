@@ -4789,24 +4789,20 @@ impl Shared {
                 &['d', 't'],
                 &['b', 'N'],
             )?;
-            parsed.value('t').map(|target| {
-                let inner = self.inner.lock();
-                resolve_display_panes_client(&inner, target).map(|target| {
-                    let kind = inner
-                        .client_kinds
-                        .get(&target)
-                        .copied()
-                        .unwrap_or(ClientKind::Command);
-                    let terminal = client_terminal(&inner, target, kind);
-                    let mut context = context.clone();
-                    retarget_context_to_attachment(&inner, target, &mut context);
-                    (target, kind, terminal, context)
-                })
-            })
+            let inner = self.inner.lock();
+            let target = resolve_client_target(&inner, client, kind, parsed.value('t'))?;
+            let kind = inner
+                .client_kinds
+                .get(&target)
+                .copied()
+                .unwrap_or(ClientKind::Command);
+            let terminal = client_terminal(&inner, target, kind);
+            let mut context = context.clone();
+            retarget_context_to_attachment(&inner, target, &mut context);
+            Some((target, kind, terminal, context))
         } else {
             None
-        }
-        .transpose()?;
+        };
         let result = if let Some((target, target_kind, target_terminal, mut target_context)) =
             display_panes_target
         {
@@ -61343,6 +61339,35 @@ bind - split-window -v -c "#{pane_current_path}"
                 .expect("target refresh-client");
             assert!(shared.inner.lock().control_outputs[&control].no_output);
         }
+    }
+
+    #[test]
+    fn targetless_command_display_panes_resolves_a_client_before_duration() {
+        let empty = Arc::new(Shared::new(1));
+        let error = empty
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-panes", ["-d", "not-a-delay"]),
+            )
+            .expect_err("targetless command without a client");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "no current client"
+        ));
+
+        let (shared, target, _, mut context) = popup_test_workspace("target");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("display-panes", ["-d", "0"]),
+            )
+            .expect("targetless command with an attached client");
+        assert!(shared.inner.lock().display_panes.contains_key(&target));
     }
 
     #[test]

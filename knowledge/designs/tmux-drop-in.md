@@ -91,12 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The final 10h canonical acceptance inventory contains 96 differential scenarios and 1,511 executable
+The final 10i canonical acceptance inventory contains 97 differential scenarios and 1,514 executable
 steps against pinned tmux `d77c9dc6`, including the config/plugin smoke corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
+`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
+The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
 `75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
 The historical 10g artifact remains 95 scenarios and 1,508 steps at SHA-256
 `15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
@@ -106,6 +108,8 @@ The historical 10e artifact remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d artifact remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
+The 10i `display-panes` row contributes three harness steps and 22 internal checks with zero TOPO,
+GEO, FMT, OUT, or WARN differences to that complete strict and attached run.
 `compat/attached-client.sh` drives real inner zz/tmux attaches through pinned-tmux PTYs, covering copy
 mode, command-output navigation, choosers, prompts, prefix tables, buffers, and nested attach. Its
 96-line command-output case checks line and page movement, search, selection-to-paste-buffer, live
@@ -122,7 +126,7 @@ OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still
 visual smoke evidence.
 
 Protocol v84 carries lexical command-block positions. `if-shell`, `run-shell`, both set-option
-commands, `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, and `set-hook` now apply
+commands, `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `display-panes`, and `set-hook` now apply
 their pinned callback rules.
 The strict three-step confirm scenario runs 19 construction, parser, readback, alias, and exact source-file
 plus Control channel checks on both servers. Every lexical typed block recursively constructs
@@ -169,8 +173,16 @@ and `-y` Enter-default behavior are daemon and GPUI unit proof, not raw TUI proo
 source construction, same-source alias mutation, multiline inner-source placement, generic alias
 recursion, selected-action runtime errors, and the broader replay-channel placement difference
 remain open. Attached-client menu rendering, input, geometry, styles, targets, formats, and raw-TUI
-overlay parity retain their existing owners. Three command-specific `args-parse:` items under one
-rule remain.
+overlay parity retain their existing owners. `display-panes` accepts an optional string or typed
+selection template while `-d` and `-t` values stay strings. Typed children construct before parent
+option-type or arity validation. Aliases and prefixes retain typed positions and canonical
+stored readback. Targetless daemon routing resolves an attached client before duration validation.
+The strict three-step fixture runs 22 internal checks with zero differential channels. Custom
+selection-template execution remains parked because mux runtime rejects the positional value and
+does not substitute the selected `%pane` for `%%%` before execution with the original queue state.
+The omitted tmux template remains `select-pane -t "%%%"`; queue blocking and presentation remain
+separate. Two
+command-specific `args-parse:` items under one rule remain.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the

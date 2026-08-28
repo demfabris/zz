@@ -71,6 +71,7 @@
 | smoke/args-parse-command-prompt | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-confirm-before | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-display-menu | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-display-panes | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-run-shell | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-set-hook | 3 | yes | 0 | yes | yes | yes |

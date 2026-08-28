@@ -113,9 +113,9 @@ dispatch now match the pin.
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
 `CommandInvocation`, and `COMMAND_ARGS_PARSE_BEHAVES` contains `bind-key`, `command-prompt`,
-`confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
+`confirm-before`, `display-menu`, `display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
 `set-window-option` after source-file, Control, stored-command, parser, postcard, mux, and daemon
-proofs. The manifest carries three remaining `args-parse:` items under one effective rule. The unimplemented
+proofs. The manifest carries two remaining `args-parse:` items under one effective rule. The unimplemented
 `choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
 the whole command.
 
@@ -236,8 +236,8 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The final 10h checkpoint from
-2026-08-28 contains 96 scenarios and 1,511 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`compat/results/summary.md` is the persisted canonical artifact. The final 10i checkpoint from
+2026-08-28 contains 97 scenarios and 1,514 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -317,6 +317,17 @@ binding preservation, client-before-completeness precedence, incomplete runtime 
 source-file diagnostics, and exact initial flag-0 plus attached flag-1 Control framing. A
 PID-unique FIFO holds the attached command stream through the error frame and proves exit 1 after
 EOF. Both servers finish `ARGS_PARSE_DISPLAY_MENU=clean:34` with zero differences.
+`smoke/args-parse-display-panes` contributes three harness steps around 22 internal checks for its
+optional string-or-typed template, string-only `-d` and `-t` values, child-before-option-type and
+arity validation, canonical and alias readback, targetless client routing before duration,
+source-file, and direct Command-client runtime behavior. A Command client with an attached
+Interactive client resolves to it; a truly
+clientless path reports `no current client`. Both servers finish `ARGS_PARSE_DISPLAY_PANES=clean:22`
+with zero TOPO, GEO, FMT, OUT, or WARN differences. The fixture closes parsing only: mux runtime
+still rejects a positional selection template instead of substituting the selected `%pane` for
+`%%%` and executing with the original queue state. Tmux uses `select-pane -t "%%%"` when the
+template is omitted. This stays tracked under `display-panes.command-template`; queue blocking and
+presentation remain separate.
 Typed `if-shell`, `run-shell`, and structured `command-prompt` callbacks stop the failed physical
 group and continue later physical lines, while string callbacks stay one group. Structured prompt
 substitution preserves leaf-argument boundaries against quote or semicolon injection. Raw string
@@ -333,6 +344,10 @@ Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
+`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
+The 10i display-panes row contributes three harness steps and 22 internal checks with zero TOPO,
+GEO, FMT, OUT, or WARN differences to the complete strict and attached artifact.
+The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
 `75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
 The historical 10g checkpoint remains 95 scenarios and 1,508 steps at SHA-256
 `15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.

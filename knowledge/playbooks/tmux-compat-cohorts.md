@@ -122,14 +122,16 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The final 10h canonical checkpoint covers 96 scenarios and 1,511 steps. Every ordinary row is clean.
+The final 10i canonical checkpoint covers 97 scenarios and 1,514 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
+`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
-rows remain. The historical 10g checkpoint remains 95 scenarios and 1,508 steps at SHA-256
+rows remain. The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
+`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
+The historical 10g checkpoint remains 95 scenarios and 1,508 steps at SHA-256
 `15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
 The historical 10f checkpoint remains 94 scenarios and 1,505 steps at SHA-256
 `31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
@@ -137,7 +139,8 @@ The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
-The final 10h artifact comes from a fresh full strict suite run.
+The final 10i artifact comes from a fresh full strict suite run. Its display-panes row contributes
+three harness steps and 22 internal checks with zero TOPO, GEO, FMT, OUT, or WARN differences.
 The two positional-bound scenarios prove canonical and alias diagnostics, the
 first-positional flag boundary, target-error precedence, and effect suppression. The expanded
 maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
@@ -194,6 +197,15 @@ Both sides finish with `ARGS_PARSE_DISPLAY_MENU=clean:34` and zero differences. 
 and input, geometry, styles, targets,
 formats, selected-action runtime errors, same-source alias mutation, eager whole-source
 construction, generic alias recursion, and raw-TUI overlay parity retain their owners.
+The focused three-step `args-parse-display-panes` row runs 22 internal checks across the optional
+string-or-typed template, string-only `-d` and `-t` values, child-before-option-type and arity validation,
+canonical, built-in alias, prefix, and preexisting user-alias readback, targetless client routing,
+duration precedence, source-file, and direct Command-client runtime paths. Both sides finish with
+`ARGS_PARSE_DISPLAY_PANES=clean:22` and zero TOPO, GEO, FMT, OUT, or WARN differences. Custom
+template execution remains parked because mux runtime rejects a positional value instead of
+substituting the selected `%pane` for `%%%` and executing with the original queue state. Tmux uses
+`select-pane -t "%%%"` when the template is omitted; queue blocking and presentation keep their
+existing owners.
 
 # Cohorts
 
@@ -238,7 +250,8 @@ milestone per letter, never one combined commit.
 | 10f | `command-prompt` commands-or-string argument rule | Closed under `tracker.args-parse-command-prompt` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; one typed-or-string template plus deferred substitution, alias, source, and group boundaries |
 | 10g | `set-hook` monitor-or-value argument rule | Closed under `tracker.args-parse-set-hook` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; lexical `-B` typing is closed while unsupported monitor runtime behavior retains its owner |
 | 10h | `display-menu` repeating item argument rule | Closed under `tracker.args-parse-display-menu` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; data-dependent NAME, KEY, and ACTION typing closes without absorbing menu presentation or selected-action execution |
-| 10i-10k | Remaining `args_parse` runtime rules | Three `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | One shared source rule, never all callback commands at once |
+| 10i | `display-panes` commands-or-string argument rule | Closed under `tracker.args-parse-display-panes` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; parsing and client-routing precedence close while custom selection-template execution remains parked |
+| 10j-10k | Remaining `args_parse` runtime rules | Two `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | One shared source rule, never all callback commands at once |
 | 10l-10p | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 10q-10s | Raw TUI daemon overlays | Three items in `clients.tui-overlay-consumption`, one confirm, menu, or popup surface per slice | Hard | ClientCore already retains state; each client renderer and input contract remains independently closable |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -249,7 +262,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10h are closed; slice 10i is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through 10i are closed; slice 10j is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

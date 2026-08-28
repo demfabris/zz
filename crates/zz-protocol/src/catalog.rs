@@ -467,6 +467,7 @@ pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "command-prompt",
     "confirm-before",
     "display-menu",
+    "display-panes",
     "if-shell",
     "run-shell",
     "set-hook",
@@ -3294,6 +3295,35 @@ mod tests {
                     .expect_err("typed option value")
                     .tmux_message(),
                 format!("command display-menu: {option} argument must be a string")
+            );
+        }
+    }
+
+    #[test]
+    fn display_panes_args_parse_accepts_a_command_or_string_template() {
+        let spec = catalog_command_spec("display-panes").expect("display-panes");
+
+        for command in [
+            CommandInvocation::new("display-panes", ["{ display-message action }"])
+                .with_command_blocks([0]),
+            CommandInvocation::new("display-panes", ["-bN", "{ display-message action }"])
+                .with_command_blocks([1]),
+            CommandInvocation::new("display-panes", ["--", "{ display-message action }"])
+                .with_command_blocks([1]),
+            CommandInvocation::new("display-panes", ["{ display-message quoted }"]),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("command-or-string template");
+        }
+
+        for option in ["-d", "-t"] {
+            let command =
+                CommandInvocation::new("display-panes", [option, "{ display-message option }"])
+                    .with_command_blocks([1]);
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed option value")
+                    .tmux_message(),
+                format!("command display-panes: {option} argument must be a string")
             );
         }
     }

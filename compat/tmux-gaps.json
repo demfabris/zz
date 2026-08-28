@@ -846,6 +846,34 @@
       "reason": "The shared expander returns only the final string and has no structured trace sink for nested conditions, modifiers, lookups, and replacements."
     },
     {
+      "id": "display-panes.command-template",
+      "title": "Execute display-panes selection templates",
+      "decision": "park",
+      "status": "blocked",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:display-panes-command-template"
+      ],
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Selecting a pane substitutes its `%pane` ID for `%%%` in an optional string or typed template and executes the result with the retained original queue state; an omitted template uses `select-pane -t \"%%%\"`.",
+        "Attached-client tests prove template success and failure without absorbing queue blocking or presentation behavior."
+      ],
+      "depends_on": [],
+      "reason": "The grammar now accepts and constructs the optional template, but mux execution rejects a positional value. Pinned tmux substitutes the selected `%pane` for `%%%` and executes with the original queue state; zz's native overlay instead has a fixed select-pane action."
+    },
+    {
       "id": "display-panes.queue-semantics",
       "title": "Wait for display-panes overlays",
       "decision": "adopt",
@@ -2716,7 +2744,6 @@
       "items": [
         "args-parse:choose-buffer",
         "args-parse:choose-tree",
-        "args-parse:display-panes",
         "semantic:tracker-hook-producer-partition",
         "semantic:tracker-key-binding-behavior",
         "semantic:tracker-nonconstant-format-behavior",
@@ -2734,7 +2761,7 @@
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and three per-command callback items remain under the shared commands-or-string rule. `display-menu` walks positional data as repeated NAME, KEY, and ACTION fields: an empty NAME is a separator that consumes no KEY or ACTION, NAME and KEY require strings, and ACTION accepts a string or typed block. The daemon keeps the typed and string action paths distinct when a user selects an item. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `display-panes`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and two per-command callback items remain under the shared commands-or-string rule. `display-panes` accepts an optional string or typed template while `-d` and `-t` values remain strings; its custom selection-template runtime stays explicit under `display-panes.command-template`. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3960,6 +3987,21 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "resolution": "Protocol v84 lexical command-block positions now drive `display-menu`'s pinned item rule without another wire change. The parser walks positional data as repeated NAME, KEY, and ACTION fields. A nonempty NAME advances through a string KEY to an ACTION, which accepts a string or typed block and resets the state to NAME. An empty NAME is a separator that consumes no KEY or ACTION and leaves the parser expecting another NAME. Values for `-b`, `-c`, `-C`, `-H`, `-s`, `-S`, `-t`, `-T`, `-x`, and `-y` remain strings. Every lexical typed block constructs before the parent callback type, arity, or effects, so child construction failures precede forbidden NAME, KEY, and option-value type errors. Accepted typed actions print recursively constructed canonical commands in stored binding readback, while quoted brace actions remain strings. The daemon already strips the structural wrapper only from typed actions before its fresh selection parse. Incomplete NAME and NAME-plus-KEY tails pass lexical construction and reach daemon runtime. Runtime resolves the current or `-c` target client before completeness, so an unattached command or initial Control reports `no current client`; initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates an incomplete group as `not enough arguments` before its overlay no-op and emits an exact flag-1 `%error`; EOF after that frame exits 1. Interactive menu ordering remains unchanged. The strict three-step, 34-check fixture covers canonical, built-in alias, unique-prefix, and preexisting user-alias paths; repeated items and separators; typed and quoted actions; every string-only valued flag; child precedence; canonical binding readback and preservation; client-before-completeness precedence; incomplete runtime groups; and exact source-file plus Control channels. A PID-unique FIFO proves attached exit status after EOF. Both servers finish `ARGS_PARSE_DISPLAY_MENU=clean:34` with zero differences. Attached-client rendering and input, geometry, styles, targets, formats, selected-action runtime errors, same-source alias mutation, eager whole-source construction, generic alias recursion, and raw-TUI overlay parity retain their existing owners. Three implemented callback commands across one effective rule remain under `tracker.semantic-coverage`."
+    },
+    {
+      "id": "tracker.args-parse-display-panes",
+      "title": "Apply display-panes command-or-string argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-display-panes.sh",
+        "scenario:compat/scenarios/smoke/args-parse-display-panes.txt",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `display-panes`' pinned command-or-string rule without another wire change. Its optional template positional accepts a string or typed block, while `-d` and `-t` values remain strings. Every lexical typed child constructs before the parent option-type or arity validation. Canonical, built-in alias, unique-prefix, and preexisting user-alias paths retain typed positions, and stored bindings print constructed child commands canonically. Daemon targetless routing now uses `resolve_client_target` before duration validation: no attached client reports `no current client`, while an ordinary Command client with an attached Interactive client resolves to that client. The strict three-step fixture runs 22 type, arity-precedence, alias, readback, target, duration, source-file, and direct Command-client runtime checks on both servers and reports zero TOPO, GEO, FMT, OUT, and WARN differences. The still-loud custom selection-template runtime is parked explicitly under `display-panes.command-template`: tmux substitutes the selected `%pane` for `%%%` and executes with the retained original queue state, while an omitted template uses `select-pane -t \"%%%\"`; zz mux rejects a positional template and its native overlay has a fixed select-pane action. Queue blocking and presentation retain their existing owners. Two implemented callback commands under one effective rule remain in `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-if-shell",

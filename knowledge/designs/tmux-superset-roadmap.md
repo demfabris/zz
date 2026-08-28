@@ -53,23 +53,27 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The final 10h canonical checkpoint covers 96 scenarios and 1,511 steps.
+The final 10i canonical checkpoint covers 97 scenarios and 1,514 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`. Requested flags, attached
+`3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
+The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
+`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
 The historical 10f checkpoint remains 94 scenarios and 1,505 steps at SHA-256
 `31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
 The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
+The 10i `display-panes` row contributes three harness steps and 22 internal checks with zero TOPO,
+GEO, FMT, OUT, or WARN differences to the complete strict and attached artifact.
 
 Protocol v82 appends one bounded UTF-8 client-environment snapshot to `ClientHello`. Local and
 SSH-forwarded clients now seed fresh sessions and refresh existing sessions through the effective
@@ -85,7 +89,7 @@ bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
 closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`,
-`tracker.args-parse-set-option`, `tracker.args-parse-display-menu`, and
+`tracker.args-parse-set-option`, `tracker.args-parse-display-menu`, `tracker.args-parse-display-panes`, and
 `tracker.args-parse-set-hook`, plus the `bind-key`, `command-prompt`, and `confirm-before` members
 of the shared commands-or-string rule.
 Source-file and Control
@@ -151,8 +155,16 @@ Control reports `no current client`; initial Control uses a flag-0 `%error` and 
 attached, Control validates an incomplete group as `not enough arguments` before its overlay no-op
 and returns a flag-1 `%error`; EOF after that frame exits 1. Interactive ordering remains
 unchanged. The daemon drops a typed action's structural
-wrapper before the fresh selection parse, while quoted brace actions remain literal. Three callback
-items under one effective rule remain. Eager whole-file
+wrapper before the fresh selection parse, while quoted brace actions remain literal. `display-panes`
+accepts an optional string or typed selection template while `-d` and `-t` values remain strings.
+Every typed child constructs before parent option-type or arity validation. Aliases and
+prefixes retain typed positions and canonical stored readback. Targetless routing resolves an
+attached client before duration validation. Its strict three-step fixture runs 22 internal checks
+with zero differential channels. Custom selection-template execution remains parked because mux
+runtime rejects the positional value instead of substituting the selected `%pane` for `%%%` and
+executing with the original queue state. Tmux uses `select-pane -t "%%%"` when the template is
+omitted; queue blocking and presentation stay separate. Two callback items under one effective
+rule remain. Eager whole-file
 construction, same-source alias mutation, multiline inner-source placement, generic alias recursion,
 selected-action runtime errors, and broader replay placement retain their owners. Attached menu
 rendering, input, geometry, styles, targets, formats, and raw-TUI overlay parity remain separate.
@@ -528,9 +540,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each implemented
    callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains
-   `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`,
-   `set-option`, and `set-window-option`; one
-   effective rule and three command-specific items remain. The
+   `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `display-panes`, `if-shell`,
+   `run-shell`, `set-hook`, `set-option`, and `set-window-option`; one effective rule and two
+   command-specific items remain. The
    unimplemented `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
    `tracker.semantic-coverage` tracks runtime adoption of the remaining commands-or-string argument rule, open-ended or
@@ -1131,6 +1143,19 @@ permanent product decision has been recorded for them.
   menu rendering and input, geometry, styles, targets, formats, selected-action runtime errors,
   same-source alias mutation, eager whole-source construction, generic alias recursion, and raw-TUI
   overlay parity retain their owners. One callback rule across three implemented commands remains.
+- 2026-08-28: Protocol v84 closed `tracker.args-parse-display-panes` without another wire change.
+  Its optional template positional accepts a string or typed block, while `-d` and `-t` values remain
+  strings. Every typed child constructs before parent option-type or arity validation.
+  Aliases and prefixes retain typed positions and canonical stored readback. Daemon targetless
+  routing resolves an attached client before duration validation, so a Command client can select an
+  attached Interactive client while a truly clientless command reports `no current client`. The
+  strict three-step fixture runs 22 internal checks and reports zero TOPO, GEO, FMT, OUT, or WARN
+  differences. The runtime custom action remains visibly parked under
+  `display-panes.command-template`: tmux substitutes the selected `%pane` for `%%%` and executes with
+  the retained original queue state, with `select-pane -t "%%%"` as the omitted default. Mux
+  execution rejects the positional value and the native overlay has a fixed select-pane action.
+  Queue blocking and presentation retain separate owners. Two callback commands under one effective
+  rule remain.
 
 # Related
 

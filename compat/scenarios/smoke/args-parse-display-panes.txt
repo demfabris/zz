@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-display-panes.sh ~/args-parse-display-panes.sh
+out: set-environment -gu ARGS_PARSE_DISPLAY_PANES
+run-shell 'sh ~/args-parse-display-panes.sh'
+out: show-environment -g ARGS_PARSE_DISPLAY_PANES

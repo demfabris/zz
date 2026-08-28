@@ -99,7 +99,7 @@ behavior for shared bindings, or consumer truth for option `BEHAVES`.
 `tracker.semantic-coverage` owns those six blind spots. Its command-specific `args-parse:` items name the
 implemented callback commands; `choose-client` and `switch-mode` remain covered by their
 unimplemented command items. Protocol v84 closes four complete runtime rules plus `bind-key`,
-`command-prompt`, and `confirm-before` within the `commands-or-string` rule, plus `set-hook`'s
+`command-prompt`, `confirm-before`, and `display-panes` within the `commands-or-string` rule, plus `set-hook`'s
 lexical monitor-or-value callback. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions
 and option values before effects, and leaves quoted braces as strings. `run-shell` accepts typed
@@ -155,7 +155,16 @@ remain literal. Broader eager whole-file source
 construction, same-source alias mutation, multiline inner-source placement, generic alias
 recursion, selected-action error delivery, and replay-channel placement remain open. Attached menu
 rendering and input plus raw-TUI overlay parity retain their client owners.
-Three `args-parse:` items under one effective rule remain.
+`display-panes` accepts an optional string or typed template while `-d` and `-t` values remain
+strings. Typed children construct before parent option-type or arity validation. Aliases and
+prefixes retain typed positions and canonical stored readback. Targetless routing resolves an
+attached client before duration validation, producing `no current client` only when none exists.
+The strict 22-check fixture closes that parser and routing boundary with zero differential channels.
+Custom template execution remains parked because mux runtime rejects the positional value instead
+of substituting the selected `%pane` for `%%%` and executing with the original queue state. Tmux
+uses `select-pane -t "%%%"` when the template is omitted; queue blocking and presentation stay
+separate.
+Two `args-parse:` items under one effective rule remain.
 Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option

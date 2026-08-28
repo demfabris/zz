@@ -88,7 +88,7 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gd
 core-foundation.workspace = true
 core-video.workspace = true
 objc2.workspace = true
-objc2-app-kit = { workspace = true, features = ["NSButton", "NSControl", "NSEvent", "NSGraphics", "NSImage", "NSMenu", "NSMenuItem", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSVisualEffectView", "objc2-core-foundation"] }
+objc2-app-kit = { workspace = true, features = ["NSButton", "NSControl", "NSEvent", "NSGraphics", "NSImage", "NSMenu", "NSMenuItem", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "objc2-core-foundation"] }
 objc2-foundation = { workspace = true, features = ["NSBundle", "NSData", "NSPathUtilities", "NSString"] }
 raw-window-handle.workspace = true
 

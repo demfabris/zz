@@ -155,28 +155,30 @@ fn corner_offset(radius: u32, row: u32) -> u32 {
 #[cfg(target_os = "macos")]
 #[allow(
     unsafe_code,
-    reason = "the raw AppKit handle and Objective-C associated-object API require unsafe access"
+    reason = "the raw AppKit handle and the WindowServer blur call require unsafe access"
 )]
 mod macos {
-    use std::{ffi::c_void, fmt, ptr};
+    use std::fmt;
 
     use gpui::Window;
-    use objc2::{
-        MainThreadMarker,
-        ffi::{
-            OBJC_ASSOCIATION_ASSIGN, OBJC_ASSOCIATION_RETAIN_NONATOMIC, objc_getAssociatedObject,
-            objc_setAssociatedObject,
-        },
-        rc::Retained,
-        runtime::AnyObject,
-    };
-    use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-        NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowOrderingMode,
-    };
+    use objc2::{MainThreadMarker, rc::Retained};
+    use objc2_app_kit::NSView;
     use raw_window_handle::RawWindowHandle;
 
-    static BACKDROP_ASSOCIATION_KEY: u8 = 0;
+    const BLUR_RADIUS: i32 = 40;
+
+    type ConnectionId = u32;
+    type WindowId = u32;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGSMainConnectionID() -> ConnectionId;
+        fn CGSSetWindowBackgroundBlurRadius(
+            connection: ConnectionId,
+            window: WindowId,
+            radius: i32,
+        ) -> i32;
+    }
 
     #[derive(Debug)]
     pub(super) enum BlurError {
@@ -185,7 +187,7 @@ mod macos {
         NotMainThread,
         MissingView,
         MissingWindow,
-        MissingContentView,
+        WindowServer(i32),
     }
 
     impl fmt::Display for BlurError {
@@ -198,21 +200,24 @@ mod macos {
                     formatter.write_str("GPUI returned a non-AppKit window handle")
                 }
                 Self::NotMainThread => {
-                    formatter.write_str("AppKit blur update ran outside the main thread")
+                    formatter.write_str("WindowServer blur update ran outside the main thread")
                 }
                 Self::MissingView => formatter.write_str("AppKit window view is unavailable"),
                 Self::MissingWindow => {
-                    formatter.write_str("AppKit view is not attached to a window")
+                    formatter.write_str("AppKit view is not attached to an on-screen window")
                 }
-                Self::MissingContentView => {
-                    formatter.write_str("AppKit window content view is unavailable")
+                Self::WindowServer(status) => {
+                    write!(
+                        formatter,
+                        "WindowServer rejected the blur radius (status {status})"
+                    )
                 }
             }
         }
     }
 
     pub(super) fn set_blur(window: &Window, enabled: bool) -> Result<(), BlurError> {
-        let main_thread = MainThreadMarker::new().ok_or(BlurError::NotMainThread)?;
+        MainThreadMarker::new().ok_or(BlurError::NotMainThread)?;
         let handle = raw_window_handle::HasWindowHandle::window_handle(window)
             .map_err(BlurError::WindowHandle)?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
@@ -223,68 +228,20 @@ mod macos {
         let view = unsafe { Retained::<NSView>::retain(handle.ns_view.as_ptr().cast()) }
             .ok_or(BlurError::MissingView)?;
         let native_window = view.window().ok_or(BlurError::MissingWindow)?;
-
-        if !enabled {
-            if let Some(backdrop) = associated_backdrop(&native_window) {
-                backdrop.removeFromSuperview();
-                set_associated_backdrop(&native_window, None);
-            }
-            return Ok(());
+        let window_id = WindowId::try_from(native_window.windowNumber())
+            .ok()
+            .filter(|id| *id != 0)
+            .ok_or(BlurError::MissingWindow)?;
+        let radius = if enabled { BLUR_RADIUS } else { 0 };
+        // SAFETY: both ids are plain integers owned by this process's WindowServer connection;
+        // the call has no memory effects and reports failure through its status code.
+        let status =
+            unsafe { CGSSetWindowBackgroundBlurRadius(CGSMainConnectionID(), window_id, radius) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(BlurError::WindowServer(status))
         }
-
-        if associated_backdrop(&native_window).is_some() {
-            return Ok(());
-        }
-
-        let content_view = native_window
-            .contentView()
-            .ok_or(BlurError::MissingContentView)?;
-        let backdrop = NSVisualEffectView::new(main_thread);
-        backdrop.setFrame(content_view.bounds());
-        backdrop.setAutoresizingMask(
-            NSAutoresizingMaskOptions::ViewWidthSizable
-                | NSAutoresizingMaskOptions::ViewHeightSizable,
-        );
-        backdrop.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-        backdrop.setMaterial(NSVisualEffectMaterial::Menu);
-        backdrop.setState(NSVisualEffectState::Active);
-
-        content_view.addSubview_positioned_relativeTo(&backdrop, NSWindowOrderingMode::Below, None);
-        set_associated_backdrop(&native_window, Some(&backdrop));
-        Ok(())
-    }
-
-    fn association_key() -> *const c_void {
-        ptr::from_ref(&BACKDROP_ASSOCIATION_KEY).cast()
-    }
-
-    fn associated_backdrop(
-        native_window: &Retained<NSWindow>,
-    ) -> Option<Retained<NSVisualEffectView>> {
-        let window = Retained::as_ptr(native_window).cast::<AnyObject>();
-        // SAFETY: this module is the sole owner of this process-unique key, stores only
-        // NSVisualEffectView values under it, and retains the returned +0 object before use.
-        let backdrop = unsafe { objc_getAssociatedObject(window, association_key()) };
-        unsafe { Retained::retain(backdrop.cast_mut().cast::<NSVisualEffectView>()) }
-    }
-
-    fn set_associated_backdrop(
-        native_window: &Retained<NSWindow>,
-        backdrop: Option<&Retained<NSVisualEffectView>>,
-    ) {
-        let window = Retained::as_ptr(native_window)
-            .cast::<AnyObject>()
-            .cast_mut();
-        let (value, policy) =
-            backdrop.map_or((ptr::null_mut(), OBJC_ASSOCIATION_ASSIGN), |backdrop| {
-                (
-                    Retained::as_ptr(backdrop).cast::<AnyObject>().cast_mut(),
-                    OBJC_ASSOCIATION_RETAIN_NONATOMIC,
-                )
-            });
-        // SAFETY: both pointers name live Objective-C objects (or nil), the key is
-        // process-unique, and GPUI calls this lifecycle only on AppKit's main thread.
-        unsafe { objc_setAssociatedObject(window, association_key(), value, policy) };
     }
 }
 

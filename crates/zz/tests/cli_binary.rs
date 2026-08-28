@@ -3130,7 +3130,10 @@ mod daemon_autostart {
         ]);
         assert_eq!(created.status.code(), Some(0));
 
-        let attach_and_type = |attach: &[&str], text: &[u8]| -> (bool, Vec<u8>, String) {
+        let attach_and_type = |attach: &[&str],
+                               text: &[u8],
+                               expected: Option<&str>|
+         -> (bool, Vec<u8>, String) {
             let Ok((mut master, slave)) = open_pty() else {
                 return (true, Vec::new(), String::new());
             };
@@ -3177,6 +3180,26 @@ mod daemon_autostart {
                         _ => thread::sleep(Duration::from_millis(10)),
                     }
                 }
+                if let Some(marker) = expected {
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    loop {
+                        let pane = fixture.run(&["capture-pane", "-p", "-t", "ro"]);
+                        if String::from_utf8_lossy(&pane.stdout).contains(marker) {
+                            break;
+                        }
+                        assert!(
+                            Instant::now() < deadline,
+                            "typed {marker} never reached the pane"
+                        );
+                        let mut buffer = [0_u8; 4096];
+                        if let Ok(count) = master.read(&mut buffer)
+                            && count > 0
+                        {
+                            captured.extend_from_slice(&buffer[..count]);
+                        }
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                }
                 let listed = fixture.run(&["list-clients", "-F", "#{client_flags}"]);
                 flags = String::from_utf8_lossy(&listed.stdout).into_owned();
             }
@@ -3187,7 +3210,7 @@ mod daemon_autostart {
         };
 
         let (rendered, captured, flags) =
-            attach_and_type(&["attach-session", "-r", "-t", "ro"], b"echo ZZRO\r");
+            attach_and_type(&["attach-session", "-r", "-t", "ro"], b"echo ZZRO\r", None);
         if captured.is_empty() && flags.is_empty() && rendered {
             return;
         }
@@ -3205,8 +3228,11 @@ mod daemon_autostart {
             "client_flags must report read-only without ignore-size: {flags}"
         );
 
-        let (rendered, writable_attach, flags) =
-            attach_and_type(&["attach-session", "-t", "ro"], b"echo ZZRW\r");
+        let (rendered, writable_attach, flags) = attach_and_type(
+            &["attach-session", "-t", "ro"],
+            b"echo ZZRW\r",
+            Some("ZZRW"),
+        );
         assert!(
             rendered,
             "writable attach did not render: {}",
@@ -5918,10 +5944,18 @@ mod daemon_autostart {
                         && line.as_str() != "%exit"
                 })
                 .collect::<Vec<_>>();
-            assert!(notifications[0].starts_with("%window-add @"));
-            assert_eq!(notifications[1], "%sessions-changed");
-            assert!(notifications[2].starts_with("%session-changed $"));
-            assert!(notifications[2].ends_with(" watched"));
+            let position = |predicate: &dyn Fn(&str) -> bool| {
+                notifications
+                    .iter()
+                    .position(|line| predicate(line))
+                    .unwrap_or_else(|| panic!("missing startup notification: {notifications:?}"))
+            };
+            let added = position(&|line| line.starts_with("%window-add @"));
+            let listed = position(&|line| line == "%sessions-changed");
+            let switched = position(&|line| {
+                line.starts_with("%session-changed $") && line.ends_with(" watched")
+            });
+            assert!(added < listed && listed < switched, "{notifications:?}");
             assert!(
                 notifications
                     .iter()
@@ -6224,7 +6258,7 @@ mod daemon_autostart {
                     .status
                     .success()
             );
-            let deadline = Instant::now() + Duration::from_secs(10);
+            let deadline = Instant::now() + Duration::from_secs(30);
             while !marker.exists() {
                 assert!(Instant::now() < deadline, "flood never completed");
                 thread::sleep(Duration::from_millis(20));

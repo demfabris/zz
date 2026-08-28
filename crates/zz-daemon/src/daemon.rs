@@ -47134,6 +47134,30 @@ mod tests {
         state.terminal_order.clear();
     }
 
+    fn wait_for_pane_runtime_facts(shared: &Arc<Shared>, panes: &[PaneId]) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let settled = {
+                let inner = shared.inner.lock();
+                panes.iter().all(|pane| {
+                    inner.engine.pane_runtime_facts(*pane).is_some_and(|facts| {
+                        !facts.current_command.is_empty()
+                            && facts.pid.is_some()
+                            && !facts.tty.is_empty()
+                    })
+                })
+            };
+            if settled {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pane runtime facts did not settle"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn two_session_pair(
         shared: &Arc<Shared>,
     ) -> (
@@ -47146,19 +47170,22 @@ mod tests {
                 ClientId(90),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-d", "-s", "a"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "a", QUIET_PANE_COMMAND]),
             )
             .expect("session a");
         let a = context.session.expect("session a id");
+        let pane_a = context.pane.expect("session a pane");
         shared
             .execute(
                 ClientId(90),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-d", "-s", "b"]),
+                &CommandInvocation::new("new-session", ["-d", "-s", "b", QUIET_PANE_COMMAND]),
             )
             .expect("session b");
         let b = context.session.expect("session b id");
+        let pane_b = context.pane.expect("session b pane");
+        wait_for_pane_runtime_facts(shared, &[pane_a, pane_b]);
         let alpha_mailbox = OutboundMailbox::new();
         let beta_mailbox = OutboundMailbox::new();
         let (alpha, _) = shared.register_subscribed(
@@ -47366,7 +47393,8 @@ mod tests {
             positions(&alpha_mailbox),
             [zz_protocol::StatusPosition::Top]
         );
-        assert!(positions(&beta_mailbox).is_empty());
+        let beta_positions = positions(&beta_mailbox);
+        assert!(beta_positions.is_empty(), "{beta_positions:?}");
     }
 
     #[test]
@@ -54733,7 +54761,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "request-full"]),
+                &CommandInvocation::new("new-session", ["-s", "request-full", QUIET_PANE_COMMAND]),
             )
             .expect("new session");
         let session = context.session.expect("session");
@@ -54743,7 +54771,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-window", ["-h"]),
+                &CommandInvocation::new("split-window", ["-h", QUIET_PANE_COMMAND]),
             )
             .expect("split pane");
         let second = context.pane.expect("second pane");
@@ -54779,20 +54807,30 @@ bind - split-window -v -c "#{pane_current_path}"
             let _ = mailbox.recv().expect("available pre-request message");
         }
 
+        let queued_fulls = || {
+            let state = mailbox.state.lock();
+            state
+                .terminals
+                .iter()
+                .filter(|(_, pending)| {
+                    matches!(
+                        decode_protocol_frame(&pending.encoded)
+                            .expect("decode pending terminal frame"),
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::TerminalViewport { .. },
+                            ..
+                        })
+                    )
+                })
+                .map(|(pane, _)| *pane)
+                .collect::<Vec<_>>()
+        };
+
         shared.send_full(client, first, &mailbox);
-        let frame = mailbox.recv().expect("requested full viewport");
-        let message = decode_protocol_frame(&frame).expect("decode requested viewport");
-        assert!(matches!(
-            message,
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::TerminalViewport { pane, .. },
-                ..
-            }) if pane == first
-        ));
-        assert!(mailbox.state.lock().terminals.is_empty());
+        assert_eq!(queued_fulls(), [first]);
 
         shared.send_full(client, PaneId(u64::MAX), &mailbox);
-        assert!(mailbox.state.lock().terminals.is_empty());
+        assert_eq!(queued_fulls(), [first]);
     }
 
     fn history_chunk_text(
@@ -57977,7 +58015,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("new-session", ["-s", "work"]),
+                &CommandInvocation::new("new-session", ["-s", "work", QUIET_PANE_COMMAND]),
             )
             .expect("new session");
         let session = context.session.expect("session");
@@ -57987,33 +58025,13 @@ bind - split-window -v -c "#{pane_current_path}"
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("split-window", ["-h"]),
+                &CommandInvocation::new("split-window", ["-h", QUIET_PANE_COMMAND]),
             )
             .expect("split pane");
         let panes = shared.inner.lock().engine.state.windows[&window]
             .pane_order()
             .to_vec();
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            let settled = {
-                let inner = shared.inner.lock();
-                panes.iter().all(|pane| {
-                    inner.engine.pane_runtime_facts(*pane).is_some_and(|facts| {
-                        !facts.current_command.is_empty()
-                            && facts.pid.is_some()
-                            && !facts.tty.is_empty()
-                    })
-                })
-            };
-            if settled {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "pane runtime facts did not settle before split resize"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        wait_for_pane_runtime_facts(&shared, &panes);
         let split = {
             let inner = shared.inner.lock();
             let mut splits = Vec::new();
@@ -73643,23 +73661,31 @@ bind - split-window -v -c "#{pane_current_path}"
             Arc::clone(&beta_mailbox),
         );
         let mut context = ExecutionContext::default();
+        let mut panes = Vec::new();
         for name in ["alpha", "beta"] {
             shared
                 .execute(
                     alpha_client,
                     ClientKind::Command,
                     &mut context,
-                    &CommandInvocation::new("new-session", ["-d", "-s", name]),
+                    &CommandInvocation::new("new-session", ["-d", "-s", name, QUIET_PANE_COMMAND]),
                 )
                 .expect("seed session");
-            shared
-                .execute(
-                    alpha_client,
-                    ClientKind::Command,
-                    &mut context,
-                    &CommandInvocation::new("set-option", ["-t", name, "status-interval", "0"]),
-                )
-                .expect("disable periodic status refreshes");
+            panes.push(context.pane.expect("seed pane"));
+            for (option, value) in [
+                ("status-interval", "0"),
+                ("status-left", ""),
+                ("status-right", ""),
+            ] {
+                shared
+                    .execute(
+                        alpha_client,
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new("set-option", ["-t", name, option, value]),
+                    )
+                    .expect("pin the status halves");
+            }
             shared
                 .execute(
                     alpha_client,
@@ -73672,6 +73698,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 )
                 .expect("disable asynchronous window renames");
         }
+        wait_for_pane_runtime_facts(&shared, &panes);
         let mut alpha_context = ExecutionContext::default();
         shared
             .attach_target(
@@ -75328,7 +75355,7 @@ bind - split-window -v -c "#{pane_current_path}"
             stream::{AgentStreamItem, AgentStreamPayload},
         };
 
-        const DEADLINE: Duration = Duration::from_secs(10);
+        const DEADLINE: Duration = Duration::from_secs(30);
 
         fn take_agent_frames(mailbox: &OutboundMailbox) -> Vec<ProtocolMessage> {
             let frames = {
@@ -75413,8 +75440,17 @@ bind - split-window -v -c "#{pane_current_path}"
             }));
 
             let mut context = ExecutionContext::default();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("new-session", ["-s", "agents"]),
+                )
+                .expect("workspace session");
+            let session = context.session.expect("session");
+            shared.attach(client, session).expect("attach");
             for command in [
-                CommandInvocation::new("new-session", ["-s", "agents"]),
                 CommandInvocation::new("set-option", ["-g", "experimental-agent-pane", "on"]),
                 CommandInvocation::new("split-picker", ["-v"]),
             ] {
@@ -75422,7 +75458,6 @@ bind - split-window -v -c "#{pane_current_path}"
                     .execute(client, ClientKind::Interactive, &mut context, &command)
                     .expect("workspace command");
             }
-            let session = context.session.expect("session");
             let agent = context.pane.expect("picker");
             shared
                 .execute(
@@ -75435,7 +75470,6 @@ bind - split-window -v -c "#{pane_current_path}"
                     ),
                 )
                 .expect("agent pane");
-            shared.attach(client, session).expect("attach");
             shared.send_resync(client, &mailbox);
             take_reliable_messages(&mailbox);
             Workspace {

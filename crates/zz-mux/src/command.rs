@@ -29052,6 +29052,113 @@ mod tests {
     }
 
     #[test]
+    fn stored_run_shell_callback_types_preserve_prior_commands() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F11", "display-message", "preserved"]),
+            )
+            .expect("baseline binding");
+        let error = engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["F11", "run-shell", "{ display-message -p forbidden }"],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect_err("typed shell command in binding");
+        assert_eq!(
+            error,
+            ServerError::InvalidCommand(
+                "command run-shell: argument 1 must be \"string\"".to_owned()
+            )
+        );
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                    ),
+                )
+                .expect("preserved binding")
+                .output
+                .lines()
+                .any(|line| line == "F11=display-message preserved")
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["F12", "run-shell", "-C", "{ display-message -p stored }"],
+                )
+                .with_command_blocks([3]),
+            )
+            .expect("typed command-mode binding");
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "prefix", "-F", "#{key_string}=#{key_command}"],
+                    ),
+                )
+                .expect("printed typed command-mode binding")
+                .output
+                .lines()
+                .any(|line| line == "F12=run-shell -C { display-message -p stored }")
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "session-closed", "display-message preserved"],
+                ),
+            )
+            .expect("baseline hook");
+        let error = engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &[
+                        "-g",
+                        "session-closed",
+                        "{ run-shell { display-message -p forbidden } }",
+                    ],
+                ),
+            )
+            .expect_err("typed shell command in hook");
+        assert_eq!(
+            error,
+            ServerError::CommandParse(
+                "command run-shell: argument 1 must be \"string\"".to_owned()
+            )
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "session-closed"]),
+                )
+                .expect("preserved hook")
+                .output,
+            "session-closed[0] display-message preserved"
+        );
+    }
+
+    #[test]
     fn unbind_key_all_and_quiet_match_tmux_table_and_error_semantics() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();

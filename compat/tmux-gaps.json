@@ -2683,7 +2683,6 @@
         "args-parse:confirm-before",
         "args-parse:display-menu",
         "args-parse:display-panes",
-        "args-parse:run-shell",
         "args-parse:set-hook",
         "args-parse:set-option",
         "args-parse:set-window-option",
@@ -2704,7 +2703,7 @@
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, `if-shell` now applies its pinned branch rule through `COMMAND_ARGS_PARSE_BEHAVES`, and 11 per-command callback items remain. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, `if-shell` and `run-shell` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and 10 per-command callback items remain. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3901,6 +3900,23 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "resolution": "Oracle schema 4 parses the pinned `args_parse` callback references and rejects callback bodies outside six recognized rules. It records 14 command-to-rule assignments from nine callbacks, including `display-menu` item groups, `run-shell -C`, and the `set-hook -B` specialization. The Rust catalog carries typed rules for the 12 implemented commands. The manifest gate requires every rule absent from `COMMAND_ARGS_PARSE_BEHAVES` to retain a command-specific `args-parse:` item; `choose-client` and `switch-mode` stay covered by their unimplemented command items. This closes discovery only. Runtime adoption remains open under `tracker.semantic-coverage`."
+    },
+    {
+      "id": "tracker.args-parse-run-shell",
+      "title": "Apply run-shell command-mode argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/parser.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-run-shell.sh",
+        "scenario:compat/scenarios/smoke/args-parse-run-shell.txt",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `run-shell`'s pinned argument callback without another wire change. A leading `-C`, including combined forms, accepts typed blocks at every positional; without it every positional must be a string. Option values remain strings, option scanning stops at the first positional or `--`, and a later `-C` stays positional. Under `-C`, execution consumes only positional 0 while valid extras remain accepted and ignored. Typed failures retain exact diagnostics and preserve prior bindings and hooks; quoted braces remain strings. The strict source-file and Control fixture runs 21 internal checks across canonical, built-in, prefix, and user aliases, foreground, background, stored-command, option-boundary, and no-effect paths. Eager whole-file or nested callback construction, including parse-only `source-file -n` validation, remains with the existing parser-edge and command-chain owners. Ten implemented callback commands remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.daemon-invalid-flag-runtime",

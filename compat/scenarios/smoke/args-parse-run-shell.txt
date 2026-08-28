@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-run-shell.sh ~/args-parse-run-shell.sh
+out: set-environment -gu ARGS_PARSE_RUN_SHELL
+run-shell 'sh ~/args-parse-run-shell.sh'
+out: show-environment -g ARGS_PARSE_RUN_SHELL

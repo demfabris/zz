@@ -215,7 +215,7 @@ overrides so `list-commands` and completion continue to describe zz's implemente
 
 The strict three-step `smoke/command-flag-errors` fixture compares 516 probes on each server. It
 contains 513 exact failures and three required-value absorption successes, then checks pane,
-buffer, file, binding, and hook sentinels. The remaining 11 custom `args_parse` command items,
+buffer, file, binding, and hook sentinels. The remaining 10 custom `args_parse` command items,
 semantic value validation, and parser-group atomicity stay under their existing owners.
 
 ## `if-shell` argument blocks
@@ -238,6 +238,32 @@ the no-mutation case. It finishes with `ARGS_PARSE_IF_SHELL=clean:12` on both se
 
 This closure does not claim tmux's eager whole-file construction timing for every nested command
 list. That broader parser-group contract remains separately tracked.
+
+## `run-shell` argument blocks
+
+The second custom callback rule closed on 2026-08-28 without another protocol change. The v84
+lexical positions now distinguish a typed block from quoted brace text in `run-shell`. A leading
+`-C`, including combined forms such as `-bC` and `-Cd0`, makes every positional
+command-or-string. Without it, every positional must be a string. Option values always remain
+strings. Leading option scanning stops at the first positional or `--`, so `-C` after either
+boundary stays positional and does not enable command mode.
+
+Only positional 0 executes in command mode. Later valid string or typed positionals are accepted
+and ignored, matching the pin. A typed positional without command mode and a typed `-c`, `-d`,
+`-s`, or `-t` value produce the pin's exact diagnostic before effects. Quoted braces stay strings;
+under `-C` they are reparsed as command text rather than treated as a lexical block. Valid stored
+bindings retain typed blocks, and an invalid replacement leaves the prior binding or hook intact.
+The strict three-step `smoke/args-parse-run-shell` scenario runs 21 internal checks on source-file
+and Control paths. It covers canonical, built-in alias, unique-prefix, and user-alias resolution,
+foreground and background execution, combined flags, option boundaries, stored printing, exact
+errors, and rejected-effect suppression. Both servers finish with
+`ARGS_PARSE_RUN_SHELL=clean:21`.
+
+This closure does not claim eager construction of every nested callback before outer command
+validation. Pinned `source-file -n` applies the callback while building its parse-only command
+list; zz currently stops after lexical parsing. Those ordering differences remain under
+`config.parser-edge-cases` and `mux.chain-parse-abort`. The fixture also avoids the pin's
+zero-positional `run-shell -C -d 0` server crash, which zz does not reproduce.
 
 ## Accepted grammar divergence evidence
 

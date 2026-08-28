@@ -68,11 +68,16 @@ accepts six rules and fails when a callback body falls outside them:
 
 `COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
 remain unimplemented and need no sidecar entry. `COMMAND_ARGS_PARSE_BEHAVES` now contains
-`if-shell`: its zero-based condition position 0 and option values must be strings, while branch
-positions 1 and 2 accept either strings or typed command blocks. Quoted brace text stays a string.
-The parser preserves that lexical distinction through source files, Control transport, aliases,
-bindings, and hooks; validation rejects a forbidden type before branch effects or stored-command
-replacement. `tracker.semantic-coverage` owns the remaining 11 command-specific `args-parse:` items.
+`if-shell` and `run-shell`. For `if-shell`, zero-based condition position 0 and option values must
+be strings, while branch positions 1 and 2 accept either strings or typed command blocks. For
+`run-shell`, a leading `-C`, including a combined short-option form, makes every positional
+command-or-string; without it every positional must be a string. Option values stay strings, option
+scanning stops at the first positional or `--`, and a later `-C` is positional. Quoted brace text
+stays a string. Command mode executes positional 0 and accepts but ignores later positionals. The
+parser preserves that lexical distinction through source files, Control transport, aliases,
+bindings, and hooks; validation rejects a forbidden type before execution or stored-command
+replacement. `tracker.semantic-coverage` owns the remaining 10 command-specific `args-parse:`
+items.
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |

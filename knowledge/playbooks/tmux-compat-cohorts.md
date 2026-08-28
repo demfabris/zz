@@ -33,6 +33,9 @@ The thirteenth closed the final `mux.error-shapes` item by matching nested `new-
 validation precedence without implementing session groups. The fourteenth closes the first custom
 argument rule with protocol v84: `CommandInvocation` retains lexical command-block positions and
 `if-shell` applies them across source-file, Control, aliases, bindings, hooks, and background work.
+The fifteenth reuses that v84 metadata without another wire change and applies `run-shell`'s
+leading `-C` rule across every positional, option boundary, stored command, Control route, and
+background callback.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -55,13 +58,13 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The current canonical checkpoint covers 89 scenarios and 1,490 steps. Every ordinary row is clean.
+The current canonical checkpoint covers 90 scenarios and 1,493 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`1a6a11a9991540c2c6d7aa26ead79c47440870cdc74fa063cf721cd648efabf8`.
-The full strict suite was rerun after the first callback rule closed, not carried forward from an
+`bd5bf71249974f78138e1484dda1c4fca8dabd0f7ec0e405f893fc46a8933b09`.
+The full strict suite was rerun after the second callback rule closed, not carried forward from an
 older artifact. The two positional-bound scenarios prove canonical and alias diagnostics, the
 first-positional flag boundary, target-error precedence, and effect suppression. The expanded
 maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
@@ -69,6 +72,9 @@ also includes the exact attach engine path and stored commands. The focused thre
 `command-flag-errors` run is clean on zz and the pin with 516 byte-compared probes inside the
 canonical suite. The focused three-step `args-parse-if-shell` row runs 12 internal source-file,
 Control, alias, stored-command, and branch-selection checks.
+The focused three-step `args-parse-run-shell` row runs 21 internal checks for lexical type,
+combined and boundary flags, aliases, foreground and background execution, Control, and stored
+command preservation.
 
 # Cohorts
 
@@ -106,7 +112,8 @@ milestone per letter, never one combined commit.
 | 9e | Shared flag errors | Closed under `mux.command-flag-errors` on 2026-08-28 | Complete | One catalog parser across 83 canonical commands and 74 aliases; 516 differential probes cover exact diagnostics and value boundaries |
 | 9f | Nested `new-session` error precedence | Closed under `mux.error-shapes` on 2026-08-28 | Complete | Separate client-lifecycle path with its own oracle proof |
 | 10a | `if-shell` branch argument rule | Closed under `tracker.args-parse-if-shell` on 2026-08-28 | Complete | Protocol v84 preserves typed blocks; one command and one effective rule |
-| 10b-10f | Remaining `args_parse` runtime rules | Eleven `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Five effective source rules, never all callback commands at once |
+| 10b | `run-shell` command-mode argument rule | Closed under `tracker.args-parse-run-shell` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; one command and one effective rule |
+| 10c-10f | Remaining `args_parse` runtime rules | Ten `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Four effective source rules, never all callback commands at once |
 | 10g-10k | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | 12a-12f | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -116,7 +123,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a are closed; slice 10b is next. Before choosing each later milestone,
+Slices 9a through 9f, 10a, and 10b are closed; slice 10c is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

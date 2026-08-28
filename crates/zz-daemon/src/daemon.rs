@@ -4670,7 +4670,7 @@ impl Shared {
                         self.capture_pane(context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::RunShell => {
-                        self.run_shell(client, kind, context, canonical, &command.args)
+                        self.run_shell(client, kind, context, canonical, command)
                     }
                     DaemonCommandDispatch::IfShell => {
                         self.if_shell(client, kind, context, canonical, command)
@@ -7998,8 +7998,9 @@ impl Shared {
         kind: ClientKind,
         context: &mut ExecutionContext,
         command_name: &str,
-        args: &[String],
+        invocation: &CommandInvocation,
     ) -> Result<Execution, DaemonError> {
+        let args = &invocation.args;
         let parsed = parse_run_shell_args(args)?;
         let (target, command_context, command, cwd, tmux, environment) = {
             let mut inner = self.inner.lock();
@@ -8034,23 +8035,20 @@ impl Shared {
             let facts = format_hook_facts_for_client(&inner, client, &command_context);
             let command = parsed.positional.first().map(|command| {
                 if parsed.command_mode {
-                    command_block_body(command).map_or_else(
-                        || {
-                            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
-                                &facts,
-                                command_context.format_variables(),
-                            )
-                            .with_command_item(command_name);
-                            InsertedCommandSource::String(expand_format_values(
-                                command,
-                                &format_context,
-                                &mut hooks,
-                            ))
-                        },
-                        |body| InsertedCommandSource::Block(body.to_owned()),
-                    )
-                } else if let Some(body) = command_block_body(command) {
-                    InsertedCommandSource::Block(body.to_owned())
+                    if invocation.argument_is_command_block(parsed.positional_start) {
+                        typed_inserted_command_source(command, true)
+                    } else {
+                        let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                            &facts,
+                            command_context.format_variables(),
+                        )
+                        .with_command_item(command_name);
+                        InsertedCommandSource::String(expand_format_values(
+                            command,
+                            &format_context,
+                            &mut hooks,
+                        ))
+                    }
                 } else {
                     let mut variables = command_context.format_variables.clone();
                     variables.extend(
@@ -8075,10 +8073,6 @@ impl Shared {
             let environment = inner.engine.job_environment(command_context.session);
             (target, command_context, command, cwd, tmux, environment)
         };
-
-        if matches!(&command, Some(InsertedCommandSource::Block(_))) && !parsed.command_mode {
-            return Err(ServerError::CommandParse(RUN_SHELL_USAGE.to_owned()).into());
-        }
 
         let route = RunShellRoute {
             client,
@@ -25580,7 +25574,6 @@ fn resolve_buffer<'a>(
     })
 }
 
-const RUN_SHELL_USAGE: &str = "usage: run-shell [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]";
 const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
 
 fn next_wait_token(inner: &mut ServerState) -> u64 {
@@ -25661,6 +25654,7 @@ struct ParsedRunShellArgs {
     delay: Option<Duration>,
     target: Option<String>,
     positional: Vec<String>,
+    positional_start: usize,
 }
 
 struct ParsedIfShellArgs {
@@ -25675,6 +25669,7 @@ fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerErr
     let parsed =
         parse_buffer_command_args("run-shell", args, &['c', 'd', 's', 't'], &['b', 'C', 'E'])?;
     let delay = parsed.value('d').map(parse_shell_delay).transpose()?;
+    let positional_start = args.len().saturating_sub(parsed.positional.len());
     Ok(ParsedRunShellArgs {
         background: parsed.has('b'),
         command_mode: parsed.has('C'),
@@ -25683,6 +25678,7 @@ fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerErr
         delay,
         target: parsed.value('t').map(str::to_owned),
         positional: parsed.positional,
+        positional_start,
     })
 }
 
@@ -49112,10 +49108,63 @@ mod tests {
                 client,
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("run-shell", ["-C", "{ display-message -p '#{command}' }"]),
+                &CommandInvocation::new("run-shell", ["-C", "{ display-message -p '#{command}' }"])
+                    .with_command_blocks([1]),
             )
             .expect("run-shell typed block child");
         assert_eq!(output.output, "display-message");
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["{ display-message -p forbidden-shell-block }"],
+                )
+                .with_command_blocks([0]),
+            )
+            .expect_err("typed shell command without -C");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::CommandParse(message))
+                if message == "command run-shell: argument 1 must be \"string\""
+        ));
+
+        let error = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-C", "{ display-message -p quoted-command-text }"],
+                ),
+            )
+            .expect_err("quoted brace text stays a command string");
+        assert!(matches!(
+            error,
+            DaemonError::InsertedCommandParse(message) if message == "syntax error"
+        ));
+
+        let output = shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    [
+                        "-C",
+                        "display-message -p first-command",
+                        "{ display-message -p ignored-command }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("typed extra command-mode argument");
+        assert_eq!(output.output, "first-command");
 
         context
             .format_variables
@@ -49211,7 +49260,8 @@ mod tests {
                 &CommandInvocation::new(
                     "run-shell",
                     ["-C", "{ set-option -g @raw-block '#{session_name}' }"],
-                ),
+                )
+                .with_command_blocks([1]),
             )
             .expect("unexpanded command block");
         let output = shared

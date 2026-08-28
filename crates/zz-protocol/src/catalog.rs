@@ -331,12 +331,19 @@ fn validate_command_args_parse(
     else {
         return Ok(());
     };
-    if args_parse.rule != CommandArgsParseRule::IfShellBranches {
-        return Ok(());
-    }
+    let run_shell_commands = args_parse.rule == CommandArgsParseRule::RunShellCommandFlag
+        && parsed
+            .options
+            .iter()
+            .any(|option| matches!(option, TmuxOption::Flag("-C")));
     let start = command.args.len().saturating_sub(parsed.positionals.len());
     for (position, index) in (start..command.args.len()).enumerate() {
-        if command.argument_is_command_block(index) && !matches!(position, 1 | 2) {
+        let accepts_command_block = match args_parse.rule {
+            CommandArgsParseRule::IfShellBranches => matches!(position, 1 | 2),
+            CommandArgsParseRule::RunShellCommandFlag => run_shell_commands,
+            _ => return Ok(()),
+        };
+        if command.argument_is_command_block(index) && !accepts_command_block {
             return Err(ServerError::CommandParse(format!(
                 "command {}: argument {} must be \"string\"",
                 spec.name,
@@ -422,7 +429,7 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
     },
 ];
 
-pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &["if-shell"];
+pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &["if-shell", "run-shell"];
 
 use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
@@ -2832,6 +2839,117 @@ mod tests {
         );
 
         let quoted = CommandInvocation::new("if-shell", ["-F", "1", "{ display-message quoted }"]);
+        assert!(parse_tmux_command_options(spec, &quoted).is_ok());
+    }
+
+    #[test]
+    fn run_shell_args_parse_switches_every_positional_with_leading_command_mode() {
+        let spec = catalog_command_spec("run-shell").expect("run-shell");
+
+        for (command, expected) in [
+            (
+                CommandInvocation::new("run-shell", ["{ display-message first }"])
+                    .with_command_blocks([0]),
+                "command run-shell: argument 1 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new("run-shell", ["printf first", "{ display-message second }"])
+                    .with_command_blocks([1]),
+                "command run-shell: argument 2 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "run-shell",
+                    ["printf first", "-C", "{ display-message third }"],
+                )
+                .with_command_blocks([2]),
+                "command run-shell: argument 3 must be \"string\"",
+            ),
+        ] {
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed shell argument")
+                    .tmux_message(),
+                expected
+            );
+        }
+
+        for command in [
+            CommandInvocation::new(
+                "run-shell",
+                [
+                    "-C",
+                    "{ display-message first }",
+                    "{ display-message ignored }",
+                ],
+            )
+            .with_command_blocks([1, 2]),
+            CommandInvocation::new("run-shell", ["-bC", "{ display-message first }"])
+                .with_command_blocks([1]),
+            CommandInvocation::new("run-shell", ["-C", "{ display-message quoted }"]),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("command-mode argument");
+        }
+
+        for command in [
+            CommandInvocation::new("run-shell", ["-Cd0", "{ display-message first }"])
+                .with_command_blocks([1]),
+            CommandInvocation::new("run-shell", ["-C", "--", "{ display-message first }"])
+                .with_command_blocks([2]),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("leading command-mode flag");
+        }
+
+        for (command, expected) in [
+            (
+                CommandInvocation::new("run-shell", ["-d0C", "{ display-message first }"])
+                    .with_command_blocks([1]),
+                "command run-shell: argument 1 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new("run-shell", ["-cC", "{ display-message first }"])
+                    .with_command_blocks([1]),
+                "command run-shell: argument 1 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new("run-shell", ["--", "-C", "{ display-message second }"])
+                    .with_command_blocks([2]),
+                "command run-shell: argument 2 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new("run-shell", ["-", "-C", "{ display-message third }"])
+                    .with_command_blocks([2]),
+                "command run-shell: argument 3 must be \"string\"",
+            ),
+        ] {
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("command-mode boundary")
+                    .tmux_message(),
+                expected
+            );
+        }
+
+        for option in ["-c", "-d", "-s", "-t"] {
+            let command = CommandInvocation::new(
+                "run-shell",
+                [
+                    "-C",
+                    option,
+                    "{ display-message option }",
+                    "display-message branch",
+                ],
+            )
+            .with_command_blocks([2]);
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed option value")
+                    .tmux_message(),
+                format!("command run-shell: {option} argument must be a string")
+            );
+        }
+
+        let quoted = CommandInvocation::new("run-shell", ["{ display-message shell text }"]);
         assert!(parse_tmux_command_options(spec, &quoted).is_ok());
     }
 

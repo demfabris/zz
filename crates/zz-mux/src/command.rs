@@ -2896,7 +2896,7 @@ impl MuxEngine {
     }
 
     pub fn new_session_attaches(args: &[String]) -> Result<bool, ServerError> {
-        let (options, _) = parse_command_options("new-session", args)?;
+        let (options, _) = parse_new_session_attach_options(args)?;
         Ok(options.has("-A") || !options.has("-d"))
     }
 
@@ -2904,12 +2904,63 @@ impl MuxEngine {
         &self,
         context: &ExecutionContext,
         args: &[String],
+        hooks: &mut impl StatusHooks,
     ) -> Result<bool, ServerError> {
-        let (options, _) = parse_command_options("new-session", args)?;
-        if !context.has_client_terminal() {
+        let (options, positional) = parse_new_session_attach_options(args)?;
+        if !context.has_client_terminal()
+            || options.has("-d")
+            || context.attached_client_context().is_some()
+        {
             return Ok(false);
         }
-        Ok(!options.has("-d"))
+        let mut item_hooks = CommandItemHooks {
+            inner: hooks,
+            command: Some("new-session"),
+        };
+        let hooks = &mut item_hooks;
+        if options.value("-t").is_some()
+            && (!positional.is_empty() || options.value("-n").is_some())
+        {
+            return Err(ServerError::InvalidCommand(
+                "command or window name given with target".to_owned(),
+            ));
+        }
+        options
+            .value("-n")
+            .map(|name| self.expand_new_session_item_name(context, name, "window", hooks))
+            .transpose()?;
+        let requested_name = options
+            .value("-s")
+            .map(|name| self.expand_new_session_item_name(context, name, "session", hooks))
+            .transpose()?;
+        if options.has("-A") {
+            let existing = match requested_name.as_deref() {
+                Some(name) => session_named(&self.state, name),
+                None => self
+                    .state
+                    .resolve_session(options.value("-t"), context.session)
+                    .ok(),
+            };
+            if existing.is_some() {
+                return Ok(true);
+            }
+        }
+        let name = requested_name.unwrap_or_else(|| next_session_name(&self.state));
+        if session_named(&self.state, &name).is_some() {
+            return Err(ServerError::InvalidCommand(format!(
+                "duplicate session: {name}"
+            )));
+        }
+        if let Some(target) = options.value("-t")
+            && self
+                .state
+                .resolve_session(Some(target), context.session)
+                .is_err()
+        {
+            tmux_clean_name(target, "session group")?;
+        }
+        spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
+        Ok(true)
     }
 
     /// Apply one parsed command and return side effects for the daemon adapter.
@@ -12197,6 +12248,17 @@ fn parse_command_options(
     Ok((options, positional))
 }
 
+fn parse_new_session_attach_options(
+    args: &[String],
+) -> Result<(Options, Vec<String>), ServerError> {
+    let spec = command_spec("new-session").expect("new-session has catalog metadata");
+    let (options, positional) = parse_options_for_spec(args, spec)?;
+    validate_options_allowing_unsupported("new-session", spec, &options, Some("-t"))?;
+    spec.validate_positional_minimum(positional.len())?;
+    spec.validate_positional_maximum(positional.len())?;
+    Ok((options, positional))
+}
+
 fn parse_options_for_spec(
     args: &[String],
     spec: &zz_protocol::CommandSpec,
@@ -12232,6 +12294,15 @@ fn validate_options(
     spec: &zz_protocol::CommandSpec,
     options: &Options,
 ) -> Result<(), ServerError> {
+    validate_options_allowing_unsupported(command, spec, options, None)
+}
+
+fn validate_options_allowing_unsupported(
+    command: &str,
+    spec: &zz_protocol::CommandSpec,
+    options: &Options,
+    allowed: Option<&str>,
+) -> Result<(), ServerError> {
     for name in options
         .flags
         .iter()
@@ -12243,7 +12314,7 @@ fn validate_options(
                 "{command} does not support {name}"
             )));
         };
-        if option.unsupported {
+        if option.unsupported && allowed != Some(name) {
             return Err(ServerError::UnsupportedCommand(format!("{command} {name}")));
         }
     }
@@ -20828,17 +20899,24 @@ mod tests {
 
     #[test]
     fn new_session_attach_routing_uses_the_command_option_parser() {
+        let arguments =
+            |args: &[&str]| args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
         let attaches = |args: &[&str]| {
-            MuxEngine::new_session_attaches(
-                &args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>(),
-            )
-            .expect("valid new-session arguments")
+            MuxEngine::new_session_attaches(&arguments(args)).expect("valid new-session arguments")
         };
 
         assert!(attaches(&["-s", "a", "/usr/bin/true", "-d"]));
         assert!(attaches(&["-s", "b", "--", "-d"]));
         assert!(attaches(&["-dA", "-s", "existing"]));
+        assert!(attaches(&["-t", "group"]));
+        assert!(attaches(&["-At", "existing"]));
         assert!(!attaches(&["-dsfoo"]));
+        assert!(!attaches(&["-d", "-t", "group"]));
+        assert_eq!(
+            MuxEngine::new_session_attaches(&arguments(&["-X"])).unwrap_err(),
+            ServerError::UnsupportedCommand("new-session -X".to_owned())
+        );
+        assert!(MuxEngine::new_session_attaches(&arguments(&["-t"])).is_err());
     }
 
     #[test]
@@ -20850,15 +20928,21 @@ mod tests {
         };
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
+        let mut hooks = CommandHooks::new(0);
+        context.set_client_attached(false);
 
         assert!(
             engine
-                .new_session_needs_attach_preflight(&context, &args(&[]))
+                .new_session_needs_attach_preflight(&context, &args(&[]), &mut hooks)
                 .unwrap()
         );
         assert!(
             !engine
-                .new_session_needs_attach_preflight(&context, &args(&["-d", "-s", "detached"]))
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &args(&["-d", "-s", "detached"]),
+                    &mut hooks,
+                )
                 .unwrap()
         );
         assert!(
@@ -20866,6 +20950,7 @@ mod tests {
                 .new_session_needs_attach_preflight(
                     &context,
                     &args(&["-A", "-d", "-s", "missing"]),
+                    &mut hooks,
                 )
                 .unwrap()
         );
@@ -20881,27 +20966,214 @@ mod tests {
                 .new_session_needs_attach_preflight(
                     &context,
                     &args(&["-A", "-d", "-s", "existing"]),
+                    &mut hooks,
                 )
                 .unwrap()
         );
         assert!(
             engine
-                .new_session_needs_attach_preflight(&context, &args(&["-A", "-s", "existing"]),)
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &args(&["-A", "-s", "existing"]),
+                    &mut hooks,
+                )
                 .unwrap()
         );
 
+        context.set_client_attached(true);
+        assert!(
+            !engine
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &args(&["-A", "-s", "existing"]),
+                    &mut hooks,
+                )
+                .unwrap()
+        );
+        context.set_client_attached(false);
         context.set_client_terminal(false);
         assert!(
             !engine
-                .new_session_needs_attach_preflight(&context, &args(&["-A", "-s", "existing"]),)
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &args(&["-A", "-s", "existing"]),
+                    &mut hooks,
+                )
                 .unwrap()
         );
         context.set_no_client();
         assert!(
             !engine
-                .new_session_needs_attach_preflight(&context, &args(&["-A", "-s", "existing"]),)
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &args(&["-A", "-s", "existing"]),
+                    &mut hooks,
+                )
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn nested_new_session_preflight_matches_tmux_validation_order() {
+        let args = |arguments: &[&str]| {
+            arguments
+                .iter()
+                .map(|argument| (*argument).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let preflight = |engine: &MuxEngine, context: &ExecutionContext, arguments: &[&str]| {
+            let mut hooks = CommandHooks::new(0);
+            engine.new_session_needs_attach_preflight(context, &args(arguments), &mut hooks)
+        };
+        let mut engine = MuxEngine::default();
+        let mut setup = ExecutionContext::default();
+        engine
+            .execute(
+                &mut setup,
+                &command("new-session", &["-d", "-s", "existing"]),
+            )
+            .unwrap();
+        let mut context = ExecutionContext::default();
+        context.set_client_attached(false);
+        let generation = engine.state.generation();
+
+        assert_eq!(
+            preflight(&engine, &context, &["-t", "group", "echo"]).unwrap_err(),
+            ServerError::InvalidCommand("command or window name given with target".to_owned())
+        );
+        assert_eq!(
+            preflight(
+                &engine,
+                &context,
+                &["-t", "group", "-n", "window", "-s", "fresh"],
+            )
+            .unwrap_err(),
+            ServerError::InvalidCommand("command or window name given with target".to_owned())
+        );
+        assert_eq!(
+            preflight(
+                &engine,
+                &context,
+                &["-n", "bad\nwindow", "-s", "bad\nsession"],
+            )
+            .unwrap_err(),
+            ServerError::InvalidCommand("invalid window name: bad\nwindow".to_owned())
+        );
+        assert_eq!(
+            preflight(&engine, &context, &["-n", "window", "-s", "bad\nsession"]).unwrap_err(),
+            ServerError::InvalidCommand("invalid session name: bad\nsession".to_owned())
+        );
+        assert!(preflight(&engine, &context, &["-A", "-s", "existing"]).unwrap());
+        assert_eq!(
+            preflight(
+                &engine,
+                &context,
+                &["-s", "existing", "-t", "bad\ngroup", "-x", "0"],
+            )
+            .unwrap_err(),
+            ServerError::InvalidCommand("duplicate session: existing".to_owned())
+        );
+        assert_eq!(
+            preflight(
+                &engine,
+                &context,
+                &["-s", "fresh", "-t", "bad\ngroup", "-x", "0"],
+            )
+            .unwrap_err(),
+            ServerError::InvalidCommand("invalid session group name: bad\ngroup".to_owned())
+        );
+        assert!(
+            preflight(
+                &engine,
+                &context,
+                &["-s", "fresh", "-t", "valid-group", "-x", "0"],
+            )
+            .unwrap()
+        );
+        assert!(preflight(&engine, &context, &["-s", "fresh", "-y", "0"]).unwrap());
+        assert_eq!(engine.state.generation(), generation);
+        assert_eq!(engine.state.sessions.len(), 1);
+    }
+
+    #[test]
+    fn nested_new_session_preflight_expands_each_item_once_with_canonical_command() {
+        struct TrackingHooks {
+            order: usize,
+            command_fallbacks: usize,
+        }
+
+        impl StatusHooks for TrackingHooks {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                match name {
+                    "order" => {
+                        self.order += 1;
+                        Some(self.order.to_string())
+                    }
+                    "command" => {
+                        self.command_fallbacks += 1;
+                        None
+                    }
+                    _ => None,
+                }
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        context.set_client_attached(false);
+        let mut hooks = TrackingHooks {
+            order: 0,
+            command_fallbacks: 0,
+        };
+        let arguments = [
+            "-n",
+            "window-#{order}-#{command}",
+            "-s",
+            "session-#{order}-#{command}",
+            "-c",
+            "/tmp/#{order}-#{command}",
+        ]
+        .map(str::to_owned);
+        assert!(
+            engine
+                .new_session_needs_attach_preflight(&context, &arguments, &mut hooks,)
+                .unwrap()
+        );
+        assert_eq!(hooks.order, 3);
+        assert_eq!(hooks.command_fallbacks, 3);
+        assert!(engine.state.sessions.is_empty());
+
+        engine
+            .execute(
+                &mut ExecutionContext::default(),
+                &command("new-session", &["-d", "-s", "new-session"]),
+            )
+            .unwrap();
+        hooks.order = 0;
+        hooks.command_fallbacks = 0;
+        let generation = engine.state.generation();
+        assert_eq!(
+            engine
+                .new_session_needs_attach_preflight(
+                    &context,
+                    &["-s".to_owned(), "#{command}".to_owned()],
+                    &mut hooks,
+                )
+                .unwrap_err(),
+            ServerError::InvalidCommand("duplicate session: new-session".to_owned())
+        );
+        assert_eq!(hooks.order, 0);
+        assert_eq!(hooks.command_fallbacks, 1);
+        assert_eq!(engine.state.generation(), generation);
+        assert_eq!(engine.state.sessions.len(), 1);
     }
 
     #[test]

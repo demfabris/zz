@@ -36,9 +36,9 @@ and closed history. The
 [2026-08-22 tmux CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
 records the source-anchored baseline used to build this plan.
 
-# Current checkpoint, 2026-08-27
+# Current checkpoint, 2026-08-28
 
-The live tracker has 86 active groups, 593 classified active items, 80 closed groups, and two known
+The live tracker has 85 active groups, 592 classified active items, 81 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,8 +53,8 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after command-flag closure covers 88 scenarios and
-1,487 steps.
+The canonical checkpoint freshly rerun after nested `new-session` precedence closed covers 88
+scenarios and 1,487 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
@@ -63,6 +63,8 @@ persisted summary SHA-256 is
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
+The attached-client fixture now also compares nested validation status, stderr, session roster,
+client count, aliases, and command-list stop behavior on both servers.
 
 Protocol v82 appends one bounded UTF-8 client-environment snapshot to `ClientHello`. Local and
 SSH-forwarded clients now seed fresh sessions and refresh existing sessions through the effective
@@ -449,8 +451,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    retains its exact canonical and alias proof. The shared option parser now covers all 83
    implemented upstream commands and 74 aliases, including stored commands and exact native attach.
    Its three-step differential compares 516 probes against zz and the pin with exact diagnostics,
-   required-value absorption, optional-value lookahead, and unchanged sentinels. Only nested-session
-   precedence remains in `mux.error-shapes`.
+   required-value absorption, optional-value lookahead, and unchanged sentinels. The final
+   `mux.error-shapes` item closed on 2026-08-28 when nested `new-session` adopted the pin's exact
+   validation order ahead of its mutation-free nesting refusal.
    `knowledge/tmux/gaps.md` remains generated from the registry.
 
 Without this gate, easy compatibility fixes can land while the persisted proof quietly goes stale.
@@ -910,7 +913,7 @@ permanent product decision has been recorded for them.
   and minima but before targets or effects. Stored binding and hook children use the same bounds
   before replacing state. The strict fixture covers 71 generic-CLI-routed canonical names
   and 62 aliases, while an exhaustive daemon test covers all 72 engine paths and aliases. Flag
-  diagnostics and nested-session precedence remain open.
+  At that checkpoint, flag diagnostics and nested-session precedence remained open.
 - 2026-08-27: The complete CLI binary and app-library gates exposed stale assertions and two production edges
   after the client-context work. Exact native `attach-session -E` now enters daemon command
   execution for its initial attach and preserves the session environment; automatic reconnect
@@ -928,9 +931,17 @@ permanent product decision has been recorded for them.
   on canonical unknown and invalid flags, pinned help usage, missing required values, required-value
   absorption, optional-value lookahead, and syntax-before-unsupported ordering. Product usage stays
   truthful in `list-commands` and completion through a separate pinned diagnostic accessor. The
-  strict three-step fixture reports `COMMAND_FLAG_ERRORS=clean:516` on zz and the pin. Parser-group
-  atomicity, callback-specific grammar, and nested `new-session` precedence remain under their
-  existing owners. No wire protocol or version change was needed.
+  strict three-step fixture reports `COMMAND_FLAG_ERRORS=clean:516` on zz and the pin. At that
+  checkpoint, parser-group atomicity, callback-specific grammar, and nested `new-session`
+  precedence remained under their existing owners. No wire protocol or version change was needed.
+- 2026-08-28: The final `mux.error-shapes` item closed without a protocol or catalog change. A
+  mutation-free nested `new-session` preflight now follows the pin through flag and arity parsing,
+  target conflicts, expanded window and session names, `-A`, duplicate detection, unresolved
+  session-group name validation, and start-directory expansion before refusing nesting. The
+  refusal still precedes terminal and size validation. A narrow `-t` routing path exposes this
+  order without implementing session groups. Canonical names, built-in aliases, prefixes, user
+  aliases, command lists, detached creation, Control clients, and already-attached clients are
+  covered by focused tests and the real attached-client differential.
 
 # Related
 

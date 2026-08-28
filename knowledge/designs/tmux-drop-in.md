@@ -1105,8 +1105,9 @@ flag ledger is untouched at 127 pairs across 29 commands — diagnostics are beh
 1. Error contract, after F0: **COMPLETE 2026-08-28.** Catalog-owned positional bounds and the shared
    option parser centralize pinned unknown and invalid flags, missing values, too-few and too-many
    arguments, aliases, and usage diagnostics. The focused flag fixture compares 516 probes on zz
-   and the pin. Whole-command-group prevalidation, nested `new-session` precedence, callback-specific
-   grammar, and semantic value validation retain separate owners.
+   and the pin. Nested `new-session` now follows the pin's creation-validation order before its
+   mutation-free nesting refusal. Whole-command-group prevalidation, callback-specific grammar,
+   and semantic value validation retain separate owners.
 2. Key grammar and tables: add a fallible canonical key parser, reject malformed modifier
    tails and pin the supported stock copy-table metadata,
    repeat flags, and actions. Preserve zz-native product bindings. Bare `list-keys` alignment
@@ -1819,7 +1820,7 @@ The four invocations the alias lives on (rows 3-4 largely closed by 7a
 | Invocation | tmux | zz today |
 | --- | --- | --- |
 | `tmux` | new session + attach this TTY | works — the installed launcher rewrites bare argv to `new-session -A`, so an empty daemon atomically creates and attaches session zero while a live daemon attaches its current session; the GUI lives behind `zz app`. |
-| `tmux new -s foo` | create **and** attach this process | CLOSED 2026-08-20 — the CLI routes attaching forms through the TUI on an Interactive connection and refuses off a TTY without creating anything; nested duplicate-name error precedence is the loud exception ledgered below |
+| `tmux new -s foo` | create **and** attach this process | CLOSED 2026-08-20: the CLI routes attaching forms through the TUI on an Interactive connection and refuses off a TTY without creating anything. Nested creation-validation precedence closed on 2026-08-28. |
 | `tmux attach -t foo` | attach this TTY | works — full `-t`/`-d` grammar, TUI attach on a TTY, engine-identical `can't find session:` headless (7a) |
 | `tmux attach` | attach, starting the server if needed | works — autostarts the daemon (CMD_STARTSERVER) and returns `no sessions`, exit 1, on an empty server, preserving `attach || new-session`; TTY check last (7a) |
 
@@ -1851,10 +1852,11 @@ a free-form `Vec<String>`, so the encoding is unchanged and `PROTOCOL_VERSION` s
 
 On its creation path, the pin checks a `-t` target combined with a command or `-n`, validates the
 window and session names, tries `-A` delegation, checks duplicate sessions, validates an unresolved
-`-t` as a session-group name, then checks nesting, terminal presence, and `-x`/`-y`
-(`cmd-new-session.c:97-238`). zz differs at one loud edge: its atomic daemon-side nesting guard runs
-before mux execution, so a nested attaching command reports the nesting refusal before any of those
-creation validations. Neither server mutates state. Three states, not two, because the pin distinguishes a NULL
+`-t` as a session-group name, expands the start directory, then checks nesting, terminal presence,
+and `-x`/`-y` (`cmd-new-session.c:97-238`). Since 2026-08-28, zz follows that same order in an
+atomic daemon-side preflight before reporting the nesting refusal. Its narrow routing parser admits
+`-t` only for that preflight; normal mux execution still rejects session groups. Neither server
+mutates state on an early failure. Three states, not two, because the pin distinguishes a NULL
 client from a client without a terminal: `if (c == NULL) detached = 1` (`:164-167`) makes a
 config's bare `new-session` create detached, and `if (c == NULL) return CMD_RETURN_NORMAL`
 (`cmd-attach-session.c:71-72`) — placed *above* target resolution — makes a config's
@@ -1871,8 +1873,9 @@ attaching `new-session` and `attach-session` issue the pinned refusal before any
 when the hello carries `client-nested-v1` and its independently retained tty matches one of this
 daemon's pane ttys. Unsetting `$TMUX` omits the marker, not the tty, and forces either attach path
 without weakening client targeting. Local Control uses that same two-fact refusal only when stdin
-is a tty; fresh creation and `-A` misses remain allowed. The creation-validation precedence
-above, including the pin's `invalid session group name` check, is ledgered in the divergence matrix.
+is a tty; fresh creation and `-A` misses remain allowed. The creation-validation precedence above,
+including the pin's `invalid session group name` check, closed on 2026-08-28 and is recorded in the
+divergence matrix.
 Protocol v70 closed client-exit notices and
 `switch-client` retargeting on 2026-08-20.
 

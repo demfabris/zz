@@ -8,7 +8,7 @@ fn command(name: &str, args: &[&str]) -> CommandInvocation {
 fn assert_unknown_flag(command: &str, flag: &str, error: &ServerError) {
     assert_eq!(
         error,
-        &ServerError::CommandParse(format!("{command} does not support {flag}"))
+        &ServerError::CommandParse(format!("command {command}: unknown flag {flag}"))
     );
 }
 
@@ -31,7 +31,14 @@ fn every_catalog_command_rejects_a_mechanically_absent_flag() {
                 &CommandInvocation::new(spec.name, [flag.clone()]),
             )
             .unwrap_err();
-        assert_unknown_flag(spec.name, &flag, &error);
+        if spec.uses_tmux_option_grammar() {
+            assert_unknown_flag(spec.name, &flag, &error);
+        } else {
+            assert_eq!(
+                error,
+                ServerError::CommandParse(format!("{} does not support {flag}", spec.name))
+            );
+        }
     }
 }
 

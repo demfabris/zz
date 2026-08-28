@@ -340,6 +340,34 @@ write_attach() {
   chmod +x "$destination"
 }
 
+write_nested_probe_runner() {
+  local side="$1"
+  local label="$2"
+  local argument
+  shift 2
+
+  NESTED_PROBE_RUNNER="$SCRATCH_DIR/nested-$side-$label.run"
+  NESTED_PROBE_ERROR="$SCRATCH_DIR/nested-$side-$label.err"
+  NESTED_PROBE_STATUS_FILE="$SCRATCH_DIR/nested-$side-$label.status"
+  rm -f -- "$NESTED_PROBE_ERROR" "$NESTED_PROBE_STATUS_FILE"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set +e\n'
+    if [ "$side" = "zz" ]; then
+      printf '%q --socket %q' "$ZZ_BIN" "$ZZ_SOCKET"
+    else
+      printf '%q -L %q' "$TMUX_BIN" "$INNER_SOCKET_NAME"
+    fi
+    for argument in "$@"; do
+      printf ' %q' "$argument"
+    done
+    printf ' 2>%q\n' "$NESTED_PROBE_ERROR"
+    printf 'status=$?\n'
+    printf "printf '%%s\\\\n' \"\$status\" >%q\n" "$NESTED_PROBE_STATUS_FILE"
+  } >"$NESTED_PROBE_RUNNER"
+  chmod +x "$NESTED_PROBE_RUNNER"
+}
+
 wait_for_socket() {
   local attempt
 
@@ -353,6 +381,21 @@ wait_for_socket() {
     sleep 0.05
   done
   fixture_failure "zz daemon did not create $ZZ_SOCKET within 10 seconds"
+}
+
+wait_for_nested_probe_status() {
+  local side="$1"
+  local label="$2"
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if [ -f "$NESTED_PROBE_STATUS_FILE" ]; then
+      NESTED_PROBE_STATUS="$(<"$NESTED_PROBE_STATUS_FILE")"
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side nested probe $label did not finish within 10 seconds"
 }
 
 LAST_CLIENT_STATE=""
@@ -1068,6 +1111,131 @@ probe_nested_attach() {
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
   wait_for_new_pane_flattened_substring "$side" "$refusal_text" "$refusal_count"
   assert_attached_client_count_stays "$side" 1
+  wait_for_client_state "$side" root
+  wait_for_terminal_ready "$side"
+}
+
+session_roster() {
+  local side="$1"
+
+  side_command "$side" list-sessions -F '#{session_name}' 2>/dev/null |
+    LC_ALL=C sort
+}
+
+run_nested_probe() {
+  local side="$1"
+  local label="$2"
+  local command
+  shift 2
+
+  write_nested_probe_runner "$side" "$label" "$@"
+  printf -v command '%q' "$NESTED_PROBE_RUNNER"
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" "$command"
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" Enter
+  wait_for_nested_probe_status "$side" "$label"
+}
+
+assert_nested_probe_error() {
+  local side="$1"
+  local label="$2"
+  local expected="$3"
+  local before
+  local after
+  local actual
+  shift 3
+
+  before="$(session_roster "$side")"
+  run_nested_probe "$side" "$label" "$@"
+  if [ "$NESTED_PROBE_STATUS" != "1" ]; then
+    fixture_failure "$side nested probe $label exited $NESTED_PROBE_STATUS instead of 1"
+  fi
+  actual="$(<"$NESTED_PROBE_ERROR")"
+  if [ "$actual" != "$expected" ]; then
+    fixture_failure "$side nested probe $label wrote '${actual:-<empty>}' instead of '$expected'"
+  fi
+  after="$(session_roster "$side")"
+  if [ "$after" != "$before" ]; then
+    fixture_failure "$side nested probe $label changed the session roster"
+  fi
+  assert_attached_client_count_stays "$side" 1
+  wait_for_client_state "$side" root
+  wait_for_terminal_ready "$side"
+}
+
+probe_nested_new_session_precedence() {
+  local side="$1"
+  local refusal="sessions should be nested with care, unset \$TMUX to force"
+  local chain="nested-chain-$side"
+  local never="nested-never-$side"
+  local before
+  local after
+  local expected_after
+  local actual
+
+  side_command "$side" set-option -s 'command-alias[90]' 'nested-new=new-session' ||
+    fixture_failure "$side could not install its nested new-session alias"
+  assert_nested_probe_error "$side" canonical "$refusal" \
+    new-session -s "nested-canonical-$side"
+  assert_nested_probe_error "$side" alias "$refusal" \
+    new -s "nested-alias-$side"
+  assert_nested_probe_error "$side" prefix "$refusal" \
+    new-s -s "nested-prefix-$side"
+  assert_nested_probe_error "$side" user-alias "$refusal" \
+    nested-new -s "nested-user-alias-$side"
+  assert_nested_probe_error "$side" target-command \
+    "command or window name given with target" \
+    new-session -t valid-group echo
+  assert_nested_probe_error "$side" target-window \
+    "command or window name given with target" \
+    new-session -t valid-group -n window -s fresh
+  assert_nested_probe_error "$side" invalid-window \
+    $'invalid window name: bad\nwindow' \
+    new-session -n $'bad\nwindow' -s $'bad\nsession'
+  assert_nested_probe_error "$side" invalid-session \
+    $'invalid session name: bad\nsession' \
+    new-session -n window -s $'bad\nsession'
+  assert_nested_probe_error "$side" duplicate-before-group \
+    "duplicate session: $INNER_SESSION" \
+    new-session -s "$INNER_SESSION" -t $'bad\ngroup' -x 0
+  assert_nested_probe_error "$side" invalid-group \
+    $'invalid session group name: bad\ngroup' \
+    new-session -s "nested-invalid-group-$side" -t $'bad\ngroup' -x 0
+  assert_nested_probe_error "$side" valid-group "$refusal" \
+    new-session -s "nested-valid-group-$side" -t valid-group -x 0
+  assert_nested_probe_error "$side" attach-existing "$refusal" \
+    new-session -A -s "$INNER_SESSION" -x 0
+  assert_nested_probe_error "$side" height "$refusal" \
+    new-session -s "nested-height-$side" -y 0
+
+  before="$(session_roster "$side")"
+  run_nested_probe "$side" command-list \
+    new-session -d -s "$chain" ';' \
+    new-session -t valid-group ';' \
+    new-session -d -s "$never"
+  if [ "$NESTED_PROBE_STATUS" != "1" ]; then
+    fixture_failure "$side nested command list exited $NESTED_PROBE_STATUS instead of 1"
+  fi
+  actual="$(<"$NESTED_PROBE_ERROR")"
+  if [ "$actual" != "$refusal" ]; then
+    fixture_failure "$side nested command list wrote '${actual:-<empty>}' instead of '$refusal'"
+  fi
+  wait_for_session_name "$side" "$chain"
+  if side_command "$side" has-session -t "=$never" 2>/dev/null; then
+    fixture_failure "$side ran the command after its nested refusal"
+  fi
+  expected_after="$({
+    printf '%s\n' "$before"
+    printf '%s\n' "$chain"
+  } | sed '/^$/d' | LC_ALL=C sort)"
+  after="$(session_roster "$side")"
+  if [ "$after" != "$expected_after" ]; then
+    fixture_failure "$side nested command list changed an unexpected session"
+  fi
+  assert_attached_client_count_stays "$side" 1
+  side_command "$side" kill-session -t "=$chain" ||
+    fixture_failure "$side could not clean up its nested command-list session"
+  side_command "$side" set-option -su 'command-alias[90]' ||
+    fixture_failure "$side could not remove its nested new-session alias"
   wait_for_client_state "$side" root
   wait_for_terminal_ready "$side"
 }
@@ -2241,6 +2409,8 @@ probe_list_keys_single zz
 probe_list_keys_single tmux
 probe_nested_attach zz
 probe_nested_attach tmux
+probe_nested_new_session_precedence zz
+probe_nested_new_session_precedence tmux
 probe_control_nested_terminal_facts zz
 probe_control_nested_terminal_facts tmux
 probe_forced_nested_attaches zz

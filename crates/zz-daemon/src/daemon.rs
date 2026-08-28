@@ -5120,6 +5120,7 @@ impl Shared {
                         && inner.engine.new_session_needs_attach_preflight(
                             &prospective_context,
                             &command.args,
+                            &mut hooks,
                         )? =>
                 {
                     return Err(refusal.into());
@@ -64211,6 +64212,222 @@ bind - split-window -v -c "#{pane_current_path}"
                 "an app-requested mouse pane accepts forwarded events while the option is off"
             );
         }
+    }
+
+    #[test]
+    fn nested_new_session_errors_precede_refusal_without_mutation() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (creator, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut creator_context = ExecutionContext::default();
+        shared
+            .execute(
+                creator,
+                ClientKind::Interactive,
+                &mut creator_context,
+                &CommandInvocation::new("new-session", ["-s", "outer"]),
+            )
+            .unwrap();
+        shared
+            .execute(
+                creator,
+                ClientKind::Interactive,
+                &mut creator_context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[90]", "nest=new-session"],
+                ),
+            )
+            .unwrap();
+        let pane = creator_context.pane.unwrap();
+        let terminal = Arc::clone(&shared.inner.lock().terminals[&pane]);
+        wait_for_terminal_identity(&terminal);
+        let pane_tty = terminal.tty().unwrap().to_string_lossy().into_owned();
+        let nested_mailbox = OutboundMailbox::new();
+        let (nested, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("nested-errors".to_owned()),
+            None,
+            Arc::clone(&nested_mailbox),
+        );
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_ttys.insert(nested, pane_tty);
+            inner.nested_clients.insert(nested);
+        }
+        let mut nested_context = ExecutionContext::default();
+        let names_before = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .sessions
+            .values()
+            .map(|session| session.name.clone())
+            .collect::<BTreeSet<_>>();
+        let refusal = "sessions should be nested with care, unset $TMUX to force";
+        {
+            let mut error = |name: &str, arguments: &[&str]| {
+                let invocation = CommandInvocation::new(name, arguments.iter().copied());
+                match shared
+                    .execute(
+                        nested,
+                        ClientKind::Interactive,
+                        &mut nested_context,
+                        &invocation,
+                    )
+                    .unwrap_err()
+                {
+                    DaemonError::Server(ServerError::InvalidCommand(message)) => message,
+                    other => panic!("unexpected nested error: {other:?}"),
+                }
+            };
+
+            for (spelling, session) in [
+                ("new-session", "canonical-inner"),
+                ("new", "alias-inner"),
+                ("new-s", "prefix-inner"),
+                ("nest", "user-alias-inner"),
+            ] {
+                assert_eq!(error(spelling, &["-s", session]), refusal);
+            }
+            assert_eq!(
+                error("new-session", &["-t", "group", "echo"]),
+                "command or window name given with target"
+            );
+            assert_eq!(
+                error(
+                    "new-session",
+                    &["-t", "group", "-n", "window", "-s", "fresh"],
+                ),
+                "command or window name given with target"
+            );
+            assert_eq!(
+                error("new-session", &["-n", "bad\nwindow", "-s", "bad\nsession"],),
+                "invalid window name: bad\nwindow"
+            );
+            assert_eq!(
+                error("new-session", &["-n", "window", "-s", "bad\nsession"],),
+                "invalid session name: bad\nsession"
+            );
+            assert_eq!(
+                error(
+                    "new-session",
+                    &["-s", "outer", "-t", "bad\ngroup", "-x", "0"],
+                ),
+                "duplicate session: outer"
+            );
+            assert_eq!(
+                error(
+                    "new-session",
+                    &["-s", "fresh", "-t", "bad\ngroup", "-x", "0"],
+                ),
+                "invalid session group name: bad\ngroup"
+            );
+            assert_eq!(
+                error(
+                    "new-session",
+                    &["-s", "fresh", "-t", "valid-group", "-x", "0"],
+                ),
+                refusal
+            );
+            assert_eq!(error("new-session", &["-A", "-s", "outer"]), refusal);
+            assert_eq!(error("new-session", &["-s", "fresh", "-y", "0"]), refusal);
+        }
+
+        let names_after_errors = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .sessions
+            .values()
+            .map(|session| session.name.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(names_after_errors, names_before);
+
+        shared
+            .execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "nested-detached"]),
+            )
+            .unwrap();
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .values()
+                .any(|session| session.name == "nested-detached")
+        );
+
+        shared.inner.lock().nested_clients.remove(&nested);
+        shared
+            .attach_target(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                "outer",
+            )
+            .unwrap();
+        shared.inner.lock().nested_clients.insert(nested);
+        shared
+            .execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-s", "attached-fresh"]),
+            )
+            .unwrap();
+        let attached_fresh = client_attached_session(&shared.inner.lock(), nested).unwrap();
+        assert_eq!(
+            shared.inner.lock().engine.state.sessions[&attached_fresh].name,
+            "attached-fresh"
+        );
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-s", "outer"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == refusal
+        ));
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), nested),
+            Some(attached_fresh)
+        );
+        assert!(matches!(
+            shared.execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new("new-session", ["-A", "-d", "-s", "outer"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == refusal
+        ));
+        shared
+            .execute(
+                nested,
+                ClientKind::Interactive,
+                &mut nested_context,
+                &CommandInvocation::new(
+                    "new-session",
+                    ["-A", "-d", "-s", "attached-detached-miss"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            client_attached_session(&shared.inner.lock(), nested),
+            Some(attached_fresh)
+        );
     }
 
     #[test]

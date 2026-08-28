@@ -338,7 +338,7 @@ fn bind_key_validates_payloads_before_storing_them() {
         )
         .unwrap_err();
     assert!(matches!(error, ServerError::CommandParse(message)
-        if message == "split-window does not support -Q"));
+        if message == "command split-window: unknown flag -Q"));
     assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
 
     let error = engine
@@ -1732,7 +1732,7 @@ fn list_keys_remaining_selectors_share_the_catalog_and_runtime_contract() {
         .unwrap_err();
     assert!(
         matches!(&error, ServerError::CommandParse(message)
-            if message == "list-keys does not support -n"),
+            if message == "command list-keys: unknown flag -n"),
         "{error:?}"
     );
     engine

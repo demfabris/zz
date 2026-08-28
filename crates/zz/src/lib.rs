@@ -2357,9 +2357,12 @@ mod tests {
         assert!(routes("new-session", &[]));
         assert!(routes("new", &["-s", "work"]));
         assert!(routes("new-s", &["-dA", "-s", "work"]));
+        assert!(routes("new-session", &["-t", "group"]));
+        assert!(routes("new", &["-At", "work"]));
         assert!(routes("new-session", &["-s", "a", "/usr/bin/true", "-d"]));
         assert!(routes("new-session", &["-s", "b", "--", "-d"]));
         assert!(!routes("new-session", &["-dsfoo"]));
+        assert!(!routes("new-session", &["-d", "-t", "group"]));
         assert!(!routes("new-session", &["-s"]));
         assert!(!routes("list-sessions", &[]));
     }
@@ -2419,9 +2422,9 @@ mod tests {
         let live_attach = prepared("go", "attach-session", true, &["-t", "work"]);
         assert!(prepared_attach_uses_tui("go", &live_attach));
 
-        let live_new = prepared("work", "new-session", true, &["-s", "work"]);
+        let live_new = prepared("work", "new-session", true, &["-t", "group"]);
         assert!(prepared_command_chain_uses_tui(
-            &[CommandInvocation::new("work", ["-s", "work"])],
+            &[CommandInvocation::new("work", ["-t", "group"])],
             &[live_new]
         ));
 
@@ -2473,6 +2476,26 @@ mod tests {
             .map(str::to_owned),
         );
         assert!(command_chain_uses_tui(&attaching_later));
+
+        let target_later = split_command_chain(
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "first",
+                ";",
+                "new-session",
+                "-t",
+                "group",
+                ";",
+                "new-session",
+                "-d",
+                "-s",
+                "never",
+            ]
+            .map(str::to_owned),
+        );
+        assert!(command_chain_uses_tui(&target_later));
 
         let detached_only = split_command_chain(
             &["new-session", "-d", "-s", "first", ";", "list-sessions"].map(str::to_owned),

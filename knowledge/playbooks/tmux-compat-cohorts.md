@@ -29,7 +29,9 @@ commands, including stored binding and hook children. The complete CLI and app-l
 closed native `attach-session -E` routing, published `client-PID` targeting, and stale client-format
 and command-palette assertions. The twelfth error-contract milestone replaced the partial daemon
 flag roster with one catalog parser across all 83 implemented upstream commands and 74 aliases.
-The last seven needed no wire version or message-schema change.
+The thirteenth closed the final `mux.error-shapes` item by matching nested `new-session`
+validation precedence without implementing session groups. The last eight needed no wire version
+or message-schema change.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -58,7 +60,7 @@ GEO divergence with every other channel clean. The sizing milestone's expanded m
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
 `6b7a0261956e84d7340c9ef34f4de0962964215b3cc8eb055a79236acdc257c6`.
-The full strict suite was rerun after the command-flag closure, not carried forward from an
+The full strict suite was rerun after the nested `new-session` closure, not carried forward from an
 older artifact. The two positional-bound scenarios prove canonical and alias diagnostics, the
 first-positional flag boundary, target-error precedence, and effect suppression. The expanded
 maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
@@ -72,7 +74,7 @@ canonical suite.
 |---|---|---|---|
 | Alert | Closed alert groups | Complete | Focused daemon and terminal tests, pinned alert probes, one full debug attached-client fixture, tracker and knowledge updates |
 | Client foundation | Session cwd, requested flags, sizing, environment, formats, and `clients.event-hooks` closed | Complete | One written oracle contract per slice, focused differential coverage, and one full debug attached-client fixture per milestone |
-| Error contracts | Async copy-pipe, shared arity, and shared flag diagnostics closed; `mux.error-shapes` retains nested `new-session` precedence and `tracker.semantic-coverage` remains | Independent of Client foundation except where a proof names client context | Every changed claim gets a pinned differential or a focused test with a named tracker item, followed by one full debug attached-client fixture |
+| Error contracts | Async copy-pipe, shared arity, shared flag diagnostics, and nested `new-session` precedence closed; `tracker.semantic-coverage` remains | Independent of Client foundation except where a proof names client context | Every changed claim gets a pinned differential or a focused test with a named tracker item, followed by one full debug attached-client fixture |
 | Copy behavior | `copy-mode.action-fidelity`, `copy-mode.command-fidelity`, `keys.copy-mode-binding-fidelity`, `keys.copy-mode-unsupported-default-actions`, `keys.copy-mode-prompt-defaults` | Command fidelity requires `clients.interactive-refresh`; prompt-backed defaults also require `prompt.command-fidelity` | Source-owned action and binding inventories, attached key-path probes, and one full debug attached-client fixture |
 
 These phases are navigation, not commit boundaries. One persistent goal and one milestone commit own
@@ -100,7 +102,7 @@ milestone per letter, never one combined commit.
 | 9c | Required positional minima | Closed under `mux.positional-minimums` on 2026-08-27 | Complete | One catalog sidecar and validator after flags but before targets and effects |
 | 9d | Shared arity errors | Closed under `mux.command-arity-errors` on 2026-08-27 | Complete | All implemented finite upstream commands plus stored children, without absorbing inner callback grammar |
 | 9e | Shared flag errors | Closed under `mux.command-flag-errors` on 2026-08-28 | Complete | One catalog parser across 83 canonical commands and 74 aliases; 516 differential probes cover exact diagnostics and value boundaries |
-| 9f | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |
+| 9f | Nested `new-session` error precedence | Closed under `mux.error-shapes` on 2026-08-28 | Complete | Separate client-lifecycle path with its own oracle proof |
 | 10a-10f | `args_parse` runtime rules | Corresponding `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Six effective source rules, never all callback commands at once |
 | 10g-10k | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -111,7 +113,8 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slice 9e is closed and slice 9f is next. Before choosing each later milestone, regenerate the report
+Slices 9a through 9f are closed and slice 10a is next. Before choosing each later milestone,
+regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, and `clients.parent-hup-exit`. Rows 4 and later are a dependency forecast,

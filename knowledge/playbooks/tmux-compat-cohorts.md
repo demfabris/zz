@@ -23,7 +23,9 @@ the sixth closed the six client lifecycle hook producers, and the seventh proved
 delivery for asynchronous copy-pipe failures. The eighth registered and executed the 24-command
 daemon invalid-flag runtime roster. The ninth closed all eight pinned positional-maximum mismatches
 with catalog-owned metadata and the pin's first-positional flag boundary. The tenth closed all
-fourteen required positional minima through a separate catalog sidecar. The complete CLI and app-library gates then
+fourteen required positional minima through a separate catalog sidecar. The eleventh removed the
+partial maximum roster and applied the catalog contract to all 72 implemented finite upstream
+commands, including stored binding and hook children. The complete CLI and app-library gates then
 closed native `attach-session -E` routing, published `client-PID` targeting, and stale client-format
 and command-palette assertions. The last six needed no protocol change.
 
@@ -56,8 +58,9 @@ is
 `e78bdd3b173e371bb5da062fea2e5806fbc359c00bb16bd0914cad8006234987`.
 The full strict suite was rerun after the positional-minimum closure, not carried forward from an
 older artifact. The two positional-bound scenarios prove canonical and alias diagnostics, the
-first-positional flag boundary, target-error precedence, and effect suppression across all twenty-two
-closed command bounds.
+first-positional flag boundary, target-error precedence, and effect suppression. The expanded
+maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
+also includes the exact attach engine path and stored commands.
 
 # Cohorts
 
@@ -89,10 +92,11 @@ milestone per letter, never one combined commit.
 | 7 | Interactive refresh decision | `clients.interactive-refresh` | Hard decision gate | Either justify and adopt the cross-client mode contract or keep it parked and reclassify dependent copy claims |
 | 8 | Async copy or pipe error delivery | Closed under `control-mode.async-copy-pipe-errors` on 2026-08-27 | Complete | Pinned source plus a delayed exit-7 Control probe prove silent delivery and copy-mode cancellation |
 | 9a | Daemon invalid-flag runtime contract | Closed under `tracker.daemon-invalid-flag-runtime` on 2026-08-27 | Complete | Source-owned 24-command roster plus production-dispatch proof; later error-shape items remain open |
-| 9b | Positional maximums | Closed under `mux.positional-maximums` on 2026-08-27 | Complete | One catalog validator across eight commands, with mux and daemon production-boundary proof |
+| 9b | Initial positional maximums | Closed under `mux.positional-maximums` on 2026-08-27 | Complete | One catalog validator across the first eight commands, with mux and daemon production-boundary proof |
 | 9c | Required positional minima | Closed under `mux.positional-minimums` on 2026-08-27 | Complete | One catalog sidecar and validator after flags but before targets and effects |
-| 9d | Shared arity and flag errors | `semantic:command-arity-errors` and `semantic:command-flag-errors` | Medium | Exact shared families without absorbing callback-body grammar |
-| 9e | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |
+| 9d | Shared arity errors | Closed under `mux.command-arity-errors` on 2026-08-27 | Complete | All implemented finite upstream commands plus stored children, without absorbing inner callback grammar |
+| 9e | Shared flag errors | `semantic:command-flag-errors` | Medium | Exact unknown, invalid, help, and missing-value families with optional-value lookahead intact |
+| 9f | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |
 | 10a-10f | `args_parse` runtime rules | Corresponding `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Six effective source rules, never all callback commands at once |
 | 10g-10k | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -103,7 +107,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slice 9c is closed and slice 9d is next. Before choosing each later milestone, regenerate the report
+Slice 9d is closed and slice 9e is next. Before choosing each later milestone, regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, and `clients.parent-hup-exit`. Rows 4 and later are a dependency forecast,

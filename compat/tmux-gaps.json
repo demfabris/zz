@@ -1895,7 +1895,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "semantic:command-arity-errors",
         "semantic:command-flag-errors",
         "semantic:nested-new-session-error-precedence"
       ],
@@ -1911,10 +1910,10 @@
         "scenario:compat/scenarios/smoke/positional-minimums.txt"
       ],
       "acceptance": [
-        "Catalog metadata drives pin-shaped arity, flag, usage, and precedence errors for every command."
+        "Pinned flag, usage, and nested-session precedence errors match for every command."
       ],
       "depends_on": [],
-      "reason": "The eight positional maximum and fourteen positional minimum mismatches closed on 2026-08-27 through catalog-backed validators at the mux and daemon parser boundaries. Canonical names, aliases, missing-target precedence, empty stdout, exact stderr, and unchanged buffers, files, panes, and overlays match the pin. The shared arity and flag error families and nested new-session precedence remain open."
+      "reason": "All implemented upstream positional minima and finite maxima closed on 2026-08-27 through catalog-backed validators at the mux, daemon, and stored-command parser boundaries. Canonical names, aliases, missing-target precedence, empty stdout, exact stderr, and unchanged buffers, files, panes, overlays, bindings, and hooks match the pin. Shared flag errors and nested new-session precedence remain open."
     },
     {
       "id": "options.lock-program",
@@ -3631,6 +3630,23 @@
       "resolution": "list-keys now implements the pin's optional positional key, -1, -O, and -r grammar, including clustered and attached options, --, repeated -O last-wins behavior, exact one-positional and missing -O errors, key-before-sort-before-table error precedence, valid-but-absent and note-filtered unknown-key errors, global and per-table note sorting, and reversal only when an order is selected. Sorting and filtering happen before -1, while repeat and width aggregates are computed after truncation. Literal stored space bases render as Space and C-Space, widths use those spellings, and positional matching compares base, type, and modifiers without stored spelling or key flags. Command and Control clients receive the selected line on stdout; attached Interactive clients receive a display-time-backed frozen status message without a command-output overlay. Stock copy-mode and copy-mode-vi bindings now publish no repeat bits while persistent copy-table movement, jump capture, and numeric repetition remain runtime key-engine behavior. Equal-base, cross-table, inapplicable-field, and four-byte Unicode comparator cases are bounded separately under list-keys.deterministic-sort-ties, and the existing long Ctrl-/Alt- spelling overacceptance remains under the strict-key divergence."
     },
     {
+      "id": "mux.command-arity-errors",
+      "title": "Match shared command arity errors",
+      "closed_on": "2026-08-27",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "file:crates/zz-mux/tests/hunt_claims.rs",
+        "file:compat/scenarios/smoke/fixtures/positional-maximums.sh",
+        "scenario:compat/scenarios/smoke/positional-maximums.txt",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "The old eight-command runtime gate is gone. Every implemented upstream command with a finite maximum now consumes its catalog maximum after leading option validation and the required minimum, before target resolution or effects. The pinned oracle contains 80 finite maxima: eight belong to explicitly unimplemented commands and all 72 executable commands use the shared validator. The daemon's common parser covers its finite roster, confirm-before now uses that parser, and all three lock commands share it without changing native target-only parsers. Stored bind-key and set-hook commands validate child minima and maxima after alias and option validation but before replacing prior state. One exhaustive daemon-path test executes every canonical name and built-in alias with maximum plus one arguments and proves the canonical diagnostic and unchanged state. The strict three-step fixture checks all 71 generic-CLI-routed finite commands and 62 aliases at exit 1 with empty stdout, exact stderr, and unchanged pane, buffer, and file state. Exact native attach keeps its positional-session extension and remains outside this generic CLI proof. Variadic commands, eight catalogued unimplemented commands, zz-native commands, and inner callback grammar are unchanged. No protocol change was needed."
+    },
+    {
       "id": "mux.local-cli-chain-parse-abort",
       "title": "Abort typed local CLI preparation errors before effects",
       "closed_on": "2026-08-25",
@@ -3656,7 +3672,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "Catalog metadata now limits choose-buffer, choose-tree, display-message, display-panes, load-buffer, save-buffer, and set-buffer to one positional argument and select-pane to none. Mux and daemon parsing emit the pin's exact canonical maximum error after valid leading options but before target resolution, callbacks, buffer mutation, or file I/O. The daemon parser follows tmux's first-positional stop rule, so later option-looking tokens count as positionals. One exact source-owned roster gates the behavior, and an independent manifest assertion prevents the roster from shrinking unnoticed. Focused production-path tests cover canonical commands and aliases with unchanged sessions, panes, overlays, buffers, and files. The command palette consumes the same catalog contract, so select-pane offers live pane targets only after -t and never as a bare positional. The three-step differential exercises all eight canonical names and all six aliases with valid-looking options after the first positional, exact exit status, empty stdout, exact stderr, and unchanged state. No protocol change was needed. Required positional bounds later closed under mux.positional-minimums; the shared arity and flag error families and nested new-session precedence remain open under mux.error-shapes."
+      "resolution": "Catalog metadata initially limited choose-buffer, choose-tree, display-message, display-panes, load-buffer, save-buffer, and set-buffer to one positional argument and select-pane to none. Mux and daemon parsing emitted the pin's exact canonical maximum error after valid leading options but before target resolution, callbacks, buffer mutation, or file I/O. The daemon parser followed tmux's first-positional stop rule, so later option-looking tokens counted as positionals. Focused production-path tests covered canonical commands and aliases with unchanged sessions, panes, overlays, buffers, and files. The command palette consumed the same catalog contract, so select-pane offered live pane targets only after -t and never as a bare positional. The three-step differential initially exercised all eight canonical names and all six aliases with exact status, streams, and unchanged state. Required positional bounds later closed under mux.positional-minimums, and mux.command-arity-errors later removed the partial roster and extended the same contract to every implemented finite upstream command. Shared flag errors and nested new-session precedence remain open under mux.error-shapes."
     },
     {
       "id": "mux.positional-minimums",
@@ -3672,7 +3688,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "A sorted catalog sidecar records the fourteen nonzero required positional bounds: thirteen commands require one argument and if-shell requires two. Every other command defaults to zero, keeping optional catalog slots optional. Mux parsing validates the minimum after flags and before maximum checks, targets, or effects. The shared daemon parser covers if-shell, load-buffer, save-buffer, and wait-for at the same boundary, while display-menu and confirm-before call the same validator after their handwritten option parsing. Focused production-path tests cover all fourteen aliases, canonical diagnostics, missing-target precedence, and unchanged sessions, menus, confirmations, waits, buffers, and source effects. The three-step differential exercises every canonical name and alias with exit status 1, empty stdout, exact stderr, and unchanged pane, buffer, and file state. No protocol change was needed. Callback bodies, incomplete menu triples, bind-key's command tail, custom upper-bound wording, shared flag errors, and nested new-session precedence remain under their existing owners."
+      "resolution": "A sorted catalog sidecar records the fourteen nonzero required positional bounds: thirteen commands require one argument and if-shell requires two. Every other command defaults to zero, keeping optional catalog slots optional. Mux parsing validates the minimum after flags and before maximum checks, targets, or effects. The shared daemon parser covers if-shell, load-buffer, save-buffer, and wait-for at the same boundary, while display-menu and confirm-before use the same validator before targets or effects. Focused production-path tests cover all fourteen aliases, canonical diagnostics, missing-target precedence, and unchanged sessions, menus, confirmations, waits, buffers, and source effects. The three-step differential exercises every canonical name and alias with exit status 1, empty stdout, exact stderr, and unchanged pane, buffer, and file state. The later mux.command-arity-errors closure applies the same minimum and maximum validation to stored bind-key and set-hook children before replacing state. No protocol change was needed. Callback bodies, incomplete menu triples, shared flag errors, and nested new-session precedence remain under their existing owners."
     },
     {
       "id": "mux.resize-pane-optional-values",
@@ -3684,7 +3700,7 @@
         "file:crates/zz-mux/tests/hunt_claims.rs",
         "scenario:compat/scenarios/resize-directions.txt"
       ],
-      "resolution": "This was a catalog-only reconciliation. Runtime already accepted bare -D, -L, -R, and -U with the default amount 1, plus attached and separated integer amounts. Static CommandOptionSpec metadata now marks the four direction values optional while retaining attached-value support, and manifest reconciliation compares that shape with the pinned oracle. No handler, effect, wire field, tag, or protocol version changed. Nine focused resize tests pass, along with 175 protocol unit tests and 14 protocol framing tests. The strict 16-step resize-directions differential has zero differences and no skips. The checked-in canonical summary still records eight steps and remains deferred for final regeneration. resize-pane -M and -T remain open under their existing owners, and mux.error-shapes remains open for its other arity, flag, usage, and precedence items."
+      "resolution": "This was a catalog-only reconciliation. Runtime already accepted bare -D, -L, -R, and -U with the default amount 1, plus attached and separated integer amounts. Static CommandOptionSpec metadata now marks the four direction values optional while retaining attached-value support, and manifest reconciliation compares that shape with the pinned oracle. No handler, effect, wire field, tag, or protocol version changed. Nine focused resize tests pass, along with 175 protocol unit tests and 14 protocol framing tests. The strict 16-step resize-directions differential and the checked-in canonical summary have zero differences and no skips. resize-pane -M and -T remain open under their existing owners, and mux.error-shapes remains open for its flag, usage, and precedence items."
     },
     {
       "id": "options.show-options-hook-rows",

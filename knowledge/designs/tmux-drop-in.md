@@ -1736,8 +1736,8 @@ pane visibility). The harness (phase 2) does not wait for this.
 
 Closed by 7a (argv surface, `$TMUX` shape, `-V`), 7b (error-output shapes), and 7d
 (the alias smoke suite, `e45f0dd`). The only phase-7 residue is the optional 7c
-appendix: arity/flag rejection wording, the `usage:` fallback, and the
-`MissingTarget` inner texts — all ledgered, none script-facing.
+appendix: flag rejection wording, the `usage:` fallback, value diagnostics, and the
+`MissingTarget` inner texts. Command arity closed across the shared runtime on 2026-08-27.
 
 - tmux argv on the zz binary: `-L` (name → socket path), `-S`, `-f`, `-2`, `-u`, plus `-C`/
   `-CC` (front-end from phase 6) and `-V`.
@@ -1756,9 +1756,9 @@ appendix: arity/flag rejection wording, the `usage:` fallback, and the
   probe 27/27 with positive control); no-tty attach says `open terminal failed: not a
   terminal`; show-messages records pin-shaped `message:`/`command:` pairs; config
   errors compose `%config-error <file>:<line>: <text>` exactly as the pin regress
-  greps. Deferred to a 7c-if-wanted: `command <name>:` arity/flag shapes and the
-  `usage:` fallback (need per-command arity metadata), the ~24 remaining
-  `needs a value` sites, key-string strictness.
+  greps. The 2026-08-27 command-arity closure later completed every implemented
+  positional minimum and finite maximum, including stored binding and hook children.
+  Flag wording, `usage:` fallback, remaining value diagnostics, and key-string strictness stay open.
 - **SHIPPED 2026-08-18 (wave 7d):** the alias smoke suite runs real plugin configs through
   PATH-carried `tmux` exec shims against zz and the pin. The harness stages a scratch HOME,
   sources each config through control mode, compares stdout and stderr independently, checks
@@ -1986,10 +1986,12 @@ this list is the campaign-level index of it plus the items that never got a matr
 - Error-text surface: the grep-facing classes CLOSED by wave 7b (2026-08-18) —
   bare pin-exact stderr for option-value/target/unknown-command errors (twelve
   regress strings byte-verified), `already set:` respelled to the pin,
-  no-tty attach = `open terminal failed: not a terminal`. Still zz-shaped by
-  sequencing, not oversight: arity/flag rejections (`command <name>: too
-  few/too many arguments`, `unknown flag -X`, `-X expects an argument`), the
-  per-command `usage:` fallback, ~24 `needs a value` sites. Companion ledger
+  no-tty attach = `open terminal failed: not a terminal`. Positional minimum
+  and maximum diagnostics CLOSED on 2026-08-27 across all 72 implemented
+  finite commands, built-in aliases, and stored `bind-key` and `set-hook`
+  children. Still zz-shaped by sequencing, not oversight: flag rejections
+  (`unknown flag -X`, `-X expects an argument`), the per-command `usage:`
+  fallback, ~24 `needs a value` sites. Companion ledger
   rows live in the divergence matrix: the command prefix-matching capability
   gap, and `set prefix` silently accepting unresolvable C-/M- keys.
 - Wave-5d-2 ledger (reviewer-CONFIRMED, non-blocking): `SocketGuard`'s drop

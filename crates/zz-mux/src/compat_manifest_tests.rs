@@ -8,7 +8,7 @@ use serde::Deserialize;
 use zz_protocol::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, CommandArgsParseRule, CommandResolution,
     DAEMON_COMMAND_SPECS, DAEMON_INVALID_FLAG_BEHAVES, KeyTables, NATIVE_COMMAND_NAMES,
-    POSITIONAL_MAX_BEHAVES, POSITIONAL_MINIMUMS, canonical_command, canonical_key, resolve_command,
+    POSITIONAL_MINIMUMS, canonical_command, canonical_key, resolve_command,
 };
 
 use crate::{
@@ -641,51 +641,49 @@ fn daemon_invalid_flag_runtime_inventory_matches_the_pin() {
 #[test]
 fn positional_maximum_runtime_inventory_matches_the_pin() {
     let (oracle, items) = inventory();
-    let upstream = oracle
+    let specs = specs();
+    let mut implemented = BTreeSet::new();
+    let mut unimplemented = BTreeSet::new();
+
+    for command in oracle
         .commands
         .iter()
-        .map(|command| (command.name.as_str(), command))
-        .collect::<BTreeMap<_, _>>();
-    let specs = specs();
-    let behaves = POSITIONAL_MAX_BEHAVES
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let expected = [
-        "choose-buffer",
-        "choose-tree",
-        "display-message",
-        "display-panes",
-        "load-buffer",
-        "save-buffer",
-        "select-pane",
-        "set-buffer",
-    ]
-    .into_iter()
-    .collect::<BTreeSet<_>>();
-
-    assert_eq!(
-        behaves.len(),
-        POSITIONAL_MAX_BEHAVES.len(),
-        "positional maximum behavior inventory contains duplicates"
-    );
-    assert_eq!(
-        behaves, expected,
-        "positional maximum behavior inventory does not match the closed roster"
-    );
-    for name in behaves {
-        let command = upstream.get(name).unwrap_or_else(|| {
-            panic!("positional maximum inventory names a native command: {name}")
-        });
-        let spec = specs.get(name).unwrap_or_else(|| {
-            panic!("positional maximum inventory names an absent command: {name}")
-        });
-        assert_eq!(spec.positional_maximum(), command.max_args, "{name}");
-        assert!(
-            !items.contains_key(&format!("positional-max:{name}")),
-            "verified positional maximum remains tracked: {name}"
-        );
+        .filter(|command| command.max_args.is_some())
+    {
+        if let Some(spec) = specs.get(command.name.as_str()) {
+            assert!(
+                !NATIVE_COMMAND_NAMES.contains(&spec.name),
+                "upstream maximum resolved to a native command: {}",
+                command.name
+            );
+            assert_eq!(
+                spec.positional_maximum(),
+                command.max_args,
+                "{}",
+                command.name
+            );
+            assert!(
+                !items.contains_key(&format!("positional-max:{}", command.name)),
+                "verified positional maximum remains tracked: {}",
+                command.name
+            );
+            implemented.insert(command.name.as_str());
+        } else {
+            assert!(
+                matches!(
+                    resolve_command(&command.name),
+                    CommandResolution::Unimplemented(name) if name == command.name
+                ),
+                "finite upstream maximum is neither implemented nor explicitly unsupported: {}",
+                command.name
+            );
+            unimplemented.insert(command.name.as_str());
+        }
     }
+
+    assert_eq!(implemented.len(), 72);
+    assert_eq!(unimplemented.len(), 8);
+    assert_eq!(implemented.len() + unimplemented.len(), 80);
 }
 
 #[test]

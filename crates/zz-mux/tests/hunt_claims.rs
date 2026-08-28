@@ -808,10 +808,11 @@ fn kill_commands_refuse_positional_targets_like_tmux() {
         let error = engine
             .execute(&mut context, &command(name, &["other"]))
             .unwrap_err();
-        assert!(
-            matches!(error, ServerError::CommandParse(ref message)
-                if message.contains("positional")),
-            "{name} accepted a positional target"
+        assert_eq!(
+            error,
+            ServerError::CommandParse(format!(
+                "command {name}: too many arguments (need at most 0)"
+            ))
         );
     }
     assert_eq!(session_names(&engine), ["keep", "other"]);
@@ -833,7 +834,12 @@ fn select_window_refuses_positional_targets_like_tmux() {
     let error = engine
         .execute(&mut context, &command("select-window", &["0"]))
         .unwrap_err();
-    assert!(matches!(error, ServerError::CommandParse(message) if message.contains("positional")));
+    assert_eq!(
+        error,
+        ServerError::CommandParse(
+            "command select-window: too many arguments (need at most 0)".to_owned()
+        )
+    );
     assert_eq!(context.window, selected);
 }
 

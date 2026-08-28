@@ -7383,9 +7383,6 @@ impl Shared {
         args: &[String],
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_buffer_command_args("pipe-pane", args, &['t'], &['I', 'O', 'o'])?;
-        if parsed.positional.len() > 1 {
-            return Err(ServerError::CommandParse(PIPE_PANE_USAGE.to_owned()).into());
-        }
         let _serial = self.pipe_effects.lock();
         let (pane, terminal, old_pipe) = {
             let mut inner = self.inner.lock();
@@ -9690,12 +9687,6 @@ impl Shared {
             &['A', 'B', 'C', 'F', 'f', 'r', 't'],
             &['c', 'D', 'l', 'L', 'R', 'S', 'U'],
         )?;
-        if parsed.positional.len() > 1 {
-            return Err(ServerError::CommandParse(
-                "refresh-client accepts at most one adjustment".to_owned(),
-            )
-            .into());
-        }
         let target = {
             let inner = self.inner.lock();
             resolve_attached_client(&inner, client, parsed.value('t'))?
@@ -10446,13 +10437,13 @@ impl Shared {
         name: &str,
         args: &[String],
     ) -> Result<Execution, DaemonError> {
-        let target = if name == "lock-server" {
-            let parsed = parse_buffer_command_args(name, args, &[], &[])?;
-            require_no_positionals(name, &parsed)?;
-            None
+        let value_options = if name == "lock-server" {
+            &[][..]
         } else {
-            parse_target_only_args(name, args)?
+            &['t'][..]
         };
+        let parsed = parse_buffer_command_args(name, args, value_options, &[])?;
+        let target = parsed.value('t').map(str::to_owned);
         let inner = self.inner.lock();
         match name {
             "lock-server" => {}
@@ -25568,10 +25559,7 @@ fn resolve_buffer<'a>(
 }
 
 const RUN_SHELL_USAGE: &str = "usage: run-shell [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]";
-const IF_SHELL_USAGE: &str =
-    "usage: if-shell [-bF] [-t target-pane] shell-command command [command]";
 const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
-const PIPE_PANE_USAGE: &str = "usage: pipe-pane [-IOo] [-t target-pane] [shell-command]";
 
 fn next_wait_token(inner: &mut ServerState) -> u64 {
     inner.next_wait_token = inner.next_wait_token.wrapping_add(1).max(1);
@@ -25677,9 +25665,6 @@ fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerErr
 
 fn parse_if_shell_args(args: &[String]) -> Result<ParsedIfShellArgs, ServerError> {
     let parsed = parse_buffer_command_args("if-shell", args, &['t'], &['b', 'F'])?;
-    if !(2..=3).contains(&parsed.positional.len()) {
-        return Err(ServerError::CommandParse(IF_SHELL_USAGE.to_owned()));
-    }
     Ok(ParsedIfShellArgs {
         background: parsed.has('b'),
         format: parsed.has('F'),
@@ -26250,9 +26235,7 @@ fn parse_buffer_command_args(
     }
     if let Some(spec) = zz_protocol::catalog_command_spec(command) {
         spec.validate_positional_minimum(parsed.positional.len())?;
-        if zz_protocol::POSITIONAL_MAX_BEHAVES.contains(&spec.name) {
-            spec.validate_positional_maximum(parsed.positional.len())?;
-        }
+        spec.validate_positional_maximum(parsed.positional.len())?;
     }
     Ok(parsed)
 }
@@ -26815,69 +26798,18 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
 }
 
 fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, ServerError> {
-    let mut parsed = ParsedConfirmBefore::default();
-    let mut index = 0;
-    while index < args.len() {
-        let argument = &args[index];
-        if argument == "--" {
-            let positional = &args[index.saturating_add(1)..];
-            if positional.len() > 1 {
-                return Err(ServerError::CommandParse(
-                    "confirm-before requires exactly one command".to_owned(),
-                ));
-            }
-            parsed.command = positional.first().cloned();
-            break;
-        }
-        if !argument.starts_with('-') || argument == "-" {
-            let positional = &args[index..];
-            if positional.len() > 1 {
-                return Err(ServerError::CommandParse(
-                    "confirm-before requires exactly one command".to_owned(),
-                ));
-            }
-            parsed.command = positional.first().cloned();
-            break;
-        }
-        for (offset, flag) in argument[1..].char_indices() {
-            match flag {
-                'b' => parsed.background = true,
-                'y' => parsed.default_yes = true,
-                'c' | 'p' | 't' => {
-                    let value_start = 1_usize
-                        .saturating_add(offset)
-                        .saturating_add(flag.len_utf8());
-                    let value = if value_start < argument.len() {
-                        argument[value_start..].to_owned()
-                    } else {
-                        index = index.saturating_add(1);
-                        args.get(index).cloned().ok_or_else(|| {
-                            ServerError::CommandParse(format!(
-                                "confirm-before -{flag} requires a value"
-                            ))
-                        })?
-                    };
-                    match flag {
-                        'c' => parsed.confirm_key = Some(value),
-                        'p' => parsed.prompt = Some(value),
-                        't' => parsed.target_client = Some(value),
-                        _ => unreachable!("valued confirm option is matched"),
-                    }
-                    break;
-                }
-                _ => {
-                    return Err(ServerError::CommandParse(format!(
-                        "unsupported command: confirm-before -{flag}"
-                    )));
-                }
-            }
-        }
-        index = index.saturating_add(1);
-    }
-    zz_protocol::catalog_command_spec("confirm-before")
-        .expect("confirm-before has catalog metadata")
-        .validate_positional_minimum(usize::from(parsed.command.is_some()))?;
-    Ok(parsed)
+    let parsed = parse_buffer_command_args("confirm-before", args, &['c', 'p', 't'], &['b', 'y'])?;
+    let [command] = parsed.positional.as_slice() else {
+        unreachable!("confirm-before positional bounds were validated");
+    };
+    Ok(ParsedConfirmBefore {
+        background: parsed.has('b'),
+        default_yes: parsed.has('y'),
+        confirm_key: parsed.value('c').map(str::to_owned),
+        prompt: parsed.value('p').map(str::to_owned),
+        target_client: parsed.value('t').map(str::to_owned),
+        command: Some(command.clone()),
+    })
 }
 
 fn parse_popup_dimension(
@@ -37042,7 +36974,7 @@ mod tests {
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::CommandParse(message))
-                if message == "refresh-client accepts at most one adjustment"
+                if message == "command refresh-client: too many arguments (need at most 1)"
         ));
 
         shared
@@ -47234,12 +47166,8 @@ mod tests {
     #[test]
     fn catalogued_positional_maximums_precede_daemon_targets_and_effects() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let input = directory.path().join("input");
-        let output = directory.path().join("output");
-        fs::write(&input, b"load sentinel").expect("input fixture");
-        fs::write(&output, b"save sentinel").expect("output fixture");
-        let input = input.to_string_lossy().into_owned();
-        let output = output.to_string_lossy().into_owned();
+        let output = directory.path().join("must-not-exist");
+        let argument = output.to_string_lossy().into_owned();
 
         let shared = Arc::new(Shared::new(1));
         shared
@@ -47250,67 +47178,38 @@ mod tests {
             )
             .expect("source buffer");
 
-        let cases = vec![
-            (
-                "choose-buffer",
-                "choose-buffer",
-                vec!["set-buffer callback", "-t", "=missing"],
-                1,
-            ),
-            (
-                "choose-tree",
-                "choose-tree",
-                vec!["set-buffer callback", "-t", "=missing"],
-                1,
-            ),
-            (
-                "display",
-                "display-message",
-                vec!["one", "-t", "=missing"],
-                1,
-            ),
-            (
-                "displayp",
-                "display-panes",
-                vec!["set-buffer callback", "-t", "missing"],
-                1,
-            ),
-            (
-                "loadb",
-                "load-buffer",
-                vec![input.as_str(), "-b", "loaded"],
-                1,
-            ),
-            (
-                "saveb",
-                "save-buffer",
-                vec![output.as_str(), "-b", "source"],
-                1,
-            ),
-            ("selectp", "select-pane", vec!["one", "-t", "=missing"], 0),
-            ("setb", "set-buffer", vec!["alpha", "-n", "renamed"], 1),
-        ];
-        for (spelling, canonical, arguments, maximum) in cases {
-            let error = shared
-                .execute(
-                    ClientId(u64::MAX),
-                    ClientKind::Command,
-                    &mut ExecutionContext::default(),
-                    &CommandInvocation::new(spelling, arguments),
-                )
-                .expect_err("positional maximum");
-            let DaemonError::Server(error) = error else {
-                panic!("unexpected error: {error:?}");
-            };
-            assert_eq!(
-                error,
-                ServerError::CommandParse(format!(
-                    "command {canonical}: too many arguments (need at most {maximum})"
-                ))
-            );
+        let specs = zz_protocol::command_specs()
+            .filter(|spec| !zz_protocol::NATIVE_COMMAND_NAMES.contains(&spec.name))
+            .filter(|spec| spec.positional_maximum().is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(specs.len(), 72);
+        for spec in specs {
+            let maximum = spec.positional_maximum().expect("finite maximum");
+            let arguments = vec![argument.clone(); maximum.saturating_add(1)];
+            for spelling in std::iter::once(spec.name).chain(spec.aliases.iter().copied()) {
+                let error = shared
+                    .execute(
+                        ClientId(u64::MAX),
+                        ClientKind::Command,
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new(spelling, arguments.clone()),
+                    )
+                    .expect_err("positional maximum");
+                let DaemonError::Server(error) = error else {
+                    panic!("unexpected error for {spelling}: {error:?}");
+                };
+                assert_eq!(
+                    error,
+                    ServerError::CommandParse(format!(
+                        "command {}: too many arguments (need at most {maximum})",
+                        spec.name
+                    )),
+                    "{spelling}"
+                );
+            }
         }
 
-        assert_eq!(fs::read(&output).expect("output fixture"), b"save sentinel");
+        assert!(!output.exists());
         let inner = shared.inner.lock();
         assert!(inner.engine.state.sessions.is_empty());
         assert!(inner.choose_buffers.is_empty());
@@ -47712,7 +47611,7 @@ mod tests {
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::CommandParse(message))
-                if message == PIPE_PANE_USAGE
+                if message == "command pipe-pane: too many arguments (need at most 1)"
         ));
         let error = shared
             .pipe_pane(
@@ -48509,7 +48408,8 @@ mod tests {
             parse_if_shell_args(
                 &["condition", "yes", "no", "extra"].map(str::to_owned)
             ),
-            Err(ServerError::CommandParse(message)) if message == IF_SHELL_USAGE
+            Err(ServerError::CommandParse(message))
+                if message == "command if-shell: too many arguments (need at most 3)"
         ));
     }
 
@@ -50321,20 +50221,15 @@ mod tests {
     }
 
     #[test]
-    fn buffer_argument_parser_handles_compact_options_and_explicit_boundaries() {
-        let args = ["-dprS", "-bbinary", "-s::", "--", "-literal"].map(str::to_owned);
-        let parsed = parse_buffer_command_args(
-            "paste-buffer",
-            &args,
-            &['b', 's', 't'],
-            &['d', 'p', 'r', 'S'],
-        )
-        .expect("buffer arguments");
-        assert!(parsed.has('d'));
-        assert!(parsed.has('p'));
-        assert!(parsed.has('r'));
-        assert!(parsed.has('S'));
-        assert_eq!(parsed.value('b'), Some("binary"));
+    fn daemon_argument_parser_handles_compact_options_and_explicit_boundaries() {
+        let args = ["-bCE", "-c/tmp", "-s::", "--", "-literal"].map(str::to_owned);
+        let parsed =
+            parse_buffer_command_args("run-shell", &args, &['c', 'd', 's', 't'], &['b', 'C', 'E'])
+                .expect("daemon arguments");
+        assert!(parsed.has('b'));
+        assert!(parsed.has('C'));
+        assert!(parsed.has('E'));
+        assert_eq!(parsed.value('c'), Some("/tmp"));
         assert_eq!(parsed.value('s'), Some("::"));
         assert_eq!(parsed.positional, ["-literal"]);
 

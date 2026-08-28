@@ -12,7 +12,7 @@ use zz_protocol::{
     CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_GUI_TEXT_BYTES, MuxOptionKey, POSITIONAL_MAX_BEHAVES, PaneId, PaneKindSnapshot,
+    MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId, PaneKindSnapshot,
     PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId, catalog_command_spec,
     command_specs, normalize_browser_profile_name, resolve_command,
 };
@@ -12197,7 +12197,7 @@ fn parse_command_options(
     let (options, positional) = parse_options_for_spec(args, spec)?;
     validate_options(command, spec, &options)?;
     spec.validate_positional_minimum(positional.len())?;
-    if POSITIONAL_MAX_BEHAVES.contains(&spec.name) {
+    if !NATIVE_COMMAND_NAMES.contains(&spec.name) {
         spec.validate_positional_maximum(positional.len())?;
     }
     Ok((options, positional))
@@ -13219,8 +13219,13 @@ fn expand_stored_aliases(
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
     let name = canonical_command(&command.name);
     if let Some(spec) = catalog_command_spec(name) {
-        let (options, _) = parse_options_for_spec(&command.args, spec)?;
-        return validate_options(name, spec, &options);
+        let (options, positional) = parse_options_for_spec(&command.args, spec)?;
+        validate_options(name, spec, &options)?;
+        spec.validate_positional_minimum(positional.len())?;
+        if !NATIVE_COMMAND_NAMES.contains(&spec.name) {
+            spec.validate_positional_maximum(positional.len())?;
+        }
+        return Ok(());
     }
     if name == "copy-mode-repeat" {
         return Ok(());
@@ -16483,7 +16488,7 @@ mod tests {
                 ),
             ),
             Err(ServerError::CommandParse(message))
-                if message == "break-pane does not accept positional arguments"
+                if message == "command break-pane: too many arguments (need at most 0)"
         ));
         assert!(matches!(
             engine.execute(
@@ -20511,6 +20516,8 @@ mod tests {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         for (spelling, canonical, arguments, maximum) in [
+            ("ls", "list-sessions", &["unexpected"][..], 0),
+            ("breakp", "break-pane", &["unexpected"][..], 0),
             (
                 "choose-buffer",
                 "choose-buffer",
@@ -20536,6 +20543,14 @@ mod tests {
                 1,
             ),
             ("selectp", "select-pane", &["-t", "=missing", "one"][..], 0),
+            (
+                "rename",
+                "rename-session",
+                &["-t", "=missing", "one", "two"][..],
+                1,
+            ),
+            ("lsk", "list-keys", &["one", "two"][..], 1),
+            ("kill-server", "kill-server", &["unexpected"][..], 0),
         ] {
             let error = engine
                 .execute(&mut context, &command(spelling, arguments))
@@ -20548,6 +20563,78 @@ mod tests {
             );
             assert!(engine.state.sessions.is_empty());
         }
+    }
+
+    #[test]
+    fn stored_commands_reject_positional_overflow_without_replacing_state() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("bind-key", &["F8", "display-message", "before"]),
+            )
+            .unwrap();
+        let binding = engine
+            .keys
+            .get("prefix", "F8")
+            .expect("baseline binding")
+            .clone();
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("bind-key", &["F8", "ls", "unexpected"]),
+                )
+                .unwrap_err(),
+            ServerError::CommandParse(
+                "command list-sessions: too many arguments (need at most 0)".to_owned()
+            )
+        );
+        assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-hook",
+                    &["-g", "session-created", "display-message before"],
+                ),
+            )
+            .unwrap();
+        let hook = engine
+            .execute(
+                &mut context,
+                &command("show-hooks", &["-g", "session-created"]),
+            )
+            .unwrap()
+            .output;
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-hook", &["-g", "session-created", "lsk one two"]),
+                )
+                .unwrap_err(),
+            ServerError::CommandParse(
+                "command list-keys: too many arguments (need at most 1)".to_owned()
+            )
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "session-created"]),
+                )
+                .unwrap()
+                .output,
+            hook
+        );
     }
 
     #[test]
@@ -30251,7 +30338,7 @@ mod tests {
                 &command("resize-window", &["one", "two"]),
             ),
             Err(ServerError::CommandParse(message))
-                if message == "resize-window accepts at most one adjustment"
+                if message == "command resize-window: too many arguments (need at most 1)"
         ));
         assert!(matches!(
             engine.execute(

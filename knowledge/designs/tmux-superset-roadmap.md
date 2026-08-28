@@ -438,15 +438,15 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    and option `BEHAVES` consumer truth. Daemon invalid-flag coverage closed on 2026-08-27: the
    source-owned roster reconciles all 24 pinned daemon-dispatched commands and a runtime test executes
    every absent alphanumeric short flag for every entry before command-specific work.
-   The eight positional maximum mismatches closed later that day. One catalog-backed validator runs
-   after flag parsing and before mux targets or daemon buffer effects. The three-step
-   `positional-maximums` fixture checks every canonical command and alias with exact canonical stderr
-   plus unchanged pane, buffer, and file state. The fourteen required positional minima closed in
-   the next slice through a separate catalog sidecar and the same parser boundaries. Its three-step
-   fixture checks all canonical names and aliases, target-error precedence, and unchanged pane,
-   buffer, and file state. Focused daemon tests prove that rejected commands also leave menu,
-   confirmation, and wait state unchanged. The shared arity, flag, and nested-session families stay
-   in `mux.error-shapes`.
+   The first eight positional maximum mismatches closed later that day, followed by all fourteen
+   required minima. The full shared arity closure then removed the partial maximum roster: all 72
+   implemented finite upstream commands now validate their catalog maximum after flags and minima
+   but before targets or effects. Stored binding and hook children use the same two bounds before
+   replacing state. The three-step `positional-maximums` fixture checks 71 generic-CLI-routed
+   command-drivable canonical names and 62 aliases with exact stderr and unchanged pane, buffer, and
+   file state; an exhaustive daemon test covers all 72 engine paths and aliases. The minimum fixture
+   retains its exact canonical and alias proof. Shared flag errors and nested-session precedence
+   remain in `mux.error-shapes`.
    `knowledge/tmux/gaps.md` remains generated from the registry.
 
 Without this gate, easy compatibility fixes can land while the persisted proof quietly goes stale.
@@ -900,7 +900,13 @@ permanent product decision has been recorded for them.
   delivery by keeping hook command variables client-only while adding session identity to the
   Control publication copy and using one tmux-facing client-name ladder for Control snapshot self
   identity.
-  Shared arity, flag, and nested-session families remain open.
+  At that checkpoint shared arity, flag diagnostics, and nested-session precedence remained open.
+- 2026-08-27: The shared command-arity slice removed the partial maximum roster without a protocol
+  change. All 72 implemented finite upstream commands now validate the catalog maximum after flags
+  and minima but before targets or effects. Stored binding and hook children use the same bounds
+  before replacing state. The strict fixture covers 71 generic-CLI-routed canonical names
+  and 62 aliases, while an exhaustive daemon test covers all 72 engine paths and aliases. Flag
+  diagnostics and nested-session precedence remain open.
 - 2026-08-27: The complete CLI binary and app-library gates exposed stale assertions and two production edges
   after the client-context work. Exact native `attach-session -E` now enters daemon command
   execution for its initial attach and preserves the session environment; automatic reconnect

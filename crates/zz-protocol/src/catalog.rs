@@ -353,17 +353,6 @@ pub static POSITIONAL_MINIMUMS: &[(&str, usize)] = &[
     ("wait-for", 1),
 ];
 
-pub static POSITIONAL_MAX_BEHAVES: &[&str] = &[
-    "choose-buffer",
-    "choose-tree",
-    "display-message",
-    "display-panes",
-    "load-buffer",
-    "save-buffer",
-    "select-pane",
-    "set-buffer",
-];
-
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
     "new-pane",
     "newp",

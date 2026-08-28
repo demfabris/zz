@@ -192,8 +192,9 @@ dependencies.
 then proves representative daemon-dispatched flags reject before callbacks or buffer mutation, and
 finally requires the fixture to publish its clean marker.
 `smoke/positional-maximums` contributes three checks: it clears inherited state, then requires exact
-canonical maximum errors for all eight commands and six aliases with valid-looking options after
-the first positional, and finally requires unchanged pane, buffer, and file state.
+canonical maximum errors for all 71 generic-CLI-routed finite commands and 62 aliases,
+and finally requires unchanged pane, buffer, and file state. The exhaustive daemon test also covers
+the exact attach engine path, which the native CLI intentionally extends with a positional session.
 `smoke/positional-minimums` contributes three checks: it clears inherited state, then requires exact
 canonical minimum errors for all fourteen commands and aliases before missing-target resolution,
 and finally requires unchanged pane, buffer, and file state. Focused daemon tests separately prove

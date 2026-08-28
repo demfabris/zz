@@ -84,6 +84,7 @@ pub struct StatusContext {
     pub session_id: String,
     pub session_many_attached: bool,
     pub session_name: String,
+    pub session_path: String,
     pub session_stack: String,
     pub session_windows: usize,
     pub socket_path: String,
@@ -236,6 +237,7 @@ enum FormatBacking {
     SessionId,
     SessionManyAttached,
     SessionName,
+    SessionPath,
     SessionStack,
     SessionWindows,
     SocketPath,
@@ -451,7 +453,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("session_many_attached", Session, SessionManyAttached),
     variable!("session_marked", Session, Zero),
     variable!("session_name", Session, SessionName),
-    variable!("session_path", Session, Empty),
+    variable!("session_path", Session, SessionPath),
     variable!("session_silence_flag", Session, WindowSilenceFlag),
     variable!("session_stack", Session, SessionStack),
     variable!("session_windows", Session, SessionWindows),
@@ -628,6 +630,7 @@ impl StatusContext {
                 Cow::Borrowed(bool_string(self.session_many_attached))
             }
             FormatBacking::SessionName => Cow::Borrowed(self.session_name.as_str()),
+            FormatBacking::SessionPath => Cow::Borrowed(self.session_path.as_str()),
             FormatBacking::SessionStack => Cow::Borrowed(self.session_stack.as_str()),
             FormatBacking::SessionWindows => Cow::Owned(self.session_windows.to_string()),
             FormatBacking::SocketPath => Cow::Borrowed(self.socket_path.as_str()),
@@ -847,6 +850,11 @@ impl MuxEngine {
         };
         context.session_id = session.id.to_string();
         context.session_name.clone_from(&session.name);
+        self.state
+            .session_working_directory(session.id)
+            .and_then(|path| path.to_str())
+            .unwrap_or_default()
+            .clone_into(&mut context.session_path);
         context.session_activity = session.activity;
         context.session_created = session.created;
         context.session_sort_activity = session.sort_activity;
@@ -3282,7 +3290,8 @@ fn truncate_output(mut value: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_protocol::Axis;
+    use crate::ExecutionContext;
+    use zz_protocol::{Axis, CommandInvocation};
 
     struct Stub;
 
@@ -3334,6 +3343,7 @@ mod tests {
             session_attached_list: "client".to_owned(),
             session_id: "$4".to_owned(),
             session_name: "work".to_owned(),
+            session_path: "/tmp/work".to_owned(),
             session_stack: "1,0".to_owned(),
             session_windows: 4,
             socket_path: "/tmp/tmux.sock".to_owned(),
@@ -3366,6 +3376,24 @@ mod tests {
 
     fn expand(format: &str) -> String {
         expand_status(format, &context(), &mut Stub)
+    }
+
+    fn expand_session_path(engine: &MuxEngine, session: Option<SessionId>) -> String {
+        expand_format(
+            "#{session_path}",
+            engine,
+            FormatContext {
+                session,
+                window: None,
+                pane: None,
+                active_session: None,
+                format_type: FormatType::Session,
+            },
+        )
+    }
+
+    fn command(name: &str, args: &[&str]) -> CommandInvocation {
+        CommandInvocation::new(name, args.iter().copied())
     }
 
     #[test]
@@ -3471,6 +3499,83 @@ mod tests {
         assert!(
             expand_format_values("#{t:session_activity}", &context(), &mut Stub).ends_with(" 2023")
         );
+    }
+
+    #[test]
+    fn session_path_is_scoped_to_the_selected_session() {
+        let mut engine = MuxEngine::default();
+        let (first, _, _) = engine.state.create_session("first").unwrap();
+        let (second, _, _) = engine.state.create_session("second").unwrap();
+        engine
+            .state
+            .set_session_working_directory(first, "/srv/first".into())
+            .unwrap();
+        engine
+            .state
+            .set_session_working_directory(second, "/srv/second".into())
+            .unwrap();
+
+        assert_eq!(expand_session_path(&engine, Some(first)), "/srv/first");
+        assert_eq!(expand_session_path(&engine, Some(second)), "/srv/second");
+    }
+
+    #[test]
+    fn session_path_is_empty_without_retained_or_existing_state() {
+        let mut engine = MuxEngine::default();
+        let (session, _, _) = engine.state.create_session("unset").unwrap();
+
+        assert_eq!(expand_session_path(&engine, Some(session)), "");
+        assert_eq!(expand_session_path(&engine, Some(SessionId(u64::MAX))), "");
+        assert_eq!(expand_session_path(&engine, None), "");
+    }
+
+    #[test]
+    fn session_path_preserves_lexical_utf8() {
+        let mut engine = MuxEngine::default();
+        let (session, _, _) = engine.state.create_session("work").unwrap();
+        let path = "/workspace/../δ project/./[draft]*";
+        engine
+            .state
+            .set_session_working_directory(session, path.into())
+            .unwrap();
+
+        assert_eq!(expand_session_path(&engine, Some(session)), path);
+    }
+
+    #[test]
+    fn attach_session_cwd_update_is_visible_on_the_next_expansion() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "source", "-c", "/source"]),
+            )
+            .unwrap();
+        let source = context.session.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "target", "-c", "/before"]),
+            )
+            .unwrap();
+        let target = context.session.unwrap();
+        engine
+            .execute(&mut context, &command("attach-session", &["-t", "=source"]))
+            .unwrap();
+
+        assert_eq!(expand_session_path(&engine, Some(target)), "/before");
+
+        let updated = "/after/../next path/[draft]*";
+        engine
+            .execute(
+                &mut context,
+                &command("attach-session", &["-t", "=target", "-c", updated]),
+            )
+            .unwrap();
+
+        assert_eq!(expand_session_path(&engine, Some(target)), updated);
+        assert_eq!(expand_session_path(&engine, Some(source)), "/source");
     }
 
     #[test]

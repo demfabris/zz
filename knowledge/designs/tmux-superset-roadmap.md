@@ -38,8 +38,8 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 88 active groups, 593 classified active items, 100 closed groups, and two known
-differentials. Accepted active groups plus closed history resolve 121 of 188 known groups (64.4%).
+The live tracker has 88 active groups, 594 classified active items, 101 closed groups, and two known
+differentials. Accepted active groups plus closed history resolve 122 of 189 known groups (64.6%).
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -54,12 +54,12 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The 10s checkpoint retains 98 scenarios and 1,517 steps.
+The 10t checkpoint contains 98 scenarios and 1,522 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`. Requested flags, attached
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
@@ -68,7 +68,8 @@ GEO, FMT, OUT, or WARN differences.
 Slice 10l registers the pinned hook-producer partition in source. Slice 10m then makes the full
 default-key structural partition explicit and matches tmux's bare key-only `bind-key` mutation.
 Slice 10n closes raw-TUI confirmation presentation and input handling. None adds a scenario step,
-so the stored artifact remains 98 scenarios and 1,517 steps with that digest. The bind-key row runs
+so the historical 10s artifact remained 98 scenarios and 1,517 steps at SHA-256
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`. The bind-key row runs
 17 internal checks, while the attached fixture now exercises seven confirmation replies with a pane
 sentinel that proves reply keys do not leak. Slice 10o closes raw-TUI consumption of the
 daemon-published menu descriptor and shared keyboard ownership. Its attached cases cover a title,
@@ -99,6 +100,16 @@ through `StatusHooks`, and 74 constant-backed names that remain live `format:` g
 are pairwise disjoint and their union equals the pinned oracle. A required exact daemon test seeds
 buffer, client, and session facts, then proves that the production `DaemonFormatHooks` consumer
 resolves every delegated name. This registration makes no context-specific value-parity claim.
+Slice 10t closes `format:session_path`. The mux expands the selected session's retained cwd at use
+time, so target changes and `attach-session -c` updates appear without another cache or protocol
+field. The `formats-values` differential grows by five steps to 18. It proves two creates with
+distinct cwd facts, two explicit targets, filtered `list-sessions` output, and lexical `..`
+preservation. Mux tests cover absent retained state and the production attach update. The format
+partition is now 93 direct mux values, 32 daemon-delegated values, and 73 live gaps.
+`format:session_active` remains open for a tri-state producer audit. The newly classified
+`sessions.new-session-attach-cwd` group owns two adjacent mismatches: zz still lacks the pinned
+`new-session -A -c` cwd mutation, and fresh `new-session -c ''` inherits a cwd instead of retaining
+the pin's explicit empty value.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
@@ -1349,6 +1360,17 @@ permanent product decision has been recorded for them.
   discovery blind spots. The accepted artifact stays at 98 scenarios and 1,517 steps with
   attached-client `PASS` and SHA-256
   `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+- 2026-08-28: Slice 10t closed `formats.session-path/format:session_path`. The mux now expands the
+  selected session's retained cwd at use time. The five added `formats-values` steps prove two
+  creates, two explicit targets, filtered list output, and lexical `..`; mux tests cover missing
+  retained state and production `attach-session -c` updates. The source partition is now 93 direct,
+  32 delegated, and 73 live gaps. `format:session_active` remains open for a tri-state producer
+  audit. The tracker also classifies the adjacent `new-session -A -c` mutation and fresh explicit
+  empty `new-session -c ''` mismatch under `sessions.new-session-attach-cwd`. It now has 88 active
+  groups, 594 items, and 101 closed entries; 122 of 189 groups are resolved (64.6%). The accepted
+  artifact covers 98 scenarios and 1,522 steps, including an 18-step `formats-values` row, with
+  attached-client `PASS`, two registered GEO rows, and SHA-256
+  `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 
 # Related
 

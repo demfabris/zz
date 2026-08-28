@@ -11,3 +11,8 @@ set-buffer bravo
 fmt: #{buffer_name}|#{buffer_size}|#{buffer_sample}|#{!!:#{buffer_created}}
 new-window -d -t w -c /tmp -n cw
 fmt: #{W:#{window_name}=#{pane_current_path};,}
+new-session -d -s path-tmp -c /tmp
+new-session -d -s path-parent -c /tmp/..
+out: display-message -p -t =path-tmp:0 #{session_name}:#{session_path}
+out: display-message -p -t =path-parent:0 #{session_name}:#{session_path}
+out: list-sessions -O name -f #{m:path-*,#{session_name}} -F #{session_name}:#{session_path}

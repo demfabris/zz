@@ -736,7 +736,6 @@
         "formats.mouse-context",
         "formats.pane-process",
         "formats.pane-runtime",
-        "formats.session-path",
         "formats.session-runtime",
         "formats.terminal-cells",
         "formats.terminal-runtime",
@@ -1058,31 +1057,6 @@
       ],
       "depends_on": [],
       "reason": "Pinned tmux refreshes session activity when a suspended tty client wakes or unlocks. zz has no suspended attached-client state or wake/unlock protocol message; reconnect and reattach already flow through the ordinary attach activity seam."
-    },
-    {
-      "id": "formats.session-path",
-      "title": "Expose the target session working path",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "easy",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "format:session_path"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/model.rs",
-        "resource:crates/zz-mux/src/formats.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Session path expands to the selected session's exact retained UTF-8 working directory at expansion time in target and list contexts, while a missing session or missing retained zz path expands to empty."
-      ],
-      "depends_on": [],
-      "reason": "Pinned tmux returns the selected session's stored cwd, while zz already retains the same session state but maps session_path to an empty format backing."
     },
     {
       "id": "formats.session-runtime",
@@ -2650,6 +2624,32 @@
       "reason": "One window belongs to one session in zz."
     },
     {
+      "id": "sessions.new-session-attach-cwd",
+      "title": "Align new-session cwd edge behavior",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "easy",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:new-session-attach-existing-cwd",
+        "semantic:new-session-explicit-empty-cwd"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "When new-session -A finds an existing session, -c expands exactly once in the resolved target and invoking-client context, updates that target before attach terminal preflight, survives terminal-open failure, isolates other sessions, and leaves a clientless -A inert.",
+        "Fresh creation and an -A miss distinguish omitted -c from an explicitly empty expansion, retain the empty session cwd like the pin, and preserve the existing initial-pane fallback."
+      ],
+      "depends_on": [],
+      "reason": "Pinned new-session delegates an existing -A target to attach-session, including its -c cwd update, and retains an explicitly empty cwd for fresh creation. zz returns from the existing-session branch before calculating or storing -c and collapses an empty fresh value to omitted, leaving the retained session cwd and session_path wrong in both cases."
+    },
+    {
       "id": "source-file.event-hook-client-cwd",
       "title": "Select the current client cwd for event-hook sources",
       "decision": "adopt",
@@ -2968,7 +2968,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags and retained-client sizing later closed under clients.attach-flags and clients.attach-sizing; session_path remains under formats.session-path."
+      "resolution": "Each session now retains one daemon-local working directory, seeded in precedence order from explicit new-session -c, the attached source session, then the caller cwd. attach-session -c resolves the exact target first, selects a compound target's window and pane, expands in that pane context, and stores the result before terminal validation; a missing target does not mutate state, while terminal-open failure does not roll the mutation back. Exact native attach-session -c enters the existing Interactive attach path, and the full debug attached-client differential separates command cwd from session cwd with decoys before passing for zz and pinned tmux. A focused daemon test adds a third source-file -t target cwd decoy. Attached source-file and reload-config now prefer the invoking client's attached session cwd while -t remains only the format and replay target; nested replay keeps that selected base. Focused mux, daemon, catalog, and native CLI tests pass. This uses internal mux and daemon state without a protocol, snapshot-schema, or format-vocabulary change. Requested attach flags and retained-client sizing later closed under clients.attach-flags and clients.attach-sizing; session_path later closed under formats.session-path."
     },
     {
       "id": "clients.attach-sizing",
@@ -3690,6 +3690,20 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "The daemon now correlates committed text with its preceding key through one bounded ordered queue per client. Every validated press or repeat Key with `text_follows: true` appends an entry that records its pane and Terminal or BrowserSurface lane. Text scans forward to the first entry for its pane and lane, retires only the older skipped prefix, and consumes that match while preserving later entries. It inherits the matched Key's activity and modal result, so the pair contributes at most one activity/latest update; empty Text is inert but also retires any linked dispatch suppression. If no entry matches, the queue stays intact and nonempty Text is standalone. A two-browser-pane regression strands one earlier key and proves the later bound key keeps its suppression debt until its matching Text, so neither the binding nor text is replayed. Bounded eviction and every explicit cleanup retire linked suppression debt. Writable standalone text reaches chooser, command-prompt, and display-panes before activity; terminal command-output text accounts once before it is swallowed, while browser command-output text is consumed before activity. Standalone read-only terminal text accounts once without a bell or PTY write, while read-only browser text keeps zz's existing silent drop. Paired writable chooser input follows its key result; writable prompt and display-panes consumption can remain at zero. Read-only terminal pairs bypass retained modals, account on the key, and never write the trailing text. The queue clears on detach, unregister/reconnect, and successful wire Attach, but survives a synchronous binding-driven `switch-client` so the trailing Text still belongs to its Key. GPUI terminal standalone input and GPUI browser key-plus-text input are proved at their emitters; TUI keys remain unpaired, while FFI and iOS retain their explicit standalone/key contracts."
+    },
+    {
+      "id": "formats.session-path",
+      "title": "Expose the target session working path",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "scenario:compat/scenarios/formats-values.txt",
+        "resource:knowledge/tmux/tmux-compat.md",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "The direct `SessionPath` backing now reads the selected session's retained UTF-8 working directory at expansion time. Targeted display and filtered list-session expansions preserve distinct session paths and lexical components such as `..`; a missing session or missing retained zz path stays empty. Focused mux tests cover target isolation, lexical UTF-8, absent state, and visibility after the production `attach-session -c` command updates one session without changing another. The source-owned 198-name partition is now 93 direct mux values, 32 daemon-delegated values, and 73 active constant-backed gaps. The residual `session_active` item remains open for its separate no-client, unattached-client, and attached-session producer audit. No protocol, snapshot, daemon client-selection, cwd-mutation, startup-source, non-UTF-8, or format-vocabulary contract changed."
     },
     {
       "id": "keys.client-focus-events",

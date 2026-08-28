@@ -56,8 +56,8 @@ minimum and maximum. The source pass also records 14 commands that use nine cust
 callbacks as six effective rules. The remaining inventories contain 180 options, 198 global
 format-table names, 14 source-enumerated names across the selected `command-item`, `list-commands`,
 and `list-keys` contexts, 68 hooks, and 303 default bindings across `root`, `prefix`, `copy-mode`,
-`copy-mode-vi`, and `move`. The 198 global names divide into 92 values resolved directly by the mux,
-32 delegated to daemon `StatusHooks`, and 74 constant-backed names that remain active `format:`
+`copy-mode-vi`, and `move`. The 198 global names divide into 93 values resolved directly by the mux,
+32 delegated to daemon `StatusHooks`, and 73 constant-backed names that remain active `format:`
 gaps.
 
 The Rust gate reconciles command and alias names, flag arities, positional bounds, custom argument
@@ -145,12 +145,14 @@ produced-versus-tracked overlap, and requires those 64 produced names plus `afte
 `daemon::tests::pinned_hook_producer_partition_matches_the_oracle` and
 `status::tests::daemon_delegated_format_consumers_match_mux_inventory` tests. The second test seeds
 buffer, client, and session facts, then requires every one of the 32 delegated names to resolve
-through the production `DaemonFormatHooks` consumer. The mux manifest test requires the 92 direct,
-32 delegated, and 74 tracked sets to stay pairwise disjoint and equal the 198-name pin.
+through the production `DaemonFormatHooks` consumer. At the slice 10s close, the mux manifest test
+required the 92 direct, 32 delegated, and 74 tracked sets to stay pairwise disjoint and equal the
+198-name pin.
 
-This closes source registration only. It does not claim context-specific value parity, and all 74
-active `format:` gaps retain their runtime owners. The oracle, protocol, snapshots, scenarios, and
-accepted compatibility artifact did not change. Slice 10m already closed the shared-binding
+That registration closed source ownership only. It did not claim context-specific value parity,
+and all 74 format gaps retained their runtime owners at that checkpoint. The oracle, protocol,
+snapshots, scenarios, and accepted compatibility artifact did not change. Slice 10m already closed
+the shared-binding
 runtime mismatch for bare key-only `bind-key`; downstream command and copy-action behavior retains
 its separate owners. Two semantic discovery gaps remain: open-ended or dynamic context-format names
 and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns that work. Shared command-flag diagnostics
@@ -275,9 +277,9 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. The 10r checkpoint
-from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
-row is clean.
+`compat/results/summary.md` is the persisted acceptance artifact. The slice 10t checkpoint from
+2026-08-28 contains 98 scenarios and 1,522 steps against pinned tmux `d77c9dc6`. Every ordinary row
+is clean, and the attached-client fixture is `PASS`.
 Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven confirmation cases and
 a pane-input sentinel to the attached fixture. Slice 10o adds bounded menu cases for a visible
 title, shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
@@ -287,9 +289,15 @@ pane-input isolation. Slice 10q adds two temporary raw clients on one destroyed 
 flagged client survives on the newest fallback, while its unflagged peer exits.
 Slice 10r keeps `smoke/cli-chain-parse-abort` at three harness steps and adds eleven cold probes on
 each engine for the two-pass local autospawn contract. Focused resolver coverage pins exact
-raw-row-zero and all-disabled menu behavior. None adds a
-differential row, so the scenario count, step count, attached-client result, and digest stay
-unchanged.
+raw-row-zero and all-disabled menu behavior. Slice 10s adds no differential row or step. Slice 10t
+extends `formats-values` from 13 to 18 steps without adding a scenario: two sessions retain `/tmp`
+and lexical `/tmp/..` paths, two targeted displays read each value, and one filtered
+`list-sessions` query reads both. Focused mux tests separately cover missing retained or target
+state and visibility after the production `attach-session -c` path updates one session. The
+`session_active` tri-state producer audit remains under `formats.session-runtime`. The new
+`sessions.new-session-attach-cwd` group owns two cwd mutation differences outside this slice:
+existing-target `new-session -A -c` skips the target update, and fresh explicit-empty `-c ''`
+collapses to omitted cwd inheritance.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -322,9 +330,9 @@ emits no `%pane-mode-changed`. The pinned foreground-disconnect server crash is 
 non-parity and stays outside the scenario. `resize-directions`
 contributes 16 checks for bare direction flags with
 the default amount 1, attached amounts such as `-L2`, separated amounts such as `-L 2`, and the
-existing absolute resize forms. `formats-values` also proves explicit
-startup `config_files`; both
-servers start with `-f /dev/null` so that fact is symmetric. `native-prefix-isolation` contributes
+existing absolute resize forms. `formats-values` also proves explicit startup `config_files` and
+the selected session's retained UTF-8 `session_path`; both servers start with `-f /dev/null` so the
+config fact is symmetric. `native-prefix-isolation` contributes
 29 steps: 28 byte-exact command-name queries plus one alias setup, without plugin-corpus
 dependencies.
 `smoke/daemon-invalid-flags` contributes three checks: it first removes any inherited sentinel,
@@ -410,11 +418,13 @@ Built-in hook values flatten typed physical groups during their second construct
 Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
 
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
-`source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
-`resize-directions` contains 16. The summary SHA-256 is
+`source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps,
+`resize-directions` contains 16, and `formats-values` contains 18. The summary SHA-256 is
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+The historical 10r and 10s checkpoints remain 98 scenarios and 1,517 steps at SHA-256
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,
-GEO, FMT, OUT, or WARN differences to the complete strict and attached artifact.
+GEO, FMT, OUT, or WARN differences to the complete differential and attached artifact.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`; its display-panes row
 contributed three harness steps and 22 internal checks with the same clean channels.

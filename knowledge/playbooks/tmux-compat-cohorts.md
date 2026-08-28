@@ -191,26 +191,34 @@ Slice 10s closes nonconstant global-format discovery without changing runtime be
 constant-placeholder gaps. A required exact daemon test proves every delegated name reaches the
 production consumer.
 
-The accepted post-10s checkpoint remains at 98 scenarios and 1,517 steps. Every ordinary row is
-clean.
-The registry now holds 88 active groups with 593 items and 100 closed records. Its status split is
-47 open, 20 blocked, and 21 accepted, for 64.4% resolution (121 of 188 groups).
+Slice 10t closes `format:session_path`. Expansion reads the selected session's retained cwd at use
+time and observes production `attach-session -c` changes. Five new `formats-values` steps prove two
+creates, two explicit targets, filtered list output, and lexical `..`. Focused mux tests cover
+missing retained state and the attach update. The 198-name source partition now contains 93 direct
+values, 32 delegated values, and 73 live gaps.
+
+The accepted post-10t checkpoint has 98 scenarios and 1,522 steps. Every ordinary row is clean.
+The registry holds 88 active groups with 594 items and 101 closed records. Its status split is
+47 open, 20 blocked, and 21 accepted, for 64.6% resolution (122 of 189 groups).
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the stored summary SHA-256
 is
-`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 The 10l and 10m milestones add no differential step. Slice 10n extends the attached fixture with seven
-confirmation cases and a pane sentinel without adding a scenario row, leaving the digest unchanged.
-Slice 10o adds the bounded menu cases without adding a scenario row, so the same digest remains.
+confirmation cases and a pane sentinel without adding a scenario row. Slice 10o adds the bounded menu
+cases without adding a scenario row.
 Slice 10p adds three popup cases and a pane sentinel to the attached fixture without adding a
-scenario row, so the same digest remains. A post-close audit hardened the frame and focus assertions
+scenario row. A post-close audit hardened the frame and focus assertions
 and ran the complete fixture successfully under `LC_ALL=C` without changing the stored corpus.
 Slice 10q adds a mixed flagged and unflagged client-destruction case to the attached fixture without
-adding a scenario row, so the same digest remains.
+adding a scenario row.
 Slice 10r adds 11 cold-socket probes per engine for implemented and parked syntax, exact native
-attach tails, and `-N` routing. It adds no differential row or step, so the same digest remains.
-Slice 10s adds only required source-registration tests, so the same artifact and digest remain.
+attach tails, and `-N` routing. It adds no differential row or step. Slice 10s adds only required
+source-registration tests. Their historical checkpoint remains 98
+scenarios and 1,517 steps at SHA-256
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+Slice 10t grows the `formats-values` row from 13 to 18 steps without adding a scenario.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
@@ -361,9 +369,10 @@ closure is that exception.
 | 10q | Per-client no-detach-on-destroy fallback | Closed under `clients.no-detach-on-destroy` on 2026-08-28 | Complete | The configured primary remains shared, while only flagged clients use the bounded newest-session fallback |
 | 10r | Local cold-start CLI parse abort | Closed under `mux.local-cli-autospawn-parse-abort` on 2026-08-28 | Complete | Static syntax covers 83 implemented and nine parked commands; exact attach, `-N`, post-config preparation, and one-shot generation ownership close before effects |
 | 10s | Nonconstant format behavior partition | Closed under `tracker.nonconstant-format-behavior` on 2026-08-28 | Complete | The single 198-name source table derives 92 mux and 32 daemon behavior registrations against 74 live gaps; an exact daemon test proves its delegated consumers |
-| 10t | Target session path format | Frozen on `formats.session-path/format:session_path` on 2026-08-28 | Small | Expose the retained target-session cwd and move the source partition to 93 direct, 32 delegated, and 73 live gaps without absorbing `session_active` |
-| Post-10t rerank | Startup initial-client cwd | Not frozen | Medium | Carry the launching cwd through the bounded cold-bootstrap provenance seam for startup-relative sources |
-| Post-rerank | Session-active client context | `format:session_active` | Medium research | Model no format client, an unattached client, and an attached session across each producer before changing the backing |
+| 10t | Target session path format | Closed under `formats.session-path/format:session_path` on 2026-08-28 | Complete | Retained target-session cwd expands at use time; five differential steps and focused mux tests prove targeting, missing state, lexical state, and production attach updates |
+| Live rerank candidate | New-session attach cwd edges | `sessions.new-session-attach-cwd` | Small-medium research | Pin existing-session `new-session -A -c` mutation and fresh explicit-empty `new-session -c ''` retention without reopening `session_path` |
+| Live rerank candidate | Startup initial-client cwd | Not frozen | Medium | Carry the launching cwd through the bounded cold-bootstrap provenance seam for startup-relative sources |
+| Live rerank candidate | Session-active client context | `format:session_active` | Medium research | Audit no format client, an unattached client, and a client attached to the target across each producer before changing the backing |
 | Post-rerank | File-wide config parse unit | Four related active items | Medium-hard | Prepare warm vectors and whole source files under frozen alias state without changing runtime-error queue semantics |
 | Post-rerank forecast | Remaining source-owned tracker registrations | Open context formats, then option consumers | Small research | Register every claimed consumer before broader behavior slices |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -374,7 +383,7 @@ closure is that exception.
 | Post-rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | Post-rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after generic prompts | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10s are closed. Under `detach-on-destroy on`, only flagged clients use
+Slices 9a through 9f and 10a through 10t are closed. Under `detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
 and only flagged clients fall back to the newest attached session when no detached survivor exists.
 Flagged and unflagged clients on one destroyed session must diverge, while no remaining session
@@ -404,24 +413,22 @@ seeds buffer, client, and session facts and resolves all 32 delegated names thro
 `DaemonFormatHooks`. The slice changes no runtime value and claims no context-specific value parity.
 Open context formats and option consumers remain separate.
 
-The full post-10s rerank first selected `formats.session-runtime`, then its independent source and
-oracle audits disproved the group's shared-client premise. The registry now splits
-`formats.session-path` from the residual `formats.session-runtime`. Pinned `session_path` reads the
-selected session's stored cwd at expansion time. Pinned `session_active` is empty without a target
-or format client; otherwise it is `1` only for a client attached to that target and `0` for an
-unattached client or one attached elsewhere. Slice 10t freezes only `format:session_path`: expose
-the exact retained UTF-8 target-session cwd, prove target and list contexts plus missing-session
-output, the zz-only missing-retained fallback, lexical state, and `attach-session -c` update
-visibility, then change the source partition to 93 direct values, 32 delegated values, and 73 live
-gaps. Do not change client selection or `session_active`.
+The full post-10s rerank first selected `formats.session-runtime`, then independent source and oracle
+audits disproved the group's shared-client premise. Slice 10t closes the resulting
+`formats.session-path` group. Pinned `session_path` reads the selected session's stored cwd at
+expansion time. The five added differential steps cover two creates, two explicit targets, filtered
+list output, and lexical `..`; mux tests cover absent retained state and production
+`attach-session -c` updates. The source partition is now 93 direct values, 32 delegated values, and
+73 live gaps.
 
-Startup initial-client cwd won the successor ranking, with the honest file-wide config parse unit
-behind it. The config boundary combines warm generic preparation, config/source construction,
-alias snapshots, and the existing first-error item; a same-line-only repair would encode the wrong
-tmux model. Every row after 10t remains a non-frozen forecast. Before freezing another milestone,
-rerank daily, script, remote, silent, and attach-dependent work including buffer file context,
-source-file cwd variants, detach execution, parent-HUP exit, popup and menu fidelity, and
-`active-pane`.
+Pinned `session_active` remains empty without a target or format client, `1` for a client attached
+to that target, and `0` for an unattached client or one attached elsewhere. Its open owner requires
+a producer-by-producer tri-state audit. Slice 10t also exposed two `new-session` cwd edges that now
+belong to `sessions.new-session-attach-cwd`: zz lacks the pinned existing-session `new-session -A -c`
+mutation, and fresh `new-session -c ''` inherits a cwd instead of preserving an explicit empty
+value. The next live rerank must weigh those edges against startup initial-client cwd, the file-wide
+config parse unit, open context formats, option consumers, and daily attach work before freezing a
+milestone.
 
 # Four-seat Codex pipeline
 
@@ -522,13 +529,17 @@ Confirm that slice 10s is closed under `tracker.nonconstant-format-behavior`: 92
 delegated name resolved through the production consumer. Treat runtime value parity, open context
 formats, and option consumers as separate residual owners.
 
-Confirm that slice 10t is frozen only on `formats.session-path/format:session_path`. Resolve the
-selected session's exact retained UTF-8 cwd in target and list contexts, keep absent state empty,
-prove `attach-session -c` updates become visible, and change the manifest partition to 93 direct,
-32 delegated, and 73 live gaps. Leave `format:session_active` untouched: it is empty without a
-target or format client, `1` for a client attached to that target, and `0` for an unattached client
-or one attached elsewhere. Do not change protocol, snapshot, cwd mutation, startup sourcing, or
-non-UTF-8 policy.
+Confirm that slice 10t is closed under `formats.session-path/format:session_path`: 93 direct values,
+32 delegated values, and 73 live gaps partition the 198 pinned names. Confirm that the 18-step
+`formats-values` row proves two creates, two explicit targets, filtered list output, and lexical
+`..`, while mux tests prove missing retained state and production `attach-session -c` updates. The
+accepted artifact has 98 scenarios and 1,522 steps, attached-client `PASS`, two registered GEO rows,
+and SHA-256 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+
+Keep `format:session_active` open for its tri-state producer audit. Keep both newly classified cwd
+edges under `sessions.new-session-attach-cwd`: existing-session `new-session -A -c` mutation and
+fresh explicit-empty `new-session -c ''` retention. Regenerate and rerank the complete live tracker
+before freezing the next slice.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
 source before editing. Use one coordinator and three Codex subagents to probe the selected

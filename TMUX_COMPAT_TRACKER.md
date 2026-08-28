@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10T FROZEN: TARGET SESSION PATH**
+> Campaign state: **SLICE 10T DELIVERED: LIVE RERANK REQUIRED**
 >
-> Tracker resolution progress: **64.4% (121 of 188 known groups)**
+> Tracker resolution progress: **64.6% (122 of 189 known groups)**
 >
-> Committed milestone base: **2026-08-28** at `8e0ef67fd1866b48455e00e066a11b951ef1dd7b`
+> Audited pre-close base: **2026-08-28** at `f5e5f026514f06f9692d5587743b5dfa2f7976c3`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Committed milestone base | `8e0ef67fd1866b48455e00e066a11b951ef1dd7b` |
-| Delivery | Local `main` contains the committed 10s closure and frozen 10t plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Audited pre-close base | `f5e5f026514f06f9692d5587743b5dfa2f7976c3` |
+| Delivery | The current local milestone closes 10t on top of its committed plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10t is frozen on target-session `session_path`; `session_active` remains separate |
-| Live registry | 88 active groups, 593 active items, 100 closed records |
+| Campaign point | Slice 10t is complete; run a live full-registry rerank before freezing its successor |
+| Live registry | 88 active groups, 594 active items, 101 closed records |
 | Active status | 47 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10t plan descends from the committed 10s milestone above. Resolve the commit
+The 10t closure descends from the committed plan above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(100 + 21) / (100 + 88) = 121 / 188 = 64.4%
+(101 + 21) / (101 + 88) = 122 / 189 = 64.6%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -152,29 +152,36 @@ Work one bounded milestone at a time:
 Fabrico granted standing authority to commit each reviewed campaign milestone and continue into the
 next reranked slice. Pushes still require an explicit request.
 
-## Accepted evidence after 10s
+## Accepted evidence after 10t
 
-The strict-plus-attached artifact remains the current accepted checkpoint. Slice 10s adds no
-differential row or step and does not change its digest:
+Slice 10t adds five focused steps to the existing `formats-values` scenario and refreshes the full
+differential-plus-attached checkpoint:
 
 | Evidence | Result |
 | --- | --- |
 | Differential scenarios | 98 |
-| Differential steps | 1,517 |
+| Differential steps | 1,522 |
 | Ordinary rows | All clean |
 | Registered differences | One GEO cell in each of two named known rows; every other channel clean |
 | Attached-client fixture | `PASS` |
-| Summary SHA-256 | `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832` |
+| Summary SHA-256 | `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432` |
 | Stored-artifact check | `compat/run.sh --check-summary` passes |
 
-`just compat --strict-geometry --attached-client` completed on the final 10q code and fixture tree.
-All 98 scenarios and 1,517 steps ran, the attached-client fixture passed, and the stored summary
-check confirmed the digest above. The fixture now includes the 10q mixed-client destruction case:
+`compat/run.sh --strict-geometry --attached-client` completed on the final 10t code and fixture
+tree. All 98 scenarios and 1,522 steps ran, the two registered geometry rows matched their exact
+tuples, the attached-client fixture passed, and the stored summary check confirmed the digest
+above. The fixture retains the 10q mixed-client destruction case:
 the flagged client survives on the newest remaining session, while its unflagged peer exits, on zz
 and pinned tmux alike. The complete fixture also passed independently under `LC_ALL=C`, retaining
 the repaired 10p full-frame and focus proof. Slice 10q adds no differential scenario or step and
 does not change the digest. Focused package tests, affected clippy, formatting, tracker and OKF
 validation, shell syntax, and diff checks also passed.
+
+The five new differential steps create two detached sessions with `/tmp` and lexical `/tmp/..`,
+then prove two targeted displays and one deterministic filtered list return the selected session's
+exact stored path on zz and pinned tmux. Focused mux tests separately prove missing retained state,
+target isolation, valid UTF-8 with spaces and glob metacharacters, and visibility after the real
+`attach-session -c` command updates one session without changing another.
 
 The 10r fixture adds 11 cold-socket probes per engine. They cover implemented and parked built-in
 syntax through canonical names, aliases, and prefixes; exact native `attach` and `attach-session`
@@ -206,7 +213,7 @@ source-registration closure above, not a fresh uninterrupted 712-test daemon-pac
 
 ## Shipped history
 
-The 100 entries under the generated report's
+The 101 entries under the generated report's
 [`Closed history`](knowledge/tmux/gaps.md#closed-history) section are the complete item-level record.
 The table below is the milestone rollup an agent needs for orientation.
 
@@ -250,6 +257,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10q | Per-client no-detach-on-destroy fallback and attached proof | `8310fb7` |
 | 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | `02bb4a1` |
 | 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | `8e0ef67` |
+| 10t | Target-session path format under `formats.session-path` | Current milestone; resolve after commit |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -390,7 +398,7 @@ changes no runtime value, fixes no active `format:` item, expands no open-ended 
 context vocabulary, registers no option consumer, and changes neither the oracle nor protocol.
 Existing format owners retain responsibility for value and context parity.
 
-## Frozen slice: 10t target session path
+## Completed slice: 10t target session path
 
 The full post-10s rerank first surfaced `formats.session-runtime`, but independent source and oracle
 audits disproved its shared-client premise. The live registry now separates `formats.session-path`
@@ -401,7 +409,7 @@ unattached client or one attached elsewhere. zz does not yet represent that thre
 across all format producers. Combining the two would turn a direct value repair into a hidden
 caller policy refactor.
 
-Slice 10t therefore freezes only `formats.session-path/format:session_path`:
+Slice 10t closes only `formats.session-path/format:session_path`:
 
 - `#{session_path}` resolves from the selected session's retained working directory, independent of
   the invoking client's selected session;
@@ -413,13 +421,19 @@ Slice 10t therefore freezes only `formats.session-path/format:session_path`:
   mutation semantics;
 - the required 198-name manifest partition moves from 92 direct, 32 delegated, and 74 active gaps
   to exactly 93 direct, 32 delegated, and 73 active gaps;
-- focused mux tests prove the zz-only missing-retained-state fallback, while a pinned differential
-  proves missing-session output, two target and list rows, lexical retention, and
+- the five-step pinned differential proves two targeted rows, one filtered list, and lexical `..`
+  retention; focused mux tests prove missing session or retained state and production
   `attach-session -c` update visibility.
 
 The slice changes no protocol, snapshot, daemon client selection, session-cwd mutation, startup
 source provenance, non-UTF-8 path policy, format vocabulary, or other format value. In particular,
 `format:session_active` stays live under its own later three-state producer audit.
+
+Review also exposed two separate cwd-mutation mismatches. Pinned `new-session -A -c` delegates an
+existing target to attach handling and replaces that session's cwd, while an explicitly empty `-c`
+on fresh creation remains an empty session cwd. zz returns from its existing-session branch before
+applying `-c` and collapses an empty fresh value to omitted. The new
+`sessions.new-session-attach-cwd` group owns both silent mismatches; 10t changes neither.
 
 ## Candidate queue after 10t
 
@@ -427,14 +441,14 @@ The table records the fresh rerank, not permission to skip the next audit.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |
-| 1 | `semantic:source-file-startup-initial-client-cwd` | Carry the launching cwd through the bounded cold-bootstrap provenance seam |
-| 2 | `format:session_active` | Model no client, unattached client, and attached session across every format producer |
-| 3 | File-wide config parse unit | Combine warm preparation, config/source construction, alias snapshots, and the stale first-error item honestly |
-| 4 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
-| 5 | `semantic:tracker-open-context-format-vocabulary` | Discover and register the omitted open context formats |
-| 6 | `semantic:control-mode-typed-config-diagnostics` | Replace prose sniffing with typed config diagnostics |
-| 7 | `semantic:client-resized-post-geometry-context` | Emit resize hooks after the matching geometry reaches the daemon |
-| 8 | `format:window_activity` | Add a real activity timestamp without grouping per-client viewport formats |
+| 1 | `sessions.new-session-attach-cwd` | Align existing `-A -c` updates and explicit-empty fresh cwd retention |
+| 2 | `semantic:source-file-startup-initial-client-cwd` | Carry the launching cwd through the bounded cold-bootstrap provenance seam |
+| 3 | `format:session_active` | Model no client, unattached client, and attached session across every format producer |
+| 4 | File-wide config parse unit | Combine warm preparation, config/source construction, alias snapshots, and the stale first-error item honestly |
+| 5 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
+| 6 | `semantic:tracker-open-context-format-vocabulary` | Discover and register the omitted open context formats |
+| 7 | `semantic:control-mode-typed-config-diagnostics` | Replace prose sniffing with typed config diagnostics |
+| 8 | `semantic:client-resized-post-geometry-context` | Emit resize hooks after the matching geometry reaches the daemon |
 
 The active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are

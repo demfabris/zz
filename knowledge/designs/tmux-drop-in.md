@@ -91,16 +91,17 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current 10s acceptance inventory contains 98 differential scenarios and
-1,517 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The complete strict and
-attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
+The current 10t acceptance inventory contains 98 differential scenarios and
+1,522 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The
+complete differential and attached run on 2026-08-28 left every ordinary row clean.
+`known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
-`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 The 10l source registration and 10m key-structure checkpoints add no differential scenario or step.
 Slice 10n adds seven attached confirmation cases plus a one-byte pane sentinel without adding a
-differential row, so the stored artifact and digest remain unchanged.
+differential row.
 Slice 10o adds bounded raw-TUI menu cases without adding a differential row. They cover a visible
 title, shortcut precedence, disabled and separator skipping, Escape, an unusable PageUp landing with
 stay-open Enter, nonactivating paste, and pane-input isolation. Focused resolver coverage pins exact
@@ -108,7 +109,7 @@ raw-row-zero and all-disabled boundary behavior. Slice 10p adds three bounded po
 title modification without job or geometry replacement, bracketed paste plus exact content-relative
 mouse and wheel input, dead `-k` retention, live focus suppression, dead focus-close, and pane-input
 isolation. Focus-enabled popup applications and C-locale ACS frame capture harden those assertions. These attached
-cases add no differential row, so the stored artifact and digest remain unchanged.
+cases add no differential row.
 Slice 10q adds the mixed-client `no-detach-on-destroy` fallback proof without adding a differential
 row. Slice 10r closes cold local CLI parse atomicity without changing the protocol or snapshot. Its
 raw pass validates the full vector against all 83 implemented and nine recognized parked tmux verbs,
@@ -129,6 +130,16 @@ pairwise disjoint and exhaustive. A required exact daemon test seeds buffer, cli
 facts and proves that the production `DaemonFormatHooks` consumer resolves every delegated name.
 This registration makes no context-specific value-parity claim. Open context formats and option
 consumers remain the two semantic discovery blind spots.
+Those slices through 10s left the historical artifact at 98 scenarios and 1,517 steps with SHA-256
+`9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+Slice 10t closes `format:session_path`. Expansion reads the selected session's retained cwd at use
+time, including changes made by production `attach-session -c`. The `formats-values` row grows by
+five steps to 18 and proves two creates with distinct cwd facts, two explicit targets, filtered
+list output, and lexical `..`. Focused mux tests cover absent retained state and the attach update.
+The source partition now contains 93 direct values, 32 daemon-delegated values, and 73 live gaps.
+`format:session_active` remains open for a tri-state producer audit. The newly classified
+`sessions.new-session-attach-cwd` group owns the adjacent pinned `new-session -A -c` mutation that
+zz lacks and the fresh explicit-empty `new-session -c ''` case where zz inherits a cwd.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -265,12 +276,14 @@ flag gap, but accepted semantic divergences remain outside that count.
 [tmux superset roadmap](/designs/tmux-superset-roadmap.md). Shared key structure and bare bind
 mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
 menu descriptor consumption in slice 10o, popup consumption in slice 10p, per-client destruction
-fallback in slice 10q, cold local CLI parse atomicity in slice 10r, and nonconstant global-format
-source registration in slice 10s. The frozen 10t plan splits target-session path from the harder
-format-client activity contract. The live registry now has 88 active groups, 593 classified active
-items, and 100 closed records; 121 of 188 groups are resolved (64.4%). Slice 10s partitions the 198 pinned global format names into 92 direct mux values, 32
-daemon-delegated values, and 74 constant-backed live gaps. Open context formats and option consumers
-remain two independent discovery milestones. Regenerate and
+fallback in slice 10q, cold local CLI parse atomicity in slice 10r, nonconstant global-format source
+registration in slice 10s, and target-session path expansion in slice 10t. The live registry now has
+88 active groups, 594 classified active items, and 101 closed records; 122 of 189 groups are resolved
+(64.6%). Slice 10t moves the 198-name partition to 93 direct mux values, 32 daemon-delegated values,
+and 73 live gaps. `format:session_active` still needs its tri-state producer audit. The adjacent
+`sessions.new-session-attach-cwd` group now records both missing `new-session -A -c` mutation parity
+and fresh explicit-empty `new-session -c ''` retention. Open context formats and option consumers
+remain independent discovery milestones. Regenerate and
 re-rank the full live tracker before every slice so a newly exposed practical gate can move ahead
 of that forecast. Client targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading

@@ -54,8 +54,8 @@ valueless, 246 required-value, and 8 optional-value. Each command also carries p
 and maximum metadata. It parses nine custom `args_parse` callbacks used by 14 commands and reduces
 them to six effective rules. The remaining inventories contain 180 options, 198 global format-table
 names, 14 source-enumerated names across three selected format contexts, 68 hooks, and 303 default
-bindings across five tables. The 198 global names divide into 92 values resolved directly by the
-mux, 32 delegated to daemon `StatusHooks`, and 74 constant-backed names that remain active
+bindings across five tables. The 198 global names divide into 93 values resolved directly by the
+mux, 32 delegated to daemon `StatusHooks`, and 73 constant-backed names that remain active
 `format:` gaps. The context selection consists of 1 shared `command-item` name, 3
 `list-commands` names, and 10 `list-keys` names. zz implements all 14. The 13 list-specific names
 came first, and `formats.command-item-context` closed on 2026-08-24 when the shared `command` name
@@ -108,16 +108,29 @@ unspecified metadata, applies only requested `-N` and `-r` changes, and silently
 unbound after ensuring its table. Structural key equality still does not prove every downstream
 command or copy action. Those consumers retain their existing owners. The gate still does not prove
 open-ended or dynamic context-format names or consumer truth for option `BEHAVES`.
-`tracker.semantic-coverage` owns those two gaps. The nonconstant global-format registration now
-partitions the 198-name pin into 92 direct mux values, 32 daemon-delegated values, and 74 active
-constant-backed `format:` gaps. The mux invariant keeps those sets pairwise disjoint. The exact
+`tracker.semantic-coverage` owns those two gaps. At the slice 10s close, the nonconstant
+global-format registration partitioned the 198-name pin into 92 direct mux values, 32
+daemon-delegated values, and 74 active constant-backed `format:` gaps. The mux invariant kept those
+sets pairwise disjoint. The exact
 `status::tests::daemon_delegated_format_consumers_match_mux_inventory` test seeds buffer, client,
 and session facts and resolves every delegated name through the production `DaemonFormatHooks`
 consumer.
 
-This registration does not claim context-specific value parity. The 74 active format gaps keep
-their runtime owners, and the oracle, protocol, snapshots, scenarios, and accepted compatibility
-artifact remain unchanged. Protocol v84 closes all six runtime rules
+That registration did not claim context-specific value parity. The 74 format gaps kept their
+runtime owners at that checkpoint, and the oracle, protocol, snapshots, scenarios, and accepted
+compatibility artifact remained unchanged. Slice 10t promotes `session_path` to direct backing from
+the selected session's retained UTF-8 working directory at expansion time. The differential proof
+creates two sessions, preserves lexical `/tmp/..`, reads each path through a targeted display, and
+reads both through one filtered `list-sessions` query. Focused mux tests separately cover missing
+retained or target state and visibility after the production `attach-session -c` command updates
+one session. The current partition is 93 direct, 32 delegated, and 73 active format gaps. The
+canonical artifact stays at 98 scenarios, grows to 1,522 steps, and retains an attached-client
+`PASS`. `session_active` remains under `formats.session-runtime` for its no-client,
+unattached-client, and attached-session producer audit. `sessions.new-session-attach-cwd` owns two
+cwd mutations that 10t does not change: an existing `new-session -A -c` target skips its cwd update,
+and fresh explicit-empty `-c ''` collapses to omitted cwd inheritance.
+
+Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.
 `choose-client` and `switch-mode` remain covered by their unimplemented command items. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions

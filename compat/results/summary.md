@@ -19,7 +19,7 @@
 | errors | 2 | yes | 0 | yes | yes | yes |
 | exec-family | 30 | yes | 0 | yes | yes | yes |
 | format-flags | 8 | yes | 0 | yes | yes | yes |
-| formats-values | 13 | yes | 0 | yes | yes | yes |
+| formats-values | 18 | yes | 0 | yes | yes | yes |
 | formats | 12 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-defaults | 18 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-errors | 17 | yes | 0 | yes | yes | yes |

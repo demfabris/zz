@@ -35,6 +35,7 @@ pkgbase = zz-bin
 	optdepends = org.freedesktop.secrets: import encrypted Chrome cookies
 	provides = zz
 	conflicts = zz
+	conflicts = zz-beta-bin
 	options = !debug
 	options = !strip
 	source_x86_64 = https://github.com/demfabris/zz/releases/download/v0.0.0/zz-0.0.0-linux-x86_64.tar.gz

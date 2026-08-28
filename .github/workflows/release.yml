@@ -135,9 +135,10 @@ jobs:
               "${prerelease[@]}"
           fi
 
-      # Prereleases stay off the tap: `brew upgrade` would hand every user an rc.
+      # Two casks, two channels: prereleases publish only to `zz@beta`, so
+      # `brew upgrade` never hands a stable user an rc, while a stable release
+      # refreshes both so beta users move up to it.
       - name: Update the Homebrew tap
-        if: ${{ !contains(github.ref_name, '-') }}
         env:
           TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         shell: bash
@@ -158,11 +159,14 @@ jobs:
 
           git clone --depth 1 "git@github.com:$TAP_REPOSITORY.git" "$tap"
           mkdir -p "$tap/Casks"
-          scripts/render-cask.sh "$ZZ_VERSION" "$ZZ_DMG" > "$tap/Casks/zz.rb"
+          if [[ "$ZZ_VERSION" != *-* ]]; then
+            scripts/render-cask.sh "$ZZ_VERSION" "$ZZ_DMG" stable > "$tap/Casks/zz.rb"
+          fi
+          scripts/render-cask.sh "$ZZ_VERSION" "$ZZ_DMG" beta > "$tap/Casks/zz@beta.rb"
 
-          git -C "$tap" add Casks/zz.rb
+          git -C "$tap" add Casks
           if git -C "$tap" diff --cached --quiet; then
-            echo "the tap already carries this cask"
+            echo "the tap already carries these casks"
             exit 0
           fi
           git -C "$tap" \
@@ -363,23 +367,22 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "$ZZ_ZIP" "$ZZ_ZIP.sha256" "$ZZ_SETUP" "$ZZ_SETUP.sha256" --clobber
 
-  # Prereleases stay off the AUR for the same reason they stay off the tap,
-  # and render-aur.sh would reject their hyphenated pkgver anyway. Publishing
-  # needs an SSH key registered on the AUR account, stored as the
+  # Two packages, two channels, mirroring the tap: prereleases publish only
+  # to zz-beta-bin, stable releases refresh zz-bin and zz-beta-bin both.
+  # Publishing needs an SSH key registered on the AUR account, stored as the
   # AUR_SSH_PRIVATE_KEY secret; until it is provisioned the step below skips
-  # and the AUR package stays at its previous version.
+  # and the AUR packages stay at their previous versions.
   aur:
-    name: AUR zz-bin
+    name: AUR
     runs-on: ubuntu-24.04
     needs: linux
-    if: ${{ !contains(github.ref_name, '-') }}
     env:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Render and push the AUR package
+      - name: Render and push the AUR packages
         if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -407,19 +410,25 @@ jobs:
             > "$known_hosts"
           export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts"
 
-          # The clone is empty (with a warning) until the first push creates
-          # the package base.
-          pkg="$RUNNER_TEMP/zz-bin"
-          git clone "ssh://aur@aur.archlinux.org/zz-bin.git" "$pkg"
-          scripts/render-aur.sh "$version" "$x86_64_sha256" "$aarch64_sha256" "$pkg"
+          channels=(beta)
+          [[ "$version" == *-* ]] || channels=(stable beta)
+          for channel in "${channels[@]}"; do
+            package=zz-bin
+            [[ "$channel" == stable ]] || package=zz-beta-bin
+            # The clone is empty (with a warning) until the first push creates
+            # the package base.
+            pkg="$RUNNER_TEMP/$package"
+            git clone "ssh://aur@aur.archlinux.org/$package.git" "$pkg"
+            scripts/render-aur.sh "$version" "$x86_64_sha256" "$aarch64_sha256" "$pkg" "$channel"
 
-          git -C "$pkg" add PKGBUILD .SRCINFO
-          if git -C "$pkg" diff --cached --quiet; then
-            echo "the AUR already carries this version"
-            exit 0
-          fi
-          git -C "$pkg" \
-            -c user.name='github-actions[bot]' \
-            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit --message "zz-bin $version"
-          git -C "$pkg" push origin HEAD:master
+            git -C "$pkg" add PKGBUILD .SRCINFO
+            if git -C "$pkg" diff --cached --quiet; then
+              echo "the AUR already carries $package $version"
+              continue
+            fi
+            git -C "$pkg" \
+              -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --message "$package $version"
+            git -C "$pkg" push origin HEAD:master
+          done

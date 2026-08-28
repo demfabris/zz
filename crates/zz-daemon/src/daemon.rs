@@ -26191,9 +26191,8 @@ fn parse_buffer_command_args(
             break;
         }
         if !argument.starts_with('-') || argument == "-" {
-            parsed.positional.push(argument.clone());
-            index += 1;
-            continue;
+            parsed.positional.extend(args[index..].iter().cloned());
+            break;
         }
 
         let mut consumed_next = false;
@@ -26225,6 +26224,11 @@ fn parse_buffer_command_args(
             }
         }
         index += usize::from(consumed_next) + 1;
+    }
+    if let Some(spec) = zz_protocol::catalog_command_spec(command)
+        && zz_protocol::POSITIONAL_MAX_BEHAVES.contains(&spec.name)
+    {
+        spec.validate_positional_maximum(parsed.positional.len())?;
     }
     Ok(parsed)
 }
@@ -43485,7 +43489,7 @@ mod tests {
                 requesting,
                 ClientKind::Interactive,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("display-message", ["hello", "client"]),
+                &CommandInvocation::new("display-message", ["hello client"]),
             )
             .expect("display message");
 
@@ -47153,6 +47157,95 @@ mod tests {
     }
 
     #[test]
+    fn catalogued_positional_maximums_precede_daemon_targets_and_effects() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let input = directory.path().join("input");
+        let output = directory.path().join("output");
+        fs::write(&input, b"load sentinel").expect("input fixture");
+        fs::write(&output, b"save sentinel").expect("output fixture");
+        let input = input.to_string_lossy().into_owned();
+        let output = output.to_string_lossy().into_owned();
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .buffer_command(
+                &ExecutionContext::default(),
+                "set-buffer",
+                &["-b", "source", "alpha"].map(str::to_owned),
+            )
+            .expect("source buffer");
+
+        let cases = vec![
+            (
+                "choose-buffer",
+                "choose-buffer",
+                vec!["set-buffer callback", "-t", "=missing"],
+                1,
+            ),
+            (
+                "choose-tree",
+                "choose-tree",
+                vec!["set-buffer callback", "-t", "=missing"],
+                1,
+            ),
+            (
+                "display",
+                "display-message",
+                vec!["one", "-t", "=missing"],
+                1,
+            ),
+            (
+                "displayp",
+                "display-panes",
+                vec!["set-buffer callback", "-t", "missing"],
+                1,
+            ),
+            (
+                "loadb",
+                "load-buffer",
+                vec![input.as_str(), "-b", "loaded"],
+                1,
+            ),
+            (
+                "saveb",
+                "save-buffer",
+                vec![output.as_str(), "-b", "source"],
+                1,
+            ),
+            ("selectp", "select-pane", vec!["one", "-t", "=missing"], 0),
+            ("setb", "set-buffer", vec!["alpha", "-n", "renamed"], 1),
+        ];
+        for (spelling, canonical, arguments, maximum) in cases {
+            let error = shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(spelling, arguments),
+                )
+                .expect_err("positional maximum");
+            let DaemonError::Server(error) = error else {
+                panic!("unexpected error: {error:?}");
+            };
+            assert_eq!(
+                error,
+                ServerError::CommandParse(format!(
+                    "command {canonical}: too many arguments (need at most {maximum})"
+                ))
+            );
+        }
+
+        assert_eq!(fs::read(&output).expect("output fixture"), b"save sentinel");
+        let inner = shared.inner.lock();
+        assert!(inner.engine.state.sessions.is_empty());
+        assert!(inner.choose_buffers.is_empty());
+        assert!(inner.display_panes.is_empty());
+        assert_eq!(inner.paste_buffers.len(), 1);
+        assert_eq!(inner.paste_buffers[0].name, "source");
+        assert_eq!(inner.paste_buffers[0].data.as_ref(), b"alpha");
+    }
+
+    #[test]
     fn wait_for_matches_sticky_signal_gc_and_dispatch_precedence() {
         let shared = Arc::new(Shared::new(1));
         register_wait_clients(&shared, [1]);
@@ -50117,6 +50210,20 @@ mod tests {
         assert_eq!(parsed.value('b'), Some("binary"));
         assert_eq!(parsed.value('s'), Some("::"));
         assert_eq!(parsed.positional, ["-literal"]);
+
+        let parsed = parse_buffer_command_args(
+            "load-buffer",
+            &["path", "-b", "late"].map(str::to_owned),
+            &['b', 't'],
+            &[],
+        )
+        .expect_err("positional maximum");
+        assert_eq!(
+            parsed,
+            ServerError::CommandParse(
+                "command load-buffer: too many arguments (need at most 1)".to_owned()
+            )
+        );
 
         let error =
             parse_buffer_command_args("paste-buffer", &["-x".to_owned()], &['b', 't'], &['d', 'p'])

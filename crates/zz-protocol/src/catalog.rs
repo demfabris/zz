@@ -1,5 +1,7 @@
 //! Shared metadata for tmux-compatible commands implemented by `zz`.
 
+use crate::message::ServerError;
+
 /// The kind of value accepted by an option or positional argument.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandValueKind {
@@ -132,6 +134,28 @@ impl CommandSpec {
     #[must_use]
     pub fn option(&self, name: &str) -> Option<&CommandOptionSpec> {
         self.options.iter().find(|option| option.name == name)
+    }
+
+    #[must_use]
+    pub const fn positional_maximum(&self) -> Option<usize> {
+        if self.variadic.is_none() {
+            Some(self.positionals.len())
+        } else {
+            None
+        }
+    }
+
+    pub fn validate_positional_maximum(&self, actual: usize) -> Result<(), ServerError> {
+        let Some(maximum) = self.positional_maximum() else {
+            return Ok(());
+        };
+        if actual > maximum {
+            return Err(ServerError::CommandParse(format!(
+                "command {}: too many arguments (need at most {maximum})",
+                self.name
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -291,6 +315,17 @@ pub static DAEMON_INVALID_FLAG_BEHAVES: &[&str] = &[
     "show-prompt-history",
     "switch-client",
     "wait-for",
+];
+
+pub static POSITIONAL_MAX_BEHAVES: &[&str] = &[
+    "choose-buffer",
+    "choose-tree",
+    "display-message",
+    "display-panes",
+    "load-buffer",
+    "save-buffer",
+    "select-pane",
+    "set-buffer",
 ];
 
 pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
@@ -540,7 +575,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-t", FreeForm, "compatibility target client"),
             CommandOptionSpec::unsupported_flag("-w"),
         ],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -569,7 +604,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-a", "append to the file"),
             CommandOptionSpec::value("-b", FreeForm, "buffer name"),
         ],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -584,7 +619,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-t", FreeForm, "compatibility target client"),
             CommandOptionSpec::unsupported_flag("-w"),
         ],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -1324,7 +1359,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_flag("-m"),
             CommandOptionSpec::unsupported_value("-P"),
         ],
-        positionals: &[Pane],
+        positionals: &[],
         variadic: None,
     },
     CommandSpec {
@@ -1595,7 +1630,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "choose-tree",
         aliases: &[],
         description: "Choose a session, window, or pane",
-        usage: "[-NrswZ] [-f filter] [-K key-format] [-O order] [-t target-pane]",
+        usage: "[-NrswZ] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-s", "show sessions"),
@@ -1612,7 +1647,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-r", "reverse sort order"),
             CommandOptionSpec::unsupported_flag("-y"),
         ],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -1628,7 +1663,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "choose-buffer",
         aliases: &[],
         description: "Choose a paste buffer",
-        usage: "[-NrZ] [-f filter] [-K key-format] [-O order] [-t target-pane]",
+        usage: "[-NrZ] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-Z", "zoom the chooser, always full window in zz"),
@@ -1641,7 +1676,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-r", "reverse sort order"),
             CommandOptionSpec::unsupported_flag("-y"),
         ],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {
@@ -1662,8 +1697,8 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_flag("-I"),
             CommandOptionSpec::unsupported_flag("-v"),
         ],
-        positionals: &[],
-        variadic: Some(FreeForm),
+        positionals: &[FreeForm],
+        variadic: None,
     },
     CommandSpec {
         name: "show-messages",
@@ -1682,14 +1717,14 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-panes",
         aliases: &["displayp"],
         description: "Display pane numbers",
-        usage: "[-bN] [-d duration] [-t target-client]",
+        usage: "[-bN] [-d duration] [-t target-client] [template]",
         options: &[
             CommandOptionSpec::value("-d", FreeForm, "duration in milliseconds"),
             CommandOptionSpec::flag("-b", "do not block other commands, always on in zz"),
             CommandOptionSpec::flag("-N", "disable pane selection"),
             CommandOptionSpec::value("-t", FreeForm, "target client"),
         ],
-        positionals: &[],
+        positionals: &[FreeForm],
         variadic: None,
     },
     CommandSpec {

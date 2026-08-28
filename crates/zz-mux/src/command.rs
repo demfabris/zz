@@ -12,9 +12,9 @@ use zz_protocol::{
     CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
-    MAX_GUI_TEXT_BYTES, MuxOptionKey, PaneId, PaneKindSnapshot, PopupBorderLines, ServerError,
-    SessionId, TerminalUiCommand, WindowId, catalog_command_spec, command_specs,
-    normalize_browser_profile_name, resolve_command,
+    MAX_GUI_TEXT_BYTES, MuxOptionKey, POSITIONAL_MAX_BEHAVES, PaneId, PaneKindSnapshot,
+    PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId, catalog_command_spec,
+    command_specs, normalize_browser_profile_name, resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
@@ -5031,15 +5031,8 @@ impl MuxEngine {
         args: &[String],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("select-pane", args)?;
-        if positional.len() > 1 {
-            return Err(ServerError::CommandParse(
-                "select-pane accepts at most one target".to_owned(),
-            ));
-        }
-        let target = options
-            .value("-t")
-            .or_else(|| positional.first().map(String::as_str));
+        let (options, _) = parse_command_options("select-pane", args)?;
+        let target = options.value("-t");
         let start = match target {
             Some(":.+" | ".+" | ":+") => {
                 let current = self.resolve_pane(None, context.window, context.pane)?;
@@ -12203,6 +12196,9 @@ fn parse_command_options(
     let spec = command_spec(command).expect("executable command has catalog metadata");
     let (options, positional) = parse_options_for_spec(args, spec)?;
     validate_options(command, spec, &options)?;
+    if POSITIONAL_MAX_BEHAVES.contains(&spec.name) {
+        spec.validate_positional_maximum(positional.len())?;
+    }
     Ok((options, positional))
 }
 
@@ -18032,7 +18028,7 @@ mod tests {
                 &mut context,
                 &command(
                     "display",
-                    &["-t", &first.to_string(), "hello", "#{pane_id}", "#P"],
+                    &["-t", &first.to_string(), "hello #{pane_id} #P"],
                 ),
             )
             .unwrap();
@@ -20507,6 +20503,50 @@ mod tests {
         assert_eq!(options.value("-U"), Some("5"));
         assert!(options.has("-R"));
         assert!(positional.is_empty());
+    }
+
+    #[test]
+    fn catalogued_positional_maximums_precede_mux_targets_and_effects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for (spelling, canonical, arguments, maximum) in [
+            (
+                "choose-buffer",
+                "choose-buffer",
+                &["-t", "=missing", "one", "two"][..],
+                1,
+            ),
+            (
+                "choose-tree",
+                "choose-tree",
+                &["-t", "=missing", "one", "two"][..],
+                1,
+            ),
+            (
+                "display",
+                "display-message",
+                &["-t", "=missing", "one", "two"][..],
+                1,
+            ),
+            (
+                "displayp",
+                "display-panes",
+                &["-t", "missing", "one", "two"][..],
+                1,
+            ),
+            ("selectp", "select-pane", &["-t", "=missing", "one"][..], 0),
+        ] {
+            let error = engine
+                .execute(&mut context, &command(spelling, arguments))
+                .expect_err("positional maximum");
+            assert_eq!(
+                error,
+                ServerError::CommandParse(format!(
+                    "command {canonical}: too many arguments (need at most {maximum})"
+                ))
+            );
+            assert!(engine.state.sessions.is_empty());
+        }
     }
 
     #[test]
@@ -29501,7 +29541,7 @@ mod tests {
         assert!(matches!(
             engine.execute(
                 &mut context,
-                &command("choose-tree", &["select-pane", "-t", "%%"]),
+                &command("choose-tree", &["select-pane -t %%"]),
             ),
             Err(ServerError::InvalidCommand(_))
         ));
@@ -29549,7 +29589,7 @@ mod tests {
         assert!(matches!(
             engine.execute(
                 &mut context,
-                &command("choose-buffer", &["paste-buffer", "-b", "%%"]),
+                &command("choose-buffer", &["paste-buffer -b %%"]),
             ),
             Err(ServerError::InvalidCommand(_))
         ));
@@ -29646,7 +29686,7 @@ mod tests {
                 selectable: false,
             }]
         );
-        for args in [vec!["select-pane", "-t", "%%%"], vec!["-d", "forever"]] {
+        for args in [vec!["select-pane -t %%%"], vec!["-d", "forever"]] {
             assert!(matches!(
                 engine.execute(&mut context, &command("display-panes", &args)),
                 Err(ServerError::InvalidCommand(_))

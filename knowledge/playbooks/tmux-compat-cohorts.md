@@ -21,7 +21,9 @@ retained-client sizing in the third milestone. The fourth milestone closed clien
 seeding and refresh with protocol v82. The fifth closed retained client formats with protocol v83,
 the sixth closed the six client lifecycle hook producers, and the seventh proved silent Control
 delivery for asynchronous copy-pipe failures. The eighth registered and executed the 24-command
-daemon invalid-flag runtime roster. The last three needed no protocol change.
+daemon invalid-flag runtime roster. The ninth closed all eight pinned positional-maximum mismatches
+with catalog-owned metadata and the pin's first-positional flag boundary. The last four needed no
+protocol change.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -44,15 +46,15 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The fresh 2026-08-27 checkpoint covers 85 scenarios and 1,478 steps. Every ordinary row is clean.
+The fresh 2026-08-27 checkpoint covers 86 scenarios and 1,481 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`b631019e585fb3f1e2a3ec6b68bb8b8beb54e5272a7fc2e660aa270d13616439`.
-The full strict suite was rerun after the daemon invalid-flag closure, not carried forward from an
-older artifact. The new three-step scenario clears inherited state before proving rejection and
-side-effect suppression.
+`40358b89c67686bc10ddfa1384f17ecfd71a2edf97f444974a1b1855c54eb18d`.
+The full strict suite was rerun after the positional-maximum closure, not carried forward from an
+older artifact. The new three-step scenario proves canonical and alias diagnostics, the
+first-positional flag boundary, and side-effect suppression across all eight commands.
 
 # Cohorts
 
@@ -84,8 +86,10 @@ milestone per letter, never one combined commit.
 | 7 | Interactive refresh decision | `clients.interactive-refresh` | Hard decision gate | Either justify and adopt the cross-client mode contract or keep it parked and reclassify dependent copy claims |
 | 8 | Async copy or pipe error delivery | Closed under `control-mode.async-copy-pipe-errors` on 2026-08-27 | Complete | Pinned source plus a delayed exit-7 Control probe prove silent delivery and copy-mode cancellation |
 | 9a | Daemon invalid-flag runtime contract | Closed under `tracker.daemon-invalid-flag-runtime` on 2026-08-27 | Complete | Source-owned 24-command roster plus production-dispatch proof; later error-shape items remain open |
-| 9b | Arity and flag error shapes | The positional and shared error items in `mux.error-shapes` | Medium | One central validation path across the affected commands |
-| 9c | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |
+| 9b | Positional maximums | Closed under `mux.positional-maximums` on 2026-08-27 | Complete | One catalog validator across eight commands, with mux and daemon production-boundary proof |
+| 9c | Required positional minima | The 14 `positional-min:*` items in `mux.error-shapes` | Medium | One catalog sidecar and validator after flags but before targets and effects |
+| 9d | Shared arity and flag errors | `semantic:command-arity-errors` and `semantic:command-flag-errors` | Medium | Exact shared families without absorbing callback-body grammar |
+| 9e | Nested `new-session` error precedence | `semantic:nested-new-session-error-precedence` | Medium | Separate client-lifecycle path with its own oracle proof |
 | 10a-10f | `args_parse` runtime rules | Corresponding `args-parse:*` items in `tracker.semantic-coverage`, one measured rule per slice | Medium | Six effective source rules, never all callback commands at once |
 | 10g-10k | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -96,9 +100,9 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slice 4 is closed. Before choosing the next milestone, regenerate the report and re-rank every
-active daily, script, remote, or silent-mismatch group. That audit must include attach-dependent
-work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
+Slice 9b is closed and slice 9c is next. Before choosing each later milestone, regenerate the report
+and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
+attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, and `clients.parent-hup-exit`. Rows 4 and later are a dependency forecast,
 not permission to skip a newly unblocked practical gate. Keep formats, hooks,
 `active-pane`, and `no-detach-on-destroy` as separate slices.
@@ -185,9 +189,10 @@ Paste this prompt into the next session:
 Continue the tmux compatibility campaign in /Users/demfabris/dev/zz-tmux-compat on
 codex/tmux-compat. Preserve unrelated work and do not push.
 
-Verify that the session-cwd, requested-client-flags, retained-client-sizing, and client-environment
-milestones are committed and their tracker groups are closed. Confirm the current checkpoint still reports 85
-scenarios, 1,478 steps, attached-client PASS, and only the two documented GEO rows.
+Verify that the session-cwd, requested-client-flags, retained-client-sizing, client-environment,
+client-formats, client-hooks, asynchronous copy-pipe, daemon-invalid-flag, and positional-maximum
+milestones are committed and their tracker entries are closed. Confirm the current checkpoint still
+reports 86 scenarios, 1,481 steps, attached-client PASS, and only the two documented GEO rows.
 
 Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
 daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one

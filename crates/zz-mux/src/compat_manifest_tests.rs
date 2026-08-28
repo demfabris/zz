@@ -8,7 +8,7 @@ use serde::Deserialize;
 use zz_protocol::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, CommandArgsParseRule, CommandResolution,
     DAEMON_COMMAND_SPECS, DAEMON_INVALID_FLAG_BEHAVES, KeyTables, NATIVE_COMMAND_NAMES,
-    canonical_command, canonical_key, resolve_command,
+    POSITIONAL_MAX_BEHAVES, canonical_command, canonical_key, resolve_command,
 };
 
 use crate::{
@@ -347,7 +347,7 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
         if command.min_args != 0 {
             positional_min_mismatches.insert(format!("positional-min:{}", command.name));
         }
-        let maximum = spec.variadic.is_none().then_some(spec.positionals.len());
+        let maximum = spec.positional_maximum();
         if maximum != command.max_args {
             positional_max_mismatches.insert(format!("positional-max:{}", command.name));
         }
@@ -636,6 +636,56 @@ fn daemon_invalid_flag_runtime_inventory_matches_the_pin() {
         behaves != expected,
         "daemon invalid-flag runtime inventory and tracker item disagree"
     );
+}
+
+#[test]
+fn positional_maximum_runtime_inventory_matches_the_pin() {
+    let (oracle, items) = inventory();
+    let upstream = oracle
+        .commands
+        .iter()
+        .map(|command| (command.name.as_str(), command))
+        .collect::<BTreeMap<_, _>>();
+    let specs = specs();
+    let behaves = POSITIONAL_MAX_BEHAVES
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let expected = [
+        "choose-buffer",
+        "choose-tree",
+        "display-message",
+        "display-panes",
+        "load-buffer",
+        "save-buffer",
+        "select-pane",
+        "set-buffer",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        behaves.len(),
+        POSITIONAL_MAX_BEHAVES.len(),
+        "positional maximum behavior inventory contains duplicates"
+    );
+    assert_eq!(
+        behaves, expected,
+        "positional maximum behavior inventory does not match the closed roster"
+    );
+    for name in behaves {
+        let command = upstream.get(name).unwrap_or_else(|| {
+            panic!("positional maximum inventory names a native command: {name}")
+        });
+        let spec = specs.get(name).unwrap_or_else(|| {
+            panic!("positional maximum inventory names an absent command: {name}")
+        });
+        assert_eq!(spec.positional_maximum(), command.max_args, "{name}");
+        assert!(
+            !items.contains_key(&format!("positional-max:{name}")),
+            "verified positional maximum remains tracked: {name}"
+        );
+    }
 }
 
 #[test]

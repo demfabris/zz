@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/positional-maximums.sh ~/positional-maximums.sh
+out: set-environment -gu POSITIONAL_MAXIMUMS
+run-shell 'sh ~/positional-maximums.sh'
+out: show-environment -g POSITIONAL_MAXIMUMS

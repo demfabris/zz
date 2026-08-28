@@ -1895,14 +1895,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "positional-max:choose-buffer",
-        "positional-max:choose-tree",
-        "positional-max:display-message",
-        "positional-max:display-panes",
-        "positional-max:load-buffer",
-        "positional-max:save-buffer",
-        "positional-max:select-pane",
-        "positional-max:set-buffer",
         "positional-min:bind-key",
         "positional-min:confirm-before",
         "positional-min:display-menu",
@@ -1922,13 +1914,19 @@
         "semantic:nested-new-session-error-precedence"
       ],
       "evidence": [
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "file:compat/check.sh",
+        "scenario:compat/scenarios/smoke/positional-maximums.txt"
       ],
       "acceptance": [
         "Catalog metadata drives pin-shaped arity, flag, usage, and precedence errors for every command."
       ],
       "depends_on": [],
-      "reason": "Scripts can inspect exact errors even when both implementations reject the command."
+      "reason": "The eight positional maximum mismatches closed on 2026-08-27 through one catalog-backed validator at the mux and daemon parser boundaries. Canonical names, aliases, missing-target precedence, empty stdout, exact stderr, and unchanged buffers, files, panes, and overlays match the pin. Required positional bounds, the shared arity and flag error families, and nested new-session precedence remain open."
     },
     {
       "id": "options.lock-program",
@@ -3651,6 +3649,22 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Against an already-running compatible daemon, local default and explicit-socket CLI preflight scans the complete prepared vector for typed name and alias-body errors before stdin capture, attach or TUI routing, or command execution. A later unknown command returns exit 1 with the pinned error shape and no earlier effect; malformed alias bodies use zz's loud unknown-command shape while aliases.command-bodies remains open. Prepared runtime command failures keep sequential queue ordering, including earlier effects and pruning later commands. A focused binary regression uses a malformed live alias after a mutating command, and the strict three-step smoke scenario proves unknown-name parse atomicity and runtime-error ordering with zero differential mismatches. Cold or failed preparation falls open to static routing, so an autospawn verb may still run before a later unknown command. Remote --host remains excluded, and local flag or arity validation plus config or source-file replay remains open under mux.chain-parse-abort."
+    },
+    {
+      "id": "mux.positional-maximums",
+      "title": "Match command positional maximums",
+      "closed_on": "2026-08-27",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "file:compat/check.sh",
+        "scenario:compat/scenarios/smoke/positional-maximums.txt",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "Catalog metadata now limits choose-buffer, choose-tree, display-message, display-panes, load-buffer, save-buffer, and set-buffer to one positional argument and select-pane to none. Mux and daemon parsing emit the pin's exact canonical maximum error after valid leading options but before target resolution, callbacks, buffer mutation, or file I/O. The daemon parser follows tmux's first-positional stop rule, so later option-looking tokens count as positionals. One exact source-owned roster gates the behavior, and an independent manifest assertion prevents the roster from shrinking unnoticed. Focused production-path tests cover canonical commands and aliases with unchanged sessions, panes, overlays, buffers, and files. The three-step differential exercises all eight canonical names and all six aliases with valid-looking options after the first positional, exact exit status, empty stdout, exact stderr, and unchanged state. No protocol change was needed. Required positional bounds, the shared arity and flag error families, and nested new-session precedence remain open under mux.error-shapes."
     },
     {
       "id": "mux.resize-pane-optional-values",

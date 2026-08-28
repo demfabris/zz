@@ -176,6 +176,22 @@ This table preserves the 2026-08-22 roster. Do not update it as a live ledger.
 `python3 compat/tmux-tracker.py write-report` publishes the current roster in the generated gap
 report. `just compat-check` runs the full gate.
 
+## Command positional maximums
+
+Eight catalog bounds closed on 2026-08-27. `choose-buffer`, `choose-tree`, `display-message`,
+`display-panes`, `load-buffer`, `save-buffer`, and `set-buffer` accept at most one positional;
+`select-pane` accepts none. The shared catalog now owns each finite maximum and formats the pin's
+exact `command <canonical-name>: too many arguments (need at most N)` diagnostic. Mux-owned
+commands validate after their flags and before target resolution. Daemon-owned buffer commands use
+the same validator before rename, buffer lookup, path expansion, or file I/O.
+
+The `positional-maximums` fixture checks all eight canonical names and all six aliases at rc 1 with
+empty stdout and exact stderr. Missing targets do not displace the arity error, the active pane does
+not move, a set-buffer rename does not happen, load-buffer creates no buffer, save-buffer preserves
+its file, and callback-looking chooser templates do not run. Required positional bounds and the
+remaining shared arity, flag, usage, and nested-session precedence work stay under
+`mux.error-shapes`.
+
 ## Accepted grammar divergence evidence
 
 The catalog count does not include syntax zz accepts or parses before diverging:

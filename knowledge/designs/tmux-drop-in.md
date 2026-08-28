@@ -91,13 +91,13 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current canonical acceptance inventory contains 85 differential scenarios and 1,478 executable
+The current canonical acceptance inventory contains 86 differential scenarios and 1,481 executable
 steps against pinned tmux `d77c9dc6`, including 18 config/plugin smokes. The complete strict and
 attached run on 2026-08-27 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
-`b631019e585fb3f1e2a3ec6b68bb8b8beb54e5272a7fc2e660aa270d13616439`.
+`40358b89c67686bc10ddfa1384f17ecfd71a2edf97f444974a1b1855c54eb18d`.
 `compat/attached-client.sh` drives real inner zz/tmux attaches through pinned-tmux PTYs, covering copy
 mode, command-output navigation, choosers, prompts, prefix tables, buffers, and nested attach. Its
 96-line command-output case checks line and page movement, search, selection-to-paste-buffer, live

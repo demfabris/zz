@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 87 active groups, 584 classified active items, 92 closed groups, and two known
+The live tracker has 87 active groups, 583 classified active items, 93 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -64,6 +64,10 @@ and both positional-bound closures each add one fail-closed three-step canonical
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,
 GEO, FMT, OUT, or WARN differences.
+Slice 10l registers the pinned hook-producer partition in source without changing runtime behavior
+or the differential corpus, so the canonical artifact remains 98 scenarios and 1,517 steps with
+that digest. Shared key behavior is the next source-owned tracker partition in slice 10m. The
+nonconstant format, open context-format, and option-consumer partitions follow as separate slices.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
@@ -466,7 +470,8 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    captures 180 options, 198 global formats, 14 source-enumerated names across the selected
    `command-item`, `list-commands`, and `list-keys` contexts, 68 hooks, and 303 default bindings
    across five tables from an attested clean build at the exact pin. `just compat-check` runs the
-   oracle and registry checks plus the full `zz-mux` library suite.
+   oracle and registry checks, the full `zz-mux` library suite, and an exact-filtered daemon
+   hook-producer partition test.
 
    `mux.resize-pane-optional-values` closed on 2026-08-25 as a catalog-only reconciliation.
    Runtime already accepted bare direction flags with amount 1 and attached or separated integer
@@ -558,9 +563,13 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    item remains. The
    unimplemented `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
-   `tracker.semantic-coverage` tracks open-ended or dynamic context formats, nonconstant formats,
-   hook production, shared binding runtime behavior, and option `BEHAVES` consumer truth. Daemon
-   invalid-flag coverage first closed on 2026-08-27 with
+   Slice 10l closes hook-producer discovery with a daemon-owned partition of all 68 pinned hook
+   names. The source roster names 27 explicit event producers, while the test derives 37 generic
+   `after-<command>` producers from implemented canonical commands. It requires those 64 produced
+   names plus the four active gaps, `after-queue`, `pane-focus-in`, `pane-focus-out`, and
+   `pane-set-clipboard`, to equal the oracle. `tracker.semantic-coverage` now tracks open-ended or
+   dynamic context formats, nonconstant formats, shared binding runtime behavior, and option
+   `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
    partial roster and routed daemon preflight through the catalog parser used by mux execution.
    The first eight positional maximum mismatches closed later that day, followed by all fourteen
@@ -1184,6 +1193,15 @@ permanent product decision has been recorded for them.
   parser fix makes direct and stored positional bounds outrank recognized parked capabilities.
   All 12 implemented callback commands now apply their pinned rules; no command-specific
   `args-parse:` item remains.
+- 2026-08-28: Slice 10l closed `tracker.hook-producer-partition` without a protocol or runtime
+  change. A daemon-owned invariant names 27 explicit event producers and derives 37 generic
+  `after-<command>` producers whose suffix names an implemented canonical command. It reads the four
+  active `hook:` items from the tracker, rejects duplicates and produced-versus-tracked overlap, and
+  requires the 64 produced names plus `after-queue`, `pane-focus-in`, `pane-focus-out`, and
+  `pane-set-clipboard` to equal all 68 pinned hooks. `just compat-check` requires the named daemon
+  test and runs it through `--exact`. The source-registration closure leaves the canonical 98
+  scenarios, 1,517 steps, attached-client `PASS`, two registered GEO rows, and summary digest
+  unchanged.
 
 # Related
 

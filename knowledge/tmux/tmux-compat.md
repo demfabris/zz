@@ -82,8 +82,9 @@ stores its update date, active gaps, and closed history. The generated
 product disposition as open, blocked, or accepted. `depends_on` records delivery order and does not
 set status.
 
-`just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, then
-runs the full `zz-mux` library suite. The Rust gate reconciles upstream command and alias names,
+`just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, runs
+the full `zz-mux` library suite, then requires the named daemon hook-producer partition test and
+runs it through `--exact`. The Rust gate reconciles upstream command and alias names,
 flag arities, positional bounds, custom argument rules, option names, global and selected
 context-format names, and hook names. It classifies native commands, native aliases, zz-only flags
 on tmux command names, and every zz-only default key. It derives the guarded native-name roster from
@@ -93,9 +94,14 @@ constant-backed format with a manifest item and tracks every missing default key
 `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. For each shared default key, it reconciles the
 rendered command and repeat bit or requires a named `binding:` divergence.
 
-The gate does not prove open-ended or dynamic context-format names, nonconstant format behavior,
-hook production, runtime behavior for shared bindings, or consumer truth for option `BEHAVES`.
-`tracker.semantic-coverage` owns those five blind spots. Protocol v84 closes all six runtime rules
+Slice 10l closes hook-producer discovery with a daemon-owned source invariant. It names 27 explicit
+event producers and derives 37 generic `after-<command>` producers whose suffix names an implemented
+canonical command. The test requires those 64 produced hooks plus the four active gaps,
+`after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, to equal all 68 pinned
+names. It also rejects duplicate explicit names and produced-versus-tracked overlap. The gate still
+does not prove open-ended or dynamic context-format names, nonconstant format behavior, runtime
+behavior for shared bindings, or consumer truth for option `BEHAVES`. `tracker.semantic-coverage`
+owns those four gaps. Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.
 `choose-client` and `switch-mode` remain covered by their unimplemented command items. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions

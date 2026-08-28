@@ -118,6 +118,14 @@ the exact buffer name or tree target, and executes against the invoking client's
 Direct and stored commands now validate positional bounds before rejecting a recognized parked
 capability. The tracker has no remaining command-specific `args-parse:` item.
 
+The twenty-fourth milestone closes slice 10l as a source registration. A daemon-owned invariant
+partitions all 68 pinned hook names into 27 explicit event producers, 37 generic
+`after-<command>` producers derived from implemented canonical commands, and four active gaps:
+`after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`. The test rejects
+duplicate explicit names and overlap between produced and tracked names. `just compat-check`
+requires the named daemon test and runs it through `--exact`. The slice changes no runtime
+behavior, protocol, differential scenario, or step.
+
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
 and TUI reconnect. `resize-window -A` and `-a` now aggregate retained client geometry once and
@@ -146,6 +154,7 @@ GEO divergence with every other channel clean. The sizing milestone's expanded m
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+The 10l source-registration milestone leaves that artifact and digest unchanged.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
@@ -283,7 +292,8 @@ closure is that exception.
 | 10h | `display-menu` repeating item argument rule | Closed under `tracker.args-parse-display-menu` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; data-dependent NAME, KEY, and ACTION typing closes without absorbing menu presentation or selected-action execution |
 | 10i | `display-panes` commands-or-string argument rule | Closed under `tracker.args-parse-display-panes` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; parsing and client-routing precedence close while custom selection-template execution remains parked |
 | 10j/10k | `choose-buffer` and `choose-tree` commands-or-string rule | Closed under `tracker.args-parse-choose-buffer` and `tracker.args-parse-choose-tree` on 2026-08-28 | Complete | One deliberate combined milestone for one callback rule, one chooser-template executor, and one attached 26-check proof |
-| 10l-10p | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
+| 10l | Hook-producer source registration | Closed under `tracker.hook-producer-partition` on 2026-08-28 | Complete | 27 explicit plus 37 derived producers reconcile with four tracked hook gaps; no runtime or differential change |
+| 10m-10p | Remaining source-owned tracker registrations | Shared key behavior next, then nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Four unrelated owners remain four independent milestones |
 | 10q-10s | Raw TUI daemon overlays | Three items in `clients.tui-overlay-consumption`, one confirm, menu, or popup surface per slice | Hard | ClientCore already retains state; each client renderer and input contract remains independently closable |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | 12a-12f | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -293,7 +303,7 @@ closure is that exception.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through the combined 10j/10k milestone are closed; slice 10l is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through 10l are closed; shared key behavior in slice 10m is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

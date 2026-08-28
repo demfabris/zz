@@ -98,6 +98,8 @@ attached run on 2026-08-28 left every ordinary row clean. `known/known-main-pres
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
+The 10l source-registration checkpoint adds no runtime behavior, differential scenario, or step,
+so it retains that artifact and digest.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -203,6 +205,13 @@ separate. All 12 implemented callback-bearing commands now appear in
 `COMMAND_ARGS_PARSE_BEHAVES`, so no command-specific `args-parse:` item remains. `choose-client` and
 `switch-mode` stay classified by their unimplemented-command items.
 
+Slice 10l closes the source-owned hook-producer partition without changing runtime behavior. A
+daemon invariant names 27 explicit event producers and derives 37 generic `after-<command>`
+producers from implemented canonical commands. It requires those 64 names plus the four active
+`hook:` items, `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, to equal
+all 68 pinned hooks. `just compat-check` requires and runs the exact daemon partition test. The
+tracker now has 87 active groups, 583 classified active items, and 93 closed-history entries.
+
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
 daemon-expanded window loop. `BEHAVES` and its drift test make that split explicit. Some
@@ -218,9 +227,9 @@ catalog-declared pairs, inventoried in the matrix and enforced by
 flag gap, but accepted semantic divergences remain outside that count.
 
 **The current queue** is dependency-ordered in the
-[tmux superset roadmap](/designs/tmux-superset-roadmap.md): register the hook-producer partition in
-slice 10l, close the other four source-owned tracker partitions independently, then take the three
-raw-TUI overlay contracts one at a time. Regenerate and re-rank the full live tracker before every
+[tmux superset roadmap](/designs/tmux-superset-roadmap.md): close the four remaining source-owned
+tracker partitions as separate milestones, starting with shared key behavior in slice 10m, then
+take the three raw-TUI overlay contracts one at a time. Regenerate and re-rank the full live tracker before every
 slice so a newly exposed practical gate can move ahead of that forecast. Client targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading
 `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order

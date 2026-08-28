@@ -1217,7 +1217,8 @@
       ],
       "evidence": [
         "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:crates/zz-daemon/src/daemon.rs"
       ],
       "acceptance": [
         "Each pane transition emits once with a defined client when multiple clients view the pane."
@@ -1241,7 +1242,8 @@
       ],
       "evidence": [
         "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:crates/zz-daemon/src/daemon.rs"
       ],
       "acceptance": [
         "The hook fires after the same queue boundary as the pin without duplicate command blocks."
@@ -2623,7 +2625,7 @@
         "An event hook that sources a relative path selects the same current or best attached client and session cwd as the pin, including when another client caused the event."
       ],
       "depends_on": [],
-      "reason": "tmux dynamically selects a current or best attached client for event-hook replay, while zz runs deferred event hooks through its sentinel client; exact session-cwd selection belongs in the shared attach context first."
+      "reason": "The shared attached-client and session-cwd facts have shipped, but deferred event hooks still run through zz's sentinel client instead of selecting tmux's current or best attached client for relative source resolution."
     },
     {
       "id": "source-file.sourced-hook-client-cwd",
@@ -2742,7 +2744,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "semantic:tracker-hook-producer-partition",
         "semantic:tracker-key-binding-behavior",
         "semantic:tracker-nonconstant-format-behavior",
         "semantic:tracker-open-context-format-vocabulary",
@@ -2755,10 +2756,10 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "acceptance": [
-        "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
+        "Consumer-owned inventories reconcile shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, and all 12 now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`. `choose-client` and `switch-mode` remain covered by their unimplemented-command items. Runtime adoption has no remaining command-specific `args-parse:` item. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "All six `args_parse` rules and the pinned hook producer partition now have source-owned registrations. Option consumption, nonconstant and open-ended formats, and shared binding behavior remain the four discovery blind spots."
     }
   ],
   "closed": [
@@ -4128,6 +4129,20 @@
         "resource:knowledge/tmux/tmux-compat.md"
       ],
       "resolution": "This milestone introduced source-derived production-dispatch coverage for all 24 pinned tmux commands that daemon dispatch preempts. Its strict three-step fixture used one absent alphanumeric short flag across buffer, shell callback, branch callback, lock, and blocking command families and proved rejection without buffer mutation. The later mux.command-flag-errors closure removed the partial daemon roster. Daemon preflight now calls the shared catalog parser, and exhaustive tests cover exact diagnostics for the full implemented command and alias surface before command-specific work. The seven daemon-native commands remain outside the pinned grammar. Callback argument rules retain their existing owner."
+    },
+    {
+      "id": "tracker.hook-producer-partition",
+      "title": "Register the pinned hook producer partition",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "file:compat/check.sh",
+        "resource:knowledge/playbooks/compat-harness.md",
+        "resource:knowledge/tmux/tmux-compat.md"
+      ],
+      "resolution": "A daemon-owned invariant now partitions all 68 pinned hook names without changing runtime behavior. The source roster names 27 explicit event producers, while the test derives 37 generic `after-<command>` producers from pinned hook names whose suffix is an implemented canonical command. It reads the four active `hook:` items from the live tracker, rejects duplicate explicit names and produced-versus-tracked overlap, and requires the 64 produced names plus those four gaps to equal the pinned oracle exactly. `just compat-check` requires and runs the exact daemon partition test after the full mux suite. `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard` remain open under their runtime owners."
     }
   ],
   "known_differentials": [

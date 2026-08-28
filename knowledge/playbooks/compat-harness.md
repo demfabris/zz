@@ -44,8 +44,9 @@ just compat-check
 ```
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
-and registry, asserts that all four named manifest tests still exist, then runs the full `zz-mux`
-library suite. Linux CI runs the same command after restoring the pinned tmux cache. A full
+and registry, requires seven named mux manifest tests, then runs the full `zz-mux` library suite.
+It also requires the named daemon hook-producer partition test and runs it through `--exact`.
+Linux CI runs the same command after restoring the pinned tmux cache. A full
 `compat/run.sh` checks the oracle and tracker before executing scenarios.
 
 Oracle schema 4 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
@@ -119,9 +120,17 @@ stored-command, parser, postcard, mux, and daemon proofs. All 12 implemented cal
 apply their pinned rules. The unimplemented `choose-client` and `switch-mode` callbacks need no
 `args-parse:` item because their `command:` items cover the whole command.
 
-Five semantic gaps remain: open-ended or dynamic context-format names, nonconstant format
-behavior, hook production, runtime behavior for shared bindings, and consumer truth for names in
-option `BEHAVES`. `tracker.semantic-coverage` owns that work. Shared command-flag diagnostics
+Hook-producer discovery closed in slice 10l. The daemon-owned invariant names 27 explicit event
+producers and derives 37 generic `after-<command>` producers from implemented canonical commands.
+It reads the four active `hook:` items from the live tracker, rejects duplicate explicit names and
+produced-versus-tracked overlap, and requires those 64 produced names plus `after-queue`,
+`pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard` to equal all 68 pinned names.
+`just compat-check` requires
+`daemon::tests::pinned_hook_producer_partition_matches_the_oracle` and runs it through `--exact`.
+Four semantic gaps remain:
+open-ended or dynamic context-format names, nonconstant format behavior, runtime behavior for
+shared bindings, and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns
+that work. Shared command-flag diagnostics
 closed on 2026-08-28 without retaining the earlier partial
 daemon roster. The catalog parser covers 83 implemented upstream canonical commands and 74 aliases
 through mux execution, daemon preflight, and stored commands. Exact native attach shares the
@@ -242,6 +251,8 @@ Use the registry vocabulary consistently:
 `compat/results/summary.md` is the persisted canonical artifact. The combined 10j/10k checkpoint
 from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
 row is clean.
+Slice 10l adds a source registration and no differential scenario or runtime behavior, so it keeps
+the same scenario count, step count, attached-client result, and digest.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,

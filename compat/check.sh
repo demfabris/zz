@@ -23,3 +23,11 @@ for required_test in \
   }
 done
 cargo test -p zz-mux --lib
+
+daemon_test="daemon::tests::pinned_hook_producer_partition_matches_the_oracle"
+daemon_test_list="$(cargo test -p zz-daemon --lib -- --list)"
+grep -Fqx -- "$daemon_test: test" <<<"$daemon_test_list" || {
+  printf 'error: required compatibility manifest test is missing: %s\n' "$daemon_test" >&2
+  exit 1
+}
+cargo test -p zz-daemon --lib "$daemon_test" -- --exact

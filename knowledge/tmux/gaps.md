@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **87**. Classified items: **584**.
+Tracked gap groups: **87**. Classified items: **583**.
 
 - Status: open: 46, blocked: 20, accepted: 21.
 - Decision: adopt: 51, native: 15, park: 15, never: 6.
 - Priority: next: 3, later: 63, none: 21.
-- Closed history entries: 92.
-- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 74, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 102, presentation: 8, protocol: 2.
+- Closed history entries: 93.
+- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 74, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 101, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -901,6 +901,7 @@ Focus is per client and clipboard changes cross client ownership.
 - Evidence:
   - `resource:knowledge/tmux/divergences.md`
   - `resource:crates/zz-mux/src/tmux_options.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
 - Acceptance:
   - `Each pane transition emits once with a defined client when multiple clients view the pane.`
 
@@ -918,6 +919,7 @@ The hook bus exists, but zz has no equivalent producer boundary.
 - Evidence:
   - `resource:knowledge/tmux/divergences.md`
   - `resource:crates/zz-mux/src/tmux_options.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
 - Acceptance:
   - `The hook fires after the same queue boundary as the pin without duplicate command blocks.`
 
@@ -1592,7 +1594,7 @@ One window belongs to one session in zz.
 
 ### `source-file.event-hook-client-cwd`: Select the current client cwd for event-hook sources
 
-tmux dynamically selects a current or best attached client for event-hook replay, while zz runs deferred event hooks through its sentinel client; exact session-cwd selection belongs in the shared attach context first.
+The shared attached-client and session-cwd facts have shipped, but deferred event hooks still run through zz's sentinel client instead of selecting tmux's current or best attached client for relative source resolution.
 
 - Decision: `adopt`
 - Status: `open`
@@ -1678,14 +1680,14 @@ The mux cannot inspect cursor, history, or terminal mode state.
 
 ### `tracker.semantic-coverage`: Close the remaining semantic discovery blind spots
 
-Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, and all 12 now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`. `choose-client` and `switch-mode` remain covered by their unimplemented-command items. Runtime adoption has no remaining command-specific `args-parse:` item. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations.
+All six `args_parse` rules and the pinned hook producer partition now have source-owned registrations. Option consumption, nonconstant and open-ended formats, and shared binding behavior remain the four discovery blind spots.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `next` / `medium`
 - Owner: `protocol`
 - User impact: scripts
-- Items: `semantic:tracker-hook-producer-partition`, `semantic:tracker-key-binding-behavior`, `semantic:tracker-nonconstant-format-behavior`, `semantic:tracker-open-context-format-vocabulary`, `semantic:tracker-option-consumer-registration`
+- Items: `semantic:tracker-key-binding-behavior`, `semantic:tracker-nonconstant-format-behavior`, `semantic:tracker-open-context-format-vocabulary`, `semantic:tracker-option-consumer-registration`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.py`
@@ -1693,7 +1695,7 @@ Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `
   - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
   - `resource:knowledge/playbooks/compat-harness.md`
 - Acceptance:
-  - `Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest.`
+  - `Consumer-owned inventories reconcile shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest.`
 
 ## Known differential scenarios
 
@@ -1798,3 +1800,4 @@ Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `
 | `tracker.args-parse-set-hook` | 2026-08-28 | Protocol v84 lexical command-block positions now drive `set-hook`'s pinned monitor-or-value rule without another wire change. Without `-B`, only positional 1 accepts a string or typed block; position 0 and extra typed positionals remain string-only. With `-B`, every positional lexically accepts either type, while `-B` and `-t` values remain strings. zz still rejects `-B` during execution because format-monitor semantics remain unsupported. Every typed child constructs before parent type, arity, or effects. Accepted typed values normalize for built-in hooks, custom `@` options, and values forwarded to `set-option`. Built-in hooks perform a second construction pass and flatten physical groups; custom `@` typed values retain textual ` ;; ` groups. Quoted braces act as runtime syntax for built-in hooks but remain literal deferred storage for custom hooks. An unindexed malformed runtime value clears the existing built-in hook before failing, while an indexed failure preserves its entry. An unindexed empty block clears without adding an entry, `-a` with an empty block does nothing, and an indexed empty block remains present. Local array creation occurs before empty-append or runtime-parse handling, so an empty or failing local append installs an empty local array that shadows the inherited global hook. `-R` constructs and can reject a typed ignored value, while it ignores a quoted string value and runs the stored hook. Preexisting aliases, the stored bind path, exact Control framing, and `default-client-command` forwarding are covered by the strict three-step, 24-check fixture. Eager whole-file construction, same-source alias mutation, multiline inner-source placement, `-B` monitor semantics, and broader replay placement remain with their existing owners. Four implemented callback commands across two effective rules remain under `tracker.semantic-coverage`. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/scenarios/smoke/fixtures/args-parse-set-hook.sh`, `scenario:compat/scenarios/smoke/args-parse-set-hook.txt`, `resource:knowledge/playbooks/compat-harness.md` |
 | `tracker.args-parse-set-option` | 2026-08-28 | Protocol v84 lexical command-block positions now drive the shared pinned value rule for `set-option` and `set-window-option` without another wire change. The option name, flag values, and extra positionals remain strings while positional 1 accepts a string or typed command block. Typed failures use exact canonical diagnostics before arity, targets, or effects. Accepted blocks stringify through recursive canonical command printing, preserving same-line `;` and physical-line `;;` groups; empty blocks become empty values, quoted braces stay literal, and `-F` runs after normalization. Canonical, built-in, prefix, preexisting user-alias, `--`, late-flag, real command-option, stored-binding, source-file, and Control paths are covered by a strict 21-check fixture. Eager whole-file construction, parse-only `source-file -n`, same-source alias creation, and the outer-user-alias plus nested-user-alias cross-case remain with their existing parser and alias owners. Eight implemented callback commands across three effective rules remain under `tracker.semantic-coverage`. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-protocol/src/message.rs`, `resource:crates/zz-mux/src/parser.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/scenarios/smoke/fixtures/args-parse-set-option.sh`, `scenario:compat/scenarios/smoke/args-parse-set-option.txt`, `resource:knowledge/playbooks/compat-harness.md` |
 | `tracker.daemon-invalid-flag-runtime` | 2026-08-27 | This milestone introduced source-derived production-dispatch coverage for all 24 pinned tmux commands that daemon dispatch preempts. Its strict three-step fixture used one absent alphanumeric short flag across buffer, shell callback, branch callback, lock, and blocking command families and proved rejection without buffer mutation. The later mux.command-flag-errors closure removed the partial daemon roster. Daemon preflight now calls the shared catalog parser, and exhaustive tests cover exact diagnostics for the full implemented command and alias surface before command-specific work. The seven daemon-native commands remain outside the pinned grammar. Callback argument rules retain their existing owner. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/check.sh`, `file:compat/scenarios/smoke/fixtures/daemon-invalid-flags.sh`, `scenario:compat/scenarios/smoke/daemon-invalid-flags.txt`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/tmux-compat.md` |
+| `tracker.hook-producer-partition` | 2026-08-28 | A daemon-owned invariant now partitions all 68 pinned hook names without changing runtime behavior. The source roster names 27 explicit event producers, while the test derives 37 generic `after-<command>` producers from pinned hook names whose suffix is an implemented canonical command. It reads the four active `hook:` items from the live tracker, rejects duplicate explicit names and produced-versus-tracked overlap, and requires the 64 produced names plus those four gaps to equal the pinned oracle exactly. `just compat-check` requires and runs the exact daemon partition test after the full mux suite. `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard` remain open under their runtime owners. | `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `file:compat/check.sh`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/tmux-compat.md` |

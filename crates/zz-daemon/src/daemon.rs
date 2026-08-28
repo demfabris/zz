@@ -2429,6 +2429,37 @@ struct PendingHookEvent {
     exclude_client: Option<ClientId>,
 }
 
+#[cfg(test)]
+const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
+    "alert-activity",
+    "alert-bell",
+    "alert-silence",
+    "client-active",
+    "client-attached",
+    "client-dark-theme",
+    "client-detached",
+    "client-focus-in",
+    "client-focus-out",
+    "client-light-theme",
+    "client-resized",
+    "client-session-changed",
+    "command-error",
+    "pane-died",
+    "pane-exited",
+    "pane-mode-changed",
+    "pane-title-changed",
+    "session-closed",
+    "session-created",
+    "session-renamed",
+    "session-window-changed",
+    "window-layout-changed",
+    "window-linked",
+    "window-pane-changed",
+    "window-renamed",
+    "window-resized",
+    "window-unlinked",
+];
+
 #[derive(Clone)]
 struct HookSessionState {
     name: String,
@@ -28721,6 +28752,116 @@ mod tests {
 
     use super::*;
     use crate::{CommandClient, InteractiveClient};
+
+    #[test]
+    fn pinned_hook_producer_partition_matches_the_oracle() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let oracle: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join("compat/tmux-oracle.json"))
+                .expect("read pinned tmux oracle"),
+        )
+        .expect("parse pinned tmux oracle");
+        let oracle_hooks = oracle["hooks"]
+            .as_array()
+            .expect("pinned tmux hooks")
+            .iter()
+            .map(|hook| hook.as_str().expect("pinned tmux hook name").to_owned())
+            .collect::<Vec<_>>();
+        let pinned_hooks = oracle_hooks.iter().cloned().collect::<BTreeSet<_>>();
+        assert_eq!(
+            pinned_hooks.len(),
+            oracle_hooks.len(),
+            "duplicate pinned hook"
+        );
+        assert_eq!(pinned_hooks.len(), 68, "pinned hook count changed");
+
+        let command_names = zz_protocol::command_specs()
+            .map(|spec| spec.name)
+            .collect::<BTreeSet<_>>();
+        let produced_after_hooks = pinned_hooks
+            .iter()
+            .filter(|hook| {
+                hook.strip_prefix("after-")
+                    .is_some_and(|command| command_names.contains(command))
+            })
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            produced_after_hooks.len(),
+            37,
+            "catalog-derived after-command hook count changed"
+        );
+
+        let produced_non_after_hooks = PRODUCED_NON_AFTER_PINNED_HOOKS
+            .iter()
+            .map(|hook| (*hook).to_owned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            produced_non_after_hooks.len(),
+            PRODUCED_NON_AFTER_PINNED_HOOKS.len(),
+            "duplicate explicit hook producer"
+        );
+        assert_eq!(
+            produced_non_after_hooks.len(),
+            27,
+            "explicit hook producer count changed"
+        );
+        assert!(
+            produced_after_hooks.is_disjoint(&produced_non_after_hooks),
+            "after-command and explicit hook producers overlap"
+        );
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join("compat/tmux-gaps.json"))
+                .expect("read tmux gap manifest"),
+        )
+        .expect("parse tmux gap manifest");
+        let mut tracked_hooks = BTreeSet::new();
+        for gap in manifest["gaps"].as_array().expect("tmux gap list") {
+            for item in gap["items"].as_array().expect("tmux gap items") {
+                let item = item.as_str().expect("tmux gap item");
+                if let Some(hook) = item.strip_prefix("hook:") {
+                    assert!(
+                        tracked_hooks.insert(hook.to_owned()),
+                        "duplicate hook gap: {hook}"
+                    );
+                }
+            }
+        }
+        let expected_tracked_hooks = [
+            "after-queue",
+            "pane-focus-in",
+            "pane-focus-out",
+            "pane-set-clipboard",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(
+            tracked_hooks, expected_tracked_hooks,
+            "runtime hook gap roster changed"
+        );
+
+        let produced_hooks = produced_after_hooks
+            .union(&produced_non_after_hooks)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(produced_hooks.len(), 64, "produced hook count changed");
+        assert_eq!(tracked_hooks.len(), 4, "tracked hook count changed");
+        assert!(
+            produced_hooks.is_disjoint(&tracked_hooks),
+            "produced and tracked hooks overlap"
+        );
+        let partition = produced_hooks
+            .union(&tracked_hooks)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(partition.len(), 68, "hook partition count changed");
+        assert_eq!(
+            partition, pinned_hooks,
+            "hook partition differs from the pin"
+        );
+    }
 
     #[test]
     fn repeated_terminal_input_stops_at_the_first_rejection() {

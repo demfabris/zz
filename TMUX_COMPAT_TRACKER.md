@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10P COMPLETE LOCALLY, AWAITING AUTHORIZED COMMIT**
+> Campaign state: **SLICE 10P COMMITTED; RERANKING THE NEXT SLICE**
 >
 > Tracker resolution progress: **63.8% (118 of 185 known groups)**
 >
-> Audited prechange base: **2026-08-28** at `7cad19e78fae2356b42832a48257ed17ddfa4b1b`
+> Committed milestone base: **2026-08-28** at `587ce5487dfafabe8d6b1357c31bd2ae032f0b8b`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited prechange base | `7cad19e78fae2356b42832a48257ed17ddfa4b1b` |
-| Published delivery | Remote `main` contains the campaign through 10o; 10p is uncommitted and unpushed |
+| Committed milestone base | `587ce5487dfafabe8d6b1357c31bd2ae032f0b8b` |
+| Delivery | Local `main` contains 10p; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Pause point | Slice 10p is implemented and proven; final rereview is clean; no next slice is frozen |
+| Campaign point | Slice 10p is committed; the live rerank has not frozen its successor |
 | Live registry | 88 active groups, 594 active items, 97 closed records |
 | Active status | 47 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The audited prechange base matched `origin/main` before slice 10p began. Resolve the commit
+The 10p milestone commit descends from the verified `origin/main` base. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -149,8 +149,8 @@ Work one bounded milestone at a time:
    current task authorizes commits.
 9. Never push unless Fabrico explicitly asks.
 
-Slice 10p stops before a commit or another implementation slice. This document does not grant
-commit or push authority.
+Fabrico granted standing authority to commit each reviewed campaign milestone and continue into the
+next reranked slice. Pushes still require an explicit request.
 
 ## Accepted evidence at the 10p checkpoint
 
@@ -219,12 +219,12 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10n | Raw-TUI confirmation rendering and input ownership | `151abce` |
 | Count correction | Unsupported flag inventory corrected to 70 pairs across 20 commands | `aad3923` |
 | 10o | Raw-TUI menu rendering, shared resolver, lifecycle, and attached proof | `1a0f59e` |
+| 10p | Raw-TUI popup state, rendering, input ownership, and attached proof | `587ce54` |
 
-Slice 10p is locally complete but absent from this shipped table until an authorized commit exists.
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
-correction is documentation maintenance, not a compatibility slice. Slices 10n, 10o, and the local
-10p checkpoint expand the attached fixture without adding differential scenario rows.
+correction is documentation maintenance, not a compatibility slice. Slices 10n through 10p expand
+the attached fixture without adding differential scenario rows.
 
 ## Completed slice: 10p raw-TUI popup
 

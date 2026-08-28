@@ -175,10 +175,10 @@ window, and shared active pane supply ordinary target formats. Control clients o
 those report hooks but remain eligible for promotion after the latest client leaves.
 Changed-resize post-geometry format timing remains a separate protocol-owned slice so the producer
 milestone does not grow across the TUI message boundary.
-`active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
-explicit later gaps.
+`no-detach-on-destroy` now drives the per-client fallback after session destruction.
+`active-pane` remains retained and reported without changing the shared selected pane.
 
-The 10p checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
+The 10q checkpoint covers 98 scenarios and 1,517 steps. Every ordinary row
 is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
@@ -191,6 +191,8 @@ Slice 10o adds the bounded menu cases without adding a scenario row, so the same
 Slice 10p adds three popup cases and a pane sentinel to the attached fixture without adding a
 scenario row, so the same digest remains. A post-close audit hardened the frame and focus assertions
 and ran the complete fixture successfully under `LC_ALL=C` without changing the stored corpus.
+Slice 10q adds a mixed flagged and unflagged client-destruction case to the attached fixture without
+adding a scenario row, so the same digest remains.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
 rows remain. The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
@@ -338,7 +340,7 @@ closure is that exception.
 | 10n | Raw TUI confirmation | Closed under `clients.tui-confirm-before-overlay` on 2026-08-28 | Complete | State, rendering, input capture, reply lifecycle, and seven attached cases close independently |
 | 10o | Raw TUI menu | Closed under `clients.tui-display-menu-overlay` on 2026-08-28 | Complete | Daemon-published descriptor consumption, rendering order, shared keyboard ownership, and bounded attached cases close without absorbing broader menu fidelity |
 | 10p | Raw TUI popup | Closed under `clients.tui-display-popup-overlay` on 2026-08-28 | Complete | Popup state, rendering, input ownership, cleanup, and three attached cases close without absorbing broader popup fidelity |
-| 10q | Per-client no-detach-on-destroy fallback | Frozen under `clients.no-detach-on-destroy` | Small | One retained flag changes only the fallback survivor at the daemon's session-destroy seam |
+| 10q | Per-client no-detach-on-destroy fallback | Closed under `clients.no-detach-on-destroy` on 2026-08-28 | Complete | The configured primary remains shared, while only flagged clients use the bounded newest-session fallback |
 | Next rerank | Chain parsing and source-owned tracker registrations | Not frozen | Small to medium | Re-rank chain abort, nonconstant formats, open context formats, and option consumers after 10q |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | Post-rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -348,8 +350,7 @@ closure is that exception.
 | Post-rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | Post-rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after generic prompts | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10p are closed. Slice 10q is frozen to
-`semantic:no-detach-on-destroy-fallback`. Under `detach-on-destroy on`, only flagged clients use
+Slices 9a through 9f and 10a through 10q are closed. Under `detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
 and only flagged clients fall back to the newest attached session when no detached survivor exists.
 Flagged and unflagged clients on one destroyed session must diverge, while no remaining session
@@ -357,7 +358,7 @@ still exits both. Direct `off`, `previous`, and `next` selection stays unchanged
 active-pane routing, detach execution, parent-HUP exit, resize-hook ordering, client cwd, and overlay
 residue.
 
-Before choosing each later milestone, regenerate the report and re-rank every active daily, script,
+Before freezing the next milestone, regenerate the report and re-rank every active daily, script,
 remote, or silent-mismatch group. That audit must include attach-dependent work such as
 `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, `clients.parent-hup-exit`, `display-popup.behavior-fidelity`, and
@@ -457,8 +458,7 @@ for the full scenario count, attached-client result, and the two documented GEO 
 Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
 daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one
 acceptance contract after that audit. Do not combine context formats, event hooks, exit actions,
-`active-pane`, or `no-detach-on-destroy` behavior merely because they share
-client state.
+or `active-pane` behavior merely because they share client state.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
 source before editing. Use one coordinator and three Codex subagents to probe the selected

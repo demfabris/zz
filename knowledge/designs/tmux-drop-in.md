@@ -91,7 +91,7 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current 10p acceptance inventory contains 98 differential scenarios and
+The current 10q acceptance inventory contains 98 differential scenarios and
 1,517 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
@@ -224,7 +224,8 @@ daemon invariant names 27 explicit event producers and derives 37 generic `after
 producers from implemented canonical commands. It requires those 64 names plus the four active
 `hook:` items, `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`, to equal
 all 68 pinned hooks. `just compat-check` requires and runs the exact daemon partition test. The
-tracker now has 88 active groups, 594 classified active items, and 97 closed-history entries.
+At the 10l checkpoint, the tracker had 87 active groups, 583 classified active items, and 93
+closed-history entries.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -264,7 +265,8 @@ component-wise largest or smallest eligible attached-client sizes, select manual
 chosen extent, follow the global `ignore-size` fallback, apply per-window Control ceilings, and use
 the session `default-size` when no eligible client contributes. zz and pinned tmux pass the full
 attached-client fixture. Protocol v82 closed bounded environment refresh. Detach exec and parent-HUP exit remain separate;
-`active-pane` and `no-detach-on-destroy` consumers stay tracked. Binary
+per-client `no-detach-on-destroy` fallback now matches pinned session destruction, while
+`active-pane` consumption stays tracked. Binary
 streaming and process control require a separate design. Floating panes stay parked; linked windows and real socket interop stay permanently
 excluded; ACLs remain parked outside the practical alias gate.
 
@@ -365,8 +367,8 @@ and nested attach through real PTYs. The remaining current gaps live in
 selection, session cwd, requested flags, and retained sizing have since shipped. The 2026-08-27
 sizing closure covers `resize-window -A` and `-a`, manual freeze, the global `ignore-size` fallback,
 per-window Control ceilings, session `default-size` fallback, and the full attached-client fixture.
-Environment refresh, detach exec, and parent-HUP exit remain open; `active-pane` and
-`no-detach-on-destroy` consumers keep separate tracker owners.
+Environment refresh and `no-detach-on-destroy` fallback have since shipped. Detach exec and
+parent-HUP exit remain open, while `active-pane` keeps its separate tracker owner.
 
 This campaign closes items 3 through 6 from the live queue, then works through the
 remaining flag ledger. File-and-line anchors in this section refer to commit `57ae502`.

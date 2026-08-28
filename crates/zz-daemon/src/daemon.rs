@@ -16412,15 +16412,34 @@ impl Shared {
                 .into_iter()
                 .map(|(session, (name, policy))| {
                     inner.last_sessions.retain(|_, last| *last != session);
-                    let clients = inner.attached.get(&session).cloned().unwrap_or_default();
                     let survivor = destroyed_session_survivor(&inner, &name, &policy);
+                    let fallback = match (survivor, policy.as_str()) {
+                        (None, "on" | "no-detached") => newest_session_matching(&inner, |_| true),
+                        _ => None,
+                    };
+                    let clients = inner
+                        .attached
+                        .get(&session)
+                        .into_iter()
+                        .flatten()
+                        .map(|client| {
+                            let client_survivor = if survivor.is_none()
+                                && inner.client_flags.get(*client).no_detach_on_destroy
+                            {
+                                fallback
+                            } else {
+                                survivor
+                            };
+                            (*client, client_survivor)
+                        })
+                        .collect::<Vec<_>>();
                     inner.session_last_attached.remove(&session);
-                    (session, clients, survivor)
+                    (session, clients)
                 })
                 .collect::<Vec<_>>()
         };
-        for (session, clients, survivor) in destroyed {
-            for client in clients {
+        for (session, clients) in destroyed {
+            for (client, survivor) in clients {
                 if let Some(survivor) = survivor {
                     match self.attach_collect_event_hooks(client, survivor, true) {
                         Ok((snapshot, events)) => {
@@ -67786,13 +67805,144 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn detach_on_destroy_applies_no_detach_fallback_per_client() {
+        fn run_case(
+            policy: &str,
+            a_attached: Option<bool>,
+            c_attached: Option<bool>,
+            flagged_expected: Option<&str>,
+            plain_expected: Option<&str>,
+        ) {
+            let shared = Arc::new(Shared::new(1));
+            let a = a_attached.map(|_| switch_test_session(&shared, "a").0);
+            let (b, _, b_pane) = switch_test_session(&shared, "b");
+            let c = c_attached.map(|_| switch_test_session(&shared, "c").0);
+            for (name, session, attached) in
+                [("a-client", a, a_attached), ("c-client", c, c_attached)]
+            {
+                if !attached.unwrap_or_default() {
+                    continue;
+                }
+                let (client, _) = shared.register_subscribed(
+                    ClientKind::Interactive,
+                    Some(name.to_owned()),
+                    None,
+                    OutboundMailbox::new(),
+                );
+                shared
+                    .attach(client, session.unwrap())
+                    .expect("attach survivor client");
+            }
+            let flagged_mailbox = OutboundMailbox::new();
+            let (flagged, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("flagged".to_owned()),
+                None,
+                Arc::clone(&flagged_mailbox),
+            );
+            let plain_mailbox = OutboundMailbox::new();
+            let (plain, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                Some("plain".to_owned()),
+                None,
+                Arc::clone(&plain_mailbox),
+            );
+            shared.attach(flagged, b).expect("attach flagged client");
+            shared.attach(plain, b).expect("attach plain client");
+            shared
+                .inner
+                .lock()
+                .client_flags
+                .apply(flagged, "no-detach-on-destroy");
+            take_reliable_messages(&flagged_mailbox);
+            take_reliable_messages(&plain_mailbox);
+            let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, b_pane)
+                .expect("b context");
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-t", "b", "detach-on-destroy", policy]),
+                )
+                .expect("set detach-on-destroy");
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("kill-session", ["-t", "b"]),
+                )
+                .expect("destroy b");
+
+            let resolve = |expected| match expected {
+                Some("a") => a,
+                Some("c") => c,
+                _ => None,
+            };
+            for (label, client, expected, mailbox) in [
+                (
+                    "flagged",
+                    flagged,
+                    resolve(flagged_expected),
+                    flagged_mailbox,
+                ),
+                ("plain", plain, resolve(plain_expected), plain_mailbox),
+            ] {
+                assert_eq!(
+                    client_attached_session(&shared.inner.lock(), client),
+                    expected,
+                    "{label} client under {policy}"
+                );
+                let messages = take_reliable_messages(&mailbox);
+                if let Some(expected) = expected {
+                    assert!(messages.iter().any(|message| matches!(
+                        message,
+                        ProtocolMessage::Attached { session, .. } if *session == expected
+                    )));
+                    assert!(!messages.iter().any(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::Detached { .. },
+                            ..
+                        })
+                    )));
+                } else {
+                    assert!(messages.iter().any(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::Detached { session, reason, .. },
+                            ..
+                        }) if *session == b && reason.is_session_destroyed()
+                    )));
+                    assert!(
+                        !messages
+                            .iter()
+                            .any(|message| matches!(message, ProtocolMessage::Attached { .. }))
+                    );
+                }
+            }
+            let inner = shared.inner.lock();
+            assert!(!inner.last_sessions.contains_key(&flagged));
+            assert!(!inner.last_sessions.contains_key(&plain));
+            assert!(inner.client_flags.get(flagged).no_detach_on_destroy);
+            assert!(!inner.client_flags.get(plain).no_detach_on_destroy);
+        }
+
+        run_case("on", Some(false), Some(true), Some("c"), None);
+        run_case("no-detached", Some(true), Some(true), Some("c"), None);
+        run_case("no-detached", Some(false), Some(true), Some("a"), Some("a"));
+        run_case("on", None, None, None, None);
+    }
+
+    #[test]
     fn detach_on_destroy_selects_each_policy_survivor() {
-        for (policy, expected) in [
-            ("off", Some("c")),
-            ("on", None),
-            ("no-detached", Some("c")),
-            ("previous", Some("a")),
-            ("next", Some("c")),
+        for (policy, flagged, expected) in [
+            ("off", true, Some("c")),
+            ("on", false, None),
+            ("no-detached", false, Some("c")),
+            ("previous", true, Some("a")),
+            ("next", true, Some("c")),
         ] {
             let shared = Arc::new(Shared::new(1));
             let (a, _, _) = switch_test_session(&shared, "a");
@@ -67816,6 +67966,13 @@ bind - split-window -v -c "#{pane_current_path}"
                 shared.attach(activity, c).expect("make c newest");
             }
             shared.attach(target, b).expect("attach target to b");
+            if flagged {
+                shared
+                    .inner
+                    .lock()
+                    .client_flags
+                    .apply(target, "no-detach-on-destroy");
+            }
             take_reliable_messages(&target_mailbox);
             let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, b_pane)
                 .expect("b context");

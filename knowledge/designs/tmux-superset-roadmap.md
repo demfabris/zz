@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 88 active groups, 594 classified active items, 97 closed groups, and two known
+The live tracker has 87 active groups, 593 classified active items, 98 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,7 +53,7 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The 10p checkpoint covers 98 scenarios and 1,517 steps.
+The 10q checkpoint covers 98 scenarios and 1,517 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
@@ -328,7 +328,7 @@ by dependency rather than raw ease.
 | 5 | Small state and format facts | Bare `list-keys` padding, `pane_dead_time`, `config_files`, client timestamps, missing hook producers with an existing event seam, and straightforward output formatting. | **Three pulls shipped.** The 2026-08-22 pull covered bare `list-keys`, explicit-startup `config_files`, and retained `pane_dead_time`. The 2026-08-24 pull added pin-ordered `show-options -H` hook rows and item-scoped `window-status-separator` expansion. The 2026-08-25 pull exposed retained session activity and corrected logical MRU ordering. |
 | 6 | Manual geometry | `resize-window` and `window-size manual` need a durable manual size plus clear precedence against per-client measurements. The command is small; the policy is not. | **Shipped 2026-08-22.** Absolute and relative practical forms, target/error precedence, manual formats, per-client precedence, and daemon PTY resize behavior are pinned. The later 2026-08-27 `clients.attach-sizing` slice closed client-derived `-A`/`-a`. |
 | 7 | Capture, chooser, prompt, and list fidelity | `capture-pane` routing/ranges, chooser formats, command-prompt chains, and exact `list-keys` rendering need attached-client and output fixtures. | **List and chooser presentation fidelity completed 2026-08-24.** The list selectors, positional key filter, stock repeat metadata, canonical Space spelling, and `-1` attached-client status route are pinned by a 46-step differential plus the attached fixture. Chooser static-filter fallback state now survives deltas, both clients show `filter: no matches`, and fully keyless lists omit the shortcut gutter; the attached fixture proves tree and buffer fallback on zz and tmux. Ordinary capture was extended 2026-08-23; trailing blank viewport rows and richer capture transports remain. |
-| 8 | Spawn and attach context | Attached cwd, client flags, sizes, environment refresh, client targeting, and exit actions cross different state owners. | **Twelve bounded slices have shipped.** Protocol v72 carries caller cwd; later slices closed client targeting, nested intent, supported tty selectors, local Control identity, session cwd, requested flags, retained sizing, and protocol v82 environment refresh. Protocol v83 closed `clients.context-formats`: one retained client-fact record covers list rows, ordinary and inserted commands, status recipients, and `display-message`, with pinned Interactive and Control empty behavior. The client lifecycle slice now produces all six report hooks with pinned duplicate, ordering, client-kind, and target-context rules. The fresh attached-client differential passes against tmux `d77c9dc6`. `detach-client -E`, active-pane consumption, changed-resize post-geometry hook context, no-detach-on-destroy fallback, parent-HUP exit actions, non-UTF-8 path bytes, read-only/focus policy, and interactive refresh remain in separate groups. |
+| 8 | Spawn and attach context | Attached cwd, client flags, sizes, environment refresh, client targeting, and exit actions cross different state owners. | **Thirteen bounded slices have shipped.** Protocol v72 carries caller cwd; later slices closed client targeting, nested intent, supported tty selectors, local Control identity, session cwd, requested flags, retained sizing, and protocol v82 environment refresh. Protocol v83 closed `clients.context-formats`: one retained client-fact record covers list rows, ordinary and inserted commands, status recipients, and `display-message`, with pinned Interactive and Control empty behavior. The client lifecycle slice now produces all six report hooks with pinned duplicate, ordering, client-kind, and target-context rules. Per-client `no-detach-on-destroy` fallback now matches the pin's two-tier survivor choice. The fresh attached-client differential passes against tmux `d77c9dc6`. `detach-client -E`, active-pane consumption, changed-resize post-geometry hook context, parent-HUP exit actions, non-UTF-8 path bytes, read-only/focus policy, and interactive refresh remain in separate groups. |
 | 9 | Interactive client behavior | Full `refresh-client`, `switch-mode`, mouse-targeted forms, pane marking, mode state, focus hooks, and client fanout cross daemon, protocol, TUI, and GUI ownership. | Implement only for named workloads. |
 | 10 | Binary streams and process control | `display-message -I`, `split-window -I`, buffer/source `-`, and lock execution require bounded transport, backpressure, cancellation, and process lifetime rules. | Separate design approval. |
 | 11 | tmux floating panes | `new-pane` and the parked `move-pane`/placement flags need a new mux-state model that is distinct from current native floating UI. | Park. |
@@ -724,8 +724,10 @@ attach behavior and ignores `-e`; `-E` preserves the session map. Control, PTY, 
 targeted switch use the same rules, while `switch-client -T` returns before refresh. The session
 map survives client disconnect, affects future panes, and does not rewrite existing process
 environments. Non-UTF-8 Unix entries remain under `clients.path-encoding`. The full attached
-differential passes against pinned tmux. `active-pane` and
-`no-detach-on-destroy` retain state but stay open under their own consumer gaps. Deferred event-hook
+differential passes against pinned tmux. `no-detach-on-destroy` now applies the newest-session
+fallback per client under `on` and only when `no-detached` lacks a detached primary. Mixed-client
+daemon tests and the attached fixture cover its fallback and exit paths without a wire change.
+`active-pane` retains state but stays open under its own consumer gap. Deferred event-hook
 client selection remains under
 `source-file.event-hook-client-cwd`. Startup configuration
 still runs before the launching client registers, so `source-file.startup-client-cwd` tracks tmux's

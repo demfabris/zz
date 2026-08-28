@@ -252,7 +252,7 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. The 10p checkpoint
+`compat/results/summary.md` is the persisted acceptance artifact. The 10q checkpoint
 from 2026-08-28 contains 98 scenarios and 1,517 steps against pinned tmux `d77c9dc6`. Every ordinary
 row is clean.
 Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven confirmation cases and
@@ -260,7 +260,8 @@ a pane-input sentinel to the attached fixture. Slice 10o adds bounded menu cases
 title, shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
 Enter, nonactivating paste, and pane-input isolation. Slice 10p adds three bounded popup cases for
 live modification, terminal input, dead retention, live focus suppression, dead focus-close, and
-pane-input isolation.
+pane-input isolation. Slice 10q adds two temporary raw clients on one destroyed session: the
+flagged client survives on the newest fallback, while its unflagged peer exits.
 Focused resolver coverage pins exact raw-row-zero and all-disabled menu behavior. None adds a
 differential row, so the scenario count, step count, attached-client result, and digest stay
 unchanged.

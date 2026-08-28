@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10Q FROZEN: PER-CLIENT NO-DETACH-ON-DESTROY FALLBACK**
+> Campaign state: **SLICE 10Q CLOSED; RERANKING THE NEXT SLICE**
 >
-> Tracker resolution progress: **63.8% (118 of 185 known groups)**
+> Tracker resolution progress: **64.3% (119 of 185 known groups)**
 >
-> Committed milestone base: **2026-08-28** at `c909406fe0f45d638b0965020491e9abc50342c6`
+> Committed milestone base: **2026-08-28** at `9c05f4592549c6cb06b3224d9f6cd95512c0a3d4`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Committed milestone base | `c909406fe0f45d638b0965020491e9abc50342c6` |
-| Delivery | Local `main` contains 10p and its proof repair; `origin/main` remains at `7cad19e` until an explicit push |
+| Committed milestone base | `9c05f4592549c6cb06b3224d9f6cd95512c0a3d4` |
+| Delivery | Local `main` contains the 10q closure; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10q is frozen to `clients.no-detach-on-destroy`; implementation has not started |
-| Live registry | 88 active groups, 594 active items, 97 closed records |
-| Active status | 47 open, 20 blocked, 21 accepted |
+| Campaign point | Slice 10q is closed; the post-close rerank has not frozen its successor |
+| Live registry | 87 active groups, 593 active items, 98 closed records |
+| Active status | 46 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10p milestone and proof-repair commits descend from the verified `origin/main` base. Resolve the commit
+The 10q closure descends from the verified `origin/main` base. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(97 + 21) / (97 + 88) = 118 / 185 = 63.8%
+(98 + 21) / (98 + 87) = 119 / 185 = 64.3%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -152,9 +152,9 @@ Work one bounded milestone at a time:
 Fabrico granted standing authority to commit each reviewed campaign milestone and continue into the
 next reranked slice. Pushes still require an explicit request.
 
-## Accepted evidence at the 10p checkpoint
+## Accepted evidence at the 10q checkpoint
 
-The fresh strict-plus-attached 10p artifact is the current accepted checkpoint:
+The fresh strict-plus-attached artifact remains the current accepted checkpoint:
 
 | Evidence | Result |
 | --- | --- |
@@ -166,13 +166,14 @@ The fresh strict-plus-attached 10p artifact is the current accepted checkpoint:
 | Summary SHA-256 | `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832` |
 | Stored-artifact check | `compat/run.sh --check-summary` passes |
 
-`just compat --strict-geometry --attached-client` completed on the final 10p code and fixture tree.
+`just compat --strict-geometry --attached-client` completed on the final 10q code and fixture tree.
 All 98 scenarios and 1,517 steps ran, the attached-client fixture passed, and the stored summary
-check confirmed the digest above. A post-close repair then made the full-frame assertion work under
-`LC_ALL=C` and pinned live-popup focus suppression plus dead `-k` FocusOut closure. The complete
-attached fixture passed again under that locale. The repair did not change the differential corpus
-or digest. Focused package tests, affected clippy, formatting, tracker and OKF validation, shell
-syntax, and diff checks also passed.
+check confirmed the digest above. The fixture now includes the 10q mixed-client destruction case:
+the flagged client survives on the newest remaining session, while its unflagged peer exits, on zz
+and pinned tmux alike. The complete fixture also passed independently under `LC_ALL=C`, retaining
+the repaired 10p full-frame and focus proof. Slice 10q adds no differential scenario or step and
+does not change the digest. Focused package tests, affected clippy, formatting, tracker and OKF
+validation, shell syntax, and diff checks also passed.
 
 This run supersedes the earlier replacement run that stopped during `lane2-store`.
 
@@ -181,9 +182,15 @@ mode-key tests passed immediately when rerun alone, matching the parallel-load c
 `AGENTS.md`. Cargo therefore did not continue through every later workspace package; affected
 package tests and the full compatibility checkpoint remain green.
 
+The fresh 10q daemon-package sweep reached the unrelated
+`pipe_pane_has_no_gap_when_control_attaches_during_a_flood` test after the changed destruction
+cluster passed, then wedged without an assertion. Its exact solo rerun also wedged and was stopped,
+so this checkpoint does not claim a complete daemon-package pass. The focused destruction tests,
+strict daemon clippy, and full compatibility gate remain green.
+
 ## Shipped history
 
-The 97 entries under the generated report's
+The 98 entries under the generated report's
 [`Closed history`](knowledge/tmux/gaps.md#closed-history) section are the complete item-level record.
 The table below is the milestone rollup an agent needs for orientation.
 
@@ -224,6 +231,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10o | Raw-TUI menu rendering, shared resolver, lifecycle, and attached proof | `1a0f59e` |
 | 10p | Raw-TUI popup state, rendering, input ownership, and attached proof | `587ce54` |
 | 10p proof repair | Live-popup focus suppression, dead `-k` focus-close, and C-locale frame proof | `c909406` |
+| 10q | Per-client no-detach-on-destroy fallback and attached proof | Current milestone commit; resolve after creation |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -285,32 +293,31 @@ contracts below remain open under `display-popup.behavior-fidelity`:
 Real mouse/status format facts remain under `formats.mouse-context`. Control-mode popup
 presentation and read-only popup actions also remain outside this slice.
 
-## Frozen slice: 10q per-client no-detach-on-destroy fallback
+## Completed slice: 10q per-client no-detach-on-destroy fallback
 
-Slice 10q owns exactly `semantic:no-detach-on-destroy-fallback` in
-`clients.no-detach-on-destroy`. The requested flag is already retained and reported. This slice
-changes only the daemon's survivor choice when a session is destroyed; it needs no protocol or
-snapshot change.
+The tracker moved `clients.no-detach-on-destroy` and its only item,
+`semantic:no-detach-on-destroy-fallback`, into closed history. The requested flag was already
+retained and reported, so the slice needed no protocol or snapshot change.
 
-Acceptance is:
+The daemon now computes the configured primary and bounded newest-session fallback once before
+moving any client. The primary still applies to every client. Under `on`, and under `no-detached`
+when no detached primary exists, only a flagged client uses the fallback. This preserves mixed
+flagged and unflagged behavior without letting the first reattach change the next client's choice.
+No remaining session still exits every client, and the flag cannot alter `off`, `previous`, or
+`next`.
 
-- under `detach-on-destroy on`, a flagged client moves to the newest remaining session while an
-  unflagged client exits;
-- under `detach-on-destroy no-detached`, an existing detached session remains the primary survivor
-  for every client, and the flagged fallback to the newest attached session applies only when no
-  detached survivor exists;
-- flagged and unflagged clients attached to the same destroyed session can diverge;
-- with no remaining session, both clients exit;
-- direct `off`, `previous`, and `next` survivor selection remains unchanged by the flag.
+Focused daemon tests cover mixed clients, both `no-detached` branches, no remaining session,
+unchanged direct policies, exact `Attached` and `SessionDestroyed` delivery, and retained flag
+state. The attached fixture creates two real raw clients on one victim session, flags one by its
+exact tty, and proves that client survives on the newest fallback while its peer process exits on
+both zz and pinned tmux.
 
-The slice excludes active-pane routing, detach execution, parent-HUP exit, resize-hook ordering,
-buffer and source-file cwd, popup or menu residue, and broader tracker registration. Proof belongs
-at the daemon decision seam plus one real attached multi-client destruction case against the pinned
-tmux oracle.
+Active-pane routing, detach execution, parent-HUP exit, resize-hook ordering, buffer and source-file
+cwd, and popup or menu residue remain separate.
 
 ## Candidate queue after 10q
 
-Only 10q is frozen. The rest is a dependency forecast and must be reranked after the slice closes.
+No successor is frozen yet. The table is a dependency forecast for the live post-10q rerank.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |
@@ -331,7 +338,7 @@ assigned only when a slice is frozen.
 
 Before selecting every later milestone, explicitly recheck attach-dependent and daily-use groups,
 including buffer file context, source-file client cwd variants, detach execution, parent-HUP exit,
-`display-popup.behavior-fidelity`, menu fidelity, `active-pane`, and `no-detach-on-destroy`.
+`display-popup.behavior-fidelity`, menu fidelity, and `active-pane`.
 
 ## Validation and closure gates
 

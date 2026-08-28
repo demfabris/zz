@@ -333,33 +333,6 @@
       "reason": "Mode state and redraw ownership span the daemon, protocol, TUI, and GUI."
     },
     {
-      "id": "clients.no-detach-on-destroy",
-      "title": "Honor no-detach-on-destroy per client",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "remote",
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:no-detach-on-destroy-fallback"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:knowledge/tmux/divergences.md",
-        "file:compat/attached-client.sh"
-      ],
-      "acceptance": [
-        "With detach-on-destroy on, a flagged client moves to the newest remaining session instead of exiting. With no-detached, its fallback applies only when no detached survivor exists. Unflagged clients keep the configured policy, and no remaining session still exits."
-      ],
-      "depends_on": [],
-      "reason": "The requested flag is retained and reported, but zz currently computes one session-destruction survivor policy for every client."
-    },
-    {
       "id": "clients.parent-hup-exit",
       "title": "Signal client parents after forced detach",
       "decision": "adopt",
@@ -2949,7 +2922,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "attach-session -f and attaching new-session -f now retain the final comma-separated client-flag mutation string in typed daemon state. Common flags are read-only, ignore-size, active-pane, and no-detach-on-destroy; Control clients also apply no-output, wait-exit, and pause-after with the pin's unsigned numeric-prefix and wrapping behavior. Unknown and empty names are ignored, ! clears except that read-only cannot clear itself, repeated -f keeps the last argument, missing targets do not mutate, terminal-open failure retains an existing-target mutation, detached creation ignores flags, and successful -A follows the attach path. State survives session switches and detach, clears on client unregister or replacement, and exact native and TUI reconnect paths replay only the mutation actually applied by a successful attaching command. Protocol v81 and the wire schema are unchanged. The fresh debug attached-client differential passes against the pinned tmux binary, including the accepted zz divergence that -r adds only read-only rather than tmux's coupled ignore-size. Flag retention and ignore-size consumption are closed; active-pane behavior remains under clients.active-pane, and destruction fallback under clients.no-detach-on-destroy."
+      "resolution": "attach-session -f and attaching new-session -f now retain the final comma-separated client-flag mutation string in typed daemon state. Common flags are read-only, ignore-size, active-pane, and no-detach-on-destroy; Control clients also apply no-output, wait-exit, and pause-after with the pin's unsigned numeric-prefix and wrapping behavior. Unknown and empty names are ignored, ! clears except that read-only cannot clear itself, repeated -f keeps the last argument, missing targets do not mutate, terminal-open failure retains an existing-target mutation, detached creation ignores flags, and successful -A follows the attach path. State survives session switches and detach, clears on client unregister or replacement, and exact native and TUI reconnect paths replay only the mutation actually applied by a successful attaching command. Protocol v81 and the wire schema are unchanged. The fresh debug attached-client differential passes against the pinned tmux binary, including the accepted zz divergence that -r adds only read-only rather than tmux's coupled ignore-size. Flag retention and ignore-size consumption closed in this slice; the later clients.no-detach-on-destroy closure consumes the destruction fallback, while active-pane behavior remains under clients.active-pane."
     },
     {
       "id": "clients.attach-session-cwd",
@@ -3073,6 +3046,18 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "The additive client-nested-v1 hello capability records whether an eligible local Command or terminal-surface process inherited a nonempty TMUX value; the existing client-tty-v1 value remains unconditional when that process has a discoverable local terminal. The daemon retains both facts independently and refuses attach-session or an attaching new-session -A only when the nested marker is present and the tty exactly matches one of its panes. Unsetting TMUX therefore forces either attach path without deleting the tty needed by ordinary client targeting. Remote endpoints publish neither host tty nor nested marker. Unregister removes both retained facts. This adds no field, tag, or protocol-version change. Focused client and daemon tests cover marker emission, retention, refusal, forced attach, tty targeting, and cleanup. The attached-client fixture removes whitespace from the complete pane history and fixed refusal literal, snapshots the count of exact normalized substrings before each attempt, requires that count to increase afterward, and holds the attached count at one through a settle. The typed commands contain no refusal text, so neither command echo nor the earlier attach-session refusal can satisfy the new-session -A proof, while terminal-query prefixes and physical-line wrapping remain tolerated. The later clients.local-control-terminal-facts closure applies the same two independent facts to local Control only when stdin supplies the tty identity."
+    },
+    {
+      "id": "clients.no-detach-on-destroy",
+      "title": "Honor no-detach-on-destroy per client",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
+      ],
+      "resolution": "Session destruction now preserves tmux's two-tier survivor choice per client. The configured primary applies to every client. When `on` has no primary, or `no-detached` finds no detached primary, only a client retaining `no-detach-on-destroy` falls back to the newest remaining session; an unflagged peer receives SessionDestroyed, and no remaining session still exits every peer. Focused daemon tests cover mixed clients, detached-primary and attached-fallback cases, no remaining sessions, externally observable attach and detach messages, and unaffected `off`, `previous`, and `next` selection. The real attached-client fixture proves the mixed-client destruction contract against pinned tmux. No protocol or snapshot change was needed."
     },
     {
       "id": "clients.read-only-local-view-actions",

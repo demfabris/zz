@@ -485,6 +485,40 @@ wait_for_requested_client_state() {
   fixture_failure "$side requested client state did not become $expected within 10 seconds; last state: ${LAST_REQUESTED_CLIENT_STATE:-<empty>}"
 }
 
+no_detach_client_state() {
+  local side="$1"
+  local client_tty="$2"
+
+  side_command "$side" list-clients -F '#{client_tty}|#{client_session}|#{client_flags}' \
+    2>/dev/null | awk -F '|' -v tty="$client_tty" '
+      $1 == tty {
+        state = "plain"
+        count = split($3, flags, ",")
+        for (i = 1; i <= count; i++) {
+          if (flags[i] == "no-detach-on-destroy") state = "flagged"
+        }
+        print $2 "|" state
+      }
+    '
+}
+
+LAST_NO_DETACH_CLIENT_STATE=""
+wait_for_no_detach_client_state() {
+  local side="$1"
+  local client_tty="$2"
+  local expected="$3"
+  local attempt
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    LAST_NO_DETACH_CLIENT_STATE="$(no_detach_client_state "$side" "$client_tty" || true)"
+    if [ "$LAST_NO_DETACH_CLIENT_STATE" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "$side client $client_tty did not become ${expected:-absent} within 10 seconds; last state: ${LAST_NO_DETACH_CLIENT_STATE:-<empty>}"
+}
+
 wait_for_session_name() {
   local side="$1"
   local expected="$2"
@@ -557,6 +591,22 @@ wait_for_outer_pane_size() {
     sleep 0.05
   done
   fixture_failure "outer pane $target did not become $expected within 10 seconds; last size: ${size:-<empty>}"
+}
+
+wait_for_outer_pane_dead() {
+  local target="$1"
+  local expected="$2"
+  local attempt
+  local actual
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    actual="$(tmux_outer_command display-message -p -t "$target" '#{pane_dead}' 2>/dev/null || true)"
+    if [ "$actual" = "$expected" ]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  fixture_failure "outer pane $target dead state did not become $expected within 10 seconds; last state: ${actual:-<empty>}"
 }
 
 assert_attached_client_count_stays() {
@@ -2721,6 +2771,63 @@ probe_requested_client_flags() {
   wait_for_requested_client_state "$side" "$INNER_SESSION|$read_only_flags"
 }
 
+probe_no_detach_on_destroy() {
+  local side="$1"
+  local victim="no-detach-victim-$side"
+  local fallback="no-detach-fallback-$side"
+  local flagged_window="no-detach-flagged-$side"
+  local plain_window="no-detach-plain-$side"
+  local flagged_target="=$OUTER_SESSION:$flagged_window"
+  local plain_target="=$OUTER_SESSION:$plain_window"
+  local flagged_attach="$SCRATCH_DIR/attach-$flagged_window"
+  local plain_attach="$SCRATCH_DIR/attach-$plain_window"
+  local flagged_tty
+  local plain_tty
+
+  wait_for_client_state "$side" root
+  side_command "$side" new-session -d -s "$victim" ||
+    fixture_failure "$side could not create its no-detach victim"
+  side_command "$side" set-option -t "=$victim:" detach-on-destroy on ||
+    fixture_failure "$side could not set its no-detach victim policy"
+  write_attach "$side" "$flagged_attach" "$victim"
+  write_attach "$side" "$plain_attach" "$victim"
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$flagged_window" \
+    "$flagged_attach" ||
+    fixture_failure "$side could not start its flagged no-detach client"
+  tmux_outer_command new-window -d -t "$OUTER_SESSION:" -n "$plain_window" \
+    "$plain_attach" ||
+    fixture_failure "$side could not start its plain no-detach client"
+
+  flagged_tty="$(tmux_outer_command display-message -p -t "$flagged_target" '#{pane_tty}')"
+  plain_tty="$(tmux_outer_command display-message -p -t "$plain_target" '#{pane_tty}')"
+  if [[ "$flagged_tty" != /dev/* || "$plain_tty" != /dev/* ]]; then
+    fixture_failure "$side outer panes did not expose both no-detach client ttys"
+  fi
+  wait_for_no_detach_client_state "$side" "$flagged_tty" "$victim|plain"
+  wait_for_no_detach_client_state "$side" "$plain_tty" "$victim|plain"
+  side_command "$side" refresh-client -t "$flagged_tty" -f no-detach-on-destroy ||
+    fixture_failure "$side could not flag its no-detach client"
+  wait_for_no_detach_client_state "$side" "$flagged_tty" "$victim|flagged"
+
+  side_command "$side" new-session -d -s "$fallback" ||
+    fixture_failure "$side could not create its no-detach fallback"
+  side_command "$side" kill-session -t "=$victim" ||
+    fixture_failure "$side could not destroy its no-detach victim"
+  wait_for_no_detach_client_state "$side" "$flagged_tty" "$fallback|flagged"
+  wait_for_no_detach_client_state "$side" "$plain_tty" ""
+  wait_for_outer_pane_dead "$flagged_target" 0
+  wait_for_outer_pane_dead "$plain_target" 1
+
+  tmux_outer_command kill-window -t "$flagged_target" ||
+    fixture_failure "$side could not remove its flagged no-detach window"
+  tmux_outer_command kill-window -t "$plain_target" ||
+    fixture_failure "$side could not remove its plain no-detach window"
+  wait_for_no_detach_client_state "$side" "$flagged_tty" ""
+  side_command "$side" kill-session -t "=$fallback" ||
+    fixture_failure "$side could not remove its no-detach fallback"
+  wait_for_client_state "$side" root
+}
+
 probe_attached_client_sizing() {
   local side="$1"
   local decoy_session="sizing-decoy-$side"
@@ -2972,6 +3079,8 @@ probe_client_environment zz
 probe_client_environment tmux
 probe_requested_client_flags zz
 probe_requested_client_flags tmux
+probe_no_detach_on_destroy zz
+probe_no_detach_on_destroy tmux
 probe_attached_client_sizing zz
 probe_attached_client_sizing tmux
 probe_client_context_formats zz

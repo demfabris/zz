@@ -337,10 +337,21 @@ built-in hook as runtime syntax but stay literal in a custom hook value. A typed
 `-R` constructs before the stored hook runs, while a quoted value is ignored. Local hook-array
 creation occurs before empty append or runtime parsing, so an empty or failing local append shadows
 the inherited global hook with an empty array.
-A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while a
-quoted brace string remains literal. These rules do not yet make source-file parse and construction
-atomic for the whole file, provide aliases defined earlier in the same source during construction,
-place multiline inner-source diagnostics, or close the broader replay-channel difference.
+`display-menu` interprets positional data as repeated NAME, KEY, and ACTION fields. A nonempty NAME
+advances through a string KEY to an ACTION, which accepts a string or typed block and resets the
+state to NAME. An empty NAME is a separator that consumes no KEY or ACTION. Its ten valued flags
+remain strings. Every lexical typed child constructs before parent type or arity validation, so a
+child failure can precede a forbidden NAME, KEY, or flag-value type. Stored bindings print accepted
+typed actions with canonical child commands. Incomplete NAME and NAME-plus-KEY tails construct and
+reach daemon runtime. Runtime resolves the current or `-c` target client before completeness, so an
+unattached command or initial Control reports `no current client`; initial Control uses a flag-0
+`%error` and exits 1. Once attached, Control validates an incomplete group as `not enough
+arguments` before its overlay no-op and emits a flag-1 `%error`; EOF after that frame exits 1.
+Interactive menu ordering stays unchanged. The daemon removes the structural wrapper
+only from a typed action before the fresh selection parse; quoted brace actions stay literal. These
+rules do not yet make source-file parse and construction atomic for the whole file, provide aliases
+defined earlier in the same source during construction, place multiline inner-source diagnostics,
+or close the broader replay-channel difference.
 
 # Schema
 

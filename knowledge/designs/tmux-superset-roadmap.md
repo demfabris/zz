@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 86 active groups, 587 classified active items, 88 closed groups, and two known
+The live tracker has 86 active groups, 586 classified active items, 89 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,12 +53,12 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The final 10g canonical checkpoint covers 95 scenarios and 1,508 steps.
+The final 10h canonical checkpoint covers 96 scenarios and 1,511 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`. Requested flags, attached
+`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
@@ -84,9 +84,10 @@ status recipients, and `display-message`. The attached fixture covers Interactiv
 bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
-closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`, and
-`tracker.args-parse-set-option`, plus `tracker.args-parse-set-hook` and the `bind-key`,
-`command-prompt`, and `confirm-before` members of the shared commands-or-string rule.
+closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`,
+`tracker.args-parse-set-option`, `tracker.args-parse-display-menu`, and
+`tracker.args-parse-set-hook`, plus the `bind-key`, `command-prompt`, and `confirm-before` members
+of the shared commands-or-string rule.
 Source-file and Control
 parsing preserve unquoted typed arguments through wire transport, aliases, bindings, and hooks;
 quoted braces remain strings. `if-shell` accepts typed branch positions while rejecting typed
@@ -140,10 +141,21 @@ remain unsupported. Built-in hooks flatten
 physical groups during their second pass, while custom `@` typed values retain textual ` ;; `
 groups. Unindexed malformed runtime replacement clears first, indexed replacement preserves its entry, and
 an empty or failing local append creates an empty local array that shadows the inherited global
-hook. Typed ignored `-R` values still construct. A typed `display-menu` action drops its structural
-wrapper before the fresh selection parse, while a quoted brace string remains literal. Four
-callback items across two effective rules remain. Eager whole-file construction, same-source alias
-mutation, multiline inner-source placement, and broader replay placement retain their owners.
+hook. Typed ignored `-R` values still construct. `display-menu` walks repeated NAME, KEY, and ACTION
+fields. Nonempty names consume a string key and a string-or-typed action; empty names are separators
+and leave the parser in NAME state. Its ten valued flags stay string-only. Typed children construct
+before parent type, arity, or effects. Accepted typed actions print canonical child commands in
+stored bindings; incomplete NAME and NAME-plus-KEY tails reach daemon runtime validation. Runtime
+resolves the current or `-c` target client before completeness, so an unattached command or initial
+Control reports `no current client`; initial Control uses a flag-0 `%error` and exits 1. Once
+attached, Control validates an incomplete group as `not enough arguments` before its overlay no-op
+and returns a flag-1 `%error`; EOF after that frame exits 1. Interactive ordering remains
+unchanged. The daemon drops a typed action's structural
+wrapper before the fresh selection parse, while quoted brace actions remain literal. Three callback
+items under one effective rule remain. Eager whole-file
+construction, same-source alias mutation, multiline inner-source placement, generic alias recursion,
+selected-action runtime errors, and broader replay placement retain their owners. Attached menu
+rendering, input, geometry, styles, targets, formats, and raw-TUI overlay parity remain separate.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -516,11 +528,12 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each implemented
    callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains
-   `bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`,
-   and `set-window-option`; two effective rules and four command-specific items remain. The
+   `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`,
+   `set-option`, and `set-window-option`; one
+   effective rule and three command-specific items remain. The
    unimplemented `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
-   `tracker.semantic-coverage` tracks runtime adoption of the two remaining argument rules, open-ended or
+   `tracker.semantic-coverage` tracks runtime adoption of the remaining commands-or-string argument rule, open-ended or
    dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
    and option `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
@@ -1101,6 +1114,23 @@ permanent product decision has been recorded for them.
   construction, same-source alias mutation, multiline inner-source placement, `-B` monitor
   semantics, and broader replay placement retain their owners. Two callback rules across four
   implemented commands remain.
+- 2026-08-28: Protocol v84 closed `tracker.args-parse-display-menu` without another wire change.
+  The parser walks positional data through repeated NAME, KEY, and ACTION states. A nonempty NAME
+  consumes a string KEY and a string-or-typed ACTION before resetting to NAME; an empty NAME is a
+  separator that consumes no KEY or ACTION. All ten valued flags remain strings. Typed children
+  construct before parent type, arity, or effects. Accepted typed actions print canonical child
+  commands in stored bindings, quoted actions remain strings, and incomplete NAME or NAME-plus-KEY
+  tails defer to daemon runtime validation. Runtime resolves the current or `-c` target client
+  before completeness, so an unattached command or initial Control reports `no current client`;
+  initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates an incomplete
+  group as `not enough arguments` before its overlay no-op and returns a flag-1 `%error`; EOF after
+  that frame exits 1. Interactive ordering remains unchanged. The daemon
+  already removes the structural wrapper only from a typed action before its fresh selection parse.
+  The strict three-step scenario runs 34 internal checks through a PID-unique FIFO, finishes
+  `ARGS_PARSE_DISPLAY_MENU=clean:34` on both servers, and reports zero differences. Attached-client
+  menu rendering and input, geometry, styles, targets, formats, selected-action runtime errors,
+  same-source alias mutation, eager whole-source construction, generic alias recursion, and raw-TUI
+  overlay parity retain their owners. One callback rule across three implemented commands remains.
 
 # Related
 

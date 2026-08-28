@@ -112,10 +112,10 @@ dispatch now match the pin.
 
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
-`CommandInvocation`, and `COMMAND_ARGS_PARSE_BEHAVES` contains `if-shell`, `run-shell`,
-`set-option`, `set-window-option`, `bind-key`, `command-prompt`, `confirm-before`, and `set-hook`
-after source-file, Control, stored-command, parser, postcard, mux, and daemon proofs. The manifest carries four remaining
-`args-parse:` items. The unimplemented
+`CommandInvocation`, and `COMMAND_ARGS_PARSE_BEHAVES` contains `bind-key`, `command-prompt`,
+`confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
+`set-window-option` after source-file, Control, stored-command, parser, postcard, mux, and daemon
+proofs. The manifest carries three remaining `args-parse:` items under one effective rule. The unimplemented
 `choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
 the whole command.
 
@@ -169,9 +169,16 @@ errors. The typed confirm callback executes its constructed list without another
 stored `bind-key` and `set-hook` lists have the same frozen execution boundary. `set-hook` and
 command-valued native set-option deliberately construct again. Built-in hook values flatten
 physical groups during that second pass, while custom `@` typed values retain textual ` ;; `
-groups. A typed ignored `set-hook -R` value still constructs. `display-menu` selection starts a
-fresh stage. Typed `command-prompt` templates retain their structured prepared command list
-through submission without re-expanding aliases. String templates substitute raw source before a
+groups. A typed ignored `set-hook -R` value still constructs. `display-menu` now walks repeated
+NAME, KEY, and ACTION fields, treats an empty NAME as a separator, keeps NAME, KEY, and all ten
+valued flag arguments string-only, and accepts strings or typed blocks for ACTION. Typed children
+construct before the parent type boundary. Incomplete item groups reach daemon runtime validation.
+Runtime resolves the current or `-c` target client before completeness, so an unattached command or
+initial Control reports `no current client`; initial Control uses a flag-0 `%error` and exits 1.
+Once attached, Control validates an incomplete group as `not enough arguments` before its overlay
+no-op and emits a flag-1 `%error`; EOF after that frame exits 1. Interactive menu ordering is
+unchanged. Typed `command-prompt` templates retain their structured prepared command list through
+submission without re-expanding aliases. String templates substitute raw source before a
 fresh parse and complete construction pass against the current alias table. Both paths replace the
 first `%%` and every `%1`, with trailing-percent quoting. Typed callbacks retain physical groups,
 while string templates and free input form one group. Both sides publish
@@ -229,8 +236,8 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The final 10g checkpoint from
-2026-08-28 contains 95 scenarios and 1,508 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`compat/results/summary.md` is the persisted canonical artifact. The final 10h checkpoint from
+2026-08-28 contains 96 scenarios and 1,511 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -303,12 +310,22 @@ attached prompt submission.
 types, child-before-parent construction, aliases, group normalization, built-in and custom storage,
 replacement, empty-value, and local-inheritance order, `-R`, named-option forwarding, stored
 bindings, and exact Control framing.
+`smoke/args-parse-display-menu` contributes three harness steps around 34 internal checks for the
+data-dependent NAME, KEY, and ACTION state, empty-name separators, typed and quoted actions, all
+ten string-only valued flags, child construction precedence, canonical and alias readback, invalid
+binding preservation, client-before-completeness precedence, incomplete runtime groups,
+source-file diagnostics, and exact initial flag-0 plus attached flag-1 Control framing. A
+PID-unique FIFO holds the attached command stream through the error frame and proves exit 1 after
+EOF. Both servers finish `ARGS_PARSE_DISPLAY_MENU=clean:34` with zero differences.
 Typed `if-shell`, `run-shell`, and structured `command-prompt` callbacks stop the failed physical
 group and continue later physical lines, while string callbacks stay one group. Structured prompt
 substitution preserves leaf-argument boundaries against quote or semicolon injection. Raw string
 templates substitute before parsing and whole-result construction. Both paths replace the first
-`%%` and every `%1`, with trailing-percent quoting. Typed `display-menu` actions drop
-their structural wrapper before the fresh selection parse, while quoted brace strings stay literal.
+`%%` and every `%1`, with trailing-percent quoting. Typed `display-menu` actions retain canonical
+child printing in stored bindings, then lose their structural wrapper before the fresh selection
+parse; quoted brace strings stay literal. The fixture does not claim attached rendering or input,
+geometry, styles, targets, formats, selected-action runtime errors, same-source alias mutation,
+eager whole-source construction, generic alias recursion, or raw-TUI overlay parity.
 Built-in hook values flatten typed physical groups during their second construction pass. Custom
 `@` values keep normalized textual groups, and typed ignored `set-hook -R` values still construct.
 Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
@@ -316,6 +333,8 @@ Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
+`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
+The historical 10g checkpoint remains 95 scenarios and 1,508 steps at SHA-256
 `15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
 The historical 10f checkpoint remains 94 scenarios and 1,505 steps at SHA-256
 `31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.

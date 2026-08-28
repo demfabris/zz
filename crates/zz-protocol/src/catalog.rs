@@ -327,6 +327,13 @@ fn validate_command_args_parse(
     command: &CommandInvocation,
     parsed: &TmuxOptionParse<'_>,
 ) -> Result<(), ServerError> {
+    #[derive(Clone, Copy)]
+    enum DisplayMenuState {
+        Name,
+        Key,
+        Action,
+    }
+
     let args_parse = COMMAND_ARGS_PARSE_SPECS
         .iter()
         .find(|args_parse| args_parse.name == spec.name)
@@ -342,17 +349,34 @@ fn validate_command_args_parse(
             .iter()
             .any(|option| matches!(option, TmuxOption::Value("-B", _)));
     let start = command.args.len().saturating_sub(parsed.positionals.len());
+    let mut display_menu_state = DisplayMenuState::Name;
     for (position, index) in (start..command.args.len()).enumerate() {
+        let is_command_block = command.argument_is_command_block(index);
         let accepts_command_block = match args_parse {
             None => false,
             Some(CommandArgsParseRule::CommandsOrString) => true,
+            Some(CommandArgsParseRule::DisplayMenuItems) => match display_menu_state {
+                DisplayMenuState::Name => {
+                    if !command.args[index].is_empty() {
+                        display_menu_state = DisplayMenuState::Key;
+                    }
+                    false
+                }
+                DisplayMenuState::Key => {
+                    display_menu_state = DisplayMenuState::Action;
+                    false
+                }
+                DisplayMenuState::Action => {
+                    display_menu_state = DisplayMenuState::Name;
+                    true
+                }
+            },
             Some(CommandArgsParseRule::IfShellBranches) => matches!(position, 1 | 2),
             Some(CommandArgsParseRule::RunShellCommandFlag) => run_shell_commands,
             Some(CommandArgsParseRule::SetHookMonitorOrValue) => set_hook_monitor || position == 1,
             Some(CommandArgsParseRule::SetOptionValue) => position == 1,
-            _ => return Ok(()),
         };
-        if command.argument_is_command_block(index) && !accepts_command_block {
+        if is_command_block && !accepts_command_block {
             return Err(ServerError::CommandParse(format!(
                 "command {}: argument {} must be \"string\"",
                 spec.name,
@@ -442,6 +466,7 @@ pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "bind-key",
     "command-prompt",
     "confirm-before",
+    "display-menu",
     "if-shell",
     "run-shell",
     "set-hook",
@@ -3132,6 +3157,143 @@ mod tests {
                     .expect_err("typed option value")
                     .tmux_message(),
                 format!("command command-prompt: {option} argument must be a string")
+            );
+        }
+    }
+
+    #[test]
+    fn display_menu_args_parse_tracks_names_keys_actions_and_separators() {
+        let spec = catalog_command_spec("display-menu").expect("display-menu");
+
+        for command in [
+            CommandInvocation::new("display-menu", ["One", "o", "display-message one"]),
+            CommandInvocation::new("display-menu", ["One", "o", "display-message one", "Two"]),
+            CommandInvocation::new(
+                "display-menu",
+                ["One", "o", "display-message one", "Two", "t"],
+            ),
+            CommandInvocation::new(
+                "display-menu",
+                [
+                    "One",
+                    "o",
+                    "{ display-message one }",
+                    "",
+                    "Two",
+                    "t",
+                    "{ display-message two }",
+                ],
+            )
+            .with_command_blocks([2, 6]),
+            CommandInvocation::new(
+                "display-menu",
+                ["", "", "One", "o", "{ display-message one }"],
+            )
+            .with_command_blocks([4]),
+            CommandInvocation::new("display-menu", ["", "One", "o", "{ display-message one }"])
+                .with_command_blocks([3]),
+            CommandInvocation::new(
+                "display-menu",
+                [
+                    "One",
+                    "o",
+                    "display-message one",
+                    "Two",
+                    "t",
+                    "{ display-message two }",
+                ],
+            )
+            .with_command_blocks([5]),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("display menu items");
+        }
+
+        for (command, expected) in [
+            (
+                CommandInvocation::new(
+                    "display-menu",
+                    ["{ display-message name }", "n", "display-message action"],
+                )
+                .with_command_blocks([0]),
+                "command display-menu: argument 1 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "display-menu",
+                    ["One", "{ display-message key }", "display-message action"],
+                )
+                .with_command_blocks([1]),
+                "command display-menu: argument 2 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "display-menu",
+                    [
+                        "",
+                        "{ display-message name }",
+                        "n",
+                        "display-message action",
+                    ],
+                )
+                .with_command_blocks([1]),
+                "command display-menu: argument 2 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "display-menu",
+                    [
+                        "One",
+                        "o",
+                        "display-message one",
+                        "{ display-message name }",
+                        "t",
+                        "display-message two",
+                    ],
+                )
+                .with_command_blocks([3]),
+                "command display-menu: argument 4 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "display-menu",
+                    [
+                        "One",
+                        "o",
+                        "display-message one",
+                        "Two",
+                        "{ display-message key }",
+                        "display-message two",
+                    ],
+                )
+                .with_command_blocks([4]),
+                "command display-menu: argument 5 must be \"string\"",
+            ),
+        ] {
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed display menu string")
+                    .tmux_message(),
+                expected
+            );
+        }
+
+        for option in ["-b", "-c", "-C", "-H", "-s", "-S", "-t", "-T", "-x", "-y"] {
+            let command = CommandInvocation::new(
+                "display-menu",
+                [
+                    option,
+                    "{ display-message option }",
+                    "One",
+                    "o",
+                    "display-message action",
+                ],
+            )
+            .with_command_blocks([1]);
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed option value")
+                    .tmux_message(),
+                format!("command display-menu: {option} argument must be a string")
             );
         }
     }

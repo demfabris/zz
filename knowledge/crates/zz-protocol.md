@@ -144,7 +144,8 @@ Protocol v84 appends `CommandInvocation.command_blocks`. Config and Control pars
 zero-based positions of standalone unquoted command blocks while quoted brace text stays an
 ordinary string. Alias expansion and key-table publication retain the positions. The
 command-aware option parser applies the adopted callback rules to `bind-key`, `command-prompt`,
-`confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option`. Every
+`confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and
+`set-window-option`. Every
 `bind-key` positional accepts a typed block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
 block only at value position 1. `confirm-before` accepts either type for its one command positional
 while `-c`, `-p`, and `-t` remain strings. The mux constructs every lexical typed block
@@ -173,11 +174,21 @@ because it does not implement format monitors. Typed hook values normalize befor
 custom `@`, or forwarded option storage. Built-in hooks flatten physical groups during their second
 construction pass, while custom `@` values retain textual ` ;; ` groups. Local hook-array creation
 precedes empty append and runtime parsing, so an empty or failing local append shadows an inherited
-global hook with an empty local array. A typed `display-menu`
-action drops its structural wrapper before the fresh selection parse, while a quoted brace string
-remains literal. All eight behaving commands reuse
-the same protocol v84 metadata. Eager whole-file source construction and its replay-channel
-placement remain a separate parser contract.
+global hook with an empty local array. `display-menu` walks its positionals as repeated NAME, KEY,
+and ACTION fields. A nonempty NAME advances through a string KEY to an ACTION, which accepts a
+string or typed block and resets the state to NAME. An empty NAME is a separator and leaves the
+parser expecting another NAME. Values for `-b`, `-c`, `-C`, `-H`, `-s`, `-S`, `-t`, `-T`, `-x`,
+and `-y` remain strings. Typed children construct before this parent type check, and accepted typed
+actions print canonical commands in stored bindings. Incomplete item tails reach daemon runtime
+validation. Runtime resolves the current or `-c` target client before completeness, so an
+unattached command or initial Control reports `no current client`; initial Control uses a flag-0
+`%error` and exits 1. Once attached, Control validates an incomplete group as `not enough
+arguments` before its overlay no-op and returns a flag-1 `%error`; EOF after that frame exits 1.
+Interactive menu ordering remains unchanged. The daemon strips the structural
+wrapper only from a typed action before its fresh selection parse; a quoted brace action stays
+literal. All nine behaving commands reuse the same
+protocol v84 metadata. Eager whole-file source construction and its replay-channel placement
+remain a separate parser contract.
 
 `MuxSnapshot` carries two per-recipient fields the daemon stamps for each subscriber:
 `focused_window`, that client's own window focus, and `SessionSnapshot::viewers`, a

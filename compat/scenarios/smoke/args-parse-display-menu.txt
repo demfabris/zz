@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-display-menu.sh ~/args-parse-display-menu.sh
+out: set-environment -gu ARGS_PARSE_DISPLAY_MENU
+run-shell 'sh ~/args-parse-display-menu.sh'
+out: show-environment -g ARGS_PARSE_DISPLAY_MENU

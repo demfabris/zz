@@ -2716,7 +2716,6 @@
       "items": [
         "args-parse:choose-buffer",
         "args-parse:choose-tree",
-        "args-parse:display-menu",
         "args-parse:display-panes",
         "semantic:tracker-hook-producer-partition",
         "semantic:tracker-key-binding-behavior",
@@ -2735,7 +2734,7 @@
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and four per-command callback items remain across two effective rules. `set-hook` accepts one typed-or-string value without `-B`, or lexically accepts every positional as either type with `-B`; format-monitor runtime behavior remains unsupported under its existing owner. Built-in hooks construct normalized values again and flatten physical groups, while custom `@` values keep their normalized textual groups. A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while quoted brace strings remain literal. This display-menu boundary does not prove its complete repeating callback rule. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and three per-command callback items remain under the shared commands-or-string rule. `display-menu` walks positional data as repeated NAME, KEY, and ACTION fields: an empty NAME is a separator that consumes no KEY or ACTION, NAME and KEY require strings, and ACTION accepts a string or typed block. The daemon keeps the typed and string action paths distinct when a user selects an item. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3946,6 +3945,21 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "resolution": "Protocol v84 lexical command-block positions now drive `confirm-before`'s pinned command-or-string rule without another wire change. The single command positional accepts a string or typed block while `-c`, `-p`, and `-t` values remain strings, and option scanning stops at the first positional or `--`. Every lexical typed block is recursively constructed before its parent command's name, callback type, or arity validation. Each recursive path carries one user-alias layer independently from siblings; a subtree produced by a user alias disables further user-alias expansion, and self-recursion fails as unknown without killing the daemon. Nested `if-shell`, `run-shell`, set-option, and `confirm-before` blocks print canonical names; an empty block reads back as `{  }`, and physical internal group newlines print as ` ;; `. A typed confirm callback executes that frozen constructed list without another user-alias lookup. String children construct after target lookup and parent-format expansion as one physical group, then remain frozen with the prompt. Source-file and Control comparisons are exact, nested bind and confirm failures are preflight parse errors, and a rejected replacement preserves the prior binding. The strict three-step scenario runs 19 internal construction, parser, readback, alias, and channel checks. Reply, `-y` Enter-default, blocking, and background execution are covered by daemon and GPUI unit tests, not the raw TUI, whose missing confirm, menu, and popup consumption is tracked under `clients.tui-overlay-consumption`. Broader eager whole-file source construction and its replay-channel placement remain open under the existing parser and command-chain owners. Six implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
+    },
+    {
+      "id": "tracker.args-parse-display-menu",
+      "title": "Apply display-menu item argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-display-menu.sh",
+        "scenario:compat/scenarios/smoke/args-parse-display-menu.txt",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `display-menu`'s pinned item rule without another wire change. The parser walks positional data as repeated NAME, KEY, and ACTION fields. A nonempty NAME advances through a string KEY to an ACTION, which accepts a string or typed block and resets the state to NAME. An empty NAME is a separator that consumes no KEY or ACTION and leaves the parser expecting another NAME. Values for `-b`, `-c`, `-C`, `-H`, `-s`, `-S`, `-t`, `-T`, `-x`, and `-y` remain strings. Every lexical typed block constructs before the parent callback type, arity, or effects, so child construction failures precede forbidden NAME, KEY, and option-value type errors. Accepted typed actions print recursively constructed canonical commands in stored binding readback, while quoted brace actions remain strings. The daemon already strips the structural wrapper only from typed actions before its fresh selection parse. Incomplete NAME and NAME-plus-KEY tails pass lexical construction and reach daemon runtime. Runtime resolves the current or `-c` target client before completeness, so an unattached command or initial Control reports `no current client`; initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates an incomplete group as `not enough arguments` before its overlay no-op and emits an exact flag-1 `%error`; EOF after that frame exits 1. Interactive menu ordering remains unchanged. The strict three-step, 34-check fixture covers canonical, built-in alias, unique-prefix, and preexisting user-alias paths; repeated items and separators; typed and quoted actions; every string-only valued flag; child precedence; canonical binding readback and preservation; client-before-completeness precedence; incomplete runtime groups; and exact source-file plus Control channels. A PID-unique FIFO proves attached exit status after EOF. Both servers finish `ARGS_PARSE_DISPLAY_MENU=clean:34` with zero differences. Attached-client rendering and input, geometry, styles, targets, formats, selected-action runtime errors, same-source alias mutation, eager whole-source construction, generic alias recursion, and raw-TUI overlay parity retain their existing owners. Three implemented callback commands across one effective rule remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-if-shell",

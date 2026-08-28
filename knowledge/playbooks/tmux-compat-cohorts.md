@@ -87,6 +87,20 @@ an empty local array that shadows the inherited global hook. The strict 24-check
 replacement, empty-value, and local-inheritance ordering, quoted braces, `-R`, aliases, stored bindings,
 `default-client-command`, source-file diagnostics, and exact Control framing.
 
+The twenty-first milestone reuses protocol v84 for `display-menu`. Its parser walks repeated NAME,
+KEY, and ACTION fields. A nonempty NAME consumes a string KEY and a string-or-typed ACTION before
+resetting to NAME; an empty NAME is a separator that consumes no KEY or ACTION. All ten valued
+flags remain strings. Typed children construct before parent type, arity, or effects. Stored
+bindings print canonical child commands for typed actions and preserve quoted action strings.
+Incomplete NAME and NAME-plus-KEY tails construct and reach daemon runtime. Runtime resolves the
+current or `-c` target client before completeness, so an unattached command or initial Control
+reports `no current client`; initial Control uses a flag-0 `%error` and exits 1. Once attached,
+Control validates an incomplete group as `not enough arguments` before its overlay no-op and emits
+an exact flag-1 `%error`; EOF after that frame exits 1. Interactive menu ordering is unchanged. The
+strict three-step, 34-check fixture covers state transitions, type boundaries, all valued flags,
+aliases, stored readback and preservation, client-before-completeness precedence, incomplete
+runtime groups, source-file diagnostics, and PID-unique FIFO Control framing.
+
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
 and TUI reconnect. `resize-window -A` and `-a` now aggregate retained client geometry once and
@@ -108,20 +122,22 @@ milestone does not grow across the TUI message boundary.
 `active-pane` and `no-detach-on-destroy` are retained and reported, but their consumers remain
 explicit later gaps.
 
-The final 10g canonical checkpoint covers 95 scenarios and 1,508 steps. Every ordinary row is clean.
+The final 10h canonical checkpoint covers 96 scenarios and 1,511 steps. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the canonical summary SHA-256
 is
-`15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
+`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
 The attached-client result is `PASS`, every ordinary row is clean, and only the two registered GEO
-rows remain. The historical 10f checkpoint remains 94 scenarios and 1,505 steps at SHA-256
+rows remain. The historical 10g checkpoint remains 95 scenarios and 1,508 steps at SHA-256
+`15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
+The historical 10f checkpoint remains 94 scenarios and 1,505 steps at SHA-256
 `31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
 The historical 10e checkpoint remains 93 scenarios and 1,502 steps at SHA-256
 `e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
 The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
-The full strict suite was rerun for the final 10g artifact, not carried forward from an older run.
+The final 10h artifact comes from a fresh full strict suite run.
 The two positional-bound scenarios prove canonical and alias diagnostics, the
 first-positional flag boundary, target-error precedence, and effect suppression. The expanded
 maximum fixture covers 71 generic-CLI-routed canonical names and 62 aliases; Rust coverage
@@ -153,8 +169,11 @@ boundaries against quote or semicolon injection. Raw string templates substitute
 and complete construction. Both paths replace the first `%%` and every `%1`, with trailing-percent
 quoting.
 Typed `display-menu` actions lose their structural wrapper before the fresh selection parse, while
-quoted brace strings remain literal. Prompt chaining and multi-answer `%2` retain their existing
-prompt owner.
+quoted brace strings remain literal. The later item-rule closure keeps incomplete NAME and
+NAME-plus-KEY groups at daemon runtime. Runtime resolves the current or `-c` target client before
+completeness. Initial Control returns a flag-0 `no current client` error. Attached Control validates
+an incomplete group as `not enough arguments` before its overlay no-op, returns a flag-1 `%error`,
+and exits 1 after EOF. Prompt chaining and multi-answer `%2` retain their existing prompt owner.
 The focused three-step `args-parse-command-prompt` row drives a real attached client and runs 43
 internal checks across template types, recursive construction precedence, alias timing,
 substitution, injection resistance, physical groups, source-file diagnostics, and exact Control
@@ -166,6 +185,15 @@ forwarding, stored bindings, and exact Control framing. Both sides finish with
 `ARGS_PARSE_SET_HOOK=clean:24`. The fixture leaves eager whole-file construction, same-source alias
 mutation, multiline inner-source placement, `-B` monitor semantics, and broader replay placement
 with their existing owners.
+The focused three-step `args-parse-display-menu` row runs 34 internal checks across the repeated
+NAME, KEY, and ACTION state, empty-name separators, typed and quoted actions, all ten string-only
+valued flags, child construction precedence, canonical, built-in alias, prefix, and preexisting
+user-alias paths, stored binding readback and preservation, incomplete runtime groups, source-file
+diagnostics, and exact initial flag-0 plus attached flag-1 Control frames through a PID-unique FIFO.
+Both sides finish with `ARGS_PARSE_DISPLAY_MENU=clean:34` and zero differences. Attached rendering
+and input, geometry, styles, targets,
+formats, selected-action runtime errors, same-source alias mutation, eager whole-source
+construction, generic alias recursion, and raw-TUI overlay parity retain their owners.
 
 # Cohorts
 
@@ -209,7 +237,8 @@ milestone per letter, never one combined commit.
 | 10e | `confirm-before` commands-or-string argument rule | Closed under `tracker.args-parse-confirm-before` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; recursive construction and exact channel proof stay separate from client reply rendering and whole-file source construction |
 | 10f | `command-prompt` commands-or-string argument rule | Closed under `tracker.args-parse-command-prompt` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; one typed-or-string template plus deferred substitution, alias, source, and group boundaries |
 | 10g | `set-hook` monitor-or-value argument rule | Closed under `tracker.args-parse-set-hook` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; lexical `-B` typing is closed while unsupported monitor runtime behavior retains its owner |
-| 10h-10k | Remaining `args_parse` runtime rules | Four `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | Two effective source rules, never all callback commands at once |
+| 10h | `display-menu` repeating item argument rule | Closed under `tracker.args-parse-display-menu` on 2026-08-28 | Complete | Protocol v84 metadata reused without a wire change; data-dependent NAME, KEY, and ACTION typing closes without absorbing menu presentation or selected-action execution |
+| 10i-10k | Remaining `args_parse` runtime rules | Three `args-parse:*` items in `tracker.semantic-coverage`, one measured command per slice | Medium | One shared source rule, never all callback commands at once |
 | 10l-10p | Source-owned tracker registrations | Hook producers, key bindings, nonconstant formats, open context formats, and option consumers, one semantic item per slice | Small to medium | Five unrelated owners remain five independent milestones |
 | 10q-10s | Raw TUI daemon overlays | Three items in `clients.tui-overlay-consumption`, one confirm, menu, or popup surface per slice | Hard | ClientCore already retains state; each client renderer and input contract remains independently closable |
 | 11 | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
@@ -220,7 +249,7 @@ milestone per letter, never one combined commit.
 | 16 | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | 17 | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after slice 16 | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10g are closed; slice 10h is next. Before choosing each later milestone,
+Slices 9a through 9f and 10a through 10h are closed; slice 10i is next. Before choosing each later milestone,
 regenerate the report
 and re-rank every active daily, script, remote, or silent-mismatch group. That audit must include
 attach-dependent work such as `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,

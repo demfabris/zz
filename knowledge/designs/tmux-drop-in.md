@@ -91,12 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The final 10g canonical acceptance inventory contains 95 differential scenarios and 1,508 executable
+The final 10h canonical acceptance inventory contains 96 differential scenarios and 1,511 executable
 steps against pinned tmux `d77c9dc6`, including the config/plugin smoke corpus. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
+`75aee7176d3ed3cf1886d4f4c697062089b87644036e85f0230f355fac7d4217`.
+The historical 10g artifact remains 95 scenarios and 1,508 steps at SHA-256
 `15385526cd2098f35276c27cd8edfef338569cd6a6c87ffe80d8f919701f042a`.
 The historical 10f artifact remains 94 scenarios and 1,505 steps at SHA-256
 `31b03805b5701aff0555ebe4d4b40a0116b8525130d4d3406963e9a1c8f1919c`.
@@ -120,8 +122,8 @@ OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still
 visual smoke evidence.
 
 Protocol v84 carries lexical command-block positions. `if-shell`, `run-shell`, both set-option
-commands, `bind-key`, `command-prompt`, `confirm-before`, and `set-hook` now apply their pinned
-callback rules.
+commands, `bind-key`, `command-prompt`, `confirm-before`, `display-menu`, and `set-hook` now apply
+their pinned callback rules.
 The strict three-step confirm scenario runs 19 construction, parser, readback, alias, and exact source-file
 plus Control channel checks on both servers. Every lexical typed block recursively constructs
 before parent name, callback type, or arity validation. Recursive paths carry independent one-layer
@@ -147,13 +149,28 @@ values remain strings in both modes. zz
 still rejects `-B` because format-monitor runtime behavior is unsupported. Built-in hooks flatten
 physical groups during their second construction pass. Custom `@` typed values retain textual
 ` ;; ` groups. An empty or failing local append still creates an empty local array and shadows the
-inherited global hook. A typed ignored `-R` value constructs before the stored hook runs. A typed
-`display-menu` action drops its structural wrapper before the fresh selection parse, while a quoted
-brace string remains literal. Reply
+inherited global hook. A typed ignored `-R` value constructs before the stored hook runs.
+`display-menu` walks repeated positional NAME, KEY, and ACTION fields. A nonempty NAME advances
+through a string KEY to a string-or-typed ACTION and then resets the state to NAME. An empty NAME is
+a separator and leaves the parser expecting another NAME. Its ten valued flags remain strings.
+Typed children construct before parent type, arity, or effects. Accepted typed actions print
+canonical child commands in stored bindings, while quoted actions remain strings. Incomplete NAME
+and NAME-plus-KEY tails construct and reach daemon runtime. Runtime resolves the current or `-c`
+target client before completeness, so an unattached command or initial Control reports `no current
+client`; initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates an
+incomplete group as `not enough arguments` before its overlay no-op and returns a flag-1 `%error`;
+EOF after that frame exits 1. Interactive ordering
+remains unchanged. The daemon strips only a typed action's
+structural wrapper before its fresh selection parse. The strict three-step fixture runs 34 type,
+state, option, precedence, alias, readback, preservation, incomplete, source-file, and Control
+checks through a PID-unique FIFO, finishes `ARGS_PARSE_DISPLAY_MENU=clean:34` on both servers, and
+reports zero differences. Reply
 and `-y` Enter-default behavior are daemon and GPUI unit proof, not raw TUI proof. Eager whole-file
-source construction, same-source alias mutation, multiline inner-source placement, and the broader
-replay-channel placement difference remain open. Four command-specific `args-parse:` items across
-two rules remain.
+source construction, same-source alias mutation, multiline inner-source placement, generic alias
+recursion, selected-action runtime errors, and the broader replay-channel placement difference
+remain open. Attached-client menu rendering, input, geometry, styles, targets, formats, and raw-TUI
+overlay parity retain their existing owners. Three command-specific `args-parse:` items under one
+rule remain.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the

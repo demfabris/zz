@@ -98,7 +98,7 @@ open-ended or dynamic context-format names, nonconstant format behavior, hook pr
 behavior for shared bindings, or consumer truth for option `BEHAVES`.
 `tracker.semantic-coverage` owns those six blind spots. Its command-specific `args-parse:` items name the
 implemented callback commands; `choose-client` and `switch-mode` remain covered by their
-unimplemented command items. Protocol v84 closes three complete runtime rules plus `bind-key`,
+unimplemented command items. Protocol v84 closes four complete runtime rules plus `bind-key`,
 `command-prompt`, and `confirm-before` within the `commands-or-string` rule, plus `set-hook`'s
 lexical monitor-or-value callback. `if-shell`
 preserves unquoted typed branches across source-file and Control parsing, rejects typed conditions
@@ -140,11 +140,22 @@ positional lexically accepts either type. Hook names and extra positionals remai
 unsupported. Built-in hook values flatten physical groups during their second construction pass;
 custom `@` typed values retain textual ` ;; ` groups. Empty and failing local appends still create
 an empty local array and shadow the inherited global hook. Typed ignored `-R` values construct before the
-stored hook runs. A typed `display-menu` action drops its structural wrapper before the fresh
-selection parse, while a quoted brace string remains literal. Broader eager whole-file source
-construction, same-source alias mutation, multiline inner-source placement, and replay-channel
-placement remain open.
-Four `args-parse:` items across two effective rules remain.
+stored hook runs. `display-menu` applies a data-dependent NAME, KEY, and ACTION state to its
+positionals. Nonempty names consume a string key and a string-or-typed action; empty names are
+separators and leave the next positional in NAME state. All ten valued flags stay string-only.
+Typed children construct before the parent type, arity, or effects, accepted typed actions print
+canonical child commands in stored bindings, and incomplete NAME or NAME-plus-KEY tails defer to
+daemon runtime validation. Runtime resolves the current or `-c` target client before completeness,
+so an unattached command or initial Control reports `no current client`; initial Control uses a
+flag-0 `%error` and exits 1. Once attached, Control validates an incomplete group as `not enough
+arguments` before its overlay no-op and returns a flag-1 `%error`; EOF after that frame exits 1.
+Interactive ordering remains unchanged. The daemon drops the
+structural wrapper only for typed actions before a fresh selection parse; quoted brace actions
+remain literal. Broader eager whole-file source
+construction, same-source alias mutation, multiline inner-source placement, generic alias
+recursion, selected-action error delivery, and replay-channel placement remain open. Attached menu
+rendering and input plus raw-TUI overlay parity retain their client owners.
+Three `args-parse:` items under one effective rule remain.
 Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option

@@ -433,6 +433,41 @@ Eager whole-file construction, aliases created earlier in the same source, multi
 diagnostic placement, `-B` monitor semantics, and broader replay placement retain their existing
 owners.
 
+## `display-menu` argument blocks
+
+The `display-menu-items` rule closed on 2026-08-28 without another wire change. Its callback reads
+positional data through repeated NAME, KEY, and ACTION states. A nonempty NAME advances to a string
+KEY, then an ACTION accepts a string or typed block and resets the state to NAME. An empty NAME is a
+separator that consumes no KEY or ACTION and leaves the parser expecting another NAME. Values for
+`-b`, `-c`, `-C`, `-H`, `-s`, `-S`, `-t`, `-T`, `-x`, and `-y` stay strings.
+
+Every lexical typed child constructs before the parent type, arity, or effect boundary. A child
+failure therefore precedes a NAME, KEY, or option-value type error. Accepted typed actions print
+their recursively constructed canonical commands in stored bindings. Quoted brace actions keep
+their string form. The callback accepts incomplete NAME and NAME-plus-KEY tails for daemon runtime
+validation, so stored bindings can retain either incomplete form. Runtime resolves the current or
+`-c` target client before completeness, so an unattached command or initial Control reports `no
+current client`; initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates
+an incomplete group as `not enough arguments` before its overlay no-op and emits an exact flag-1
+`%error`; EOF after that frame exits 1. Interactive menu ordering remains unchanged.
+
+The daemon's existing selection path removes the structural wrapper from a typed action before its
+fresh parse and leaves quoted brace strings literal. The callback closure does not absorb selected
+action execution or error delivery.
+
+The strict three-step `smoke/args-parse-display-menu` scenario runs 34 internal checks. It covers
+typed NAME and KEY positions at the first and later items, empty-name separator resets, all ten
+string-only valued flags, child-before-parent precedence, multiple items and separators, canonical,
+built-in alias, unique-prefix, and preexisting user-alias construction, typed and quoted stored
+readback, invalid-binding preservation, client-before-completeness precedence, incomplete runtime
+groups, source-file diagnostics, and exact initial flag-0 plus attached flag-1 Control framing. A
+PID-unique FIFO proves the attached process exits 1 after EOF. Both servers finish with
+`ARGS_PARSE_DISPLAY_MENU=clean:34`, and the strict run reports zero differences.
+
+Attached-client rendering and input, geometry, styles, targets, formats, selected-action runtime
+errors, same-source alias mutation, eager whole-source construction, generic alias recursion, and
+raw-TUI overlay parity retain their existing owners.
+
 ## Accepted grammar divergence evidence
 
 The catalog count does not include syntax zz accepts or parses before diverging:
@@ -498,8 +533,8 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   multi-answer `%2`, and the remaining prompt UI and queue contracts stay with
   `prompt.command-fidelity`.
 - A selected typed `display-menu` action drops its structural block wrapper before the fresh parse.
-  A quoted brace string remains literal. This boundary does not close the command's repeating
-  display-menu-items callback rule.
+  A quoted brace string remains literal. The argument-rule closure above leaves selected-action
+  execution and error delivery with the menu runtime owner.
 - `command-prompt` draws a different LABEL from the pin in two of three cases, found while
   measuring the mode flags and left alone because D1's brief required zero visible change for
   prompts using none of the new flags. `cmd_command_prompt_exec` appends a trailing space to

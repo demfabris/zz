@@ -10227,6 +10227,13 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_menu_args(&command.args)?;
         if kind == ClientKind::Control {
+            resolve_popup_client(
+                &self.inner.lock(),
+                client,
+                context,
+                parsed.target_client.as_deref(),
+            )?;
+            validate_display_menu_items(&parsed.items)?;
             return Ok(Execution::default());
         }
         let (target_client, mut target) = {
@@ -27101,6 +27108,24 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
         .validate_positional_minimum(parsed.items.len())?;
     parsed.positional_start = args.len().saturating_sub(parsed.items.len());
     Ok(parsed)
+}
+
+fn validate_display_menu_items(items: &[String]) -> Result<(), ServerError> {
+    let mut index = 0;
+    while index < items.len() {
+        let name = &items[index];
+        index = index.saturating_add(1);
+        if name.is_empty() {
+            continue;
+        }
+        if items.len().saturating_sub(index) < 2 {
+            return Err(ServerError::InvalidCommand(
+                "not enough arguments".to_owned(),
+            ));
+        }
+        index = index.saturating_add(2);
+    }
+    Ok(())
 }
 
 fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, ServerError> {
@@ -61690,6 +61715,59 @@ bind - split-window -v -c "#{pane_current_path}"
                 .title,
             "typed-choice"
         );
+    }
+
+    #[test]
+    fn control_display_menu_validates_item_shapes_before_ignoring_the_overlay() {
+        let empty = Arc::new(Shared::new(1));
+        let error = empty
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Control,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("display-menu", ["Incomplete", "i"]),
+            )
+            .expect_err("unattached control menu");
+        assert!(matches!(
+            error,
+            DaemonError::Server(ServerError::InvalidCommand(message))
+                if message == "no current client"
+        ));
+
+        let (shared, client, _, mut context) = popup_test_workspace("desktop");
+
+        for items in [
+            vec!["Incomplete"],
+            vec!["Incomplete", "i"],
+            vec!["", "Incomplete", "i"],
+        ] {
+            let error = shared
+                .execute(
+                    client,
+                    ClientKind::Control,
+                    &mut context,
+                    &CommandInvocation::new("display-menu", items),
+                )
+                .expect_err("incomplete control menu item");
+            assert!(matches!(
+                error,
+                DaemonError::Server(ServerError::InvalidCommand(message))
+                    if message == "not enough arguments"
+            ));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    ["", "Complete", "c", "display-message complete"],
+                ),
+            )
+            .expect("complete control menu");
+        assert!(!shared.inner.lock().menus.contains_key(&client));
     }
 
     #[test]

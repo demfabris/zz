@@ -68,8 +68,8 @@ accepts six rules and fails when a callback body falls outside them:
 
 `COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
 remain unimplemented and need no sidecar entry. `COMMAND_ARGS_PARSE_BEHAVES` now contains
-`bind-key`, `command-prompt`, `confirm-before`, `if-shell`, `run-shell`, `set-hook`, `set-option`,
-and `set-window-option`. Every `bind-key`
+`bind-key`, `command-prompt`, `confirm-before`, `display-menu`, `if-shell`, `run-shell`, `set-hook`,
+`set-option`, and `set-window-option`. Every `bind-key`
 positional accepts a string or typed block while `-T` and `-N` values remain strings. Scanning
 stops at the first positional or `--`; a typed key expands the live mux environment and is
 recursively printed before key lookup. Unknown typed-key commands keep their source diagnostic.
@@ -119,8 +119,20 @@ the prior entry. An unindexed empty value clears without adding an entry, `-a` w
 does nothing, and an indexed empty value remains present. Local array creation precedes empty append
 and runtime parsing, so an empty or failing local append creates an empty local array that shadows
 the inherited global hook. `-R` constructs a typed supplied value
-before it runs the stored hook but ignores a supplied quoted string. `tracker.semantic-coverage`
-owns the remaining four command-specific `args-parse:` items across two effective rules.
+before it runs the stored hook but ignores a supplied quoted string. `display-menu` tracks repeated
+NAME, KEY, and ACTION fields from the positional data. A nonempty NAME advances through a
+string-only KEY to an ACTION, which accepts a string or typed block and resets the state to NAME.
+An empty NAME is a separator that consumes no KEY or ACTION. Its ten valued flags remain strings.
+Typed children construct before the parent type, arity, or effect boundary, so child failures
+precede rejected NAME, KEY, and option-value types. Stored bindings print accepted typed actions
+with canonical child command names and retain quoted actions as strings. Incomplete NAME and
+NAME-plus-KEY tails construct successfully and reach daemon runtime. Runtime resolves the current
+or `-c` target client before completeness, so an unattached command or initial Control reports `no
+current client`; initial Control uses a flag-0 `%error` and exits 1. Once attached, Control validates
+an incomplete group as `not enough arguments` before its overlay no-op and returns a flag-1
+`%error`; EOF after that frame exits 1.
+Interactive ordering remains unchanged. `tracker.semantic-coverage`
+owns the remaining three command-specific `args-parse:` items under one effective rule.
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |
@@ -369,9 +381,10 @@ free input form one group. Prompt chains and multi-answer `%2` remain under thei
 before storage or normalization. Built-in hook values flatten physical groups during that stage,
 while custom `@` values retain their normalized textual groups for deferred execution. A typed
 ignored `set-hook -R` value still constructs and can fail before the stored hook runs. A typed
-`display-menu` action drops its structural wrapper before
+`display-menu` action keeps its wrapper through stored binding readback; the daemon drops it before
 the fresh selection parse, while a quoted brace string remains literal. Each stage resolves at most
-one user-alias layer; an alias-produced subtree cannot open another layer.
+one user-alias layer; an alias-produced subtree cannot open another layer. Generic alias recursion
+and selected-action runtime errors retain their existing owners.
 
 Protocol v74 gives Control the same daemon-owned boundary: `PrepareCommandList` resolves one
 complete initial argv unit or LF line under one lock, and the client executes the immutable result

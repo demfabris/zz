@@ -223,7 +223,7 @@ consumers remain bounded rather than byte-exact, so the roster means “reaches 
 **Commands: 83 of the pin's 92 verbs run; 9 are recognized but unimplemented** (four
 native-chrome superseded, linked windows permanently excluded, and `new-pane`, `switch-mode`, and
 `server-access` parked on separate missing models).
-**Twenty-three of the 83 implemented commands still reject tmux flags:** exactly 85
+**Twenty of the 83 implemented commands still reject tmux flags:** exactly 70
 catalog-declared pairs, inventoried in the matrix and enforced by
 `the_unsupported_flag_ledger_matches_the_catalog`. Sixty commands have no catalog-declared
 flag gap, but accepted semantic divergences remain outside that count.

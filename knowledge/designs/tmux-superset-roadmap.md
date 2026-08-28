@@ -227,7 +227,7 @@ tmux `d77c9dc6` passes with no skips and leaves the canonical scenario summary u
 These counts preserve the audit baseline. Use the generated gap report for current totals.
 
 - 83 of 92 tmux commands execute; 9 are recognized but unimplemented.
-- 85 tmux-valid flags are rejected across 23 implemented commands.
+- 70 tmux-valid flags are rejected across 20 implemented commands.
 - All 180 named options stored at the audit baseline; 104 behaved and 76 were storage-only. The
   2026-08-24 separator slice moved the current split to 105 behaving and 75 storage-only.
 - The audit used a flat format ledger. Schema 3 supersedes that snapshot with 198 global

@@ -3125,10 +3125,10 @@ impl MuxEngine {
             "set-hook" => self.set_hook(context, &command.args, hooks, default_shell_is_valid)?,
             "show-hooks" => self.show_hooks(context, &command.args, hooks)?,
             "set-option" => {
-                self.set_option(context, &command.args, false, hooks, default_shell_is_valid)?
+                self.set_option(context, command, false, hooks, default_shell_is_valid)?
             }
             "set-window-option" => {
-                self.set_option(context, &command.args, true, hooks, default_shell_is_valid)?
+                self.set_option(context, command, true, hooks, default_shell_is_valid)?
             }
             "show-options" => self.show_options(
                 context,
@@ -6762,6 +6762,7 @@ impl MuxEngine {
             if let Some(value) = positional.get(1) {
                 forwarded.push(value.clone());
             }
+            let forwarded = CommandInvocation::new("set-option", forwarded);
             return self.set_option(context, &forwarded, false, hooks, default_shell_is_valid);
         }
         let target =
@@ -7525,17 +7526,23 @@ impl MuxEngine {
     fn set_option(
         &mut self,
         context: &ExecutionContext,
-        args: &[String],
+        invocation: &CommandInvocation,
         force_window: bool,
         hooks: &mut impl StatusHooks,
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
-        let command = if force_window {
+        let command_name = if force_window {
             "set-window-option"
         } else {
             "set-option"
         };
-        let (options, positional) = parse_command_options(command, args)?;
+        let spec = command_spec(command_name).expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = invocation
+            .args
+            .len()
+            .saturating_sub(parsed_options.positionals.len());
+        let (options, positional) = parse_command_options(command_name, &invocation.args)?;
         let Some(option) = positional.first() else {
             return Err(ServerError::CommandParse(
                 "set-option needs an option".to_owned(),
@@ -7570,14 +7577,6 @@ impl MuxEngine {
             format_type: FormatType::Pane,
         };
         let option = expand_format_with_hooks(option, self, format_context, hooks);
-        let value = positional.get(1).map(|value| {
-            if options.has("-F") {
-                expand_format_with_hooks(value, self, format_context, hooks)
-            } else {
-                value.clone()
-            }
-        });
-        let value = value.as_deref();
         let parsed = match parse_tmux_option(&option) {
             Ok(parsed) => parsed,
             Err(()) if options.has("-q") => return Ok(Execution::default()),
@@ -7587,6 +7586,25 @@ impl MuxEngine {
                 )));
             }
         };
+        let value = positional
+            .get(1)
+            .map(|value| {
+                let value = if invocation.argument_is_command_block(positional_start + 1) {
+                    normalize_typed_option_command(
+                        self,
+                        crate::parser::command_block_body(value).unwrap_or(value),
+                    )?
+                } else {
+                    value.clone()
+                };
+                Ok(if options.has("-F") {
+                    expand_format_with_hooks(&value, self, format_context, hooks)
+                } else {
+                    value
+                })
+            })
+            .transpose()?;
+        let value = value.as_deref();
         if parsed.index.is_some() && (parsed.name.starts_with('@') || is_native_option(parsed.name))
         {
             return Err(ServerError::InvalidCommand(format!(
@@ -13196,35 +13214,74 @@ fn parse_hook_commands(
 }
 
 fn normalize_option_command(engine: &MuxEngine, value: &str) -> Result<String, ServerError> {
+    normalize_option_command_with_groups(engine, value, false)
+}
+
+fn normalize_typed_option_command(engine: &MuxEngine, value: &str) -> Result<String, ServerError> {
+    normalize_option_command_with_groups(engine, value, true)
+}
+
+fn normalize_option_command_with_groups(
+    engine: &MuxEngine,
+    value: &str,
+    source_groups: bool,
+) -> Result<String, ServerError> {
     let parsed = crate::parse_config("<set-option>", value);
     if !parsed.diagnostics.is_empty() {
         return Err(ServerError::InvalidCommand("syntax error".to_owned()));
     }
-    parsed
-        .commands
-        .into_iter()
-        .map(|command| {
-            let mut command = engine
-                .resolve_command_alias(&command)
-                .into_command(&command)?;
-            command.name = match resolve_command(&command.name) {
-                CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
-                    name.to_owned()
-                }
-                CommandResolution::Ambiguous(message) => {
-                    return Err(ServerError::InvalidCommand(message));
-                }
-                CommandResolution::Unknown => {
-                    return Err(ServerError::InvalidCommand(format!(
-                        "unknown command: {}",
-                        command.name
-                    )));
-                }
-            };
-            Ok(format_command(&command))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|commands| commands.join(" ; "))
+    let mut commands = Vec::with_capacity(parsed.commands.len());
+    for command in parsed.commands {
+        let mut command = engine
+            .resolve_command_alias(&command)
+            .into_command(&command)?;
+        command.name = match resolve_command(&command.name) {
+            CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
+                name.to_owned()
+            }
+            CommandResolution::Ambiguous(message) => {
+                return Err(ServerError::InvalidCommand(message));
+            }
+            CommandResolution::Unknown => {
+                return Err(ServerError::InvalidCommand(format!(
+                    "unknown command: {}",
+                    command.name
+                )));
+            }
+        };
+        for index in 0..command.args.len() {
+            if !command.argument_is_command_block(index) {
+                continue;
+            }
+            let body = crate::parser::command_block_body(&command.args[index])
+                .unwrap_or(&command.args[index]);
+            let body = normalize_option_command_with_groups(engine, body, source_groups)?;
+            command.args[index] = format!("{{ {body} }}");
+        }
+        commands.push(command);
+    }
+
+    let mut output = String::new();
+    let mut previous_line = None;
+    for command in commands {
+        let line = command.source.as_ref().map(|source| source.line);
+        if !output.is_empty() {
+            output.push_str(
+                if source_groups
+                    && previous_line
+                        .zip(line)
+                        .is_some_and(|(previous, current)| previous != current)
+                {
+                    " ;; "
+                } else {
+                    " ; "
+                },
+            );
+        }
+        output.push_str(&format_command(&command));
+        previous_line = line;
+    }
+    Ok(output)
 }
 
 fn has_unquoted_hook_format(input: &str) -> bool {
@@ -28135,6 +28192,282 @@ mod tests {
                 .unwrap()
                 .output,
             ""
+        );
+    }
+
+    #[test]
+    fn set_option_command_block_values_normalize_before_format_expansion() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "work", "-n", "main"]),
+            )
+            .expect("session");
+
+        for (name, args, block, show, expected) in [
+            (
+                "set-option",
+                vec!["-g", "@single", "{ display -p alias }"],
+                2,
+                vec!["-gv", "@single"],
+                "display-message -p alias",
+            ),
+            (
+                "set-window-option",
+                vec!["-g", "@multi", "{ display-mes -p one ; splitw -d }"],
+                2,
+                vec!["-gv", "@multi"],
+                "display-message -p one ; split-window -d",
+            ),
+            (
+                "set-option",
+                vec!["-g", "@empty", "{}"],
+                2,
+                vec!["-gv", "@empty"],
+                "\n",
+            ),
+            (
+                "set-option",
+                vec![
+                    "-g",
+                    "@nested",
+                    "{ if -F 1 { display -p 'yes ok' } { display -p no } }",
+                ],
+                2,
+                vec!["-gv", "@nested"],
+                "if-shell -F 1 { display-message -p \"yes ok\" } { display-message -p no }",
+            ),
+            (
+                "set-option",
+                vec!["-g", "@nested-empty", "{ if-shell -F 1 {} {} }"],
+                2,
+                vec!["-gv", "@nested-empty"],
+                "if-shell -F 1 {  } {  }",
+            ),
+            (
+                "set-option",
+                vec!["-g", "@groups", "{\n display -p one\n display -p two\n}"],
+                2,
+                vec!["-gv", "@groups"],
+                "display-message -p one ;; display-message -p two",
+            ),
+            (
+                "set-option",
+                vec![
+                    "-gF",
+                    "@formatted",
+                    "{ display -p '#{session_name}:#{window_name}' }",
+                ],
+                2,
+                vec!["-gv", "@formatted"],
+                "display-message -p \"work:main\"",
+            ),
+            (
+                "set-option",
+                vec![
+                    "-g",
+                    "@unexpanded",
+                    "{ display -p '#{session_name}:#{window_name}' }",
+                ],
+                2,
+                vec!["-gv", "@unexpanded"],
+                "display-message -p \"#{session_name}:#{window_name}\"",
+            ),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(name, args).with_command_blocks([block]),
+                )
+                .expect("typed option value");
+            let show_name = if name == "set-window-option" {
+                "show-window-options"
+            } else {
+                "show-options"
+            };
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command(show_name, &show))
+                    .expect("typed option readback")
+                    .output,
+                expected
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@quoted", "{ display -p quoted }"]),
+            )
+            .expect("quoted braces");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-gv", "@quoted"]),)
+                .expect("quoted readback")
+                .output,
+            "{ display -p quoted }"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[80]", "flash=display-message -p"],
+                ),
+            )
+            .expect("command alias");
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "@user-alias", "{ flash expanded }"])
+                    .with_command_blocks([2]),
+            )
+            .expect("typed user alias");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-gv", "@user-alias"]),
+                )
+                .expect("user alias readback")
+                .output,
+            "display-message -p expanded"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "default-client-command",
+                        "{ display -p client ; neww -d }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("typed command option");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-client-command"]),
+                )
+                .expect("command option readback")
+                .output,
+            "display-message -p client ; new-window -d"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "default-client-command",
+                        "{\n display -p typed-first\n display -p typed-second\n}",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("multiline typed command option");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-client-command"]),
+                )
+                .expect("multiline typed command readback")
+                .output,
+            "display-message -p typed-first ; display-message -p typed-second"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "default-client-command",
+                        "display -p first\ndisplay -p second",
+                    ],
+                ),
+            )
+            .expect("multiline string command option");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "default-client-command"]),
+                )
+                .expect("multiline command option readback")
+                .output,
+            "display-message -p first ; display-message -p second"
+        );
+    }
+
+    #[test]
+    fn set_option_command_block_rejections_preserve_existing_state() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "@kept", "original"]),
+            )
+            .expect("baseline option");
+
+        for (invocation, expected) in [
+            (
+                CommandInvocation::new(
+                    "set-option",
+                    ["-g", "{ set-option -g @kept forbidden }", "replacement"],
+                )
+                .with_command_blocks([1]),
+                "command set-option: argument 1 must be \"string\"",
+            ),
+            (
+                CommandInvocation::new(
+                    "set-window-option",
+                    [
+                        "-t",
+                        "{ set-option -g @kept forbidden }",
+                        "@value",
+                        "replacement",
+                    ],
+                )
+                .with_command_blocks([1]),
+                "command set-window-option: -t argument must be a string",
+            ),
+            (
+                CommandInvocation::new(
+                    "set-option",
+                    ["@value", "replacement", "{ set-option -g @kept forbidden }"],
+                )
+                .with_command_blocks([2]),
+                "command set-option: argument 3 must be \"string\"",
+            ),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &invocation)
+                    .expect_err("rejected typed argument")
+                    .tmux_message(),
+                expected
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("show-options", &["-gv", "@kept"]),)
+                .expect("preserved option")
+                .output,
+            "original"
         );
     }
 

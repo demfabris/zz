@@ -229,12 +229,16 @@ This is no-effect source parsing, not full tmux parse validation: tmux validates
 arguments while building its command list, while zz performs those checks during replay. Shared flag
 and arity diagnostics match at dispatch. `config.parser-edge-cases` and `mux.chain-parse-abort`
 retain the parse-unit boundary.
-The `run-shell` callback closure does not claim tmux's eager nested-command construction. Pinned
+The first three callback closures do not claim tmux's eager nested-command construction. Pinned
 tmux recursively builds `{ ... }` bodies before it applies the outer callback, including under
 `source-file -n`. zz records lexical block positions during config parsing and applies callback and
 child-command validation only during replay. Consequently, `source-file -n` still does not reject
-an otherwise invalid typed `run-shell` in zz, and an invalid nested body can take diagnostic
-precedence on the pin. `config.parser-edge-cases` and `mux.chain-parse-abort` retain that work.
+an otherwise invalid typed `run-shell` or set-option value in zz, and an invalid nested body can
+take diagnostic precedence on the pin. Alias definitions earlier in the same source are also
+unavailable during the pin's whole-file construction. The outer-user-alias plus nested-user-alias
+case retains tmux's `NOALIAS` parse state, which protocol v84 does not carry. `config.parser-edge-cases`,
+`mux.chain-parse-abort`, `aliases.config-parse-unit`, and the existing alias owners retain those
+boundaries.
 `-t` resolves one pane target before path expansion and replay. A missing target follows tmux's
 `CMD_FIND_CANFAIL` path: the file still loads with an empty target context, while the invoking client
 cwd remains the source base. `-F` reads the resolved target context. `-v` emits canonical parsed

@@ -341,6 +341,7 @@ fn validate_command_args_parse(
         let accepts_command_block = match args_parse.rule {
             CommandArgsParseRule::IfShellBranches => matches!(position, 1 | 2),
             CommandArgsParseRule::RunShellCommandFlag => run_shell_commands,
+            CommandArgsParseRule::SetOptionValue => position == 1,
             _ => return Ok(()),
         };
         if command.argument_is_command_block(index) && !accepts_command_block {
@@ -429,7 +430,8 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
     },
 ];
 
-pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &["if-shell", "run-shell"];
+pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] =
+    &["if-shell", "run-shell", "set-option", "set-window-option"];
 
 use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
@@ -2951,6 +2953,58 @@ mod tests {
 
         let quoted = CommandInvocation::new("run-shell", ["{ display-message shell text }"]);
         assert!(parse_tmux_command_options(spec, &quoted).is_ok());
+    }
+
+    #[test]
+    fn set_option_args_parse_accepts_only_the_value_as_a_command_block() {
+        for name in ["set-option", "set-window-option"] {
+            let spec = catalog_command_spec(name).expect("set option command");
+
+            for command in [
+                CommandInvocation::new(name, ["-g", "@typed", "{ display-message value }"])
+                    .with_command_blocks([2]),
+                CommandInvocation::new(name, ["--", "@typed", "{}"]).with_command_blocks([2]),
+            ] {
+                parse_tmux_command_options(spec, &command).expect("typed option value");
+            }
+
+            for (command, expected) in [
+                (
+                    CommandInvocation::new(name, ["-g", "{ display-message name }", "value"])
+                        .with_command_blocks([1]),
+                    format!("command {name}: argument 1 must be \"string\""),
+                ),
+                (
+                    CommandInvocation::new(
+                        name,
+                        ["-t", "{ display-message target }", "@typed", "value"],
+                    )
+                    .with_command_blocks([1]),
+                    format!("command {name}: -t argument must be a string"),
+                ),
+                (
+                    CommandInvocation::new(name, ["@typed", "value", "{ display-message extra }"])
+                        .with_command_blocks([2]),
+                    format!("command {name}: argument 3 must be \"string\""),
+                ),
+                (
+                    CommandInvocation::new(name, ["@typed", "-g", "{ display-message late }"])
+                        .with_command_blocks([2]),
+                    format!("command {name}: argument 3 must be \"string\""),
+                ),
+            ] {
+                assert_eq!(
+                    parse_tmux_command_options(spec, &command)
+                        .expect_err("rejected command block")
+                        .tmux_message(),
+                    expected
+                );
+            }
+
+            let quoted =
+                CommandInvocation::new(name, ["-g", "@quoted", "{ display-message quoted }"]);
+            parse_tmux_command_options(spec, &quoted).expect("quoted braces");
+        }
     }
 
     #[test]

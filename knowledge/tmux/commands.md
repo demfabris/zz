@@ -68,16 +68,19 @@ accepts six rules and fails when a callback body falls outside them:
 
 `COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
 remain unimplemented and need no sidecar entry. `COMMAND_ARGS_PARSE_BEHAVES` now contains
-`if-shell` and `run-shell`. For `if-shell`, zero-based condition position 0 and option values must
-be strings, while branch positions 1 and 2 accept either strings or typed command blocks. For
-`run-shell`, a leading `-C`, including a combined short-option form, makes every positional
-command-or-string; without it every positional must be a string. Option values stay strings, option
-scanning stops at the first positional or `--`, and a later `-C` is positional. Quoted brace text
-stays a string. Command mode executes positional 0 and accepts but ignores later positionals. The
-parser preserves that lexical distinction through source files, Control transport, aliases,
-bindings, and hooks; validation rejects a forbidden type before execution or stored-command
-replacement. `tracker.semantic-coverage` owns the remaining 10 command-specific `args-parse:`
-items.
+`if-shell`, `run-shell`, `set-option`, and `set-window-option`. For `if-shell`, zero-based condition
+position 0 and option values must be strings, while branch positions 1 and 2 accept either strings
+or typed command blocks. For `run-shell`, a leading `-C`, including a combined short-option form,
+makes every positional command-or-string; without it every positional must be a string. Option
+values stay strings, option scanning stops at the first positional or `--`, and a later `-C` is
+positional. Command mode executes positional 0 and accepts but ignores later positionals.
+For both set commands, option names, flag values, and extra positionals stay strings while position
+1 accepts either a string or a typed block. Typed values recursively print canonical command names,
+same-line `;` groups, physical-line `;;` groups, and nested blocks before `-F` expansion. Empty
+blocks become empty values, while quoted brace text stays a string. The parser preserves lexical
+types through source files, Control transport, aliases, bindings, and hooks; validation rejects a
+forbidden type before execution or stored-command replacement. `tracker.semantic-coverage` owns the
+remaining eight command-specific `args-parse:` items across three effective rules.
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |

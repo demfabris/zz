@@ -69,6 +69,7 @@
 | known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
 | smoke/args-parse-if-shell | 3 | yes | 0 | yes | yes | yes |
 | smoke/args-parse-run-shell | 3 | yes | 0 | yes | yes | yes |
+| smoke/args-parse-set-option | 3 | yes | 0 | yes | yes | yes |
 | smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |

@@ -2684,8 +2684,6 @@
         "args-parse:display-menu",
         "args-parse:display-panes",
         "args-parse:set-hook",
-        "args-parse:set-option",
-        "args-parse:set-window-option",
         "semantic:tracker-hook-producer-partition",
         "semantic:tracker-key-binding-behavior",
         "semantic:tracker-nonconstant-format-behavior",
@@ -2703,7 +2701,7 @@
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands, `if-shell` and `run-shell` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and 10 per-command callback items remain. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `if-shell`, `run-shell`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and eight per-command callback items remain. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -3917,6 +3915,22 @@
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "resolution": "Protocol v84 lexical command-block positions now drive `run-shell`'s pinned argument callback without another wire change. A leading `-C`, including combined forms, accepts typed blocks at every positional; without it every positional must be a string. Option values remain strings, option scanning stops at the first positional or `--`, and a later `-C` stays positional. Under `-C`, execution consumes only positional 0 while valid extras remain accepted and ignored. Typed failures retain exact diagnostics and preserve prior bindings and hooks; quoted braces remain strings. The strict source-file and Control fixture runs 21 internal checks across canonical, built-in, prefix, and user aliases, foreground, background, stored-command, option-boundary, and no-effect paths. Eager whole-file or nested callback construction, including parse-only `source-file -n` validation, remains with the existing parser-edge and command-chain owners. Ten implemented callback commands remain under `tracker.semantic-coverage`."
+    },
+    {
+      "id": "tracker.args-parse-set-option",
+      "title": "Apply set-option value argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/parser.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-set-option.sh",
+        "scenario:compat/scenarios/smoke/args-parse-set-option.txt",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive the shared pinned value rule for `set-option` and `set-window-option` without another wire change. The option name, flag values, and extra positionals remain strings while positional 1 accepts a string or typed command block. Typed failures use exact canonical diagnostics before arity, targets, or effects. Accepted blocks stringify through recursive canonical command printing, preserving same-line `;` and physical-line `;;` groups; empty blocks become empty values, quoted braces stay literal, and `-F` runs after normalization. Canonical, built-in, prefix, preexisting user-alias, `--`, late-flag, real command-option, stored-binding, source-file, and Control paths are covered by a strict 21-check fixture. Eager whole-file construction, parse-only `source-file -n`, same-source alias creation, and the outer-user-alias plus nested-user-alias cross-case remain with their existing parser and alias owners. Eight implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.daemon-invalid-flag-runtime",

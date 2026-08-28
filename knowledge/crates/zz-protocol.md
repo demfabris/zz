@@ -143,7 +143,9 @@ it on unregister with the rest of the connection facts.
 Protocol v84 appends `CommandInvocation.command_blocks`. Config and Control parsers record the
 zero-based positions of standalone unquoted command blocks while quoted brace text stays an
 ordinary string. Alias expansion and key-table publication retain the positions. The
-command-aware option parser applies the adopted callback rules to `if-shell` and `run-shell`.
+command-aware option parser applies the adopted callback rules to `if-shell`, `run-shell`,
+`set-option`, and `set-window-option`. The two set commands accept a typed block only at value
+position 1 and reuse the same protocol v84 metadata.
 
 `MuxSnapshot` carries two per-recipient fields the daemon stamps for each subscriber:
 `focused_window`, that client's own window focus, and `SessionSnapshot::viewers`, a

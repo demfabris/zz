@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-set-option.sh ~/args-parse-set-option.sh
+out: set-environment -gu ARGS_PARSE_SET_OPTION
+run-shell 'sh ~/args-parse-set-option.sh'
+out: show-environment -g ARGS_PARSE_SET_OPTION

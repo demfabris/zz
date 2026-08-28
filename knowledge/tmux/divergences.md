@@ -215,7 +215,7 @@ overrides so `list-commands` and completion continue to describe zz's implemente
 
 The strict three-step `smoke/command-flag-errors` fixture compares 516 probes on each server. It
 contains 513 exact failures and three required-value absorption successes, then checks pane,
-buffer, file, binding, and hook sentinels. The remaining 10 custom `args_parse` command items,
+buffer, file, binding, and hook sentinels. The remaining eight custom `args_parse` command items,
 semantic value validation, and parser-group atomicity stay under their existing owners.
 
 ## `if-shell` argument blocks
@@ -264,6 +264,34 @@ validation. Pinned `source-file -n` applies the callback while building its pars
 list; zz currently stops after lexical parsing. Those ordering differences remain under
 `config.parser-edge-cases` and `mux.chain-parse-abort`. The fixture also avoids the pin's
 zero-positional `run-shell -C -d 0` server crash, which zz does not reproduce.
+
+## `set-option` argument blocks
+
+The third custom callback rule closed on 2026-08-28 without another protocol change. For
+`set-option` and `set-window-option`, positional value 1 accepts either a string or a typed command
+block. The option name, every flag value, and every extra positional remain strings. Typed failures
+use the canonical command name and precede maximum arity, target lookup, and effects. A rejected
+direct command or stored binding replacement leaves existing state unchanged.
+
+Accepted blocks stringify through recursive command printing before optional `-F` expansion.
+Built-in aliases, unique prefixes, and one preexisting user-alias layer become canonical names;
+same-line commands retain ` ; `, physical-line groups retain ` ;; `, and nested blocks are printed
+recursively. A top-level empty block becomes an empty value. Quoted brace text stays literal.
+String command options keep tmux's one-group parse, so a multiline `default-client-command` uses
+`;`; a typed multiline value first preserves its groups and then follows that same command-option
+normalization.
+
+The strict three-step `smoke/args-parse-set-option` scenario runs 21 internal source-file and
+Control checks. It covers both commands, canonical names, built-in aliases, unique prefixes,
+preexisting user aliases, typed names and targets, typed versus string extras, `--`, late flags,
+single, multi, nested, multiline, empty, and quoted values, `-F` ordering, a real command option,
+stored binding preservation, direct Control rejection, and Control-written readback. Both servers
+finish with `ARGS_PARSE_SET_OPTION=clean:21`.
+
+This closure does not claim eager whole-file or invalid-child construction, callback validation
+under `source-file -n`, aliases created earlier in the same source, or tmux's suppressed nested user
+alias after an outer user-alias expansion. Those remain with `config.parser-edge-cases`,
+`mux.chain-parse-abort`, `aliases.config-parse-unit`, and the existing alias owners.
 
 ## Accepted grammar divergence evidence
 

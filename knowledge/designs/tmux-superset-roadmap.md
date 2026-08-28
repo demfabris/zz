@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 85 active groups, 590 classified active items, 83 closed groups, and two known
+The live tracker has 85 active groups, 588 classified active items, 84 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,13 +53,13 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after the second callback rule closed covers 90 scenarios
-and 1,493 steps.
+The canonical checkpoint freshly rerun after the third callback rule closed covers 91 scenarios
+and 1,496 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`bd5bf71249974f78138e1484dda1c4fca8dabd0f7ec0e405f893fc46a8933b09`. Requested flags, attached
+`50b5eddb77da336747557d66928289dec366e6699917d3495c115f360caa5102`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
@@ -79,13 +79,19 @@ status recipients, and `display-message`. The attached fixture covers Interactiv
 bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
-closes both `tracker.args-parse-if-shell` and `tracker.args-parse-run-shell`. Source-file and Control
+closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`, and
+`tracker.args-parse-set-option`. Source-file and Control
 parsing preserve unquoted typed arguments through wire transport, aliases, bindings, and hooks;
 quoted braces remain strings. `if-shell` accepts typed branch positions while rejecting typed
 conditions, option values, and extra positionals. `run-shell` accepts typed positionals only when a
 leading `-C` enables command mode, keeps option values string-only, and stops scanning flags at the
 first positional or `--`. Its strict three-step scenario runs 21 internal checks on both servers
-and finishes with `ARGS_PARSE_RUN_SHELL=clean:21`.
+and finishes with `ARGS_PARSE_RUN_SHELL=clean:21`. `set-option` and `set-window-option` share the
+`SetOptionValue` rule: only positional 1 accepts a typed block; option names, flag values, and extra
+positionals remain strings. Recursive command printing preserves same-line `;` and physical-line
+`;;`, empty blocks become empty values, quoted braces stay literal, and `-F` expands after typed
+normalization. Their strict three-step scenario runs 21 internal checks on both servers and finishes
+with `ARGS_PARSE_SET_OPTION=clean:21`.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -441,12 +447,13 @@ work queue. Select exact gap IDs from the generated report before starting a sli
 
    `tracker.args-parse-inventory` closed callback discovery on 2026-08-25. The oracle rejects an
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
-   commands, and the third manifest test requires one `args-parse:` item for each rule absent from
-   `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains `if-shell` and `run-shell`; four
-   effective rules and 10 command-specific items remain. The unimplemented
+   commands, and the third manifest test requires one `args-parse:` item for each implemented
+   callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains `if-shell`, `run-shell`,
+   `set-option`, and `set-window-option`; three effective rules and eight command-specific items
+   remain. The unimplemented
    `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
-   `tracker.semantic-coverage` tracks runtime adoption of the four remaining argument rules, open-ended or
+   `tracker.semantic-coverage` tracks runtime adoption of the three remaining argument rules, open-ended or
    dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
    and option `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
@@ -966,6 +973,14 @@ permanent product decision has been recorded for them.
   accepted and ignored. Exact failures preserve stored bindings and hooks. The strict three-step scenario runs
   21 source-file and Control checks and finishes `ARGS_PARSE_RUN_SHELL=clean:21` on zz and the pin.
   Four callback rules across 10 implemented commands remain.
+- 2026-08-28: The existing protocol v84 metadata closed `tracker.args-parse-set-option` without a
+  wire change. `set-option` and `set-window-option` accept typed command blocks only at positional
+  1. Option names, option values attached to flags, and extra positionals remain strings, with exact
+  type failures preceding arity, target lookup, and effects. Recursive typed printing preserves
+  same-line and physical-line command groups before `-F` expansion; empty blocks become empty
+  values and quoted braces stay literal. The strict three-step scenario runs 21 source-file and
+  Control checks and finishes `ARGS_PARSE_SET_OPTION=clean:21` on zz and the pin. Three callback
+  rules across eight implemented commands remain.
 
 # Related
 

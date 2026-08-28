@@ -354,7 +354,9 @@ closure is that exception.
 | 10p | Raw TUI popup | Closed under `clients.tui-display-popup-overlay` on 2026-08-28 | Complete | Popup state, rendering, input ownership, cleanup, and three attached cases close without absorbing broader popup fidelity |
 | 10q | Per-client no-detach-on-destroy fallback | Closed under `clients.no-detach-on-destroy` on 2026-08-28 | Complete | The configured primary remains shared, while only flagged clients use the bounded newest-session fallback |
 | 10r | Local cold-start CLI parse abort | Closed under `mux.local-cli-autospawn-parse-abort` on 2026-08-28 | Complete | Static syntax covers 83 implemented and nine parked commands; exact attach, `-N`, post-config preparation, and one-shot generation ownership close before effects |
-| Post-rerank forecast | Source-owned tracker registrations | `semantic:tracker-nonconstant-format-behavior`, then open context formats and option consumers | Small research | Register every claimed producer before returning to broader behavior slices |
+| 10s | Nonconstant format behavior partition | Frozen under `semantic:tracker-nonconstant-format-behavior` on 2026-08-28 | Small research | Partition 124 behavior registrations into 92 mux and 32 daemon consumers against 74 live gaps and all 198 pinned names |
+| Post-10s rerank | Startup source cwd and config-group atomicity | Not frozen | Medium | Recheck the newly bounded startup client-cwd seam and config/source group preparation before returning to forecast registrations |
+| Post-rerank forecast | Remaining source-owned tracker registrations | Open context formats, then option consumers | Small research | Register every claimed consumer before broader behavior slices |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | Post-rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
 | Post-rerank | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Medium after action fidelity | Seven keys become honest only after their five actions exist |
@@ -385,12 +387,20 @@ shutdown, and rejects registrations once stopping begins. Runtime target and eff
 their queue semantics. The old chain gap retains two active siblings: warm unaliased generic command
 groups and config or source-file replay.
 
-No successor has been frozen. Before freezing the next milestone, regenerate the report and re-rank
-every active daily, script, remote, or silent-mismatch group. That audit must include
-attach-dependent work such as
+The post-10r rerank froze slice 10s on `semantic:tracker-nonconstant-format-behavior`. The 198-name
+global format table currently has 74 active constant-placeholder gaps and 124 implicitly trusted
+nonconstant names. Slice 10s registers those 124 names as 92 direct mux values and 32 daemon-hook
+values, proves the daemon consumes its complete delegated roster, and requires the two behavior
+sets plus the 74 live gaps to partition the pin exactly. It changes no runtime value and claims no
+context-specific value parity. Open context formats and option consumers remain separate.
+
+The rerank also exposed `semantic:source-file-startup-initial-client-cwd` as a potentially bounded
+use of 10r's cold-bootstrap provenance, with `semantic:config-source-group-parse-abort` close behind.
+Before freezing the next milestone, regenerate the report and re-rank every active daily, script,
+remote, or silent-mismatch group. That audit must include attach-dependent work such as
 `buffers.client-file-context`, the three open `source-file.*-client-cwd` groups,
 `clients.detach-exec`, `clients.parent-hup-exit`, `display-popup.behavior-fidelity`, and
-`display-menu.behavior-fidelity`. Every row after 10r is a non-frozen dependency forecast,
+`display-menu.behavior-fidelity`. Every row after 10s is a non-frozen dependency forecast,
 not permission to skip a newly unblocked practical gate. Keep formats, hooks, and `active-pane` as
 separate slices.
 
@@ -483,15 +493,16 @@ shared arity and shared flag closures plus the complete CLI and app-library gate
 focused command-flag scenario reports 516 matching probes, then use the current canonical summary
 for the full scenario count, attached-client result, and the two documented GEO rows.
 
-Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include
-daily, script, remote, and silent mismatches plus newly unblocked attach-dependent work. Freeze one
-acceptance contract after that audit. Do not combine context formats, event hooks, exit actions,
-or `active-pane` behavior merely because they share client state.
-
 Confirm that slice 10r is closed under `mux.local-cli-autospawn-parse-abort`, with 83 implemented
 and nine parked syntax entries, exact attach-tail and `-N` coverage, one post-config preparation
 snapshot, the generation-owned one-shot lease, and 11 cold probes per engine. Treat warm unaliased
 command groups and config or source-file replay as separate residual owners.
+
+Confirm that slice 10s is frozen under `semantic:tracker-nonconstant-format-behavior`. Implement
+only the source-owned partition of 124 behavior registrations into 92 mux and 32 daemon consumers,
+prove the delegated consumer roster, and reconcile those names plus 74 active `format:` gaps with
+all 198 pinned names. Do not change runtime values, context-format vocabulary, option consumers, the
+oracle, or the protocol.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
 source before editing. Use one coordinator and three Codex subagents to probe the selected

@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10R DELIVERED: LIVE RERANK REQUIRED**
+> Campaign state: **SLICE 10S FROZEN: NONCONSTANT FORMAT BEHAVIOR PARTITION**
 >
 > Tracker resolution progress: **64.5% (120 of 186 known groups)**
 >
-> Audited pre-close base: **2026-08-28** at `c85c6de4494100594922f3eb7fd10014b35d01c1`
+> Committed milestone base: **2026-08-28** at `02bb4a145141610a9c43bb2e25cf0cd92bf43520`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited pre-close base | `c85c6de4494100594922f3eb7fd10014b35d01c1` |
-| Delivery | The current local milestone closes 10r on top of its committed plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Committed milestone base | `02bb4a145141610a9c43bb2e25cf0cd92bf43520` |
+| Delivery | Local `main` contains the committed 10r closure and frozen 10s plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10r is complete; run a live full-registry rerank before freezing its successor |
+| Campaign point | Slice 10s is frozen on the nonconstant global-format behavior partition |
 | Live registry | 87 active groups, 594 active items, 99 closed records |
 | Active status | 46 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10r closure descends from the committed plan above. Resolve the commit
+The 10s plan descends from the committed 10r milestone above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -237,7 +237,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10p | Raw-TUI popup state, rendering, input ownership, and attached proof | `587ce54` |
 | 10p proof repair | Live-popup focus suppression, dead `-k` focus-close, and C-locale frame proof | `c909406` |
 | 10q | Per-client no-detach-on-destroy fallback and attached proof | `8310fb7` |
-| 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | Current milestone; resolve after commit |
+| 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | `02bb4a1` |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -352,21 +352,47 @@ ownership, contention, pipelining, and shutdown ordering. The strict fixture run
 each engine. Runtime target and effect errors retain queue semantics: earlier effects stay visible,
 and later commands do not run. Slice 10r changes neither protocol nor snapshot schema.
 
-## Non-frozen forecast after 10r
+## Frozen slice: 10s nonconstant format behavior partition
 
-No successor is frozen. Run a full live rerank first; the table records dependencies only.
+The post-10r rerank selected `semantic:tracker-nonconstant-format-behavior` as the largest bounded
+silent-discovery surface. The pinned oracle and zz both name 198 global format-table variables, but
+the compatibility gate currently classifies only the 74 variables whose zz backing is a constant
+placeholder. The other 124 names are implicitly trusted even though their behavior is split
+between 92 mux-resolved backings and 32 daemon-provided status-hook values.
+
+Slice 10s acceptance is:
+
+- source-owned inventories classify exactly 124 unique nonconstant format names as 92 direct mux
+  values plus 32 values delegated to the daemon;
+- a daemon consumer test proves that the complete 32-name delegated roster is handled by the
+  production format hook rather than merely named by the mux;
+- the 124 behavior registrations and 74 active `format:` items are disjoint and their union equals
+  all 198 unique names in the pinned oracle and zz format table;
+- every registered or tracked name remains live, and duplicate, stale, missing, or newly
+  unclassified names fail the compatibility gate;
+- the invariant extends the existing required manifest test and gains a required exact daemon test,
+  so `just compat-check` cannot silently stop enforcing either half.
+
+This is a registration milestone, not a claim that all 124 values match tmux in every context. It
+must not change runtime values, fix any active `format:` item, expand open-ended command-specific
+context vocabularies, register option consumers, change the oracle or protocol, or add a
+differential scenario. Existing format owners retain value and context parity.
+
+## Candidate queue after 10s
+
+The table records the live rerank's strongest successors, not permission to skip the next rerank.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |
-| 1 | `semantic:tracker-nonconstant-format-behavior` | Discover and register nonconstant format behavior |
-| 2 | `semantic:tracker-open-context-format-vocabulary` | Discover and register open context formats |
-| 3 | `semantic:tracker-option-consumer-registration` | Discover and register option consumers |
-| 4 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
-| 5 | Remaining `copy-mode.action-fidelity` items | Cursor, logical line, goto, selection, jump/prompt, and copy effects as separate slices |
-| 6 | `keys.copy-mode-unsupported-default-actions` | Add seven defaults only after their actions exist |
-| 7 | `copy-mode.command-fidelity` | Resolve or reclassify the interactive-refresh dependency first |
-| 8 | `keys.copy-mode-binding-fidelity` | Match the 15 divergent shared command shapes |
-| 9 | `prompt.command-fidelity` and then `keys.copy-mode-prompt-defaults` | Land generic prompt behavior before its ten copy-mode defaults |
+| 1 | `semantic:source-file-startup-initial-client-cwd` | Recheck the newly bounded cold-bootstrap seam for startup-relative source paths |
+| 2 | `semantic:config-source-group-parse-abort` | Recheck config and source replay atomicity using the 10r preparation machinery |
+| 3 | `semantic:tracker-open-context-format-vocabulary` | Discover and register open context formats |
+| 4 | `semantic:tracker-option-consumer-registration` | Discover and register option consumers |
+| 5 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
+| 6 | `semantic:source-file-sourced-hook-client-cwd` | Preserve the invoking client when a sourced hook re-enters source replay |
+| 7 | Remaining `copy-mode.action-fidelity` items | Cursor, logical line, goto, selection, jump/prompt, and copy effects as separate slices |
+| 8 | `keys.copy-mode-unsupported-default-actions` | Add seven defaults only after their actions exist |
+| 9 | `copy-mode.command-fidelity` and dependent binding or prompt work | Resolve or reclassify the interactive-refresh dependency first |
 
 The active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are

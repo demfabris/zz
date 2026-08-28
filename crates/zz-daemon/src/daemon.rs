@@ -43760,6 +43760,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn send_text_verifies_the_echo_then_submits() {
         let (shared, client, target) =
@@ -43778,6 +43779,7 @@ mod tests {
         });
     }
 
+    #[cfg(unix)]
     #[test]
     fn send_text_reports_a_stall_when_nothing_echoes() {
         let (shared, client, target) = send_text_fixture(
@@ -55298,6 +55300,7 @@ bind - split-window -v -c "#{pane_current_path}"
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn copy_mode_dash_h_publishes_a_hidden_position_and_nothing_else() {
         for (name, copy_args, hidden) in [
@@ -55349,6 +55352,7 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn copy_mode_scroll_exit_reconciles_the_client_copy_session() {
         for (name, copy_args, exits) in [

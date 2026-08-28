@@ -94,7 +94,7 @@ impl SettingsSection {
             Self::Advanced => {
                 "Control daemon lifecycle, diagnostics, and experimental pane features."
             }
-            Self::About => "tmux and Ghostty had a kid. Zed was the affair.",
+            Self::About => "tmux, ghostty and gpui walked into a mux.",
         }
     }
 

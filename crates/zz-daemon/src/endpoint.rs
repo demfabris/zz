@@ -44,17 +44,30 @@ use crate::askpass::{AskpassListener, SshPrompts};
 use crate::transport::{LocalListener, LocalStream, TransportListener as _};
 use crate::transport::{LocalTransport, Transport as _, TransportStream as _};
 
+/// `sh -l` reads `/etc/profile` and `~/.profile`; a PATH exported from `~/.bash_profile` or
+/// `~/.zshrc` never reaches it, which hides the CLI that install.sh linked into one of these.
+/// Appending leaves whatever the profile did contribute ahead of the fallbacks.
+macro_rules! remote_path_fallback {
+    () => {
+        "PATH=\"$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin\"; export PATH; "
+    };
+}
+
 #[cfg(any(unix, windows, test))]
 // Runs under `sh -lc` so `zz` resolves through the login shell's PATH; the sentinel prefixes
 // let the parser skip whatever a login profile prints around the probe's own output.
-pub(crate) const REMOTE_SOCKET_PROBE: &str = "'if [ -n \"$XDG_RUNTIME_DIR\" ]; then zz_dir=\"$XDG_RUNTIME_DIR/zz\"; \
+pub(crate) const REMOTE_SOCKET_PROBE: &str = concat!(
+    "'",
+    remote_path_fallback!(),
+    "if [ -n \"$XDG_RUNTIME_DIR\" ]; then zz_dir=\"$XDG_RUNTIME_DIR/zz\"; \
      else zz_tmp=\"$TMPDIR\"; \
      if [ -z \"$zz_tmp\" ]; then zz_tmp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null); fi; \
      case \"$zz_tmp\" in /*) ;; *) zz_tmp=/tmp ;; esac; \
      zz_dir=\"${zz_tmp%/}/zz-$USER\"; fi; \
      printf \"zz-probe-socket=%s\\n\" \"$zz_dir/default.sock\"; \
      if command -v zz >/dev/null 2>&1; then printf \"zz-probe-protocol=%s\\n\" \"$(zz protocol-version 2>/dev/null || echo unknown)\"; \
-     else printf \"zz-probe-protocol=missing\\n\"; fi'";
+     else printf \"zz-probe-protocol=missing\\n\"; fi'"
+);
 /// Exit codes the auto-start script picks for itself; ssh reports its own failures as 255.
 #[cfg(any(unix, windows, test))]
 pub(crate) const REMOTE_ZZ_MISSING_STATUS: i32 = 127;
@@ -498,7 +511,7 @@ fn ssh_daemon_start_command(
 pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
     let socket = shell_quote(&remote_socket.to_string_lossy());
     format!(
-        "command -v zz >/dev/null 2>&1 || exit {REMOTE_ZZ_MISSING_STATUS}; \
+        "{fallback}command -v zz >/dev/null 2>&1 || exit {REMOTE_ZZ_MISSING_STATUS}; \
          if setsid true >/dev/null 2>&1; \
          then setsid zz daemon --socket {socket} >/dev/null 2>&1 </dev/null & \
          else nohup zz daemon --socket {socket} >/dev/null 2>&1 </dev/null & fi; \
@@ -509,7 +522,18 @@ pub(crate) fn remote_daemon_start_script(remote_socket: &Path) -> String {
          while [ \"$attempt\" -lt \"$attempts\" ]; do \
          if [ -S {socket} ]; then exit 0; fi; \
          sleep \"$delay\"; attempt=$((attempt + 1)); done; \
-         exit {REMOTE_DAEMON_TIMEOUT_STATUS}"
+         exit {REMOTE_DAEMON_TIMEOUT_STATUS}",
+        fallback = remote_path_fallback!(),
+    )
+}
+
+/// The remote half of an attach that cannot forward a Unix socket: `zz proxy` on its stdio.
+#[cfg(any(windows, target_os = "ios", test))]
+pub(crate) fn remote_proxy_script(remote_socket: &Path) -> String {
+    format!(
+        "{fallback}exec zz proxy --socket {socket}",
+        fallback = remote_path_fallback!(),
+        socket = shell_quote(&remote_socket.to_string_lossy()),
     )
 }
 
@@ -1108,7 +1132,6 @@ fn ssh_proxy_command(
     session: SshSession<'_>,
     remote_socket: &Path,
 ) -> Command {
-    let socket = shell_quote(&remote_socket.to_string_lossy());
     let mut command = Command::new("ssh");
     append_ssh_options(&mut command, endpoint, session);
     command
@@ -1116,7 +1139,7 @@ fn ssh_proxy_command(
         .arg(&endpoint.host)
         .arg("sh")
         .arg("-lc")
-        .arg(shell_quote(&format!("exec zz proxy --socket {socket}")))
+        .arg(shell_quote(&remote_proxy_script(remote_socket)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1762,11 +1785,28 @@ mod tests {
     }
 
     #[test]
+    fn every_remote_script_looks_where_the_installer_puts_the_cli() {
+        let scripts = [
+            REMOTE_SOCKET_PROBE.to_owned(),
+            remote_daemon_start_script(Path::new("/run/zz.sock")),
+            remote_proxy_script(Path::new("/run/zz.sock")),
+        ];
+        for script in scripts {
+            for dir in ["$HOME/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"] {
+                assert!(script.contains(dir), "{dir} missing from: {script}");
+            }
+        }
+    }
+
+    #[test]
     fn autostart_script_starts_the_daemon_on_the_resolved_socket() {
         let script = remote_daemon_start_script(Path::new("/run/user/1000/zz/default.sock"));
         assert!(
-            script.starts_with("command -v zz >/dev/null 2>&1 || exit 127;"),
-            "missing zz needs its own exit status before anything else runs: {script}"
+            script.starts_with(concat!(
+                remote_path_fallback!(),
+                "command -v zz >/dev/null 2>&1 || exit 127;"
+            )),
+            "missing zz needs its own exit status before anything but the PATH line runs: {script}"
         );
         assert!(
             script.contains(

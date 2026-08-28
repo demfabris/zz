@@ -34,7 +34,7 @@ use crate::{
     endpoint::{
         EndpointError, PROXY_READY_MARKER, REMOTE_DAEMON_TIMEOUT_STATUS, REMOTE_SOCKET_PROBE,
         REMOTE_ZZ_MISSING_STATUS, SshEndpoint, parse_remote_probe_output,
-        remote_daemon_start_script, shell_quote,
+        remote_daemon_start_script, remote_proxy_script, shell_quote,
     },
     ios_keychain::{self, KeychainError},
     transport::TransportStream,
@@ -325,10 +325,9 @@ async fn establish(
         .channel_open_session()
         .await
         .map_err(|error| ssh_failed(format!("opening the proxy channel: {error}")))?;
-    let socket = shell_quote(&remote_socket.to_string_lossy());
     let command = format!(
         "sh -lc {}",
-        shell_quote(&format!("exec zz proxy --socket {socket}"))
+        shell_quote(&remote_proxy_script(&remote_socket))
     );
     channel
         .exec(true, command)

@@ -131,6 +131,14 @@ protocol error, or panic), so that is the one place that can notice the last sub
 | Auto-start | `ssh … <host> sh -lc '<start script>'` | Start the daemon detached (`setsid`, else `nohup`), then poll for its socket (50 × 100 ms, or 5 × 1 s where `sleep` refuses a fraction). `sh -lc` because `zz` usually lives on the login shell's PATH only; a missing binary exits 127 and a timeout exits 3 |
 | Forward | `ssh -N -o ExitOnForwardFailure=yes -o StreamLocalBindMask=0177 -L <local>:<remote> … <host>` | The tunnel. `wait_for_socket` polls 250 × 20 ms; `Drop` kills the child, cancels the forwarding on the master, and unlinks the local socket |
 
+All three remote scripts open with `remote_path_fallback!`, which appends `$HOME/.local/bin`,
+`/opt/homebrew/bin`, and `/usr/local/bin` to `PATH`. Those are the three directories `install.sh`
+links the CLI into, and `sh -l` cannot see them on its own: it reads `/etc/profile` and `~/.profile`
+only, never the `~/.bash_profile` or `~/.zshrc` where a bash or zsh user actually exports PATH.
+Before the fallback, a correctly installed remote answered the probe with `missing` and its host row
+read "zz is not installed". Appending rather than prepending keeps a deliberately chosen `zz` ahead
+of the guesses.
+
 The start is unconditional rather than guarded on the socket file, because a socket outlives a
 daemon that was killed and `[ -S ]` reports those corpses as healthy . the state the auto-start
 exists to rescue. `zz daemon` already probes the endpoint, takes over a dead one, and answers

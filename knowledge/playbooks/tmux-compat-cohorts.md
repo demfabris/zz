@@ -23,8 +23,9 @@ the sixth closed the six client lifecycle hook producers, and the seventh proved
 delivery for asynchronous copy-pipe failures. The eighth registered and executed the 24-command
 daemon invalid-flag runtime roster. The ninth closed all eight pinned positional-maximum mismatches
 with catalog-owned metadata and the pin's first-positional flag boundary. The tenth closed all
-fourteen required positional minima through a separate catalog sidecar. The last five needed no
-protocol change.
+fourteen required positional minima through a separate catalog sidecar. The complete CLI and app-library gates then
+closed native `attach-session -E` routing, published `client-PID` targeting, and stale client-format
+and command-palette assertions. The last six needed no protocol change.
 
 `clients.attach-context` closed as three bounded contracts. Sessions keep one internal cwd, and
 attached source loading prefers it. Clients keep requested flags through attach, switch, detach,
@@ -193,8 +194,8 @@ codex/tmux-compat. Preserve unrelated work and do not push.
 
 Verify that the session-cwd, requested-client-flags, retained-client-sizing, client-environment,
 client-formats, client-hooks, asynchronous copy-pipe, daemon-invalid-flag, positional-maximum, and
-positional-minimum
-milestones are committed and their tracker entries are closed. Confirm the current checkpoint still
+positional-minimum milestones are committed and their tracker entries are closed. Also verify that
+the complete CLI and app-library gate repair is committed. Confirm the current checkpoint still
 reports 87 scenarios, 1,484 steps, attached-client PASS, and only the two documented GEO rows.
 
 Regenerate and re-rank the entire active tracker before selecting the next bounded slice. Include

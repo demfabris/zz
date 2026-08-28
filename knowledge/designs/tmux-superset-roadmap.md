@@ -262,8 +262,8 @@ The first eight ease ranks have shipped at least one evidence-driven slice:
 - `resize-window`/`resizew` now resize the durable layout extent, select a window-local manual
   sizing policy, expose the two manual-size formats, and outrank later client measurements. The
   16-step strict-geometry scenario covers absolute and relative sizes, option transitions, output,
-  bounds, and missing-target error precedence against the pin. `-A`/`-a` stay explicitly rejected
-  until zz has a reason to expose client-derived largest/smallest resize requests.
+  bounds, and missing-target error precedence against the pin. The later `clients.attach-sizing`
+  slice closed client-derived `-A`/`-a` aggregation.
 - `new-window` and `split-window` apply repeated `-e NAME=VALUE` entries only to the new pane,
   ignore malformed entries, and let the last value win without changing `show-environment`.
   Their `-E` forms create live panes with no child process, reject nonempty commands after target
@@ -271,8 +271,8 @@ The first eight ease ranks have shipped at least one evidence-driven slice:
 - Creation-time `new-session -e` overlays the normal `update-environment` seed, persists on the
   session, and reaches its first pane; later entries win and malformed entries are ignored.
   Creation-time `-E` skips that normal seed while retaining explicit overlays, and `-A` ignores
-  `-e` when the session already exists. An 18-step differential fixture pins the behavior. Client-
-  sourced values and attach-time reseeding remain open.
+  `-e` when the session already exists. An 18-step differential fixture pins the behavior. Protocol
+  v82 later closed bounded UTF-8 client-sourced values and attach-time reseeding.
 
 Focused protocol, mux, daemon, TUI, completion, strict-Clippy, formatting, and differential tests
 cover the tranche. Gate 0's mechanism and current canonical summary are complete. The 2026-08-26
@@ -901,6 +901,17 @@ permanent product decision has been recorded for them.
   Control publication copy and using one tmux-facing client-name ladder for Control snapshot self
   identity.
   Shared arity, flag, and nested-session families remain open.
+- 2026-08-27: The complete CLI binary and app-library gates exposed stale assertions and two production edges
+  after the client-context work. Exact native `attach-session -E` now enters daemon command
+  execution for its initial attach and preserves the session environment; automatic reconnect
+  behavior is unchanged. The shared attached-client selector accepts the exact published
+  `#{client_name}`, including the `client-PID` fallback used by nameless Control clients. Control
+  menu targeting and nonself detach therefore consume the same identity that `list-clients`
+  reports. Client-flag assertions now accept the pinned `focused` and `UTF-8` facts while preserving
+  the deliberate `-r`/`ignore-size` difference, and Control height remains intentionally empty.
+  The command palette follows the catalog's zero positional maximum for `select-pane` and offers
+  live pane targets only after `-t`. The complete CLI binary and app-library suites pass all 102
+  and 639 tests.
 
 # Related
 

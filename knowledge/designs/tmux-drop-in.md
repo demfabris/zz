@@ -171,8 +171,8 @@ excluded; ACLs remain parked outside the practical alias gate.
    typed switches now reset the target client's key table unless a real `bind-key -r` binding
    invoked them, including switches aimed at another client with `-c`,
    attached connection contexts follow same-session window retargets, and same-session switches
-   emit `%session-changed`. The divergence matrix records zz's per-client window focus and the
-   unmodeled `focused`/`UTF-8` client flags. Surface rule: decision 6.
+   emit `%session-changed`. The divergence matrix records zz's per-client window focus. Protocol
+   v83 later closed the former `focused`/`UTF-8` client-flag difference. Surface rule: decision 6.
 2. ~~**The flag-level sweep, Waves 2a and 2b**~~ — **SHIPPED 2026-08-20**.
    `set`/`setw -F` and `new-window`/`split-window`/`break-pane -P -F` removed eight
    pairs; shared filter/sort semantics for five list commands, both choosers, and
@@ -642,9 +642,9 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    multi-command bodies remain under their separate tracker entries.
 7. `update-environment`: **shipped 2026-08-21.** `seed_session_environment` and
    `global_tmux_option_value` both read the stored array; the frozen constant is gone from
-   `command.rs`. Creation-time `new-session -e/-E` shipped 2026-08-22. Client-sourced values,
-   attach re-seeding, `attach-session -E`, and `fnmatch` value patterns stay ledgered because the
-   wire carries no client environment.
+   `command.rs`. Creation-time `new-session -e/-E` shipped 2026-08-22. Protocol v82 later added the
+   bounded client environment snapshot and closed UTF-8 client-sourced seeding, wildcard matching,
+   attach refresh, and `attach-session -E`. Non-UTF-8 entries remain separately tracked.
 8. Lifecycle trio: **shipped 2026-08-21.** A dedicated `scalar_option_explicit` accessor
    over the stored-scalar maps gives presence-means-set semantics at each option's pin
    scope; `should_shutdown_if_empty` consults `exit_empty_explicit` /
@@ -1155,10 +1155,10 @@ Tranches:
   session. Their `-E` forms create live empty panes without a child process. Creation-time
   `new-session -e` now persists last-wins overlays on the new session and reaches its first pane;
   creation-time `-E` suppresses the normal `update-environment` seed but retains explicit `-e`.
-  `new-session -A` against an existing session ignores `-e`, matching the pin. The remaining G1
-  work is client-sourced creation and attach-time reseeding: zz has no client environment to copy,
-  accepted `new-session -E` has no existing-session reseed to suppress, and `attach-session -E`
-  stays rejected until that wire contract exists.
+  `new-session -A` against an existing session ignores `-e`, matching the pin. Protocol v82 later
+  closed the remaining UTF-8 G1 work with a bounded client environment snapshot: client-sourced
+  creation, existing-session reseeding, wildcard selection, and `attach-session -E` now follow the
+  pin. Non-UTF-8 environment entries remain under `clients.path-encoding`.
 - G2 pane input and marking: `last-pane -d/-e` shipped 2026-08-22 with input gating at the daemon's
   shared sink resolver. The remaining work is `select-pane -d -e -m -M -g -P`, the marked pane
   target and format facts, and per-pane style storage. Gate every daemon input route, keep one global
@@ -1283,7 +1283,7 @@ geometry fixtures matched their documented divergences, and all eight plugin smo
 | F5 TUI lock | Park. It adds new lock execution behavior and optional wire messages. |
 | TUI status extras | Keep `PREFIX` and `COPY`; hide the detach hint after explicit status customization. |
 | Unsupported config summary | Park until Command responses gain an approved stderr channel; keep stderr plus exit 0 and invalid lines at exit 1 in the eventual contract. |
-| Client environment and stdin wire | Park `attach-session -E`, the attach-side reseeding half of `new-session -E`, and all G6 streaming until fabrico approves the contracts. Pane-local spawn `-e`/`-E` and creation-time `new-session -e`/`-E` need no new wire and have shipped. |
+| Client environment and stdin wire | Protocol v82 superseded the environment park with a bounded UTF-8 snapshot and shipped client-sourced creation, attach reseeding, and `attach-session -E`. Non-UTF-8 entries remain separately tracked. G6 streaming stays parked. |
 | Protocol v71 | Recommend the audited single bundle in A3, with per-client option publication, personalized status metadata, per-pane typed border colors, and Command-response stderr. Keep it parked until fabrico approves it. |
 | Prefix scope | Keep both prefixes global in v71 to match the current shared key-table contract; treat tmux-style session scope as a separate core refactor. |
 | Lock wire | Exclude it from v71; if F5 is approved, use a separate bump with an explicit client process-execution policy. |
@@ -1924,11 +1924,9 @@ this list is the campaign-level index of it plus the items that never got a matr
   keep zz's own shapes; the harness and scripts compare through `-F`.
 - Non-UTF-8 argv: pin VIS-octal-escapes (`a\377b`), zz replacement-chars (U+FFFD) —
   `to_string_lossy` at the CLI boundary; OsString plumbing judged not worth it.
-- `update-environment` markers at session create honor the stored array (Wave C run 1) but
-  source from the daemon's environment, not the attaching client's (the wire carries no
-  client environ); diverges when the daemon outlives the shell that started it. Creation-time
-  `new-session -e/-E` is implemented, but the same missing field leaves attach re-seeding absent,
-  `attach-session -E` rejected, and `fnmatch` value patterns unexpanded.
+- Protocol v82 now carries bounded UTF-8 client environments, so stored `update-environment`
+  patterns, wildcard selection, attach refresh, and `attach-session -E` follow the invoking client.
+  Non-UTF-8 names and values remain under `clients.path-encoding`.
 - Two upstream layout bugs refused rather than reproduced (two-pane `main-*` preset,
   mixed-parent `-E` spread) — `known/` scenarios pin them.
 - Grouped sessions / linked windows / socket interop / fleet broadcast — the permanent

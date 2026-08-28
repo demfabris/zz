@@ -809,9 +809,19 @@ mod tests {
         assert_eq!(targets[0].label, "@2");
         assert!(targets[0].detail.contains("editor"));
 
-        let panes = complete_command(
+        let bare_select = complete_command(
             "select-pane ",
-            12,
+            "select-pane ".len(),
+            &[],
+            &snapshot(),
+            PaneKindAvailability::default(),
+        );
+        assert!(bare_select.iter().any(|item| item.label == "-t"));
+        assert!(!bare_select.iter().any(|item| item.label == "%3"));
+
+        let panes = complete_command(
+            "select-pane -t ",
+            "select-pane -t ".len(),
             &[],
             &snapshot(),
             PaneKindAvailability::default(),

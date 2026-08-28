@@ -22567,6 +22567,7 @@ fn attached_client_matches(
         .client_names
         .get(&client)
         .is_some_and(|name| name == target)
+        || client_format_name(inner, client) == target
         || format!("device-{}", client.0) == target
         || inner.client_ttys.get(&client).is_some_and(|tty| {
             tty == target
@@ -36227,6 +36228,24 @@ mod tests {
             client_format_name(&inner, client),
             format!("device-{}", client.0)
         );
+    }
+
+    #[test]
+    fn displayed_pid_fallback_is_an_attached_client_target() {
+        let shared = Arc::new(Shared::new(1));
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        let mut inner = shared.inner.lock();
+        let (session, _, _) = inner
+            .engine
+            .state
+            .create_session("pid-target")
+            .expect("pid target session");
+        inner.attached.entry(session).or_default().insert(client);
+        inner.client_pids.insert(client, 4242);
+
+        assert_eq!(client_format_name(&inner, client), "client-4242");
+        assert_eq!(find_attached_client(&inner, "client-4242"), Some(client));
     }
 
     #[test]

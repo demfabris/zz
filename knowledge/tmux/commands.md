@@ -77,9 +77,12 @@ first session, window, and pane ids are `$0`, `@0`, and `%0`.
 Implemented client-selector flags share one attached-client matcher. `detach-client -t`,
 `switch-client -c`, `display-message -c`, `display-panes -t`, `display-popup -c`,
 `display-menu -c`, `confirm-before -t`, `refresh-client -t`, `lock-client -t`, and
-`load-buffer -t` accept an exact client name, a full tty, or the tty after removing exactly one
-leading `/dev/` prefix, with exactly one optional trailing colon. They do not accept a final
-pathname basename: `/dev/pts/3` admits `pts/3`, but not `3` unless `3` is the exact client name.
+`load-buffer -t` accept an exact registered name, the exact published `#{client_name}`, a full tty,
+or the tty after removing exactly one leading `/dev/` prefix, with exactly one optional trailing
+colon. Published names follow the tty, registered-name, `client-PID`, and `device-N` ladder, so a
+nameless Control client can be targeted by the value returned from `list-clients`. They do not
+accept a final pathname basename: `/dev/pts/3` admits `pts/3`, but not `3` unless `3` is the exact
+client name.
 Collisions choose the globally oldest attached client regardless of session. The shared native
 `device-N` alias remains; popup, menu, confirm, refresh, and lock also retain numeric `N` and
 `client-N` aliases. Unsupported `command-prompt -t`, `show-messages -t`, `send-keys -c`, and

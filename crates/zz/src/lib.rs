@@ -95,7 +95,7 @@ const TMUX_USAGE: &str = concat!(
     "            [-S socket-path] [-T features] [command [flags]]"
 );
 #[cfg(not(target_os = "ios"))]
-const NATIVE_ATTACH_USAGE: &str = "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dr] [-c working-directory] [-f flags] [session]";
+const NATIVE_ATTACH_USAGE: &str = "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dEr] [-c working-directory] [-f flags] [session]";
 #[cfg(not(target_os = "ios"))]
 const NATIVE_APP_USAGE: &str = "zz: usage: zz app";
 #[cfg(not(target_os = "ios"))]
@@ -114,6 +114,7 @@ enum Startup {
 struct NativeAttachArguments {
     restart_daemon: bool,
     detach_others: bool,
+    no_update_environment: bool,
     read_only: bool,
     client_flags: Option<String>,
     working_directory: Option<String>,
@@ -928,23 +929,7 @@ fn run_command_mode(
             eprintln!("zz: --restart-daemon is only supported for the local daemon");
             return Some(ExitCode::FAILURE);
         }
-        let attach_command = options.working_directory.as_ref().map(|working_directory| {
-            let mut args = Vec::new();
-            if options.detach_others {
-                args.push("-d".to_owned());
-            }
-            if options.read_only {
-                args.push("-r".to_owned());
-            }
-            if let Some(client_flags) = &options.client_flags {
-                args.extend(["-f".to_owned(), client_flags.clone()]);
-            }
-            args.extend(["-c".to_owned(), working_directory.clone()]);
-            if let Some(session) = &options.session {
-                args.extend(["-t".to_owned(), session.clone()]);
-            }
-            CommandInvocation::new("attach-session", args)
-        });
+        let attach_command = native_attach_command(&options);
         let options = zz_tui::RunOptions {
             socket_path: socket_path.to_path_buf(),
             host: host.map(str::to_owned),
@@ -1321,6 +1306,7 @@ fn parse_native_attach_arguments(
 ) -> Result<NativeAttachArguments, NativeAttachArgumentError> {
     let mut restart_daemon = false;
     let mut detach_others = false;
+    let mut no_update_environment = false;
     let mut read_only = false;
     let mut client_flags = None;
     let mut working_directory = None;
@@ -1350,6 +1336,7 @@ fn parse_native_attach_arguments(
             let name = format!("-{option}");
             match option {
                 'd' => detach_others = true,
+                'E' => no_update_environment = true,
                 'r' => read_only = true,
                 't' | 'c' | 'f' => {
                     let value_index = index + option.len_utf8();
@@ -1370,7 +1357,7 @@ fn parse_native_attach_arguments(
                     }
                     break;
                 }
-                'x' | 'E' => {
+                'x' => {
                     return Err(NativeAttachArgumentError::Command(
                         ServerError::UnsupportedCommand(format!("attach-session {name}")),
                     ));
@@ -1391,11 +1378,39 @@ fn parse_native_attach_arguments(
     Ok(NativeAttachArguments {
         restart_daemon,
         detach_others,
+        no_update_environment,
         read_only,
         client_flags,
         working_directory,
         session: target.or(positional),
     })
+}
+
+#[cfg(not(target_os = "ios"))]
+fn native_attach_command(options: &NativeAttachArguments) -> Option<CommandInvocation> {
+    if !options.no_update_environment && options.working_directory.is_none() {
+        return None;
+    }
+    let mut args = Vec::new();
+    if options.detach_others {
+        args.push("-d".to_owned());
+    }
+    if options.no_update_environment {
+        args.push("-E".to_owned());
+    }
+    if options.read_only {
+        args.push("-r".to_owned());
+    }
+    if let Some(client_flags) = &options.client_flags {
+        args.extend(["-f".to_owned(), client_flags.clone()]);
+    }
+    if let Some(working_directory) = &options.working_directory {
+        args.extend(["-c".to_owned(), working_directory.clone()]);
+    }
+    if let Some(session) = &options.session {
+        args.extend(["-t".to_owned(), session.clone()]);
+    }
+    Some(CommandInvocation::new("attach-session", args))
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -2222,8 +2237,8 @@ mod tests {
         application_arguments, application_working_directory, attach_prefix_uses_tui,
         command_chain_uses_tui, command_error_message, command_reads_stdin, daemon_is_missing,
         daemon_transport_failure, execute_command_chain, implicit_tmux_endpoint_conflict,
-        new_session_uses_tui, parse_native_attach_arguments, prepared_attach_uses_tui,
-        prepared_command_chain_uses_tui, prepared_command_reads_stdin,
+        native_attach_command, new_session_uses_tui, parse_native_attach_arguments,
+        prepared_attach_uses_tui, prepared_command_chain_uses_tui, prepared_command_reads_stdin,
         prepared_kill_server_recovery, prepared_native_attach, protocol_version_output,
         run_command_mode, split_command_chain, terminal_color_scheme, tmux_command_starts_server,
     };
@@ -2444,6 +2459,7 @@ mod tests {
         .unwrap();
         assert!(target.detach_others);
         assert!(target.restart_daemon);
+        assert!(!target.no_update_environment);
         assert!(!target.read_only);
         assert_eq!(target.working_directory, None);
         assert_eq!(target.session.as_deref(), Some("work"));
@@ -2460,6 +2476,15 @@ mod tests {
         assert!(read_only.read_only);
         assert_eq!(read_only.client_flags, None);
         assert_eq!(read_only.session.as_deref(), Some("work"));
+
+        let no_update =
+            parse_native_attach_arguments(["-E", "-t", "work"].map(str::to_owned)).unwrap();
+        assert!(no_update.no_update_environment);
+        assert_eq!(no_update.session.as_deref(), Some("work"));
+        assert_eq!(
+            native_attach_command(&no_update).unwrap().args,
+            ["-E", "-t", "work"]
+        );
 
         let flags = parse_native_attach_arguments(
             [
@@ -2481,6 +2506,36 @@ mod tests {
         assert!(cwd.detach_others);
         assert_eq!(cwd.working_directory.as_deref(), Some("/tmp/work"));
         assert_eq!(cwd.session.as_deref(), Some("work"));
+        assert_eq!(
+            native_attach_command(&cwd).unwrap().args,
+            ["-d", "-c", "/tmp/work", "-t", "work"]
+        );
+
+        let bundled = parse_native_attach_arguments(
+            ["-dEr", "-fignore-size", "-c/tmp/work", "-twork"].map(str::to_owned),
+        )
+        .unwrap();
+        assert!(bundled.detach_others);
+        assert!(bundled.no_update_environment);
+        assert!(bundled.read_only);
+        let command = native_attach_command(&bundled).unwrap();
+        assert_eq!(command.name, "attach-session");
+        assert_eq!(
+            command.args,
+            [
+                "-d",
+                "-E",
+                "-r",
+                "-f",
+                "ignore-size",
+                "-c",
+                "/tmp/work",
+                "-t",
+                "work"
+            ]
+        );
+
+        assert!(native_attach_command(&read_only).is_none());
 
         assert!(matches!(
             parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),

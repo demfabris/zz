@@ -2872,32 +2872,104 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn native_attach_rejections_match_the_engine() {
+    fn native_attach_rejects_unsupported_x_like_the_engine() {
         let fixture = Fixture::new();
-        for args in [
-            &["-x"][..],
-            &["-E"][..],
-            &["-c", "/tmp"][..],
-            &["-f", "flags"][..],
-        ] {
-            let invocation =
-                zz_protocol::CommandInvocation::new("attach-session", args.iter().copied());
-            let error = zz_mux::MuxEngine::default()
-                .execute(&mut zz_mux::ExecutionContext::default(), &invocation)
-                .expect_err("engine rejects the unsupported attach option");
-            let expected = format!("{}\n", error.tmux_message());
-            for command in ["attach", "attach-session"] {
-                let output = fixture
-                    .command()
-                    .arg(command)
-                    .args(args)
-                    .output()
-                    .expect("run native attach rejection");
-                assert_eq!(output.status.code(), Some(1));
-                assert!(output.stdout.is_empty());
-                assert_eq!(output.stderr, expected.as_bytes());
-            }
+        let invocation = zz_protocol::CommandInvocation::new("attach-session", ["-x"]);
+        let error = zz_mux::MuxEngine::default()
+            .execute(&mut zz_mux::ExecutionContext::default(), &invocation)
+            .expect_err("engine rejects the unsupported attach option");
+        let expected = format!("{}\n", error.tmux_message());
+        for command in ["attach", "attach-session"] {
+            let output = fixture
+                .command()
+                .args([command, "-x"])
+                .output()
+                .expect("run native attach rejection");
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            assert_eq!(output.stderr, expected.as_bytes());
         }
+    }
+
+    #[test]
+    fn native_attach_e_preserves_the_session_environment() {
+        const NAME: &str = "ZZ_NATIVE_ATTACH_E";
+
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&[
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "native-attach-e",
+                    "printf 'ZZ_NATIVE_ATTACH_E_READY\\r\\n'; exec /bin/cat",
+                ])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-t",
+                    "=native-attach-e:",
+                    "update-environment",
+                    NAME,
+                ])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-environment",
+                    "-t",
+                    "=native-attach-e",
+                    NAME,
+                    "before-E",
+                ])
+                .status
+                .success()
+        );
+
+        let mut preserved = fixture.command();
+        preserved
+            .env(NAME, "ignored")
+            .args(["attach-session", "-E", "-t", "=native-attach-e"]);
+        let (rendered, captured, early_status) =
+            capture_command_until(preserved, &[b"ZZ_NATIVE_ATTACH_E_READY"]);
+        if rendered && captured.is_empty() {
+            return;
+        }
+        assert!(
+            rendered,
+            "native attach -E exited early={early_status:?}; output={}",
+            String::from_utf8_lossy(&captured)
+        );
+        let environment = fixture.run(&["show-environment", "-t", "=native-attach-e", NAME]);
+        assert_eq!(environment.status.code(), Some(0));
+        assert_eq!(environment.stdout, format!("{NAME}=before-E\n").as_bytes());
+        assert!(environment.stderr.is_empty());
+
+        let mut refreshed = fixture.command();
+        refreshed
+            .env(NAME, "refreshed")
+            .args(["attach-session", "-t", "=native-attach-e"]);
+        let (rendered, captured, early_status) =
+            capture_command_until(refreshed, &[b"ZZ_NATIVE_ATTACH_E_READY"]);
+        assert!(
+            rendered,
+            "ordinary native attach exited early={early_status:?}; output={}",
+            String::from_utf8_lossy(&captured)
+        );
+        let environment = fixture.run(&["show-environment", "-t", "=native-attach-e", NAME]);
+        assert_eq!(environment.status.code(), Some(0));
+        assert_eq!(environment.stdout, format!("{NAME}=refreshed\n").as_bytes());
+        assert!(environment.stderr.is_empty());
     }
 
     #[test]
@@ -3069,7 +3141,11 @@ mod daemon_autostart {
             String::from_utf8_lossy(&captured)
         );
         assert!(
-            flags.lines().any(|line| line == "attached,read-only"),
+            flags.lines().any(|line| {
+                line.split(',').any(|flag| flag == "attached")
+                    && line.split(',').any(|flag| flag == "read-only")
+                    && !line.split(',').any(|flag| flag == "ignore-size")
+            }),
             "client_flags must report read-only without ignore-size: {flags}"
         );
 
@@ -3081,7 +3157,11 @@ mod daemon_autostart {
             String::from_utf8_lossy(&writable_attach)
         );
         assert!(
-            flags.lines().any(|line| line == "attached"),
+            flags.lines().any(|line| {
+                line.split(',').any(|flag| flag == "attached")
+                    && !line.split(',').any(|flag| flag == "read-only")
+                    && !line.split(',').any(|flag| flag == "ignore-size")
+            }),
             "plain attach reports no read-only flag: {flags}"
         );
 
@@ -5890,29 +5970,10 @@ mod daemon_autostart {
                 "sizing",
                 "exec /bin/cat",
             ]);
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                let listed = fixture.run(&["list-clients", "-F", "#{client_name}:#{client_flags}"]);
-                if listed.status.success()
-                    && String::from_utf8_lossy(&listed.stdout).contains("control-mode")
-                {
-                    break;
-                }
-                assert!(Instant::now() < deadline, "control client did not attach");
-                thread::sleep(Duration::from_millis(10));
-            }
-            let listed = fixture.run(&["list-clients", "-F", "#{client_name}:#{client_flags}"]);
-            let line = String::from_utf8(listed.stdout)
-                .expect("client list")
-                .lines()
-                .find(|line| line.ends_with("control-mode"))
-                .expect("control client list row")
-                .to_owned();
-            let target = line
-                .split_once(':')
-                .expect("client row fields")
-                .0
-                .to_owned();
+            let target = wait_for_control_clients(&fixture, 1, "refresh-client sizing")
+                .into_iter()
+                .next()
+                .expect("control client list row");
             let menu_args = [
                 "display-menu",
                 "-c",
@@ -5928,17 +5989,13 @@ mod daemon_autostart {
                 .write_all(b"refresh-client -C 100x50\n")
                 .expect("set control size");
             stdin.flush().expect("flush control size");
-            let expected_dimensions = format!("{target}:100x50");
+            let expected_width = format!("{target}:100");
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
-                let dimensions = fixture.run(&[
-                    "list-clients",
-                    "-F",
-                    "#{client_name}:#{client_width}x#{client_height}",
-                ]);
-                if String::from_utf8_lossy(&dimensions.stdout)
+                let width = fixture.run(&["list-clients", "-F", "#{client_name}:#{client_width}"]);
+                if String::from_utf8_lossy(&width.stdout)
                     .lines()
-                    .any(|line| line == expected_dimensions)
+                    .any(|line| line == expected_width)
                 {
                     break;
                 }

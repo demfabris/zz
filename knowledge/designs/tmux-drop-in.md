@@ -91,12 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current canonical acceptance inventory contains 92 differential scenarios and 1,499 executable
+The final 10e canonical acceptance inventory contains 93 differential scenarios and 1,502 executable
 steps against pinned tmux `d77c9dc6`, including 25 config/plugin smokes. The complete strict and
 attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
+`e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
+The historical 10d artifact remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
 `compat/attached-client.sh` drives real inner zz/tmux attaches through pinned-tmux PTYs, covering copy
 mode, command-output navigation, choosers, prompts, prefix tables, buffers, and nested attach. Its
@@ -104,13 +106,38 @@ mode, command-output navigation, choosers, prompts, prefix tables, buffers, and 
 bindings, and both mode-key tables as local terminal semantics. The Cargo launcher and a verified
 built-bundle smoke both pass the six bare/new/attach × empty/existing cases through a spaced path.
 Gate 0 provides durable evidence for the surfaces it exercises. The live tracker still records CLI
-and TUI gaps, including ordinary TUI pane copy-search editing and typed Control diagnostics.
+and TUI gaps, including ordinary TUI pane copy-search editing, typed Control diagnostics, and raw
+TUI consumption of `confirm-before`, `display-menu`, and `display-popup` state.
 Protocol v80 closes startup config cause delivery. Protocol v81 closes targetless and invalid-target
 foreground Control shell-output placement; resolved targets and ordinary background jobs keep zz's
 native per-Interactive command-output view. The
 command-output fixture makes no mouse,
 OS clipboard, SSH, pixel, or canonical-summary claim; native GUI rendering still needs separate
 visual smoke evidence.
+
+Protocol v84 carries lexical command-block positions. `if-shell`, `run-shell`, both set-option
+commands, `bind-key`, and `confirm-before` now apply their pinned callback rules. The strict
+three-step confirm scenario runs 19 construction, parser, readback, alias, and exact source-file
+plus Control channel checks on both servers. Every lexical typed block recursively constructs
+before parent name, callback type, or arity validation. Recursive paths carry independent one-layer
+user-alias budgets; alias-produced subtrees disable further user aliases, self-recursion fails
+unknown without killing the daemon, and siblings remain independent. Nested callbacks print
+canonical names, `{  }` for empty blocks, and ` ;; ` for physical internal group newlines. Nested
+bind and confirm failures are preflight parse errors. Stored `bind-key` and `set-hook` lists and
+typed `if-shell`, `run-shell`, and `confirm-before` callbacks execute their constructed commands
+without another user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical
+groups: a failed group stops its remaining commands while later physical lines continue; string
+callbacks stay one group. Typed `command-prompt` templates retain their structured prepared command
+list through submission without re-expanding aliases. Structured substitution preserves
+leaf-argument boundaries against quote or semicolon injection, replaces only the first `%%` in each
+leaf, and keeps the same typed physical-group failure boundary. String templates and free input
+start fresh as one group. The command's args-parse item, broader `%1` behavior, and string-template
+fidelity remain open for 10f. `set-hook` and command-valued native set-option deliberately construct
+again. A typed `display-menu` action drops its structural wrapper before the fresh selection parse,
+while a quoted brace string remains literal. Reply
+and `-y` Enter-default behavior are daemon and GPUI unit proof, not raw TUI proof. Eager whole-file
+source construction and the broader replay-channel placement difference remain open. Six
+command-specific `args-parse:` items across three rules remain.
 
 **Options: all 180 of the pin's named options store; 105 have a behavior consumer.** The
 remaining 75 are storage-only. `window-status-separator` joined on 2026-08-24 through the
@@ -613,11 +640,15 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    before canonical lookup.
    Daemon execution expands once before read-only authorization, then sends the same immutable
    invocation through logging, native preemption, mux dispatch, and hooks without another alias
-   lookup. Stored bindings prepare and authorize each command immediately before it runs, so an
-   earlier command can change the alias seen by the next command; an expansion failure uses the
-   ordinary command-output and `key_command_failed` warning path. Read-only clients instead prepare
-   and authorize the whole stored chain before any command runs. Bind-key, set-hook, and
-   option-command validation also resolve one layer and refuse matched unsupported bodies.
+   lookup. Stored `bind-key` and `set-hook` lists execute the commands constructed for storage
+   without another user-alias lookup; read-only clients authorize that same frozen chain before any
+   effect. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks stay frozen after lexical
+   construction. Typed `command-prompt` templates retain their structured prepared command list
+   through submission without re-expanding aliases; string templates and free input start fresh,
+   and the command's args-parse item remains open. `set-hook` and command-valued native set-option
+   intentionally apply their second construction stage, while selecting a `display-menu` action
+   begins a fresh stage. Each stage resolves no more than one user-alias layer and refuses matched
+   unsupported bodies.
    Protocol v74 closes the former Control-side static name check. Control asks the daemon to prepare
    the complete initial argv unit or LF line under one lock before allocating frames, then executes
    the immutable returned invocations without a second alias lookup. The protocol-internal
@@ -1519,6 +1550,10 @@ All waves shipped, each reviewed to CONFIRMED-CLOSED against the pin:
   (maintainer): blocking retvals, close matrix, input capture above the
   prefix, dead-job modify, -C cross-client, position letters, -e/-d live.
 
+  Current qualification: daemon and GPUI popup behavior remain shipped. Raw zz-tui still drops the
+  retained popup state and does not render or intercept it; `clients.tui-overlay-consumption` owns
+  that client path.
+
 - **Wave 5d-2** (`01096c2` + `30d4daa`, CONFIRMED-CLOSED 2026-08-18; closes
   phase 5) — `display-menu`/`menu`, `confirm-before`/`confirm`, and the lock
   trio. Menus and confirm prompts render NATIVE on the 5d-1 FloatingSurface
@@ -1562,6 +1597,10 @@ All waves shipped, each reviewed to CONFIRMED-CLOSED against the pin:
   Hardware smoke pending (maintainer): menu keyboard walk + shortcut fire,
   confirm prompt accept/reject live, paging clamp feel on a long menu.
 
+  Current qualification: menu and confirm command execution plus GPUI surfaces remain shipped.
+  Raw zz-tui still drops both retained states and can route input to the underlying pane;
+  `clients.tui-overlay-consumption` owns rendering, input capture, lifecycle, and cleanup.
+
 Phase 7a (binary surface) shipped in parallel (`a054c38` + `34d9d60`,
 autostart CONFIRMED-CLOSED): tmux argv (-V `tmux 3.8-zz`, -L/-S/-f, -c, -N,
 -l; tmux-shaped usage + `unknown option`/`option requires an argument`
@@ -1599,8 +1638,9 @@ Original phase-5 tiering, kept for the record:
   executing the stored branches.
 - `set-hook`/`show-hooks` — an event bus, not a spawn: tmux has **68** hook points at the pin,
   and control-mode notifications (phase 6) are fed by the same events (~1 week).
-- `display-popup`, `display-menu`, `confirm-before`, the `lock-*` trio — UI on both the GUI
-  and TUI surfaces; `display-popup` is load-bearing for tmux-fzf and `fzf-tmux -p` (~1 week+).
+- `display-popup`, `display-menu`, `confirm-before`, the `lock-*` trio: daemon execution and GPUI
+  surfaces shipped. Raw TUI confirm, menu, and popup consumption remains active under
+  `clients.tui-overlay-consumption`; popup support is important for tmux-fzf and `fzf-tmux -p`.
 
 **The consent gate, rebuilt on verified facts.** Config already executes shell ungated today:
 `#()` in status strings spawns `/bin/sh -c` every `status-interval`, and the
@@ -2261,9 +2301,14 @@ against the LIVE engine global environment (hidden included). Guards: 25 parser 
 tests, daemon readback regressions, and the 15-step `smoke/config-grammar` harness
 scenario byte-diffed against the pin. Ledgered divergences: control-mode stdin keeps
 `$VAR` LITERAL (pin expands server-side; non-expanding entry point, test-pinned);
-re-parse sites expand at bind/execution time vs the pin's config-tokenization time
-(comment at `bound_commands`); `\377`→U+00FF and `\000`-retained vs the pin's raw
-byte/NUL-truncation (String storage, test-pinned); the pin's `%elif`/`%else`
+stored bind and hook lists and typed `if-shell`, `run-shell`, and `confirm-before` callbacks now
+retain their lexical construction through execution. Typed `command-prompt` templates retain their
+structured prepared command list through submission without re-expanding aliases; string templates
+and free input start fresh, and the command's args-parse item remains open. `set-hook` and
+command-valued native set-option intentionally construct a second time, while `display-menu`
+selection begins a fresh stage. Eager whole-file source construction remains open;
+`\377`→U+00FF and `\000`-retained vs the pin's raw byte/NUL-truncation (String storage,
+test-pinned); the pin's `%elif`/`%else`
 assignment-leak quirk is NOT reproduced (zz keeps single-branch assignment scope);
 `%if c ; cmd ; %endif` is zz-lax (pin rejects the `;`). Oh My Tmux joined the smoke
 corpus on 2026-08-20. The later source-file diagnostics wave fixed command-stream delivery and

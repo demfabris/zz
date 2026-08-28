@@ -1,4 +1,6 @@
-use zz_mux::{CommandSpec, ExecutionContext, MuxEffect, MuxEngine, parse_config};
+use zz_mux::{
+    CommandPromptTemplate, CommandSpec, ExecutionContext, MuxEffect, MuxEngine, parse_config,
+};
 use zz_protocol::ServerError;
 
 #[test]
@@ -64,7 +66,7 @@ fn existing_tmux_config_applies_supported_subset_and_skips_the_rest() {
             [MuxEffect::CommandPrompt {
                 prompt: ":".to_owned(),
                 input: input.to_owned(),
-                template: Some(template.to_owned()),
+                template: Some(CommandPromptTemplate::String(template.to_owned())),
                 prompt_type: zz_protocol::CommandPromptType::Command,
                 mode: zz_protocol::CommandPromptMode::Text,
                 no_freeze: false,

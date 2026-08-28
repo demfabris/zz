@@ -272,8 +272,9 @@ closing quote, while zz leaves it literal.
 # Syntax and tokenization rules
 
 The lexer processes only real input characters, then performs explicit EOF finalization: a valid
-final command is flushed without requiring a newline, while an unfinished quote or escape produces a
-diagnostic and omits only that invalid final command. Its rules:
+final command is flushed without requiring a newline, and an open single or double quote at EOF
+finishes the current token like the pin. A trailing escape still produces a diagnostic and omits
+that invalid final command. Its rules:
 
 | Feature | Behavior |
 | --- | --- |
@@ -288,6 +289,7 @@ diagnostic and omits only that invalid final command. Its rules:
 | `%if / %elif / %else / %endif` | EVALUATED at parse time: the condition format-expands through the context (no jobs — `#()` is empty) and truth-tests with the pin's `format_true` (false = empty or exactly `"0"`). Same-line and nested forms per the pin's `condition1` grammar; a condition's `#{…}` scans balanced through whitespace; `#{` right after `%else`/`%endif` is a `syntax error` like the pin. |
 | Backslash escape | Outside single quotes, `\` escapes the next char; `\`+newline is line continuation (joins lines). |
 | Quoted empty / concatenation | `""` preserves an empty argument; `""suffix` concatenates into one word (adjacent quoted+bare text is a single token). |
+| Open quote at EOF | The current single- or double-quoted token and final command finish without an unterminated-quote diagnostic. |
 | Command blocks `{ … }` | A standalone unquoted balanced block is one argument whose zero-based position is retained on `CommandInvocation`; quoted brace text is a string. A block cannot be the command name. |
 | First-word command name | The first word of a command becomes `CommandInvocation.name`; the rest become `args`. |
 
@@ -304,13 +306,32 @@ string tail reparses as one group, and longer tails use argument-list parsing. A
 is a valid empty list. Outside a block, an escaped `\;` separates bound commands; one final
 separator is discarded, while leading and doubled separators still report an empty command.
 
+Callback construction walks every lexical typed block recursively before validating the parent
+command's name, callback type, or arity. One user-alias layer is tracked per recursive path, so
+siblings remain independent; an alias-produced subtree disables another user-alias expansion, and
+self-recursion becomes an unknown-command parse error without killing the daemon. Nested
+`if-shell`, `run-shell`, set-option, and `confirm-before` blocks print canonical names. An empty
+block reads back as `{  }`, and physical internal group newlines print as ` ;; `. These rules cover
+each constructed command tree. Stored `bind-key` and `set-hook` lists and typed `if-shell`,
+`run-shell`, and `confirm-before` callbacks execute that constructed form without another
+user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed
+group stops its remaining commands while later physical lines continue; string callbacks remain
+one group. Typed `command-prompt` templates retain their structured prepared command list through
+submission without re-expanding aliases. Structured substitution edits each leaf argument in place,
+preserves argument boundaries against quote or semicolon injection, replaces only the first `%%`
+per leaf, and keeps the same typed physical-group failure boundary. String templates and free input
+start fresh as one group. Its args-parse rule, broader `%1` behavior, and string-template fidelity
+remain open for 10f. `set-hook` and command-valued native set-option deliberately construct again.
+A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while a
+quoted brace string remains literal. These rules do not yet make source-file parse and construction
+atomic for the whole file or close the broader replay-channel difference.
+
 # Schema
 
 `ConfigDiagnostic` cases emitted directly by the lexer:
 
 | Diagnostic message | Cause |
 | --- | --- |
-| `unterminated quote` | Input ends while inside a `'` or `"` quote. |
 | `syntax error` | The pin's generic yacc message: trailing `\` at EOF, stray/short `%if` family directives, unterminated `%if` (reported at the EOF detection line, like the pin), a second leading assignment, `#{` after `%else`/`%endif`. |
 | `invalid octal escape` | `\` followed by a bad octal form (`\4`, `\400`, `\12x`). |
 | `invalid \u argument` / `invalid \U argument` | Bad or out-of-range unicode escape (surrogates included). |

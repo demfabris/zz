@@ -113,8 +113,9 @@ dispatch now match the pin.
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
 `CommandInvocation`, and `COMMAND_ARGS_PARSE_BEHAVES` contains `if-shell`, `run-shell`,
-`set-option`, `set-window-option`, and `bind-key` after source-file, Control, stored-command, parser,
-postcard, mux, and daemon proofs. The manifest carries seven remaining `args-parse:` items. The unimplemented
+`set-option`, `set-window-option`, `bind-key`, and `confirm-before` after source-file, Control,
+stored-command, parser, postcard, mux, and daemon proofs. The manifest carries six remaining
+`args-parse:` items. The unimplemented
 `choose-client` and `switch-mode` callbacks need no second item because their `command:` items cover
 the whole command.
 
@@ -154,6 +155,26 @@ ending at the first positional or `--`. It covers exact typed and string tails, 
 typed tails, aliases, boundary flags, child-failure preservation,
 Control routing, and physical-group execution through a real attached client. Both sides publish
 `ARGS_PARSE_BIND_KEY=clean:16`. The fixture does not invoke or claim `send-keys -K` behavior.
+The strict three-step `smoke/args-parse-confirm-before` scenario runs 19 internal checks. It covers
+the one command positional as a typed block or string, string-only `-c`, `-p`, and `-t` values,
+the first-positional and `--` boundaries, canonical readback, aliases, target and child parser
+errors, invalid replacement preservation, parent-format expansion, and exact source-file plus
+Control channel placement. Every lexical typed block constructs recursively before parent name,
+callback type, or arity validation. Recursive paths carry one independent user-alias layer;
+alias-produced subtrees disable further user aliases, self-recursion fails unknown without killing
+the daemon, and siblings stay independent. Nested `if-shell`, `run-shell`, set-option, and confirm
+blocks print canonical names; empty readback is `{  }`, and physical internal group newlines print
+as ` ;; `. Exact Control comparisons prove nested bind and confirm failures are preflight parse
+errors. The typed confirm callback executes its constructed list without another user-alias lookup;
+stored `bind-key` and `set-hook` lists have the same frozen execution boundary. `set-hook` and
+command-valued native set-option deliberately construct again, while `display-menu` selection starts
+a fresh stage. Typed `command-prompt` templates retain their structured prepared command list
+through submission without re-expanding aliases; string templates and free input start fresh, and
+the command's args-parse item remains open. Both sides publish
+`ARGS_PARSE_CONFIRM_BEFORE=clean:19`. The scenario proves construction, parsing, readback, and
+output channels. Accept, reject, `-y` Enter-default, blocking, and background replies are daemon and
+GPUI unit-test evidence; raw zz-tui does not yet consume confirm, menu, or popup state. It does not
+close eager whole-file source construction or the broader replay-channel placement difference.
 
 Regenerate the readable report after changing the manifest:
 
@@ -182,8 +203,8 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The 2026-08-28 checkpoint contains
-92 scenarios and 1,499 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`compat/results/summary.md` is the persisted canonical artifact. The final 10e checkpoint from
+2026-08-28 contains 93 scenarios and 1,502 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -244,10 +265,23 @@ aliases, source-file, and direct Control behavior across both set-option command
 `smoke/args-parse-bind-key` contributes three harness steps around 16 internal checks for typed
 option and key positions, exact typed and string tails, aliases, flag boundaries, child rejection,
 Control routing, and physical-group execution through a real attached client.
+`smoke/args-parse-confirm-before` contributes three harness steps around 19 internal checks for
+recursive typed and string construction, string-only option values, nested canonical readback,
+per-path alias budgets, self-recursion safety, physical groups, invalid replacement preservation,
+and exact source-file plus Control diagnostics.
+Late focused regressions prove that typed `if-shell`, `run-shell`, and structured `command-prompt`
+callbacks stop the failed physical group and continue later physical lines, while string callbacks
+stay one group. Structured prompt substitution preserves leaf-argument boundaries against quote or
+semicolon injection and replaces only the first `%%` in each leaf. Typed `display-menu` actions drop
+their structural wrapper before the fresh selection parse, while quoted brace strings stay literal.
+The command-prompt args-parse rule, broader `%1` behavior, and string-template fidelity remain open
+for 10f.
 
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
+`e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`.
+The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 `afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and

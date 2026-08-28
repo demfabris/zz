@@ -434,6 +434,7 @@ pub static COMMAND_ARGS_PARSE_SPECS: &[CommandArgsParseSpec] = &[
 
 pub static COMMAND_ARGS_PARSE_BEHAVES: &[&str] = &[
     "bind-key",
+    "confirm-before",
     "if-shell",
     "run-shell",
     "set-option",
@@ -3054,6 +3055,42 @@ mod tests {
                     .expect_err("typed option value")
                     .tmux_message(),
                 format!("command bind-key: {option} argument must be a string")
+            );
+        }
+    }
+
+    #[test]
+    fn confirm_before_args_parse_accepts_only_the_command_as_a_block() {
+        let spec = catalog_command_spec("confirm-before").expect("confirm-before");
+
+        for command in [
+            CommandInvocation::new("confirm-before", ["{ display-message action }"])
+                .with_command_blocks([0]),
+            CommandInvocation::new(
+                "confirm-before",
+                ["-by", "--", "{ display-message action }"],
+            )
+            .with_command_blocks([2]),
+            CommandInvocation::new("confirm-before", ["{ display-message quoted }"]),
+        ] {
+            parse_tmux_command_options(spec, &command).expect("command-or-string positional");
+        }
+
+        for option in ["-c", "-p", "-t"] {
+            let command = CommandInvocation::new(
+                "confirm-before",
+                [
+                    option,
+                    "{ display-message option }",
+                    "display-message action",
+                ],
+            )
+            .with_command_blocks([1]);
+            assert_eq!(
+                parse_tmux_command_options(spec, &command)
+                    .expect_err("typed option value")
+                    .tmux_message(),
+                format!("command confirm-before: {option} argument must be a string")
             );
         }
     }

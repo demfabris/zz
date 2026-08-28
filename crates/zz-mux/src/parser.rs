@@ -734,8 +734,6 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
         }
         if let Some(state) = block {
             builder.diagnostic(state.line, state.column, "unterminated command block");
-        } else if quote != Quote::None {
-            builder.diagnostic(command_line, command_column, "unterminated quote");
         } else {
             builder.finish_statement(
                 command_line,
@@ -1071,12 +1069,23 @@ mod tests {
     }
 
     #[test]
-    fn continues_lines_and_reports_unterminated_quotes() {
+    fn continues_lines_and_finishes_open_quotes_at_eof() {
         let parsed = parse_config("test.conf", "bind c new-\\\nwindow\nset 'oops");
-        assert!(parsed.commands.is_empty());
-        assert_eq!(parsed.diagnostics.len(), 1);
-        assert_eq!(parsed.diagnostics[0].line, 3);
-        assert_eq!(parsed.diagnostics[0].column, 1);
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands.len(), 2);
+        assert_eq!(parsed.commands[0].name, "bind");
+        assert_eq!(parsed.commands[0].args, ["c", "new-window"]);
+        assert_eq!(parsed.commands[1].name, "set");
+        assert_eq!(parsed.commands[1].args, ["oops"]);
+    }
+
+    #[test]
+    fn finishes_a_trailing_open_quote_before_command_validation() {
+        let parsed = parse_config("<test>", "display-message -p \"\" ; wibble\"");
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands.len(), 2);
+        assert_eq!(parsed.commands[0].args, ["-p", ""]);
+        assert_eq!(parsed.commands[1].name, "wibble");
     }
 
     #[test]

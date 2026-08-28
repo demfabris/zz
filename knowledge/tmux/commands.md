@@ -68,7 +68,7 @@ accepts six rules and fails when a callback body falls outside them:
 
 `COMMAND_ARGS_PARSE_SPECS` mirrors the 12 implemented commands. `choose-client` and `switch-mode`
 remain unimplemented and need no sidecar entry. `COMMAND_ARGS_PARSE_BEHAVES` now contains
-`bind-key`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`. Every `bind-key`
+`bind-key`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`. Every `bind-key`
 positional accepts a string or typed block while `-T` and `-N` values remain strings. Scanning
 stops at the first positional or `--`; a typed key expands the live mux environment and is
 recursively printed before key lookup. Unknown typed-key commands keep their source diagnostic.
@@ -85,8 +85,18 @@ recursively print canonical command names, same-line `;` groups, physical-line `
 nested blocks before `-F` expansion. Empty
 blocks become empty values, while quoted brace text stays a string. The parser preserves lexical
 types through source files, Control transport, aliases, bindings, and hooks; validation rejects a
-forbidden type before execution or stored-command replacement. `tracker.semantic-coverage` owns the
-remaining seven command-specific `args-parse:` items across three effective rules.
+forbidden type before execution or stored-command replacement. `confirm-before` accepts one typed
+block or string command while its option values remain strings. Every lexical typed block
+constructs recursively before its parent's name, callback type, or arity validation. One
+user-alias layer is independent per recursive path; siblings do not consume each other's layer,
+alias-produced subtrees disable further user aliases, and direct self-recursion fails as an unknown
+command without killing the daemon. Nested `if-shell`, `run-shell`, set-option, and
+`confirm-before` blocks print canonical names. Empty blocks print as `{  }`, while physical
+internal group newlines print as ` ;; `. String children construct after target lookup and
+parent-format expansion as one group. Nested bind and confirm construction failures are preflight
+parse errors. Eager whole-file source construction and its replay-channel placement remain open.
+`tracker.semantic-coverage` owns the remaining six command-specific `args-parse:` items across
+three effective rules.
 
 | Target | Resolver | Accepts |
 | --- | --- | --- |
@@ -167,7 +177,7 @@ terminal; piped Control stdin contributes none.
 | `send-keys` | `send` | Send keys/text (`-l` literal, concatenating its arguments byte-for-byte like tmux; `-H` hexadecimal ASCII codes, `0x` prefix accepted; high bytes tmux would write raw are refused because `KeyToken::Literal` carries UTF-8) or `-X` copy-mode actions. `-N` expands its last value and accepts 1 through UINT_MAX with the pin's invalid, too-small, and too-large errors; attached values, short clusters, `send`, and unique command prefixes work. A whole terminal key list travels in one compact repeat field, and daemon delivery stops at the first full input queue. Browser sinks use the native `MAX_BROWSER_KEY_REPEAT` cap of 9,999 because tmux has no browser pane. Prefix-consuming copy movements, jumps, matching brackets, and repeat-search actions run N times; `other-end` swaps only for odd N; `select-line` spans N lines; the copy-end-of-line family selects through the end of row N and copies once; other toggles, selection, copy, clear-selection, and cancel run once. A bare `-N <n>` with no keys and no `-X` arms the client's native copy-mode repeat prefix, still capped at 9,999 under `terminal.key-control`. The first `send` or `send-keys` command whose option prefix contains `-X` consumes it: a stored `-N` wins, otherwise the engine inserts separate `-N <count>` arguments immediately before the option argument containing `-X`. The engine does not scan onward after a stored `-N`; a binding with no qualifying `-X` leaves the count armed. For a read-only client, absence of `-X` is decided before full option and repeat parsing, so unsupported `-M` still answers `client is read-only`. `-X` allows the pin's read-only-safe typed movement, history, line, word, paragraph, prompt, bracket, goto-line, set-mark, jump-to-mark, and cancel actions. Selection, copying, search, jump capture, rectangle, and pin-recognized but zz-unimplemented unsafe copy-line, selection-mode, scroll-exit, and search forms answer `client is read-only`. An empty or genuinely unknown `-X` action remains authorization-safe and follows the ordinary no-mode or no-op path, matching the pin's separation between command and window-copy authorization. `-F` is accepted as tmux's inert flag. The outer grammar rejects `-C`, `-P`, and `-o` with the pin's unknown-flag error. The copy-mode parser recognizes `-C` and `-P` after the action on the pin's 14 copy-family grammar entries, including a `-CP` cluster, and recognizes `-o` after `next-prompt` or `previous-prompt`. A local `--` ends flag parsing. Invalid local flags, actions, or arity run no copy action and reset the repeat prefix to 1. Four action handlers remain open under `terminal.key-control`: `copy-line`, `copy-line-and-cancel`, `copy-pipe-line`, and `copy-pipe-line-and-cancel`. The same tracker item owns the pin's first-line redraw after a local parser failure because zz has no no-op redraw effect. Flags with no zz model (`-R` terminal reset, `-M`, `-K`) are rejected rather than dropped. |
 | `copy-mode` | . | Enter copy mode (`-u` page up, `-d` page down, combinable; tmux applies `-u` then `-d`). `-H` hides the native position indicator. `-e` latches exit-at-bottom on fresh entry: scroll-down/page-down/halfpage-down landing at the live bottom with no selection leaves copy mode, and `-ed` at the bottom exits instantly. `-q` pops copy mode and returns. These entry, movement, and cancel paths remain available to read-only clients and affect only their attached local view. `-M` is tmux's mouse-drag entry; without a mouse event it is a silent no-op. `-k`, `-S`, and `-s` are rejected. |
 | `copy-mode-search-prompt` | . | *zz-native:* open the native copy-mode search prompt (`-b` backward). |
-| `command-prompt` | . | Open the native command prompt (`-p`, `-I`, `%%` template). `-b` is accepted and already true: the prompt never blocks its caller. `-T command\|search` picks the history ring; the mode flags resolve in the pin's order `-1`, `-N`, `-i`, `-k`, `-e` with `-C` orthogonal. `-1` submits one key, `-k` submits that key's NAME, `-N` collects digits and lets the first non-digit both submit and reach the key tables, `-i` runs the template on every edit with an `=`/`-`/`+` prefix, `-e` exits on a backspace at an empty buffer, and `-C` keeps terminal frames flowing where a plain prompt freezes them. `-l`, `-F`, `-t` and `-P` are still rejected. |
+| `command-prompt` | . | Open the native command prompt (`-p`, `-I`, `%%` template). `-b` is accepted and already true: the prompt never blocks its caller. `-T command\|search` picks the history ring; the mode flags resolve in the pin's order `-1`, `-N`, `-i`, `-k`, `-e` with `-C` orthogonal. `-1` submits one key, `-k` submits that key's NAME, `-N` collects digits and lets the first non-digit both submit and reach the key tables, `-i` runs the template on every edit with an `=`/`-`/`+` prefix, `-e` exits on a backspace at an empty buffer, and `-C` keeps terminal frames flowing where a plain prompt freezes them. A typed template retains its structured prepared command list through submission without another user-alias lookup. Substitution edits each leaf argument in place, preserves argument boundaries against quote or semicolon injection, and replaces only the first `%%` in each leaf. A failed typed physical group stops while later physical lines continue. String templates and free input start fresh as one group. The full pinned args-parse rule, broader `%1` behavior, and string-template fidelity remain open for 10f. `-l`, `-F`, `-t` and `-P` are still rejected. |
 | `show-prompt-history` / `clear-prompt-history` | `showphist` / `clearphist` | Show or clear the separate command and search prompt rings. `-T command` or `-T search` selects one ring; omitting it shows or clears both. Show output numbers entries oldest first with the pin's header and blank lines. Invalid types error, and clears rewrite the configured `history-file`. Runtime saves serialize record/clear races so stale history cannot reappear on disk. |
 | `focus-sidebar` | . | *zz-native:* show and focus the workspace sidebar (`-t`). |
 | `choose-tree` | . | Open the native hierarchy chooser: panes by default, windows with `-w`, sessions with `-s`. `-f` filters in pane context, `-O` sorts each hierarchy level, and `-r` reverses the default index order or the explicit sort. Zero matches restore the unfiltered tree and show `filter: no matches`. `-Z` is accepted and already true: the full-window overlay has nothing left to zoom. The default `C-b s`/`C-b w` bindings still call zz-native `focus-sidebar` directly. |
@@ -319,13 +329,27 @@ An empty, multi-command, or unparsable matched body fails as `unknown command: <
 of falling through to the canonical or catalog alias it shadows. Actual empty and multi-command
 execution remains tracked under `aliases.command-bodies`.
 
-Writable stored bindings observe the live alias table immediately before each command dispatch, so
-an earlier binding command may change the alias seen by the next. Read-only clients resolve and
-authorize the whole binding chain before any effect. Protocol v74 gives Control the same
-daemon-owned view: `PrepareCommandList` resolves one complete initial argv unit or LF line under one
-lock, and the client executes the immutable result with `CommandRequest.prepared = true`. That bit
-skips only a second alias lookup. The daemon still performs ordinary read-only authorization, and
-it accepts no client-supplied canonical identity as authority. Exact attach routing, client-side
+Construction, not execution, owns user-alias observation. Stored `bind-key` and `set-hook` command
+lists execute their constructed commands without another user-alias lookup. Read-only clients
+authorize the same frozen stored chain before any effect; writable and read-only execution differ
+in authorization, not alias timing. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks
+remain frozen after lexical construction. Typed `if-shell` and `run-shell` callbacks preserve
+physical groups: a failed group stops its remaining commands while later physical lines continue;
+string callbacks remain one group. Typed `command-prompt` templates retain their structured prepared
+command list through submission without another user-alias lookup. Structured substitution preserves
+leaf-argument boundaries, replaces only the first `%%` in each leaf, and keeps the same typed
+physical-group failure boundary. String templates and free input start fresh as one group.
+`args-parse:command-prompt`, broader `%1` behavior, and string-template fidelity remain open for 10f.
+`set-hook` and command-valued native set-option apply their documented second construction stage
+before storage or normalization. A typed `display-menu` action drops its structural wrapper before
+the fresh selection parse, while a quoted brace string remains literal. Each stage resolves at most
+one user-alias layer; an alias-produced subtree cannot open another layer.
+
+Protocol v74 gives Control the same daemon-owned boundary: `PrepareCommandList` resolves one
+complete initial argv unit or LF line under one lock, and the client executes the immutable result
+with `CommandRequest.prepared = true`. That bit skips a second user-alias lookup. The daemon still
+performs ordinary read-only authorization, and it accepts no client-supplied canonical identity as
+authority. Exact attach routing, client-side
 stdin capture, and `kill-server` recovery now consume that identity for local CLI endpoints. The
 same immutable vector crosses a TUI reconnect. Before preprocessing or execution, the local CLI
 scans the whole vector for typed preparation errors, so a later invalid command cannot follow an

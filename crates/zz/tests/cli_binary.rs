@@ -2676,7 +2676,7 @@ mod daemon_autostart {
                     "set-option",
                     "-s",
                     "command-alias[40]",
-                    "broken=display-message 'unterminated",
+                    "broken=display-message \\",
                 ])
                 .status
                 .success()

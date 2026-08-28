@@ -2398,10 +2398,11 @@ mod tests {
             panic!("unknown command was rejected before live preparation");
         };
         assert_eq!(commands[0].name, "bogus-command");
-        assert_eq!(
-            parse_line("set 'oops"),
-            ParsedLine::Error("parse error: unterminated quote".to_owned())
-        );
+        let ParsedLine::Commands(commands) = parse_line("set 'oops") else {
+            panic!("open quote at EOF was rejected");
+        };
+        assert_eq!(commands[0].name, "set");
+        assert_eq!(commands[0].args, ["oops"]);
         let ParsedLine::Commands(commands) = parse_line("set-environment -g CONTROL_LITERAL $FOO")
         else {
             panic!("literal variable command was not parsed");

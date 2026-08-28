@@ -418,6 +418,12 @@ impl ExecutionContext {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommandPromptTemplate {
+    String(String),
+    Commands(Vec<CommandInvocation>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MuxEffect {
     PaneCreated {
         pane: PaneId,
@@ -473,7 +479,7 @@ pub enum MuxEffect {
     CommandPrompt {
         prompt: String,
         input: String,
-        template: Option<String>,
+        template: Option<CommandPromptTemplate>,
         prompt_type: CommandPromptType,
         mode: CommandPromptMode,
         no_freeze: bool,
@@ -2164,6 +2170,49 @@ impl MuxEngine {
         crate::parser::parse_config_with(source, input, &mut context)
     }
 
+    pub fn prepare_callback_commands(
+        &self,
+        input: &str,
+        source_groups: bool,
+        owner: &str,
+    ) -> Result<Vec<CommandInvocation>, ServerError> {
+        prepare_callback_commands_with_aliases(self, input, source_groups, owner, true, true)
+    }
+
+    pub fn prepare_frozen_callback_commands(
+        &self,
+        input: &str,
+        source_groups: bool,
+        owner: &str,
+    ) -> Result<Vec<CommandInvocation>, ServerError> {
+        prepare_callback_commands_with_aliases(self, input, source_groups, owner, false, false)
+    }
+
+    pub fn prepare_frozen_callback_invocations(
+        &self,
+        commands: &mut [CommandInvocation],
+        owner: &str,
+    ) -> Result<(), ServerError> {
+        prepare_callback_invocations_with_aliases(self, commands, owner, false, false)
+    }
+
+    pub fn prepare_expanded_callback_command(
+        &self,
+        command: &mut CommandInvocation,
+        owner: &str,
+        alias_matched: bool,
+    ) -> Result<(), ServerError> {
+        prepare_expanded_callback_invocation(self, command, owner, !alias_matched)
+    }
+
+    pub fn substitute_command_prompt_commands(
+        &self,
+        commands: &mut [CommandInvocation],
+        input: &str,
+    ) -> Result<(), ServerError> {
+        substitute_command_prompt_invocations(commands, input)
+    }
+
     pub fn parse_config_without_variable_expansion(
         source: impl Into<String>,
         input: &str,
@@ -3029,7 +3078,20 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
-        let command = self.resolve_command_alias(command).into_command(command)?;
+        let (mut command, alias_matched) = match self.resolve_command_alias(command) {
+            CommandAliasResolution::Miss => (command.clone(), false),
+            CommandAliasResolution::Expanded(command) => (command, true),
+            CommandAliasResolution::MatchedUnsupported(_) => {
+                return Err(ServerError::CommandParse(format!(
+                    "unknown command: {}",
+                    command.name
+                )));
+            }
+        };
+        if (0..command.args.len()).any(|index| command.argument_is_command_block(index)) {
+            let owner = canonical_command(&command.name).to_owned();
+            self.prepare_expanded_callback_command(&mut command, &owner, alias_matched)?;
+        }
         self.execute_without_alias_expansion(context, &command, hooks, default_shell_is_valid)
     }
 
@@ -3111,7 +3173,7 @@ impl MuxEngine {
             "send-prefix" => self.send_prefix(context, &command.args)?,
             "copy-mode" => self.copy_mode(context, &command.args)?,
             "copy-mode-search-prompt" => self.copy_mode_search_prompt(context, &command.args)?,
-            "command-prompt" => self.command_prompt(context, &command.args)?,
+            "command-prompt" => self.command_prompt(context, command)?,
             "focus-sidebar" => self.focus_sidebar(context, &command.args)?,
             "choose-tree" => self.choose_tree(context, &command.args)?,
             "choose-buffer" => self.choose_buffer(context, &command.args)?,
@@ -6091,8 +6153,12 @@ impl MuxEngine {
     fn command_prompt(
         &self,
         context: &ExecutionContext,
-        args: &[String],
+        invocation: &CommandInvocation,
     ) -> Result<Execution, ServerError> {
+        let args = &invocation.args;
+        let spec = command_spec("command-prompt").expect("executable command has catalog metadata");
+        let parsed_options = parse_tmux_command_options(spec, invocation)?;
+        let positional_start = args.len().saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("command-prompt", args)?;
         if positional.len() > 1 {
             return Err(ServerError::CommandParse(
@@ -6111,7 +6177,18 @@ impl MuxEngine {
         let mode = command_prompt_mode(&options);
         let prompt = options.value("-p").unwrap_or(":").to_owned();
         let input = self.expand_prompt_input(context, options.value("-I").unwrap_or_default())?;
-        let template = positional.first().cloned();
+        let template = positional
+            .first()
+            .map(|template| {
+                if invocation.argument_is_command_block(positional_start) {
+                    let body = crate::parser::command_block_body(template).unwrap_or(template);
+                    self.prepare_frozen_callback_commands(body, true, "command-prompt")
+                        .map(CommandPromptTemplate::Commands)
+                } else {
+                    Ok(CommandPromptTemplate::String(template.clone()))
+                }
+            })
+            .transpose()?;
         if prompt.len() > MAX_COMMAND_PROMPT_LABEL_BYTES {
             return Err(ServerError::InvalidCommand(format!(
                 "command prompt label exceeds {MAX_COMMAND_PROMPT_LABEL_BYTES} bytes"
@@ -6123,10 +6200,14 @@ impl MuxEngine {
                 zz_protocol::MAX_COMMAND_PROMPT_BYTES
             )));
         }
-        if template
-            .as_ref()
-            .is_some_and(|template| template.len() > MAX_COMMAND_PROMPT_TEMPLATE_BYTES)
-        {
+        if template.as_ref().is_some_and(|template| match template {
+            CommandPromptTemplate::String(template) => {
+                template.len() > MAX_COMMAND_PROMPT_TEMPLATE_BYTES
+            }
+            CommandPromptTemplate::Commands(commands) => {
+                format_callback_commands(commands).len() > MAX_COMMAND_PROMPT_TEMPLATE_BYTES
+            }
+        }) {
             return Err(ServerError::InvalidCommand(format!(
                 "command prompt template exceeds {MAX_COMMAND_PROMPT_TEMPLATE_BYTES} bytes"
             )));
@@ -13174,25 +13255,28 @@ fn bound_commands(
     start: usize,
 ) -> Result<Vec<CommandInvocation>, ServerError> {
     let tail = &owner.args[start..];
-    let mut commands = if owner.argument_is_command_block(start) {
+    if owner.argument_is_command_block(start) {
         if let [argument] = tail {
-            parse_bound_command_string(
+            return prepare_callback_commands_with_aliases(
                 engine,
                 crate::parser::command_block_body(argument).unwrap_or(argument),
                 true,
-            )?
-        } else {
-            Vec::new()
+                "bind-key",
+                false,
+                false,
+            );
         }
-    } else if let [argument] = tail {
-        parse_bound_command_string(engine, argument, false)?
-    } else {
-        owner.split_commands_from(start)
-    };
-    expand_stored_aliases(engine, &mut commands)?;
-    for command in &commands {
-        validate_bound_command(command, "bind-key")?;
+        return Ok(Vec::new());
     }
+    if let [argument] = tail {
+        return engine
+            .prepare_callback_commands(argument, false, "bind-key")
+            .map_err(|error| callback_construction_error("bind-key", error));
+    }
+    let mut commands = owner.split_commands_from(start);
+    let result =
+        prepare_callback_invocations_with_aliases(engine, &mut commands, "bind-key", true, false);
+    result.map_err(|error| callback_construction_error("bind-key", error))?;
     Ok(commands)
 }
 
@@ -13200,12 +13284,37 @@ fn parse_bound_command_string(
     engine: &MuxEngine,
     input: &str,
     source_groups: bool,
+    owner: &str,
 ) -> Result<Vec<CommandInvocation>, ServerError> {
-    let parsed = engine.parse_config("<bind-key>", input);
+    let parsed = engine.parse_config(format!("<{owner}>"), input);
     if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
-        return Err(ServerError::InvalidCommand(diagnostic.message));
+        return Err(ServerError::CommandParse(diagnostic.message));
     }
     let mut commands = parsed.commands;
+    retain_callback_source_groups(&mut commands, source_groups);
+    Ok(commands)
+}
+
+fn prepare_callback_commands_with_aliases(
+    engine: &MuxEngine,
+    input: &str,
+    source_groups: bool,
+    owner: &str,
+    command_aliases_available: bool,
+    block_aliases_available: bool,
+) -> Result<Vec<CommandInvocation>, ServerError> {
+    let mut commands = parse_bound_command_string(engine, input, source_groups, owner)?;
+    prepare_callback_invocations_with_aliases(
+        engine,
+        &mut commands,
+        owner,
+        command_aliases_available,
+        block_aliases_available,
+    )?;
+    Ok(commands)
+}
+
+fn retain_callback_source_groups(commands: &mut [CommandInvocation], source_groups: bool) {
     let multiple_groups = source_groups
         && commands.windows(2).any(|commands| {
             commands[0]
@@ -13218,11 +13327,111 @@ fn parse_bound_command_string(
                     .map(|source| (&source.source, source.line))
         });
     if !multiple_groups {
-        for command in &mut commands {
+        for command in commands {
             command.source = None;
         }
     }
-    Ok(commands)
+}
+
+fn prepare_callback_invocations(
+    engine: &MuxEngine,
+    commands: &mut [CommandInvocation],
+    owner: &str,
+) -> Result<(), ServerError> {
+    prepare_callback_invocations_with_aliases(engine, commands, owner, true, true)
+}
+
+fn prepare_callback_invocations_with_aliases(
+    engine: &MuxEngine,
+    commands: &mut [CommandInvocation],
+    owner: &str,
+    command_aliases_available: bool,
+    block_aliases_available: bool,
+) -> Result<(), ServerError> {
+    for command in commands {
+        prepare_callback_invocation(
+            engine,
+            command,
+            owner,
+            command_aliases_available,
+            block_aliases_available,
+        )?;
+    }
+    Ok(())
+}
+
+fn prepare_callback_invocation(
+    engine: &MuxEngine,
+    command: &mut CommandInvocation,
+    owner: &str,
+    command_aliases_available: bool,
+    block_aliases_available: bool,
+) -> Result<(), ServerError> {
+    let alias_matched = expand_stored_alias(engine, command, command_aliases_available)?;
+    prepare_expanded_callback_invocation(
+        engine,
+        command,
+        owner,
+        !alias_matched && block_aliases_available,
+    )
+}
+
+fn prepare_expanded_callback_invocation(
+    engine: &MuxEngine,
+    command: &mut CommandInvocation,
+    owner: &str,
+    aliases_available: bool,
+) -> Result<(), ServerError> {
+    for index in 0..command.args.len() {
+        if !command.argument_is_command_block(index) {
+            continue;
+        }
+        let value = &command.args[index];
+        let body = crate::parser::command_block_body(value).unwrap_or(value);
+        let commands = prepare_callback_commands_with_aliases(
+            engine,
+            body,
+            true,
+            owner,
+            aliases_available,
+            aliases_available,
+        )?;
+        let body = format_callback_commands(&commands);
+        command.args[index] = format!("{{ {body} }}");
+    }
+    validate_bound_command(command, owner)
+}
+
+fn substitute_command_prompt_invocations(
+    commands: &mut [CommandInvocation],
+    input: &str,
+) -> Result<(), ServerError> {
+    for command in commands {
+        for index in 0..command.args.len() {
+            if !command.argument_is_command_block(index) {
+                command.args[index] = command.args[index].replacen("%%", input, 1);
+                continue;
+            }
+            let body = crate::parser::command_block_body(&command.args[index])
+                .unwrap_or(&command.args[index]);
+            let parsed =
+                crate::parser::parse_config_without_variable_expansion("<command-prompt>", body);
+            if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+                return Err(ServerError::CommandParse(diagnostic.message));
+            }
+            let mut nested = parsed.commands;
+            substitute_command_prompt_invocations(&mut nested, input)?;
+            command.args[index] = format!("{{ {} }}", format_callback_commands(&nested));
+        }
+    }
+    Ok(())
+}
+
+fn callback_construction_error(owner: &str, error: ServerError) -> ServerError {
+    match (owner, error) {
+        ("bind-key", ServerError::CommandParse(message)) => ServerError::InvalidCommand(message),
+        (_, error) => error,
+    }
 }
 
 fn parse_hook_commands(
@@ -13238,60 +13447,36 @@ fn parse_hook_commands(
         return Err(ServerError::InvalidCommand(diagnostic.message));
     }
     let mut commands = parsed.commands;
-    expand_stored_aliases(engine, &mut commands)?;
-    for command in &commands {
-        validate_bound_command(command, "set-hook")?;
-    }
+    prepare_callback_invocations(engine, &mut commands, "set-hook")?;
     Ok(commands)
 }
 
 fn normalize_option_command(engine: &MuxEngine, value: &str) -> Result<String, ServerError> {
-    normalize_option_command_with_groups(engine, value, false)
+    normalize_option_command_with_groups(engine, value, false, true)
 }
 
 fn normalize_typed_command_block(engine: &MuxEngine, value: &str) -> Result<String, ServerError> {
-    normalize_option_command_with_groups(engine, value, true)
+    normalize_option_command_with_groups(engine, value, true, false)
 }
 
 fn normalize_option_command_with_groups(
     engine: &MuxEngine,
     value: &str,
     source_groups: bool,
+    aliases_available: bool,
 ) -> Result<String, ServerError> {
     let parsed = engine.parse_config("<set-option>", value);
     if !parsed.diagnostics.is_empty() {
         return Err(ServerError::InvalidCommand("syntax error".to_owned()));
     }
-    let mut commands = Vec::with_capacity(parsed.commands.len());
-    for command in parsed.commands {
-        let mut command = engine
-            .resolve_command_alias(&command)
-            .into_command(&command)?;
-        command.name = match resolve_command(&command.name) {
-            CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
-                name.to_owned()
-            }
-            CommandResolution::Ambiguous(message) => {
-                return Err(ServerError::CommandParse(message));
-            }
-            CommandResolution::Unknown => {
-                return Err(ServerError::CommandParse(format!(
-                    "unknown command: {}",
-                    command.name
-                )));
-            }
-        };
-        for index in 0..command.args.len() {
-            if !command.argument_is_command_block(index) {
-                continue;
-            }
-            let body = crate::parser::command_block_body(&command.args[index])
-                .unwrap_or(&command.args[index]);
-            let body = normalize_option_command_with_groups(engine, body, source_groups)?;
-            command.args[index] = format!("{{ {body} }}");
-        }
-        commands.push(command);
-    }
+    let mut commands = parsed.commands;
+    prepare_callback_invocations_with_aliases(
+        engine,
+        &mut commands,
+        "set-option",
+        aliases_available,
+        aliases_available,
+    )?;
 
     let mut output = String::new();
     let mut previous_line = None;
@@ -13366,34 +13551,32 @@ fn has_unquoted_hook_format(input: &str) -> bool {
     false
 }
 
-fn expand_stored_aliases(
+fn expand_stored_alias(
     engine: &MuxEngine,
-    commands: &mut [CommandInvocation],
-) -> Result<(), ServerError> {
-    for command in commands {
-        *command = engine
-            .resolve_command_alias(command)
-            .into_command(command)?;
+    command: &mut CommandInvocation,
+    aliases_available: bool,
+) -> Result<bool, ServerError> {
+    if !aliases_available {
+        return Ok(false);
     }
-    Ok(())
+    match engine.resolve_command_alias(command) {
+        CommandAliasResolution::Miss => Ok(false),
+        CommandAliasResolution::Expanded(expanded) => {
+            *command = expanded;
+            Ok(true)
+        }
+        CommandAliasResolution::MatchedUnsupported(_) => Err(ServerError::CommandParse(format!(
+            "unknown command: {}",
+            command.name
+        ))),
+    }
 }
 
 fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<(), ServerError> {
     let name = canonical_command(&command.name);
     if let Some(spec) = catalog_command_spec(name) {
         if spec.uses_tmux_option_grammar() {
-            let result = parse_tmux_command_options(spec, command);
-            if owner == "bind-key" {
-                if let Err(error) = result {
-                    parse_tmux_options(spec, &command.args)?;
-                    return Err(match error {
-                        ServerError::CommandParse(message) => ServerError::InvalidCommand(message),
-                        error => error,
-                    });
-                }
-            } else {
-                result?;
-            }
+            parse_tmux_command_options(spec, command)?;
         }
         let (options, positional) = parse_options_for_spec(&command.args, spec)?;
         validate_options(name, spec, &options)?;
@@ -13413,11 +13596,31 @@ fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<()
         CommandResolution::Ambiguous(message) => message,
         _ => format!("unknown command: {name}"),
     };
-    Err(if owner == "bind-key" {
-        ServerError::InvalidCommand(message)
-    } else {
-        ServerError::CommandParse(message)
-    })
+    Err(ServerError::CommandParse(message))
+}
+
+fn format_callback_commands(commands: &[CommandInvocation]) -> String {
+    let mut output = String::new();
+    let mut previous_group = None;
+    for command in commands {
+        let group = command
+            .source
+            .as_ref()
+            .map(|source| (&source.source, source.line));
+        if !output.is_empty() {
+            if previous_group
+                .zip(group)
+                .is_some_and(|(previous, current)| previous != current)
+            {
+                output.push('\n');
+            } else {
+                output.push_str(" ; ");
+            }
+        }
+        output.push_str(&format_command(command));
+        previous_group = group;
+    }
+    output
 }
 
 pub fn format_command(command: &CommandInvocation) -> String {
@@ -13571,7 +13774,7 @@ fn tmux_command_print(command: &CommandInvocation) -> String {
 
 fn tmux_command_argument_print(command: &CommandInvocation, index: usize, value: &str) -> String {
     if command.argument_is_command_block(index) {
-        value.to_owned()
+        value.replace('\n', " ;; ")
     } else {
         tmux_args_escape(value)
     }
@@ -20887,7 +21090,7 @@ mod tests {
                     &command("bind-key", &["F8", "ls", "unexpected"]),
                 )
                 .unwrap_err(),
-            ServerError::CommandParse(
+            ServerError::InvalidCommand(
                 "command list-sessions: too many arguments (need at most 0)".to_owned()
             )
         );
@@ -20910,7 +21113,7 @@ mod tests {
                 engine
                     .execute(&mut context, &command("bind-key", body))
                     .expect_err("stored command parse error"),
-                ServerError::CommandParse(expected.to_owned())
+                ServerError::InvalidCommand(expected.to_owned())
             );
             assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
         }
@@ -20928,7 +21131,7 @@ mod tests {
             engine
                 .execute(&mut context, &command("bind-key", &["F8", "badls", "-0"]),)
                 .expect_err("stored user alias error"),
-            ServerError::CommandParse("command list-sessions: unknown flag -0".to_owned())
+            ServerError::InvalidCommand("command list-sessions: unknown flag -0".to_owned())
         );
         assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
 
@@ -21691,6 +21894,334 @@ mod tests {
         assert_ne!(typed[0].source, typed[1].source);
         assert!(typed.iter().all(|command| command.source.is_some()));
         assert!(string.iter().all(|command| command.source.is_none()));
+    }
+
+    #[test]
+    fn callback_construction_freezes_aliases_and_tracks_physical_groups() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[91]", "c10e=display-message -p"],
+                ),
+            )
+            .expect("callback alias");
+
+        let typed = engine
+            .prepare_callback_commands(
+                "c10e one ; display -p two\ndisplay -p three",
+                true,
+                "confirm-before",
+            )
+            .expect("typed callbacks");
+        assert_eq!(typed[0].name, "display-message");
+        assert_eq!(typed[0].args, ["-p", "one"]);
+        assert!(typed.iter().all(|command| command.source.is_some()));
+        assert_eq!(
+            typed[0].source.as_ref().map(|source| source.line),
+            typed[1].source.as_ref().map(|source| source.line)
+        );
+        assert_ne!(
+            typed[1].source.as_ref().map(|source| source.line),
+            typed[2].source.as_ref().map(|source| source.line)
+        );
+
+        let string = engine
+            .prepare_callback_commands("c10e one\ndisplay -p two", false, "confirm-before")
+            .expect("string callbacks");
+        assert!(string.iter().all(|command| command.source.is_none()));
+        assert_eq!(
+            engine
+                .prepare_callback_commands("wibble", true, "confirm-before")
+                .expect_err("typed unknown callback"),
+            ServerError::CommandParse("unknown command: wibble".to_owned())
+        );
+        let mut expanded =
+            CommandInvocation::new("confirm-before", ["{ wibble }"]).with_command_blocks([0]);
+        assert_eq!(
+            engine
+                .prepare_expanded_callback_command(&mut expanded, "confirm-before", false)
+                .expect_err("expanded typed unknown callback"),
+            ServerError::CommandParse("unknown command: wibble".to_owned())
+        );
+    }
+
+    #[test]
+    fn callback_construction_carries_one_alias_layer_per_branch() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for (index, value) in [
+            (90, "loop10e=confirm-before { loop10e }"),
+            (91, "inner10e=display-message -p reached"),
+            (92, "outer10e=confirm-before { inner10e }"),
+            (93, "left10e=display-message -p left"),
+            (94, "right10e=display-message -p right"),
+            (95, "optionloop10e=set-option -g @loop { optionloop10e }"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-option",
+                        &["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("callback alias");
+        }
+
+        for input in ["loop10e", "outer10e"] {
+            assert!(matches!(
+                engine.prepare_callback_commands(input, true, "confirm-before"),
+                Err(ServerError::CommandParse(message))
+                    if message == if input == "loop10e" {
+                        "unknown command: loop10e"
+                    } else {
+                        "unknown command: inner10e"
+                    }
+            ));
+        }
+
+        let prepared = engine
+            .prepare_callback_commands(
+                "confirm-before { left10e ; right10e }",
+                true,
+                "confirm-before",
+            )
+            .expect("sibling aliases retain independent budgets");
+        assert_eq!(
+            prepared[0].args,
+            ["{ display-message -p left ; display-message -p right }"]
+        );
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", "@loop", "{ optionloop10e }"])
+                        .with_command_blocks([2]),
+                )
+                .expect_err("typed option aliases share the recursion budget"),
+            ServerError::CommandParse("unknown command: optionloop10e".to_owned())
+        );
+    }
+
+    #[test]
+    fn bind_key_constructs_nested_confirm_blocks_before_storage() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        let parsed = engine.parse_config(
+            "nested-confirm.conf",
+            "bind-key -T zzconfirm F1 confirm-before { display -p one ; list-sessions\n display -p two }",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        engine
+            .execute(&mut context, &parsed.commands[0])
+            .expect("nested typed confirm binding");
+
+        let stored = &engine
+            .keys
+            .get("zzconfirm", "F1")
+            .expect("confirm binding")
+            .commands[0];
+        assert_eq!(stored.name, "confirm-before");
+        assert_eq!(
+            stored.args,
+            ["{ display-message -p one ; list-sessions\ndisplay-message -p two }"]
+        );
+        assert!(stored.argument_is_command_block(0));
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[92]", "zzconfirm=confirm-before -c x"],
+                ),
+            )
+            .expect("confirm alias");
+        let aliased = engine.parse_config(
+            "aliased-confirm.conf",
+            "bind-key -T zzconfirm F2 zzconfirm { display -p alias }",
+        );
+        assert!(aliased.diagnostics.is_empty());
+        engine
+            .execute(&mut context, &aliased.commands[0])
+            .expect("aliased confirm binding");
+        let stored = &engine
+            .keys
+            .get("zzconfirm", "F2")
+            .expect("aliased binding")
+            .commands[0];
+        assert_eq!(stored.name, "confirm-before");
+        assert_eq!(stored.args, ["-c", "x", "{ display-message -p alias }"]);
+        assert!(stored.argument_is_command_block(2));
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &["-T", "zzconfirm", "F3", "display-message", "preserved"],
+                ),
+            )
+            .expect("baseline binding");
+        let error = engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    [
+                        "-T",
+                        "zzconfirm",
+                        "F3",
+                        "confirm-before",
+                        "{ display-message forbidden }",
+                        "-y",
+                    ],
+                )
+                .with_command_blocks([4]),
+            )
+            .expect_err("late confirm option");
+        assert_eq!(
+            error,
+            ServerError::InvalidCommand(
+                "command confirm-before: too many arguments (need at most 1)".to_owned()
+            )
+        );
+        assert_eq!(
+            engine
+                .keys
+                .get("zzconfirm", "F3")
+                .expect("preserved binding")
+                .commands,
+            [CommandInvocation::new("display-message", ["preserved"])]
+        );
+    }
+
+    #[test]
+    fn bind_key_recursively_constructs_and_prints_confirm_blocks() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        for (index, value) in [
+            (96, "nested10e=display-message -p nested"),
+            (97, "za10e=display-message -p staged"),
+            (98, "zconfirm10e=confirm-before"),
+            (99, "ztailchain10e=zconfirm10e"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-option",
+                        &["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("nested alias");
+        }
+
+        let parsed = engine.parse_config(
+            "recursive-confirm.conf",
+            "bind-key -T zzconfirm F4 confirm-before -p ok {}\n\
+             bind-key -T zzconfirm F5 confirm-before {\n\
+              display -p one\n\
+              display -p two\n\
+             }\n\
+             bind-key -T zzconfirm F6 confirm-before { if-shell -F 1 { nested10e } }",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        for command in &parsed.commands {
+            engine
+                .execute(&mut context, command)
+                .expect("recursive confirm binding");
+        }
+
+        for (key, expected) in [
+            ("F4", "confirm-before -p ok {  }"),
+            (
+                "F5",
+                "confirm-before { display-message -p one ;; display-message -p two }",
+            ),
+            (
+                "F6",
+                "confirm-before { if-shell -F 1 { display-message -p nested } }",
+            ),
+        ] {
+            assert_eq!(
+                format_key_command(
+                    engine
+                        .keys
+                        .get("zzconfirm", key)
+                        .expect("recursive binding"),
+                ),
+                expected
+            );
+        }
+        assert!(engine.keys.get("zzconfirm", "F5").unwrap().commands[0].args[0].contains('\n'));
+
+        let invalid = engine.parse_config(
+            "invalid-recursive-confirm.conf",
+            "bind-key -T zzconfirm F7 confirm-before { if-shell -F 1 { bind-key -T { display-message bad-table } F2 display-message } }",
+        );
+        assert!(invalid.diagnostics.is_empty());
+        assert_eq!(
+            engine
+                .execute(&mut context, &invalid.commands[0])
+                .expect_err("nested typed option is constructed eagerly"),
+            ServerError::CommandParse("command bind-key: -T argument must be a string".to_owned())
+        );
+        assert!(engine.keys.get("zzconfirm", "F7").is_none());
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[100]",
+                        "display-message=set-environment -g DOUBLE_HIT yes",
+                    ],
+                ),
+            )
+            .expect("canonical shadow alias");
+
+        let staged = engine.parse_config(
+            "staged-confirm.conf",
+            "bind-key -T zzconfirm F8 zconfirm10e { za10e }\n\
+             bind-key -T zzconfirm F9 ztailchain10e { za10e }\n\
+             bind-key -T zzconfirm F10 { zconfirm10e { za10e } }\n\
+             bind-key -T zzconfirm F11 { za10e }",
+        );
+        assert!(staged.diagnostics.is_empty());
+        engine
+            .execute(&mut context, &staged.commands[0])
+            .expect("independent bind tail stage");
+        assert_eq!(
+            format_key_command(engine.keys.get("zzconfirm", "F8").unwrap()),
+            "confirm-before { display-message -p staged }"
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &staged.commands[1])
+                .expect_err("bind tail aliases consume one layer"),
+            ServerError::InvalidCommand("unknown command: zconfirm10e".to_owned())
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &staged.commands[2])
+                .expect_err("typed tail aliases share one layer"),
+            ServerError::CommandParse("unknown command: za10e".to_owned())
+        );
+        engine
+            .execute(&mut context, &staged.commands[3])
+            .expect("frozen typed tail");
+        assert_eq!(
+            engine.keys.get("zzconfirm", "F11").unwrap().commands,
+            [CommandInvocation::new("display-message", ["-p", "staged"])]
+        );
     }
 
     #[test]
@@ -23347,7 +23878,7 @@ mod tests {
                     &command("bind-key", &["F9", "agent-send", "--bogus"]),
                 )
                 .unwrap_err(),
-            ServerError::CommandParse("agent-send does not support --bogus".to_owned())
+            ServerError::InvalidCommand("agent-send does not support --bogus".to_owned())
         );
     }
 
@@ -24207,7 +24738,7 @@ mod tests {
             Err(ServerError::CommandParse(message)) if message == "invalid flag -B"
         ));
 
-        let invalid = "display-message '";
+        let invalid = "display-message \\";
         let expected = crate::parse_config("<set-hook>", invalid)
             .diagnostics
             .into_iter()
@@ -29281,7 +29812,7 @@ mod tests {
             ("20", "kill-server="),
             ("21", "list-windows=list-sessions ; kill-server"),
             ("22", "lsw=list-sessions ; kill-server"),
-            ("23", "kill-session=display-message 'unterminated"),
+            ("23", "kill-session=display-message \\"),
         ] {
             engine
                 .execute(
@@ -29330,7 +29861,7 @@ mod tests {
             engine
                 .execute(&mut context, &command("bind-key", &["F9", "kill-server"]))
                 .unwrap_err(),
-            ServerError::CommandParse("unknown command: kill-server".to_owned())
+            ServerError::InvalidCommand("unknown command: kill-server".to_owned())
         );
         let binding_after = engine
             .execute(
@@ -29408,11 +29939,7 @@ mod tests {
                 &mut context,
                 &command(
                     "set-option",
-                    &[
-                        "-s",
-                        "command-alias[31]",
-                        "unparsed=display-message 'unterminated",
-                    ],
+                    &["-s", "command-alias[31]", "unparsed=display-message \\"],
                 ),
             )
             .expect("unparsable alias");
@@ -29591,9 +30118,7 @@ mod tests {
             .expect_err("typed if-shell condition in binding");
         assert_eq!(
             error,
-            ServerError::InvalidCommand(
-                "command if-shell: argument 1 must be \"string\"".to_owned()
-            )
+            ServerError::CommandParse("command if-shell: argument 1 must be \"string\"".to_owned())
         );
         assert!(
             engine
@@ -30902,7 +31427,7 @@ mod tests {
             vec![MuxEffect::CommandPrompt {
                 prompt: "window name".to_owned(),
                 input: "scratch".to_owned(),
-                template: Some("new-window -n %%".to_owned()),
+                template: Some(CommandPromptTemplate::String("new-window -n %%".to_owned(),)),
                 prompt_type: CommandPromptType::Command,
                 mode: CommandPromptMode::Text,
                 no_freeze: false,
@@ -30929,7 +31454,9 @@ mod tests {
             vec![MuxEffect::CommandPrompt {
                 prompt: ":".to_owned(),
                 input: "work tree / editor pane".to_owned(),
-                template: Some("rename-window -- '%%'".to_owned()),
+                template: Some(CommandPromptTemplate::String(
+                    "rename-window -- '%%'".to_owned(),
+                )),
                 prompt_type: CommandPromptType::Command,
                 mode: CommandPromptMode::Text,
                 no_freeze: false,
@@ -30943,6 +31470,65 @@ mod tests {
             Err(ServerError::UnsupportedCommand(message))
                 if message == "command-prompt -F"
         ));
+
+        for (index, value) in [
+            (90, "a10e=display-message"),
+            (
+                91,
+                "display-message=set-environment -g COMMAND_PROMPT_DOUBLE yes",
+            ),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "set-option",
+                        &["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("set prompt alias");
+        }
+        let parsed = engine.parse_config("prompt.conf", "command-prompt -I x { a10e }");
+        assert!(parsed.diagnostics.is_empty());
+        let execution = engine
+            .execute(&mut context, &parsed.commands[0])
+            .expect("typed prompt effect");
+        assert!(matches!(
+            execution.effects.as_slice(),
+            [MuxEffect::CommandPrompt {
+                template: Some(CommandPromptTemplate::Commands(commands)),
+                ..
+            }] if commands.len() == 1 && commands[0].name == "display-message"
+        ));
+    }
+
+    #[test]
+    fn command_prompt_substitution_preserves_structured_arguments() {
+        let engine = MuxEngine::default();
+        let parsed = engine.parse_config(
+            "prompt.conf",
+            "if-shell -F 1 { set-environment -g PROMPT_VALUE '%%:%%' }",
+        );
+        assert!(parsed.diagnostics.is_empty());
+        let mut commands = parsed.commands;
+        engine
+            .prepare_frozen_callback_invocations(&mut commands, "command-prompt")
+            .expect("prepare typed prompt commands");
+        let input = "x\" ; set-environment -g PROMPT_INJECTED yes ; display-message -p \"";
+        engine
+            .substitute_command_prompt_commands(&mut commands, input)
+            .expect("substitute typed prompt input");
+
+        let body = crate::parser::command_block_body(&commands[0].args[2])
+            .expect("structured branch body");
+        let nested = MuxEngine::parse_config_without_variable_expansion("prompt.conf", body);
+        assert!(nested.diagnostics.is_empty());
+        assert_eq!(nested.commands.len(), 1);
+        assert_eq!(nested.commands[0].name, "set-environment");
+        assert_eq!(
+            nested.commands[0].args,
+            ["-g", "PROMPT_VALUE", &format!("{input}:%%")]
+        );
     }
 
     #[test]

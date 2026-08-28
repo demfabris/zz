@@ -337,7 +337,7 @@ fn bind_key_validates_payloads_before_storing_them() {
             &command("bind-key", &["x", "split-window", "-Q"]),
         )
         .unwrap_err();
-    assert!(matches!(error, ServerError::CommandParse(message)
+    assert!(matches!(error, ServerError::InvalidCommand(message)
         if message == "command split-window: unknown flag -Q"));
     assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
 
@@ -403,19 +403,25 @@ fn bind_key_validates_payloads_before_storing_them() {
 }
 
 #[test]
-fn bind_key_surfaces_block_diagnostics_and_accepts_empty_endings() {
+fn bind_key_accepts_open_quotes_and_empty_endings() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
 
-    let error = engine
+    engine
         .execute(
             &mut context,
             &CommandInvocation::new("bind-key", ["x", "{ send-keys 'unterminated }"])
                 .with_command_blocks([1]),
         )
-        .unwrap_err();
-    assert!(matches!(error, ServerError::InvalidCommand(message)
-        if message == "unterminated quote"));
+        .expect("open quote at block EOF");
+    assert_eq!(
+        engine
+            .keys
+            .get("prefix", "x")
+            .expect("open quote binding")
+            .commands,
+        [CommandInvocation::new("send-keys", ["unterminated "])]
+    );
     engine
         .execute(
             &mut context,

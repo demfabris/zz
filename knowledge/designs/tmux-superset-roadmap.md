@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 85 active groups, 587 classified active items, 85 closed groups, and two known
+The live tracker has 86 active groups, 589 classified active items, 86 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,18 +53,19 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after the `bind-key` callback slice closed covers 92 scenarios
-and 1,499 steps.
+The final 10e canonical checkpoint covers 93 scenarios and 1,502 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`. Requested flags, attached
+`e0783568fc5845eaaa9ff4b84256d43a046ced996fbf8b664bc65d9bf0d9578a`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
 The attached-client fixture now also compares nested validation status, stderr, session roster,
 client count, aliases, and command-list stop behavior on both servers.
+The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
+`afea2249cd62402fe00dc8c54ea60662eb616ef584806f4774cd77723746144e`.
 
 Protocol v82 appends one bounded UTF-8 client-environment snapshot to `ClientHello`. Local and
 SSH-forwarded clients now seed fresh sessions and refresh existing sessions through the effective
@@ -80,7 +81,8 @@ bound-command, implicit target-client, and Control contexts against the pin.
 
 Protocol v84 appends zero-based lexical command-block positions to `CommandInvocation` and now
 closes `tracker.args-parse-if-shell`, `tracker.args-parse-run-shell`, and
-`tracker.args-parse-set-option`, plus the `bind-key` member of the shared commands-or-string rule.
+`tracker.args-parse-set-option`, plus the `bind-key` and `confirm-before` members of the shared
+commands-or-string rule.
 Source-file and Control
 parsing preserve unquoted typed arguments through wire transport, aliases, bindings, and hooks;
 quoted braces remain strings. `if-shell` accepts typed branch positions while rejecting typed
@@ -101,6 +103,31 @@ one string tail reparses as one group, and a typed first tail with extra argumen
 binding. Stored child failures leave the prior binding intact. Its strict three-step scenario runs
 16 internal checks through a real attached client and finishes `ARGS_PARSE_BIND_KEY=clean:16` on
 both servers.
+`confirm-before` accepts a typed block or string at its one command positional while `-c`, `-p`,
+and `-t` values stay strings. Every lexical typed block constructs recursively before its parent's
+name, callback type, or arity validation. Recursive paths carry independent one-layer user-alias
+budgets; alias-produced subtrees disable further user aliases, direct self-recursion fails unknown
+without killing the daemon, and siblings remain independent. Nested `if-shell`, `run-shell`,
+set-option, and confirm blocks print canonical names. Empty blocks read back as `{  }`, while
+physical internal group newlines print as ` ;; `. String children construct after target lookup and
+parent-format expansion as one group. Its strict three-step scenario runs 19 internal construction,
+parser, readback, alias, and exact channel checks and finishes
+`ARGS_PARSE_CONFIRM_BEFORE=clean:19` on both servers. Nested bind and confirm failures are preflight
+parse errors. Reply and `-y` Enter-default paths are daemon and GPUI unit proof; raw zz-tui does not
+yet consume confirm, menu, or popup state. Eager whole-file source construction and the broader
+replay-channel placement difference remain open.
+Stored `bind-key` and `set-hook` commands execute their constructed lists without another
+user-alias lookup. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks stay frozen after
+lexical construction. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed
+group stops its remaining commands while later physical lines continue; string callbacks stay one
+group. Typed `command-prompt` templates retain their structured prepared command list through
+submission without re-expanding aliases. Structured substitution preserves leaf-argument
+boundaries against quote or semicolon injection, replaces only the first `%%` in each leaf, and
+keeps the same typed physical-group failure boundary. String templates and free input start fresh
+as one group. The command's args-parse item, broader `%1` behavior, and string-template fidelity
+remain open for 10f. `set-hook` and command-valued native set-option retain their intentional second
+construction stage. A typed `display-menu` action drops its structural wrapper before the fresh
+selection parse, while a quoted brace string remains literal.
 
 Protocol v81 closes `control-mode.async-command-output`. Targetless and
 invalid-target foreground shell output reaches the exact originating Control client raw after its
@@ -438,11 +465,23 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    and remote transport work. The separate 29-step
    `native-prefix-isolation` fixture closes all 25 unique prefixes that native names had changed
    and checks ambiguous `list-commands` exit parity. The daemon authorizes one expanded alias
-   invocation and dispatches that same value. Writable stored bindings resolve each command just
-   before dispatch, so an earlier command can change a later alias; read-only clients resolve and
-   authorize the whole chain before any effect. A typed alias result now keeps an exact empty,
-   multi-command, or unparsable match from falling through to the canonical or catalog-alias command
-   it shadows. Actual empty and multi-command execution remains under `aliases.command-bodies`.
+   invocation and dispatches that same value. Stored bind-key and set-hook lists execute their
+   constructed commands without another user-alias lookup. Read-only clients authorize that frozen
+   chain before any effect; writable execution uses the same alias boundary. Typed `if-shell`,
+   `run-shell`, and `confirm-before` callbacks remain frozen after lexical construction. Typed
+   `if-shell` and `run-shell` callbacks preserve physical groups: a failed group stops its remaining
+   commands while later physical lines continue; string callbacks remain one group. Typed
+   `command-prompt` templates retain their structured prepared command list through submission
+   without re-expanding aliases. Structured substitution preserves leaf-argument boundaries,
+   replaces only the first `%%` per leaf, and keeps the same typed physical-group boundary. String
+   templates and free input start fresh as one group. The command's args-parse item, broader `%1`
+   behavior, and string-template fidelity remain open for 10f. `set-hook` and command-valued native
+   set-option retain their intentional second construction stage. A typed `display-menu` action
+   drops its structural wrapper before the fresh selection parse, while a quoted brace string stays
+   literal. A
+   typed alias result now keeps an exact empty, multi-command, or unparsable match from falling
+   through to the canonical or catalog-alias command it shadows. Actual empty and multi-command
+   execution remains under `aliases.command-bodies`.
    Protocol v74 closes Control's static unknown-name precheck by preparing each complete input unit
    under one daemon lock before framing. Prepared execution freezes only that alias lookup and still
    reauthorizes normally. Local ordinary CLI commands now prepare the complete vector against an
@@ -458,8 +497,8 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    unknown callback body, the Rust catalog carries typed rules for all 12 implemented callback
    commands, and the third manifest test requires one `args-parse:` item for each implemented
    callback command absent from `COMMAND_ARGS_PARSE_BEHAVES`. The behaving roster now contains
-   `bind-key`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`; three effective rules
-   and seven command-specific items remain. The unimplemented
+   `bind-key`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and `set-window-option`;
+   three effective rules and six command-specific items remain. The unimplemented
    `choose-client` and `switch-mode` callbacks stay covered by their command items.
 
    `tracker.semantic-coverage` tracks runtime adoption of the three remaining argument rules, open-ended or
@@ -800,7 +839,9 @@ the same pane-kind operation as the picker. Do not give `split-window` an agent 
 
 - `%` and `"` may open `split-picker` in the zz default table.
 - `s` and `w` may focus the native sidebar instead of drawing tmux's tree.
-- Prompts, menus, popups, copy mode, status, and choosers use native presentation.
+- The GPUI client uses native presentation for prompts, menus, popups, copy mode, status, and
+  choosers. Raw zz-tui still lacks confirm, menu, and popup rendering and input consumption under
+  `clients.tui-overlay-consumption`.
 - Current window may remain per client rather than per session.
 - GUI defaults may keep the persistent-daemon lifecycle until a config explicitly selects tmux
   lifecycle behavior.
@@ -999,6 +1040,20 @@ permanent product decision has been recorded for them.
   physical groups. The strict three-step scenario drives a real attached client, runs 16 internal
   checks, and finishes `ARGS_PARSE_BIND_KEY=clean:16` on zz and the pin. Three callback rules across
   seven implemented commands remain.
+- 2026-08-28: The existing protocol v84 metadata closed `tracker.args-parse-confirm-before`
+  without a wire change. Its one command positional accepts a typed block or string while `-c`,
+  `-p`, and `-t` values remain strings. Every lexical typed block recursively constructs before
+  its parent name, callback type, or arity validation. Each recursive path carries one independent
+  user-alias layer, alias-produced subtrees disable further user aliases, self-recursion fails
+  unknown safely, and nested callbacks print canonically. Empty blocks print as `{  }`; physical
+  internal group newlines print as ` ;; `. String construction follows target lookup and
+  parent-format expansion as one group. The strict three-step scenario runs 19 construction,
+  parser, readback, alias, and exact channel checks and finishes
+  `ARGS_PARSE_CONFIRM_BEFORE=clean:19` on zz and the pin. Nested bind and confirm failures are
+  preflight parse errors. Eager whole-file source construction and the broader replay-channel
+  placement difference remain open. Three callback rules across six implemented commands remain.
+  The same audit registered `clients.tui-overlay-consumption` because raw zz-tui drops confirm,
+  menu, and popup state changes and does not intercept overlay input.
 
 # Related
 

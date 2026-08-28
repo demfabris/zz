@@ -442,6 +442,41 @@
       "reason": "Independent GUI clients and per-client sizing are core zz behavior."
     },
     {
+      "id": "clients.tui-overlay-consumption",
+      "title": "Render and consume daemon overlays in zz-tui",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "client",
+      "items": [
+        "semantic:tui-confirm-before-overlay",
+        "semantic:tui-display-menu-overlay",
+        "semantic:tui-display-popup-overlay"
+      ],
+      "evidence": [
+        "resource:crates/zz-client/src/core.rs",
+        "resource:crates/zz-tui/src/app.rs",
+        "resource:crates/zz-tui/src/input.rs",
+        "resource:crates/zz-tui/src/render.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Raw attach handles open, update, resync, and close for confirm-before, display-menu, and display-popup overlays.",
+        "Overlay keyboard, paste, and pointer input never reaches the underlying pane; an underlying sentinel proves zero leakage.",
+        "Confirm input matches the published key and case rules, y and n handling, and Enter default behavior including -y.",
+        "Menu input matches navigation, shortcuts, cancellation, separators, disabled entries, and stay-open actions.",
+        "Popup rendering and input cover visible frames, keys, paste, mouse, scroll, cursor state, exit flags, and cache cleanup."
+      ],
+      "depends_on": [],
+      "reason": "ClientCore retains all three daemon overlay states, but zz-tui drops their change events, has no corresponding model, renderer, or input path, and can route input to the underlying pane while an overlay is waiting. Popup viewport frames are retained but do not enter the workspace layout, and close events do not clear the unused synthetic viewport before reconnect."
+    },
+    {
       "id": "commands.native-client-tools",
       "title": "Use native client tools",
       "decision": "native",
@@ -1977,13 +2012,16 @@
       ],
       "evidence": [
         "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:crates/zz/src/command/confirm.rs",
+        "resource:crates/zz/src/command/menu.rs",
+        "resource:crates/zz/src/workspace/view.rs"
       ],
       "acceptance": [
-        "Native overlays keep command and keyboard semantics while using zz theme tokens."
+        "The GPUI client keeps command and keyboard semantics while rendering overlays through native surfaces and zz theme tokens."
       ],
       "depends_on": [],
-      "reason": "These options style tmux's cell-drawn surfaces, which zz replaces with native chrome."
+      "reason": "These options style tmux's cell-drawn surfaces. The GPUI client replaces that presentation with native chrome; this accepted GUI styling decision does not prove that another client implements or consumes the overlay."
     },
     {
       "id": "options.option-name-format-coverage",
@@ -2361,7 +2399,7 @@
       "depends_on": [
         "clients.interactive-refresh"
       ],
-      "reason": "Exact behavior needs a prompt chain and command queue across attached clients."
+      "reason": "Typed templates now retain their structured prepared command list through submission without another user-alias lookup. Structured substitution edits each leaf argument in place, preserves argument boundaries against quote or semicolon injection, and replaces only the first `%%` in each leaf. A failed typed physical group stops its remaining commands while later physical lines continue. String templates and free input begin a fresh one-group construction stage. The full `args-parse:command-prompt` rule, prompt chaining and broader `%1` substitution, string-template fidelity, labels, key spelling, pass order, vi editing, and freeze behavior remain open."
     },
     {
       "id": "prompt.pane-rendered",
@@ -2679,7 +2717,6 @@
         "args-parse:choose-buffer",
         "args-parse:choose-tree",
         "args-parse:command-prompt",
-        "args-parse:confirm-before",
         "args-parse:display-menu",
         "args-parse:display-panes",
         "args-parse:set-hook",
@@ -2700,7 +2737,7 @@
         "Producer- or consumer-owned inventories reconcile hook production, shared key behavior, nonconstant and open-ended context formats, and option consumption against the live manifest."
       ],
       "depends_on": [],
-      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `if-shell`, `run-shell`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and seven per-command callback items remain across three effective rules. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
+      "reason": "Oracle schema 4 records all 14 callback-bearing tmux commands as six effective `args_parse` rules. The Rust catalog mirrors the 12 implemented commands; `bind-key`, `confirm-before`, `if-shell`, `run-shell`, `set-option`, and `set-window-option` now apply their pinned rules through `COMMAND_ARGS_PARSE_BEHAVES`, and six per-command callback items remain across three effective rules. A typed `command-prompt` template retains its structured prepared command list through submission without another user-alias lookup. Its leaf substitution preserves argument boundaries, replaces only the first `%%` per argument, and retains physical groups; a failed group stops while later physical lines continue. String templates and free input start fresh as one group. A typed `display-menu` action drops its structural wrapper before the fresh selection parse, while quoted brace strings remain literal. These boundaries do not prove either command's complete pinned callback rule. Hook production, option consumption, open-ended formats, and shared binding behavior still need source-owned registrations."
     }
   ],
   "closed": [
@@ -2784,7 +2821,7 @@
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
-      "resolution": "MuxEngine::resolve_command_alias now returns Miss, Expanded, or MatchedUnsupported with empty, multiple-command, and unparsable reasons. Every mux and daemon caller converts a matched unsupported body to `unknown command: <typed name>` instead of falling through to a shadowed canonical name or catalog alias. Direct execution, daemon routing, terminal-qualified replay, bind-key and set-hook storage, option-command normalization, stored binding dispatch, and read-only preflight all share that result. Writable stored bindings resolve each command immediately before its dispatch, so an earlier command may change the alias observed by a later command; alias-resolution failures use the same command-output and key-command-failed path as other per-command failures. Read-only bindings instead resolve and authorize the whole chain before any effect. Focused regressions prove `kill-server=`, multi-command `list-windows` and `lsw` shadows, and an unparsable `kill-session` shadow cannot shut down, list, kill a session, replace a binding, install a hook, or change an option command. Alias resolution remains one layer, and a malformed shadow refuses before read-only authorization. `aliases.command-bodies` remains open for actual empty and multi-command execution; local CLI preprocessing is closed under aliases.client-preflight, while remote preprocessing remains under aliases.remote-client-preflight."
+      "resolution": "MuxEngine::resolve_command_alias now returns Miss, Expanded, or MatchedUnsupported with empty, multiple-command, and unparsable reasons. Every mux and daemon construction entry point converts a matched unsupported body to `unknown command: <typed name>` instead of falling through to a shadowed canonical name or catalog alias. Direct execution, daemon routing, terminal-qualified replay, bind-key and set-hook storage, option-command normalization, and read-only preflight share that result. Stored bind-key and set-hook command lists execute the commands constructed for storage without another user-alias lookup; read-only clients authorize the same frozen list as one all-or-nothing chain before effects. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks are likewise frozen after lexical construction. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed group stops its remaining commands while later physical lines continue; string callbacks remain one group. Typed `command-prompt` templates retain their structured prepared command list through submission without another user-alias lookup. Their substitution preserves leaf-argument boundaries, replaces only the first `%%` per leaf, and keeps the same typed physical-group failure boundary; string templates and free input start fresh as one group. The command's args-parse item plus broader `%1` and string-template fidelity remain open. `set-hook` and command-valued native set-option intentionally apply their documented second construction stage. A selected typed `display-menu` action drops its structural wrapper before its fresh construction stage, while a quoted brace string remains literal. Alias-resolution failures use the same command-output and key-command-failed path as other per-command failures. Focused regressions prove `kill-server=`, multi-command `list-windows` and `lsw` shadows, and an unparsable `kill-session` shadow cannot shut down, list, kill a session, replace a binding, install a hook, or change an option command. Each construction path admits one user-alias layer, and a malformed shadow refuses before read-only authorization. `aliases.command-bodies` remains open for actual empty and multi-command execution; local CLI preprocessing is closed under aliases.client-preflight, while remote preprocessing remains under aliases.remote-client-preflight."
     },
     {
       "id": "choosers.cross-client-pane-mode-routing",
@@ -3030,7 +3067,7 @@
         "file:crates/zz/tests/cli_binary.rs",
         "scenario:compat/scenarios/native-prefix-isolation.txt"
       ],
-      "resolution": "Exact canonical names and aliases resolve first. Non-exact lookups use tmux canonical names whenever any match exists and consult the guarded 19-name native roster only when tmux has no match. The daemon expands one immutable user-alias layer before read-only authorization and reuses it for dispatch and hooks. Writable stored bindings resolve per command, while read-only bindings resolve and authorize the whole chain before any effect. Non-exact attach prefixes execute through the interactive command path, static agent-send prefixes trigger stdin capture, and protocol v74 prepares Control command units against the live alias table before framing. The manifest gate derives the native roster from catalog minus the pinned oracle and checks every pinned canonical prefix; the strict 29-step scenario covers all 25 affected unique prefixes, exact catalog alias precedence, user command-alias expansion, and ambiguous list-commands exit parity. Local exact attach, stdin, and kill recovery preprocessing now consumes the prepared canonical identity and alias-match state under aliases.client-preflight; remote --host routing remains under aliases.remote-client-preflight."
+      "resolution": "Exact canonical names and aliases resolve first. Non-exact lookups use tmux canonical names whenever any match exists and consult the guarded 19-name native roster only when tmux has no match. The daemon expands one immutable user-alias layer for a direct invocation before read-only authorization and reuses it for dispatch and hooks. Stored bind-key and set-hook lists execute their constructed commands without another user-alias lookup; read-only clients authorize that frozen chain before any effect. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks also stay frozen after lexical construction. Typed `if-shell` and `run-shell` callbacks retain physical groups, stopping a failed group while continuing later physical lines; string callbacks remain one group. Typed `command-prompt` templates retain their structured prepared command list through submission without another user-alias lookup. Structured substitution preserves leaf-argument boundaries, replaces only the first `%%` per leaf, and keeps the typed physical-group boundary. String templates and free input start fresh as one group; the command's args-parse item plus broader `%1` and string-template fidelity remain open. `set-hook` and command-valued native set-option retain their intentional second construction stage. A typed `display-menu` action drops its structural wrapper before the fresh selection stage, while a quoted brace string remains literal. Non-exact attach prefixes execute through the interactive command path, static agent-send prefixes trigger stdin capture, and protocol v74 prepares Control command units against the live alias table before framing. The manifest gate derives the native roster from catalog minus the pinned oracle and checks every pinned canonical prefix; the strict 29-step scenario covers all 25 affected unique prefixes, exact catalog alias precedence, user command-alias expansion, and ambiguous list-commands exit parity. Local exact attach, stdin, and kill recovery preprocessing now consumes the prepared canonical identity and alias-match state under aliases.client-preflight; remote --host routing remains under aliases.remote-client-preflight."
     },
     {
       "id": "commands.tmux-name-extensions",
@@ -3883,6 +3920,21 @@
       "resolution": "Protocol v84 lexical command-block positions now drive `bind-key`'s pinned command-or-string rule without another wire change. Every positional accepts a string or typed block while `-T` and `-N` remain string-only, option scanning stops at the first positional or `--`, exact typed and string tails take their distinct construction paths, and typed command-name groups are omitted from variadic chains. Typed keys expand the live mux environment and use recursive canonical printing before key validation. Daemon dispatch stops the failed source group but continues later physical groups, while a string tail remains one group. Empty blocks, the pin's typed-first variadic oddity, aliases, nested callbacks, multiline groups, exact diagnostics, Control framing, and prior-binding preservation are covered by a strict 16-check source-file and Control fixture. Bare key-only mutation remains under `semantic:tracker-key-binding-behavior`; eager whole-file validation, parse-only `source-file -n`, same-source alias creation, and nested user-alias suppression remain with their existing parser and alias owners. Seven implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
     },
     {
+      "id": "tracker.args-parse-confirm-before",
+      "title": "Apply confirm-before command-or-string argument parsing",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:compat/scenarios/smoke/fixtures/args-parse-confirm-before.sh",
+        "scenario:compat/scenarios/smoke/args-parse-confirm-before.txt",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "Protocol v84 lexical command-block positions now drive `confirm-before`'s pinned command-or-string rule without another wire change. The single command positional accepts a string or typed block while `-c`, `-p`, and `-t` values remain strings, and option scanning stops at the first positional or `--`. Every lexical typed block is recursively constructed before its parent command's name, callback type, or arity validation. Each recursive path carries one user-alias layer independently from siblings; a subtree produced by a user alias disables further user-alias expansion, and self-recursion fails as unknown without killing the daemon. Nested `if-shell`, `run-shell`, set-option, and `confirm-before` blocks print canonical names; an empty block reads back as `{  }`, and physical internal group newlines print as ` ;; `. A typed confirm callback executes that frozen constructed list without another user-alias lookup. String children construct after target lookup and parent-format expansion as one physical group, then remain frozen with the prompt. Source-file and Control comparisons are exact, nested bind and confirm failures are preflight parse errors, and a rejected replacement preserves the prior binding. The strict three-step scenario runs 19 internal construction, parser, readback, alias, and channel checks. Reply, `-y` Enter-default, blocking, and background execution are covered by daemon and GPUI unit tests, not the raw TUI, whose missing confirm, menu, and popup consumption is tracked under `clients.tui-overlay-consumption`. Broader eager whole-file source construction and its replay-channel placement remain open under the existing parser and command-chain owners. Six implemented callback commands across three effective rules remain under `tracker.semantic-coverage`."
+    },
+    {
       "id": "tracker.args-parse-if-shell",
       "title": "Apply if-shell branch argument parsing",
       "closed_on": "2026-08-28",
@@ -3899,7 +3951,7 @@
         "resource:knowledge/playbooks/compat-harness.md",
         "resource:knowledge/protocol/wire-protocol.md"
       ],
-      "resolution": "Protocol v84 carries zero-based unquoted command-block argument positions on `CommandInvocation`, preserving them through config and Control parsing, aliases, bindings, hooks, key-table snapshots, and wire transport while quoted braces remain strings. `if-shell` now rejects typed option values, conditions, and extra positionals with the pin's exact diagnostics before effects; zero-based branch positions 1 and 2 accept either typed blocks or strings across format, foreground shell, and background routes. Plain bind-key tails retain typed positions across command chains. Stored valid branches retain their type and printed form, while an invalid replacement reports bare stderr with status 1 and leaves the prior binding intact. The strict source-file and Control fixture proves the canonical command, built-in alias, branch selection, channel placement, and no-mutation contract. Eleven implemented callback commands remain under `tracker.semantic-coverage`."
+      "resolution": "Protocol v84 carries zero-based unquoted command-block argument positions on `CommandInvocation`, preserving them through config and Control parsing, aliases, bindings, hooks, key-table snapshots, and wire transport while quoted braces remain strings. `if-shell` now rejects typed option values, conditions, and extra positionals with the pin's exact diagnostics before effects; zero-based branch positions 1 and 2 accept either typed blocks or strings across format, foreground shell, and background routes. A typed callback preserves physical source groups: failure stops the rest of that group while later physical lines continue. A string callback reparses as one group. Plain bind-key tails retain typed positions across command chains. Stored valid branches retain their type and printed form, while an invalid replacement reports bare stderr with status 1 and leaves the prior binding intact. The strict source-file and Control fixture proves the canonical command, built-in alias, branch selection, channel placement, and no-mutation contract. Eleven implemented callback commands remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-inventory",
@@ -3929,7 +3981,7 @@
         "scenario:compat/scenarios/smoke/args-parse-run-shell.txt",
         "resource:knowledge/playbooks/compat-harness.md"
       ],
-      "resolution": "Protocol v84 lexical command-block positions now drive `run-shell`'s pinned argument callback without another wire change. A leading `-C`, including combined forms, accepts typed blocks at every positional; without it every positional must be a string. Option values remain strings, option scanning stops at the first positional or `--`, and a later `-C` stays positional. Under `-C`, execution consumes only positional 0 while valid extras remain accepted and ignored. Typed failures retain exact diagnostics and preserve prior bindings and hooks; quoted braces remain strings. The strict source-file and Control fixture runs 21 internal checks across canonical, built-in, prefix, and user aliases, foreground, background, stored-command, option-boundary, and no-effect paths. Eager whole-file or nested callback construction, including parse-only `source-file -n` validation, remains with the existing parser-edge and command-chain owners. Ten implemented callback commands remain under `tracker.semantic-coverage`."
+      "resolution": "Protocol v84 lexical command-block positions now drive `run-shell`'s pinned argument callback without another wire change. A leading `-C`, including combined forms, accepts typed blocks at every positional; without it every positional must be a string. Option values remain strings, option scanning stops at the first positional or `--`, and a later `-C` stays positional. Under `-C`, execution consumes only positional 0 while valid extras remain accepted and ignored. A typed command callback preserves physical source groups: failure stops the rest of that group while later physical lines continue. A string callback reparses as one group. Typed failures retain exact diagnostics and preserve prior bindings and hooks; quoted braces remain strings. The strict source-file and Control fixture runs 21 internal checks across canonical, built-in, prefix, and user aliases, foreground, background, stored-command, option-boundary, and no-effect paths. Eager whole-file or nested callback construction, including parse-only `source-file -n` validation, remains with the existing parser-edge and command-chain owners. Ten implemented callback commands remain under `tracker.semantic-coverage`."
     },
     {
       "id": "tracker.args-parse-set-option",

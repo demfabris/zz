@@ -143,10 +143,29 @@ it on unregister with the rest of the connection facts.
 Protocol v84 appends `CommandInvocation.command_blocks`. Config and Control parsers record the
 zero-based positions of standalone unquoted command blocks while quoted brace text stays an
 ordinary string. Alias expansion and key-table publication retain the positions. The
-command-aware option parser applies the adopted callback rules to `bind-key`, `if-shell`,
-`run-shell`, `set-option`, and `set-window-option`. Every `bind-key` positional accepts a typed
+command-aware option parser applies the adopted callback rules to `bind-key`, `confirm-before`,
+`if-shell`, `run-shell`, `set-option`, and `set-window-option`. Every `bind-key` positional accepts a typed
 block or string while `-T` and `-N` values remain strings. The two set commands accept a typed
-block only at value position 1. All five commands reuse the same protocol v84 metadata.
+block only at value position 1. `confirm-before` accepts either type for its one command positional
+while `-c`, `-p`, and `-t` remain strings. The mux constructs every lexical typed block
+recursively before validating its parent command name, callback type, or arity. One user-alias
+layer travels independently down each recursive path; siblings do not share it, and an
+alias-produced subtree disables another user-alias expansion. Nested `if-shell`, `run-shell`,
+set-option, and `confirm-before` blocks print canonical names; empty blocks read back as `{  }`,
+and physical internal group newlines print as ` ;; `. Stored `bind-key` and `set-hook` lists and
+typed `if-shell`, `run-shell`, and `confirm-before` callbacks execute their constructed commands
+without another user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical
+groups: a failed group stops its remaining commands while later physical lines continue; string
+callbacks remain one group. Typed `command-prompt` templates retain their structured prepared
+command list through submission without re-expanding aliases. Structured substitution preserves
+leaf-argument boundaries against quote or semicolon injection, replaces only the first `%%` per
+leaf, and keeps the same typed physical-group failure boundary. String templates and free input
+start fresh as one group. The command's args-parse rule, broader `%1` behavior, and string-template
+fidelity remain open for 10f. `set-hook` and command-valued native set-option deliberately apply a
+second construction stage. A typed `display-menu` action drops its structural wrapper before the
+fresh selection parse, while a quoted brace string remains literal. All six closed commands reuse
+the same protocol v84 metadata. Eager whole-file source construction and its replay-channel
+placement remain a separate parser contract.
 
 `MuxSnapshot` carries two per-recipient fields the daemon stamps for each subscriber:
 `focused_window`, that client's own window focus, and `SessionSnapshot::viewers`, a

@@ -111,7 +111,28 @@ remain string-only. It stops scanning at the first positional or `--`, prints a 
 lookup after live mux-environment expansion, preserves typed physical-line groups, reparses one
 string tail as one group, and retains the pin's empty binding for a typed first variadic tail.
 Unknown typed-key commands keep their source diagnostic, while a constructed invalid key remains
-a bare key error. Seven `args-parse:` items across three effective rules remain.
+a bare key error. `confirm-before` now applies the same command-or-string rule to its one command
+positional while `-c`, `-p`, and `-t` stay strings. Every lexical typed block recursively
+constructs before its parent's name, callback type, or arity validation. Each recursive path gets
+one independent user-alias layer; alias-produced subtrees disable another user-alias expansion, and
+self-recursion fails as unknown without killing the daemon. Nested `if-shell`, `run-shell`,
+set-option, and confirm blocks print canonical names. Empty blocks read back as `{  }`, and physical
+internal group newlines print as ` ;; `. String children construct after target lookup and
+parent-format expansion as one group. Exact Control comparisons prove nested bind and confirm
+construction failures are preflight parse errors. Stored `bind-key` and `set-hook` lists and typed
+`if-shell`, `run-shell`, and `confirm-before` callbacks execute their constructed commands without
+another user-alias lookup. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a
+failed group stops its remaining commands while later physical lines continue; string callbacks
+stay one group. Typed `command-prompt` templates retain their structured prepared command list
+through submission without re-expanding aliases. Structured substitution preserves leaf-argument
+boundaries against quote or semicolon injection, replaces only the first `%%` in each leaf, and
+keeps the same typed physical-group failure boundary. String templates and free input start fresh
+as one group. The command's args-parse item, broader `%1` behavior, and string-template fidelity
+remain open for 10f. `set-hook` and command-valued native set-option deliberately construct a second
+time. A typed `display-menu` action drops its structural wrapper before the fresh selection parse,
+while a quoted brace string remains literal. Broader eager whole-file source construction and its
+replay-channel placement remain open.
+Six `args-parse:` items across three effective rules remain.
 Shared command-flag diagnostics closed on 2026-08-28. One
 catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option
@@ -173,9 +194,13 @@ cells. zz publishes daemon-owned state and renders it in its clients:
 
 - `status-format[]` rows render in the TUI and in a top or bottom GUI row when a config customizes
   status. Native sidebar and titlebar presentation remain at defaults.
-- Prompts, choosers, menus, popups, copy mode, and pane indicators use native surfaces.
+- The GPUI client uses native surfaces for prompts, choosers, menus, popups, copy mode, and pane
+  indicators.
+- The raw TUI already consumes command prompts, choose trees, choose buffers, and display-panes,
+  but does not yet render or consume `confirm-before`, `display-menu`, or `display-popup`. Those
+  three client paths are an active compatibility gap.
 - A native surface may look different. Its command, key, target, exit, and state semantics remain
-  part of the compatibility contract.
+  part of the compatibility contract for every client that presents it.
 
 This is a presentation divergence, not permission to reinterpret a tmux command.
 

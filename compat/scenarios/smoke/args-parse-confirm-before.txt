@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/args-parse-confirm-before.sh ~/args-parse-confirm-before.sh
+out: set-environment -gu ARGS_PARSE_CONFIRM_BEFORE
+run-shell 'sh ~/args-parse-confirm-before.sh'
+out: show-environment -g ARGS_PARSE_CONFIRM_BEFORE

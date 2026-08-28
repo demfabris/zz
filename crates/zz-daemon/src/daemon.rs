@@ -20,12 +20,13 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
-    CellLayout, CommandAliasResolution, CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope,
-    Execution, ExecutionContext, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
-    PaneRuntimeFacts, ParsedConfig, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
-    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, display_width,
-    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, parse_tmux_colour, send_keys_is_read_only_safe,
+    CellLayout, CommandAliasResolution, CommandPromptTemplate, CopyModeStyleValues,
+    DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, KeyDecision, KeyEngine,
+    KeyTables, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig, StatusHooks,
+    TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
+    copy_mode_action_is_read_only_safe, display_width, expand_format_values, expand_status,
+    format_command, format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
+    send_keys_is_read_only_safe,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferAction, ChooseBufferItem, ChooseBufferSearchState,
@@ -3092,6 +3093,27 @@ impl Drop for ClientRegistrationGuard {
     }
 }
 
+fn resolve_and_prepare_command(
+    engine: &MuxEngine,
+    command: &CommandInvocation,
+) -> Result<(CommandInvocation, bool), ServerError> {
+    let (mut command, alias_matched) = match engine.resolve_command_alias(command) {
+        CommandAliasResolution::Miss => (command.clone(), false),
+        CommandAliasResolution::Expanded(command) => (command, true),
+        CommandAliasResolution::MatchedUnsupported(_) => {
+            return Err(ServerError::CommandParse(format!(
+                "unknown command: {}",
+                command.name
+            )));
+        }
+    };
+    if (0..command.args.len()).any(|index| command.argument_is_command_block(index)) {
+        let owner = canonical_command(&command.name).to_owned();
+        engine.prepare_expanded_callback_command(&mut command, &owner, alias_matched)?;
+    }
+    Ok((command, alias_matched))
+}
+
 impl Shared {
     #[cfg(unix)]
     fn install_tmux_shim(&self) -> Result<(), DaemonError> {
@@ -4437,10 +4459,7 @@ impl Shared {
         let command = if prepared {
             command.clone()
         } else {
-            inner
-                .engine
-                .resolve_command_alias(command)
-                .into_command(command)?
+            resolve_and_prepare_command(&inner.engine, command)?.0
         };
         let blocked = inner.client_flags.contains(client) && !command_is_read_only_safe(&command);
         Ok((command, blocked))
@@ -4451,7 +4470,7 @@ impl Shared {
         commands
             .into_iter()
             .map(|typed| {
-                let (invocation, alias_matched, alias_error) =
+                let (mut invocation, alias_matched, alias_error) =
                     match inner.engine.resolve_command_alias(&typed) {
                         CommandAliasResolution::Miss => (typed, false, None),
                         CommandAliasResolution::Expanded(invocation) => (invocation, true, None),
@@ -4472,28 +4491,39 @@ impl Shared {
                         result: PreparedCommandResult::Error(error),
                     };
                 }
-                match resolve_command(&invocation.name) {
+                let resolution = resolve_command(&invocation.name);
+                let canonical_name = match &resolution {
                     CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
-                        let has_command_blocks = (0..invocation.args.len())
-                            .any(|index| invocation.argument_is_command_block(index));
-                        let result = if has_command_blocks {
-                            zz_protocol::catalog_command_spec(name)
-                                .filter(|spec| spec.uses_tmux_option_grammar())
-                                .map_or(Ok(()), |spec| {
-                                    zz_protocol::parse_tmux_command_options(spec, &invocation)
-                                        .map(|_| ())
-                                })
-                                .map_or_else(PreparedCommandResult::Error, |()| {
-                                    PreparedCommandResult::Ready
-                                })
-                        } else {
-                            PreparedCommandResult::Ready
+                        Some((*name).to_owned())
+                    }
+                    CommandResolution::Ambiguous(_) | CommandResolution::Unknown => None,
+                };
+                let has_command_blocks = (0..invocation.args.len())
+                    .any(|index| invocation.argument_is_command_block(index));
+                if has_command_blocks {
+                    let owner = canonical_name
+                        .clone()
+                        .unwrap_or_else(|| invocation.name.clone());
+                    if let Err(error) = inner.engine.prepare_expanded_callback_command(
+                        &mut invocation,
+                        &owner,
+                        alias_matched,
+                    ) {
+                        return PreparedCommand {
+                            invocation,
+                            canonical_name,
+                            alias_matched,
+                            result: PreparedCommandResult::Error(error),
                         };
+                    }
+                }
+                match resolution {
+                    CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
                         PreparedCommand {
                             invocation,
                             canonical_name: Some(name.to_owned()),
                             alias_matched,
-                            result,
+                            result: PreparedCommandResult::Ready,
                         }
                     }
                     CommandResolution::Ambiguous(message) => PreparedCommand {
@@ -4540,12 +4570,7 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
-        let routed = self
-            .inner
-            .lock()
-            .engine
-            .resolve_command_alias(command)
-            .into_command(command)?;
+        let routed = resolve_and_prepare_command(&self.inner.lock().engine, command)?.0;
         self.execute_with_mux_source_routed(client, kind, context, &routed, mux_source)
     }
 
@@ -4733,10 +4758,10 @@ impl Shared {
                         self.display_popup(client, kind, context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::DisplayMenu => {
-                        self.display_menu(client, kind, context, canonical, &command.args)
+                        self.display_menu(client, kind, context, canonical, command)
                     }
                     DaemonCommandDispatch::ConfirmBefore => {
-                        self.confirm_before(client, kind, context, canonical, &command.args)
+                        self.confirm_before(client, kind, context, canonical, command)
                     }
                     DaemonCommandDispatch::Lock => {
                         self.lock_command(client, context, canonical, &command.args)
@@ -4916,8 +4941,15 @@ impl Shared {
                         &mut hook_context,
                         &command,
                         target,
+                        true,
                     ),
-                    None => self.execute(client, kind, &mut hook_context, &command),
+                    None => self.execute_with_mux_source_routed(
+                        client,
+                        kind,
+                        &mut hook_context,
+                        &command,
+                        MuxOptionSource::RuntimeCommand,
+                    ),
                 };
                 match execution {
                     Ok(execution) => {
@@ -8479,23 +8511,53 @@ impl Shared {
         label: &str,
         control_target: Option<(ClientId, u8)>,
     ) -> Result<InsertedCommandResult, DaemonError> {
-        let input = match source {
-            InsertedCommandSource::String(input) | InsertedCommandSource::Block(input) => input,
+        let (input, prepared) = match source {
+            InsertedCommandSource::String(input) => (input, false),
+            InsertedCommandSource::Block(input) => (input, true),
             InsertedCommandSource::Shell(_) => unreachable!(),
         };
-        let parsed = {
+        let mut parsed = {
             let inner = self.inner.lock();
             inner.engine.parse_config(label, input)
         };
         if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
             return Err(DaemonError::InsertedCommandParse(diagnostic.message));
         }
+        if prepared {
+            let owner = label
+                .strip_prefix('<')
+                .and_then(|label| label.strip_suffix('>'))
+                .unwrap_or(label);
+            self.inner
+                .lock()
+                .engine
+                .prepare_frozen_callback_invocations(&mut parsed.commands, owner)?;
+        }
         let mut result = InsertedCommandResult::default();
+        let mut first_error = None;
+        let mut failed_group = None;
         for command in parsed.commands {
-            let execution = match control_target {
-                Some(target) => {
-                    self.execute_control_command_with_guard(client, kind, context, &command, target)
+            let group = command
+                .source
+                .as_ref()
+                .map(|source| (source.source.clone(), source.line));
+            if prepared && let Some(failed) = &failed_group {
+                if failed == &group {
+                    continue;
                 }
+                failed_group = None;
+            }
+            let execution = match control_target {
+                Some(target) => self.execute_control_command_with_guard(
+                    client, kind, context, &command, target, prepared,
+                ),
+                None if prepared => self.execute_with_mux_source_routed(
+                    client,
+                    kind,
+                    context,
+                    &command,
+                    MuxOptionSource::RuntimeCommand,
+                ),
                 None => self.execute(client, kind, context, &command),
             };
             if let Some((guard_client, flags)) = control_target {
@@ -8511,6 +8573,10 @@ impl Shared {
                                 .exit_code = exit_code;
                         }
                         result.exit_code = exit_code;
+                        if prepared {
+                            failed_group = Some(group);
+                            continue;
+                        }
                         break;
                     }
                     Err(error) => {
@@ -8527,6 +8593,10 @@ impl Shared {
                                 .exit_code = 1;
                             result.exit_code = 1;
                         }
+                        if prepared {
+                            failed_group = Some(group);
+                            continue;
+                        }
                         break;
                     }
                 }
@@ -8537,15 +8607,32 @@ impl Shared {
                 Err(DaemonError::CommandExit { output, exit_code }) => {
                     append_inserted_output(&mut result.output, &output);
                     result.exit_code = exit_code;
+                    if prepared {
+                        failed_group = Some(group);
+                        continue;
+                    }
                     break;
                 }
                 Err(error) => {
+                    if prepared {
+                        if let Some(error_output) = daemon_error_output(&error) {
+                            append_inserted_output(&mut result.output, error_output);
+                        }
+                        failed_group = Some(group);
+                        if first_error.is_none() {
+                            first_error = Some(discard_all_command_output(error));
+                        }
+                        continue;
+                    }
                     return Err(prepend_command_output(
                         std::mem::take(&mut result.output),
                         error,
                     ));
                 }
             }
+        }
+        if let Some(error) = first_error {
+            return Err(prepend_command_output(result.output, error));
         }
         Ok(result)
     }
@@ -8557,14 +8644,15 @@ impl Shared {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
         target: (ClientId, u8),
+        prepared: bool,
     ) -> Result<Execution, DaemonError> {
         let capture = self.begin_control_command_event_capture(target.0);
-        let routed = self
-            .inner
-            .lock()
-            .engine
-            .resolve_command_alias(command)
-            .into_command(command);
+        let routed = if prepared {
+            Ok(command.clone())
+        } else {
+            resolve_and_prepare_command(&self.inner.lock().engine, command)
+                .map(|(command, _)| command)
+        };
         let source_command = routed
             .as_ref()
             .is_ok_and(|command| canonical_command(&command.name) == "source-file");
@@ -10129,9 +10217,9 @@ impl Shared {
         kind: ClientKind,
         context: &ExecutionContext,
         command_name: &str,
-        args: &[String],
+        command: &CommandInvocation,
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_display_menu_args(args)?;
+        let parsed = parse_display_menu_args(&command.args)?;
         if kind == ClientKind::Control {
             return Ok(Execution::default());
         }
@@ -10184,7 +10272,8 @@ impl Shared {
                     return Err(ServerError::CommandParse("not enough arguments".to_owned()).into());
                 }
                 let key = &parsed.items[index];
-                let command = &parsed.items[index.saturating_add(1)];
+                let command_index = index.saturating_add(1);
+                let action = &parsed.items[command_index];
                 index = index.saturating_add(2);
                 let name =
                     expand_popup_value(&inner, &target, context.session, Some(command_name), name);
@@ -10198,15 +10287,22 @@ impl Shared {
                     name.strip_prefix('-').unwrap_or_default().to_owned()
                 };
                 let key = enabled.then(|| menu_shortcut(key)).flatten();
-                let command = expand_popup_value(
+                let action = if command.argument_is_command_block(
+                    parsed.positional_start.saturating_add(command_index),
+                ) {
+                    command_block_body(action).unwrap_or(action).trim()
+                } else {
+                    action
+                };
+                let action = expand_popup_value(
                     &inner,
                     &target,
                     context.session,
                     Some(command_name),
-                    command,
+                    action,
                 );
                 items.push(Some(MenuItem { name, key, enabled }));
-                commands.push(Some(command));
+                commands.push(Some(action));
             }
             if items.is_empty() {
                 return Ok(Execution::default());
@@ -10317,10 +10413,21 @@ impl Shared {
         kind: ClientKind,
         context: &ExecutionContext,
         command_name: &str,
-        args: &[String],
+        invocation: &CommandInvocation,
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_confirm_before_args(args)?;
-        let (target_client, target, commands, prompt) = {
+        let parsed = parse_confirm_before_args(&invocation.args)?;
+        let command = parsed
+            .command
+            .as_deref()
+            .expect("confirm command was required");
+        let typed = invocation.argument_is_command_block(parsed.positional_start);
+        let typed_commands = if typed {
+            let command = command_block_body(command).unwrap_or(command);
+            Some(self.parse_confirm_commands(command, true)?)
+        } else {
+            None
+        };
+        let (target_client, target, expanded_command) = {
             let inner = self.inner.lock();
             let target_client =
                 resolve_popup_client(&inner, client, context, parsed.target_client.as_deref())?;
@@ -10331,40 +10438,36 @@ impl Shared {
             target
                 .format_variables
                 .clone_from(&context.format_variables);
-            let command = parsed
-                .command
-                .as_deref()
-                .expect("confirm command was required");
-            let command = command_block_body(command).map_or_else(
-                || {
-                    expand_popup_value(
-                        &inner,
-                        &target,
-                        context.session,
-                        Some(command_name),
-                        command,
-                    )
-                },
-                str::to_owned,
-            );
-            let parsed_commands = inner.engine.parse_config("<confirm-before>", &command);
-            if let Some(diagnostic) = parsed_commands.diagnostics.first() {
-                return Err(ServerError::CommandParse(diagnostic.message.clone()).into());
-            }
-            let first = parsed_commands
-                .commands
+            let expanded_command = (!typed).then(|| {
+                expand_popup_value(
+                    &inner,
+                    &target,
+                    context.session,
+                    Some(command_name),
+                    command,
+                )
+            });
+            (target_client, target, expanded_command)
+        };
+        let commands = match typed_commands {
+            Some(commands) => commands,
+            None => self.parse_confirm_commands(
+                expanded_command
+                    .as_deref()
+                    .expect("string confirm command was expanded"),
+                false,
+            )?,
+        };
+        let prompt = if let Some(prompt) = parsed.prompt.as_deref() {
+            format!("{prompt} ")
+        } else {
+            let first = commands
                 .first()
                 .ok_or_else(|| ServerError::CommandParse("empty command".to_owned()))?;
-            let prompt = parsed.prompt.as_deref().map_or_else(
-                || {
-                    format!(
-                        "Confirm '{}'? ({{confirm-key}}/n) ",
-                        canonical_command(&first.name)
-                    )
-                },
-                |prompt| format!("{prompt} "),
-            );
-            (target_client, target, parsed_commands.commands, prompt)
+            format!(
+                "Confirm '{}'? ({{confirm-key}}/n) ",
+                canonical_command(&first.name)
+            )
         };
         let confirm_key = parsed.confirm_key.as_deref().unwrap_or("y");
         let bytes = confirm_key.as_bytes();
@@ -10442,14 +10545,30 @@ impl Shared {
             });
         }
         let mut command_context = context.clone();
-        self.execute_overlay_commands(
-            client,
-            kind,
-            &mut command_context,
-            blocking_commands,
-            "confirm-before",
-        );
-        Ok(Execution::default())
+        self.run_confirm_commands(client, kind, &mut command_context, &blocking_commands)
+    }
+
+    fn parse_confirm_commands(
+        &self,
+        command: &str,
+        typed: bool,
+    ) -> Result<Vec<CommandInvocation>, DaemonError> {
+        let inner = self.inner.lock();
+        let result = if typed {
+            inner
+                .engine
+                .prepare_frozen_callback_commands(command, true, "confirm-before")
+        } else {
+            inner
+                .engine
+                .prepare_callback_commands(command, false, "confirm-before")
+        };
+        result.map_err(|error| match error {
+            ServerError::CommandParse(message) if !typed => {
+                ServerError::InvalidCommand(message).into()
+            }
+            error => error.into(),
+        })
     }
 
     fn lock_command(
@@ -12015,11 +12134,11 @@ impl Shared {
                 mut context,
             } if accepted => {
                 self.inner.lock().engine.repair_context(&mut context);
-                self.execute_overlay_commands(
+                self.execute_confirm_commands(
                     client,
                     ClientKind::Interactive,
                     &mut context,
-                    commands,
+                    &commands,
                     "confirm-before",
                 );
             }
@@ -12030,11 +12149,11 @@ impl Shared {
                         .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane))
                         .unwrap_or_else(|| context.clone())
                 };
-                self.execute_overlay_commands(
+                self.execute_confirm_commands(
                     client,
                     ClientKind::Interactive,
                     &mut target,
-                    commands,
+                    &commands,
                     "confirm-before",
                 );
             }
@@ -12049,7 +12168,7 @@ impl Shared {
         command: &str,
         title: &str,
     ) {
-        let source = inserted_command_source(command);
+        let source = InsertedCommandSource::String(command.to_owned());
         match self.execute_inserted_commands(
             client,
             ClientKind::Interactive,
@@ -12068,35 +12187,73 @@ impl Shared {
         }
     }
 
-    fn execute_overlay_commands(
+    fn execute_confirm_commands(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
         context: &mut ExecutionContext,
-        commands: Vec<CommandInvocation>,
+        commands: &[CommandInvocation],
         title: &str,
     ) {
+        match self.run_confirm_commands(client, kind, context, commands) {
+            Ok(execution) => self.route_background_inserted_output(
+                client,
+                kind,
+                context,
+                title.to_owned(),
+                &execution.output,
+            ),
+            Err(error) => self.publish_background_command_error(client, context, &error, false),
+        }
+    }
+
+    fn run_confirm_commands(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        commands: &[CommandInvocation],
+    ) -> Result<Execution, DaemonError> {
         let mut output = String::new();
+        let mut first_error = None;
+        let mut failed_group = None;
         for command in commands {
-            match self.execute(client, kind, context, &command) {
+            let group = command
+                .source
+                .as_ref()
+                .map(|source| (source.source.clone(), source.line));
+            if let Some(failed) = &failed_group {
+                if failed == &group {
+                    continue;
+                }
+                failed_group = None;
+            }
+            match self.execute_with_mux_source_routed(
+                client,
+                kind,
+                context,
+                command,
+                MuxOptionSource::RuntimeCommand,
+            ) {
                 Ok(execution) => append_inserted_output(&mut output, &execution.output),
                 Err(error) => {
                     if let Some(error_output) = daemon_error_output(&error) {
                         append_inserted_output(&mut output, error_output);
                     }
-                    self.route_background_inserted_output(
-                        client,
-                        kind,
-                        context,
-                        title.to_owned(),
-                        &output,
-                    );
-                    self.publish_background_command_error(client, context, &error, false);
-                    return;
+                    failed_group = Some(group);
+                    if first_error.is_none() {
+                        first_error = Some(discard_all_command_output(error));
+                    }
                 }
             }
         }
-        self.route_background_inserted_output(client, kind, context, title.to_owned(), &output);
+        match first_error {
+            Some(error) => Err(prepend_command_output(output, error)),
+            None => Ok(Execution {
+                output,
+                effects: Vec::new(),
+            }),
+        }
     }
 
     fn reject_unattached_input(&self, client: ClientId, pane: PaneId) -> Result<(), ServerError> {
@@ -13345,15 +13502,7 @@ impl Shared {
         let (read_only_commands, blocked) = {
             let mut inner = self.inner.lock();
             if inner.client_flags.contains(client) {
-                let commands = commands
-                    .iter()
-                    .map(|command| {
-                        inner
-                            .engine
-                            .resolve_command_alias(command)
-                            .into_command(command)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                let commands = commands.to_vec();
                 let blocked = commands
                     .iter()
                     .any(|command| !command_is_read_only_safe(command))
@@ -13396,31 +13545,20 @@ impl Shared {
                 failed_group = None;
             }
             let command = if let Some(commands) = &read_only_commands {
-                Ok(commands[index].clone())
+                commands[index].clone()
             } else {
-                let inner = self.inner.lock();
-                inner
-                    .engine
-                    .resolve_command_alias(original)
-                    .into_command(original)
-                    .map_err(DaemonError::from)
+                original.clone()
             };
-            let (command, execution) = match command {
-                Ok(command) => {
-                    let previous_repeat_binding = context.repeat_binding();
-                    context.set_repeat_binding(repeat_binding);
-                    let execution = self.execute_with_mux_source_routed(
-                        client,
-                        kind,
-                        context,
-                        &command,
-                        MuxOptionSource::RuntimeCommand,
-                    );
-                    context.set_repeat_binding(previous_repeat_binding);
-                    (command, execution)
-                }
-                Err(error) => (original.clone(), Err(error)),
-            };
+            let previous_repeat_binding = context.repeat_binding();
+            context.set_repeat_binding(repeat_binding);
+            let execution = self.execute_with_mux_source_routed(
+                client,
+                kind,
+                context,
+                &command,
+                MuxOptionSource::RuntimeCommand,
+            );
+            context.set_repeat_binding(previous_repeat_binding);
             let execution = match execution {
                 Ok(execution) => execution,
                 Err(error) => {
@@ -13836,30 +13974,61 @@ impl Shared {
         context: &mut ExecutionContext,
         submission: &CommandPromptSubmission,
     ) {
-        let source = submission
-            .template
-            .as_deref()
-            .unwrap_or(submission.input.as_str());
-        let mut parsed = {
-            let inner = self.inner.lock();
-            inner.engine.parse_config("<command-prompt>", source)
+        let prepared = matches!(
+            &submission.template,
+            Some(CommandPromptTemplate::Commands(_))
+        );
+        let mut commands = match &submission.template {
+            Some(CommandPromptTemplate::Commands(commands)) => commands.clone(),
+            template => {
+                let source = match template {
+                    Some(CommandPromptTemplate::String(template)) => template.as_str(),
+                    Some(CommandPromptTemplate::Commands(_)) => unreachable!(),
+                    None => submission.input.as_str(),
+                };
+                let parsed = {
+                    let inner = self.inner.lock();
+                    inner.engine.parse_config("<command-prompt>", source)
+                };
+                if let Some(diagnostic) = parsed.diagnostics.first() {
+                    self.publish_to_client(
+                        client,
+                        EventPayload::ClientMessage {
+                            pane: context.pane,
+                            kind: ClientMessageKind::Error,
+                            text: format!(
+                                "{}:{}:{}: {}",
+                                diagnostic.source,
+                                diagnostic.line,
+                                diagnostic.column,
+                                diagnostic.message
+                            ),
+                        },
+                    );
+                    return;
+                }
+                parsed.commands
+            }
         };
-        if let Some(diagnostic) = parsed.diagnostics.first() {
-            self.publish_to_client(
-                client,
-                EventPayload::ClientMessage {
-                    pane: context.pane,
-                    kind: ClientMessageKind::Error,
-                    text: format!(
-                        "{}:{}:{}: {}",
-                        diagnostic.source, diagnostic.line, diagnostic.column, diagnostic.message
-                    ),
-                },
-            );
-            return;
-        }
-        if submission.template.is_some() {
-            for command in &mut parsed.commands {
+        if prepared {
+            let substitution = self
+                .inner
+                .lock()
+                .engine
+                .substitute_command_prompt_commands(&mut commands, &submission.input);
+            if let Err(error) = substitution {
+                self.publish_to_client(
+                    client,
+                    EventPayload::ClientMessage {
+                        pane: context.pane,
+                        kind: ClientMessageKind::Error,
+                        text: error.to_string(),
+                    },
+                );
+                return;
+            }
+        } else if submission.template.is_some() {
+            for command in &mut commands {
                 command.name = command.name.replace("%%", &submission.input);
                 for argument in &mut command.args {
                     *argument = argument.replace("%%", &submission.input);
@@ -13869,8 +14038,30 @@ impl Shared {
 
         let mut output = String::new();
         let mut output_truncated = false;
-        for command in parsed.commands {
-            match self.execute(client, kind, context, &command) {
+        let mut failed_group = None;
+        for command in commands {
+            let group = command
+                .source
+                .as_ref()
+                .map(|source| (source.source.clone(), source.line));
+            if prepared && let Some(failed) = &failed_group {
+                if failed == &group {
+                    continue;
+                }
+                failed_group = None;
+            }
+            let execution = if prepared {
+                self.execute_with_mux_source_routed(
+                    client,
+                    kind,
+                    context,
+                    &command,
+                    MuxOptionSource::RuntimeCommand,
+                )
+            } else {
+                self.execute(client, kind, context, &command)
+            };
+            match execution {
                 Ok(execution) if !execution.output.is_empty() && !output_truncated => {
                     output_truncated = append_command_prompt_output(&mut output, &execution.output);
                 }
@@ -13880,6 +14071,18 @@ impl Shared {
                         && !output_truncated
                     {
                         output_truncated = append_command_prompt_output(&mut output, error_output);
+                    }
+                    if prepared {
+                        self.publish_to_client(
+                            client,
+                            EventPayload::ClientMessage {
+                                pane: context.pane,
+                                kind: ClientMessageKind::Error,
+                                text: error.to_string(),
+                            },
+                        );
+                        failed_group = Some(group);
+                        continue;
                     }
                     if output_truncated {
                         if !output.is_empty() {
@@ -18170,10 +18373,7 @@ impl Shared {
             }
             let routed = {
                 let inner = self.inner.lock();
-                inner
-                    .engine
-                    .resolve_command_alias(&command)
-                    .into_command(&command)
+                resolve_and_prepare_command(&inner.engine, &command).map(|prepared| prepared.0)
             };
             let routed = match routed {
                 Ok(routed) => routed,
@@ -21529,7 +21729,7 @@ struct CommandPrompt {
     prompt: String,
     input: String,
     cursor: usize,
-    template: Option<String>,
+    template: Option<CommandPromptTemplate>,
     history_index: Option<usize>,
     history_draft: String,
     prompt_type: CommandPromptType,
@@ -21544,7 +21744,7 @@ impl CommandPrompt {
     fn new(
         prompt: String,
         input: String,
-        template: Option<String>,
+        template: Option<CommandPromptTemplate>,
         prompt_type: CommandPromptType,
         mode: CommandPromptMode,
         no_freeze: bool,
@@ -21907,7 +22107,7 @@ enum PromptKeyAction {
 
 struct CommandPromptSubmission {
     input: String,
-    template: Option<String>,
+    template: Option<CommandPromptTemplate>,
 }
 
 /// What the wire owes the client about the prompt after one key press.
@@ -25737,13 +25937,6 @@ fn parse_shell_delay_seconds(value: &str) -> Option<f64> {
     (seconds.is_finite() && seconds >= 0.0).then_some(seconds)
 }
 
-fn inserted_command_source(argument: &str) -> InsertedCommandSource {
-    command_block_body(argument).map_or_else(
-        || InsertedCommandSource::String(argument.to_owned()),
-        |body| InsertedCommandSource::Block(body.to_owned()),
-    )
-}
-
 fn typed_inserted_command_source(argument: &str, command_block: bool) -> InsertedCommandSource {
     if command_block && let Some(body) = command_block_body(argument) {
         return InsertedCommandSource::Block(body.to_owned());
@@ -25840,6 +26033,17 @@ fn prepend_command_output(mut output: String, error: DaemonError) -> DaemonError
             output,
             error: Box::new(error),
         },
+    }
+}
+
+fn discard_all_command_output(error: DaemonError) -> DaemonError {
+    match error {
+        DaemonError::CommandExit { exit_code, .. } => DaemonError::CommandExit {
+            output: String::new(),
+            exit_code,
+        },
+        DaemonError::CommandFailed { error, .. } => discard_all_command_output(*error),
+        error => error,
     }
 }
 
@@ -26699,6 +26903,7 @@ struct ParsedDisplayMenu {
     x: Option<String>,
     y: Option<String>,
     items: Vec<String>,
+    positional_start: usize,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -26709,6 +26914,7 @@ struct ParsedConfirmBefore {
     prompt: Option<String>,
     target_client: Option<String>,
     command: Option<String>,
+    positional_start: usize,
 }
 
 fn parse_display_popup_args(args: &[String]) -> Result<ParsedDisplayPopup, ServerError> {
@@ -26838,11 +27044,13 @@ fn parse_display_menu_args(args: &[String]) -> Result<ParsedDisplayMenu, ServerE
     zz_protocol::catalog_command_spec("display-menu")
         .expect("display-menu has catalog metadata")
         .validate_positional_minimum(parsed.items.len())?;
+    parsed.positional_start = args.len().saturating_sub(parsed.items.len());
     Ok(parsed)
 }
 
 fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, ServerError> {
     let parsed = parse_buffer_command_args("confirm-before", args, &['c', 'p', 't'], &['b', 'y'])?;
+    let positional_start = args.len().saturating_sub(parsed.positional.len());
     let [command] = parsed.positional.as_slice() else {
         unreachable!("confirm-before positional bounds were validated");
     };
@@ -26853,6 +27061,7 @@ fn parse_confirm_before_args(args: &[String]) -> Result<ParsedConfirmBefore, Ser
         prompt: parsed.value('p').map(str::to_owned),
         target_client: parsed.value('t').map(str::to_owned),
         command: Some(command.clone()),
+        positional_start,
     })
 }
 
@@ -29070,9 +29279,9 @@ mod tests {
             retained_startup_causes(&shared),
             [
                 format!("{}: No such file or directory", missing.display()),
-                format!("{}:1: unterminated quote", invalid.display()),
                 format!("{}:1: EARLY", first.display()),
                 format!("{}:2: can't find session: missing", first.display()),
+                format!("{}:2: invalid option: unterminated\n", invalid.display()),
             ]
         );
         assert_eq!(
@@ -29353,7 +29562,7 @@ mod tests {
              set-option -g @nested-next yes\n",
         )
         .expect("nested failure config");
-        fs::write(&nested_parser_failure, "set 'oops\n").expect("nested parser failure config");
+        fs::write(&nested_parser_failure, "set \\").expect("nested parser failure config");
         fs::write(&mixed_match, "set-option -g @mixed-loaded yes\n").expect("mixed source match");
         fs::create_dir(&matched_read_failure).expect("matched read failure directory");
         fs::write(
@@ -30791,7 +31000,9 @@ mod tests {
             CommandPrompt::new(
                 "prompt".to_owned(),
                 "7".to_owned(),
-                Some("rename-session -- 'prompt-before-any'".to_owned()),
+                Some(CommandPromptTemplate::String(
+                    "rename-session -- 'prompt-before-any'".to_owned(),
+                )),
                 CommandPromptType::Command,
                 CommandPromptMode::Numeric,
                 false,
@@ -31137,7 +31348,7 @@ mod tests {
                 CommandPrompt::new(
                     "prompt".to_owned(),
                     input.to_owned(),
-                    template.map(str::to_owned),
+                    template.map(|template| CommandPromptTemplate::String(template.to_owned())),
                     CommandPromptType::Command,
                     mode,
                     false,
@@ -39218,8 +39429,8 @@ mod tests {
             invalid_response,
             CommandResponse::Success {
                 request_id: 2,
-                output: format!("{}:2: unterminated quote\n", invalid.display()),
-                exit_code: 1,
+                output: String::new(),
+                exit_code: 0,
                 stderr: String::new(),
             }
         );
@@ -49191,6 +49402,78 @@ mod tests {
             )
             .expect("typed extra command-mode argument");
         assert_eq!(output.output, "first-command");
+
+        for (name, command) in [
+            (
+                "RUN_GROUP",
+                CommandInvocation::new(
+                    "run-shell",
+                    [
+                        "-C",
+                        "{ kill-session -t missing ; set-environment -g RUN_GROUP_SAME yes\nset-environment -g RUN_GROUP_NEXT yes }",
+                    ],
+                )
+                .with_command_blocks([1]),
+            ),
+            (
+                "IF_GROUP",
+                CommandInvocation::new(
+                    "if-shell",
+                    [
+                        "-F",
+                        "1",
+                        "{ kill-session -t missing ; set-environment -g IF_GROUP_SAME yes\nset-environment -g IF_GROUP_NEXT yes }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            ),
+        ] {
+            let _error = shared
+                .execute(client, ClientKind::Command, &mut context, &command)
+                .expect_err("typed callback group fails");
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner
+                    .engine
+                    .global_environment_variable(&format!("{name}_SAME")),
+                None
+            );
+            assert_eq!(
+                inner
+                    .engine
+                    .global_environment_variable(&format!("{name}_NEXT")),
+                Some("yes".to_owned())
+            );
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "run-shell",
+                    [
+                        "-C",
+                        "kill-session -t missing ; set-environment -g STRING_GROUP_SAME yes\nset-environment -g STRING_GROUP_NEXT yes",
+                    ],
+                ),
+            )
+            .expect_err("string callback is one failure group");
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner
+                .engine
+                .global_environment_variable("STRING_GROUP_SAME"),
+            None
+        );
+        assert_eq!(
+            inner
+                .engine
+                .global_environment_variable("STRING_GROUP_NEXT"),
+            None
+        );
+        drop(inner);
 
         context
             .format_variables
@@ -61297,6 +61580,59 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn display_menu_strips_only_structured_action_wrappers() {
+        let (shared, client, _, mut context) = popup_test_workspace("desktop");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "display-menu",
+                    [
+                        "Typed",
+                        "t",
+                        "{ select-pane -T typed-choice }",
+                        "Literal",
+                        "l",
+                        "{ display-message literal }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("open menu");
+        assert_eq!(
+            shared.inner.lock().menus[&client].commands,
+            [
+                Some("select-pane -T typed-choice".to_owned()),
+                Some("{ display-message literal }".to_owned()),
+            ]
+        );
+
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Menu {
+                    action: MenuAction::Choose(0),
+                },
+            )
+            .expect("choose typed menu action");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(context.pane.expect("active pane"))
+                .expect("live pane")
+                .title,
+            "typed-choice"
+        );
+    }
+
+    #[test]
     fn display_menu_drops_empty_expansions_and_obeys_overlay_and_size_noops() {
         let (shared, client, _, mut context) = popup_test_workspace("desktop");
         shared
@@ -61486,7 +61822,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new("confirm-before", ["-c", "bad", "{ broken"]),
             ),
-            Err(DaemonError::Server(ServerError::CommandParse(message)))
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message != "invalid confirm key"
         ));
         for key in ["", "yy", "é", "\n"] {
@@ -61536,12 +61872,25 @@ bind - split-window -v -c "#{pane_current_path}"
             "confirm-before"
         );
 
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["{ renamew quoted }"]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "syntax error"
+        ));
+        assert!(!shared.inner.lock().confirms.contains_key(&client));
+
         shared
             .execute(
                 client,
                 ClientKind::Interactive,
                 &mut context,
-                &CommandInvocation::new("confirm-before", ["{ renamew '#{command}' }"]),
+                &CommandInvocation::new("confirm-before", ["{ renamew '#{command}' }"])
+                    .with_command_blocks([0]),
             )
             .expect("open typed-block confirm");
         shared.input_confirm(client, &context, ConfirmAction::Reply(true));
@@ -61576,6 +61925,361 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(
             shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
             "accepted"
+        );
+    }
+
+    #[test]
+    fn confirm_before_types_freeze_environment_aliases_and_error_channels() {
+        let (shared, client, _, mut context) = popup_test_workspace("desktop");
+        for option in ["-c", "-p", "-t"] {
+            let invocation = CommandInvocation::new(
+                "confirm-before",
+                [
+                    option,
+                    "{ display-message option }",
+                    "{ display-message action }",
+                ],
+            )
+            .with_command_blocks([1, 2]);
+            assert!(matches!(
+                shared.execute(client, ClientKind::Interactive, &mut context, &invocation),
+                Err(DaemonError::Server(ServerError::CommandParse(message)))
+                    if message == format!(
+                        "command confirm-before: {option} argument must be a string"
+                    )
+            ));
+        }
+
+        for child in ["not-a-command", "display-"] {
+            let typed = CommandInvocation::new("confirm-before", [format!("{{ {child} }}")])
+                .with_command_blocks([0]);
+            let typed_error = shared
+                .execute(client, ClientKind::Interactive, &mut context, &typed)
+                .expect_err("typed child construction error");
+            assert!(
+                matches!(
+                    &typed_error,
+                    DaemonError::Server(ServerError::CommandParse(_))
+                ),
+                "{typed_error:?}"
+            );
+            assert!(matches!(
+                shared.execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("confirm-before", [child]),
+                ),
+                Err(DaemonError::Server(ServerError::InvalidCommand(_)))
+            ));
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "C10E_CONFIRM_VALUE", "typed-old"],
+                ),
+            )
+            .expect("seed typed environment");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    ["{ rename-window $C10E_CONFIRM_VALUE }"],
+                )
+                .with_command_blocks([0]),
+            )
+            .expect("open typed environment confirm");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "C10E_CONFIRM_VALUE", "typed-new"],
+                ),
+            )
+            .expect("mutate typed environment");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "typed-old"
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "C10E_CONFIRM_VALUE", "string-old"],
+                ),
+            )
+            .expect("seed string environment");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["rename-window $C10E_CONFIRM_VALUE"]),
+            )
+            .expect("open string environment confirm");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-environment",
+                    ["-g", "C10E_CONFIRM_VALUE", "string-new"],
+                ),
+            )
+            .expect("mutate string environment");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "string-old"
+        );
+
+        let set_alias = |value: &str| {
+            let mut alias_context = ExecutionContext::default();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut alias_context,
+                    &CommandInvocation::new("set-option", ["-s", "command-alias[90]", value]),
+                )
+                .expect("set confirm alias");
+        };
+        set_alias("c10e=rename-window");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["{ c10e typed-alias }"])
+                    .with_command_blocks([0]),
+            )
+            .expect("open typed alias confirm");
+        set_alias("c10e=display-message -p changed");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "typed-alias"
+        );
+
+        set_alias("c10e=rename-window");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[91]",
+                        "rename-window=set-environment -g C10E_DOUBLE yes",
+                    ],
+                ),
+            )
+            .expect("set canonical shadow");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["{ c10e typed-shadow }"])
+                    .with_command_blocks([0]),
+            )
+            .expect("open typed canonical shadow confirm");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "typed-shadow"
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("C10E_DOUBLE"),
+            None
+        );
+
+        set_alias("c10e=rename-window");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["c10e string-alias"]),
+            )
+            .expect("open string alias confirm");
+        set_alias("c10e=display-message -p changed");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&context.window.unwrap()].name,
+            "string-alias"
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "@confirm-payload", "\" ; wibble"]),
+            )
+            .expect("set confirm format payload");
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    ["-c", "xx", "display-message -p \"#{@confirm-payload}\""],
+                ),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "unknown command: wibble"
+        ));
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    ["-c", "xx", "{ display-message -p \"#{@confirm-payload}\" }"],
+                )
+                .with_command_blocks([2]),
+            ),
+            Err(DaemonError::Server(ServerError::InvalidCommand(message)))
+                if message == "invalid confirm key"
+        ));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("confirm-before", ["-p", "Empty", "{}"])
+                    .with_command_blocks([2]),
+            )
+            .expect("open empty typed custom confirm");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+    }
+
+    #[test]
+    fn confirm_before_command_groups_and_blocking_failures_match_pin() {
+        let (shared, client, mailbox, mut context) = popup_test_workspace("desktop");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    [
+                        "{ kill-pane -t missing ; set-environment -g C10E_SAME_LINE no\nset-environment -g C10E_NEXT_LINE yes }",
+                    ],
+                )
+                .with_command_blocks([0]),
+            )
+            .expect("open grouped typed confirm");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.engine.global_environment_variable("C10E_SAME_LINE"),
+                None
+            );
+            assert_eq!(
+                inner
+                    .engine
+                    .global_environment_variable("C10E_NEXT_LINE")
+                    .as_deref(),
+                Some("yes")
+            );
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    ["kill-pane -t missing\nset-environment -g C10E_STRING_CONTINUED no"],
+                ),
+            )
+            .expect("open multiline string confirm");
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("C10E_STRING_CONTINUED"),
+            None
+        );
+        take_reliable_messages(&mailbox);
+
+        let sender = Arc::clone(&shared);
+        let mut command_context = context.clone();
+        let (send, receive) = crossbeam_channel::bounded(1);
+        let worker = thread::spawn(move || {
+            let result = sender.execute(
+                ClientId(901),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    [
+                        "-t",
+                        "desktop",
+                        "display-message -p before ; kill-pane -t missing",
+                    ],
+                ),
+            );
+            send.send(result).expect("return blocking confirm result");
+        });
+        wait_for_confirm_state(&shared, client);
+        shared.input_confirm(client, &context, ConfirmAction::Reply(true));
+        let error = receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("blocking confirm result")
+            .expect_err("blocking child failure");
+        worker.join().expect("blocking confirm worker");
+        assert!(matches!(
+            error,
+            DaemonError::CommandFailed { output, error }
+                if output == "before" && daemon_error_text(&error) == "can't find pane: missing"
+        ));
+        assert!(
+            !take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Error,
+                            ..
+                        },
+                        ..
+                    })
+                ))
         );
     }
 
@@ -63881,6 +64585,24 @@ bind - split-window -v -c "#{pane_current_path}"
                 )
                 .unwrap();
         }
+        for (index, value) in [
+            ("43", "child10e=display-message -p nested"),
+            ("44", "outer10e=confirm-before { child10e }"),
+            ("45", "loop10e=confirm-before { loop10e }"),
+            ("46", "outerbad10e=wibble { childbad10e }"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .unwrap();
+        }
         let source = zz_protocol::SourceSpan {
             source: "control".to_owned(),
             line: 7,
@@ -63939,6 +64661,72 @@ bind - split-window -v -c "#{pane_current_path}"
                 "command bind-key: -T argument must be a string".to_owned()
             ))
         );
+        let typed_confirm = shared.prepare_command_list(vec![
+            CommandInvocation::new("confirm-before", ["{ display -p ready }"])
+                .with_command_blocks([0]),
+            CommandInvocation::new("confirm-before", ["{ wibble }"]).with_command_blocks([0]),
+        ]);
+        assert_eq!(
+            typed_confirm[0].invocation.args,
+            ["{ display-message -p ready }"]
+        );
+        assert_eq!(typed_confirm[0].result, PreparedCommandResult::Ready);
+        assert_eq!(
+            typed_confirm[1].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(
+                "unknown command: wibble".to_owned()
+            ))
+        );
+        let nested = {
+            let inner = shared.inner.lock();
+            inner.engine.parse_config(
+                "control",
+                "confirm-before { if-shell -F 1 { child10e } }\n\
+                 bind-key -T review F1 confirm-before { wibble }",
+            )
+        };
+        assert!(nested.diagnostics.is_empty());
+        let nested = shared.prepare_command_list(nested.commands);
+        assert_eq!(
+            nested[0].invocation.args,
+            ["{ if-shell -F 1 { display-message -p nested } }"]
+        );
+        assert_eq!(nested[0].result, PreparedCommandResult::Ready);
+        assert_eq!(
+            nested[1].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(
+                "unknown command: wibble".to_owned()
+            ))
+        );
+        let lexical_errors = {
+            let inner = shared.inner.lock();
+            inner
+                .engine
+                .parse_config("control", "wibble { childbad10e }\nouterbad10e")
+        };
+        assert!(lexical_errors.diagnostics.is_empty());
+        for command in shared.prepare_command_list(lexical_errors.commands) {
+            assert_eq!(
+                command.result,
+                PreparedCommandResult::Error(ServerError::CommandParse(
+                    "unknown command: childbad10e".to_owned()
+                ))
+            );
+        }
+        let alias_budget = shared.prepare_command_list(vec![
+            CommandInvocation::new("outer10e", [] as [&str; 0]),
+            CommandInvocation::new("loop10e", [] as [&str; 0]),
+        ]);
+        for (command, expected) in alias_budget
+            .iter()
+            .zip(["unknown command: child10e", "unknown command: loop10e"])
+        {
+            assert!(command.alias_matched);
+            assert_eq!(
+                command.result,
+                PreparedCommandResult::Error(ServerError::CommandParse(expected.to_owned()))
+            );
+        }
         let ordinary_invalid =
             shared.prepare_command_list(vec![CommandInvocation::new("list-sessions", ["-Z"])]);
         assert_eq!(ordinary_invalid[0].result, PreparedCommandResult::Ready);
@@ -64005,6 +64793,119 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn stored_callbacks_do_not_reexpand_constructed_commands() {
+        let (shared, client, _, mut context) = popup_test_workspace("callback-freeze");
+        let set_alias = |index: u8, value: &str| {
+            let mut alias_context = ExecutionContext::default();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut alias_context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("set callback alias");
+        };
+
+        set_alias(90, "a10e=display-message");
+        set_alias(91, "display-message=set-environment -g RUN_DOUBLE yes");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("run-shell", ["-C", "{ a10e }"]).with_command_blocks([1]),
+            )
+            .expect("run prepared block");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("RUN_DOUBLE"),
+            None
+        );
+
+        set_alias(91, "display-message=list-sessions");
+        set_alias(92, "list-sessions=set-environment -g HOOK_THIRD yes");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "after-new-window", "{ a10e }"])
+                    .with_command_blocks([2]),
+            )
+            .expect("store constructed hook");
+        let stored_hook = shared
+            .inner
+            .lock()
+            .engine
+            .event_hook_commands(&context, "after-new-window")
+            .expect("stored hook");
+        assert_eq!(stored_hook[0][0].name, "list-sessions");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-R", "after-new-window"]),
+            )
+            .expect("run stored hook");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("HOOK_THIRD"),
+            None
+        );
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("bind-key", ["-T", "root", "F1", "{ a10e }"])
+                    .with_command_blocks([3]),
+            )
+            .expect("store constructed binding");
+        let commands = shared
+            .inner
+            .lock()
+            .engine
+            .keys
+            .get("root", "F1")
+            .expect("stored binding")
+            .commands
+            .clone();
+        assert_eq!(commands[0].name, "display-message");
+        set_alias(91, "display-message=set-environment -g BIND_DOUBLE yes");
+        let pane = context.pane.expect("callback pane");
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &commands,
+                false,
+            )
+            .expect("run stored binding");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("BIND_DOUBLE"),
+            None
+        );
+    }
+
+    #[test]
     fn forged_prepared_requests_are_still_read_only_authorized() {
         let shared = Arc::new(Shared::new(1));
         let (a, _, _) = switch_test_session(&shared, "A");
@@ -64047,7 +64948,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn unsupported_alias_shadows_fail_before_authorization_and_binding_effects() {
+    fn unsupported_alias_shadows_fail_direct_commands_while_bindings_stay_frozen() {
         let shared = Arc::new(Shared::new(1));
         let (session, _, pane) = switch_test_session(&shared, "work");
         let (victim, _, _) = switch_test_session(&shared, "victim");
@@ -64105,20 +65006,15 @@ bind - split-window -v -c "#{pane_current_path}"
         );
 
         let error = shared
-            .execute_key_commands(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                pane,
-                &[CommandInvocation::new("kill-session", ["-t", "victim"])],
-                false,
-            )
-            .expect_err("unsupported alias precedes read-only binding authorization");
-        assert!(matches!(
+            .inner
+            .lock()
+            .engine
+            .prepare_callback_commands("kill-session -t victim", false, "bind-key")
+            .expect_err("unsupported alias blocks binding construction");
+        assert_eq!(
             error,
-            DaemonError::Server(ServerError::CommandParse(message))
-                if message == "unknown command: kill-session"
-        ));
+            ServerError::CommandParse("unknown command: kill-session".to_owned())
+        );
         assert!(
             shared
                 .inner
@@ -64170,29 +65066,28 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("clear first shadow");
         let (dynamic_victim, _, _) = switch_test_session(&shared, "dynamic-victim");
-        let error = shared
+        let commands = shared
+            .inner
+            .lock()
+            .engine
+            .prepare_callback_commands(
+                "set-option -s command-alias[40] kill-session= ; kill-session -t dynamic-victim",
+                false,
+                "bind-key",
+            )
+            .expect("construct binding before alias mutation");
+        shared
             .execute_key_commands(
                 client,
                 ClientKind::Interactive,
                 &mut context,
                 pane,
-                &[
-                    CommandInvocation::new(
-                        "set-option",
-                        ["-s", "command-alias[40]", "kill-session="],
-                    ),
-                    CommandInvocation::new("kill-session", ["-t", "dynamic-victim"]),
-                ],
+                &commands,
                 false,
             )
-            .expect_err("later binding command observes the unsupported shadow");
-        assert!(matches!(
-            error,
-            DaemonError::Server(ServerError::CommandParse(message))
-                if message == "unknown command: kill-session"
-        ));
+            .expect("constructed binding ignores later shadow");
         assert!(
-            shared
+            !shared
                 .inner
                 .lock()
                 .engine
@@ -64233,13 +65128,19 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("unsafe alias");
+        let unsafe_commands = shared
+            .inner
+            .lock()
+            .engine
+            .prepare_callback_commands("a", false, "bind-key")
+            .expect("construct unsafe binding");
         shared
             .execute_key_commands(
                 client,
                 ClientKind::Interactive,
                 &mut context,
                 pane,
-                &[CommandInvocation::new("a", [] as [&str; 0])],
+                &unsafe_commands,
                 false,
             )
             .expect("blocked binding");
@@ -64260,13 +65161,19 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("safe alias");
+        let safe_commands = shared
+            .inner
+            .lock()
+            .engine
+            .prepare_callback_commands("a", false, "bind-key")
+            .expect("construct safe binding");
         shared
             .execute_key_commands(
                 client,
                 ClientKind::Interactive,
                 &mut context,
                 pane,
-                &[CommandInvocation::new("a", [] as [&str; 0])],
+                &safe_commands,
                 false,
             )
             .expect("allowed binding");
@@ -64274,7 +65181,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn key_binding_commands_observe_alias_changes_from_earlier_commands() {
+    fn key_binding_commands_keep_construction_time_aliases() {
         let shared = Arc::new(Shared::new(1));
         let (a, _, pane) = switch_test_session(&shared, "A");
         let (b, _, _) = switch_test_session(&shared, "B");
@@ -64286,21 +65193,43 @@ bind - split-window -v -c "#{pane_current_path}"
         );
         shared.attach(client, a).expect("attach");
         shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[40]", "dynamic=kill-session -t B"],
+                ),
+            )
+            .expect("initial alias");
+        let commands = shared
+            .inner
+            .lock()
+            .engine
+            .prepare_callback_commands("dynamic", false, "bind-key")
+            .expect("construct binding");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[40]", "dynamic=display-message changed"],
+                ),
+            )
+            .expect("change alias");
+        shared
             .execute_key_commands(
                 client,
                 ClientKind::Interactive,
                 &mut ExecutionContext::default(),
                 pane,
-                &[
-                    CommandInvocation::new(
-                        "set-option",
-                        ["-s", "command-alias[40]", "dynamic=kill-session -t B"],
-                    ),
-                    CommandInvocation::new("dynamic", [] as [&str; 0]),
-                ],
+                &commands,
                 false,
             )
-            .expect("binding chain");
+            .expect("frozen binding");
         assert!(!shared.inner.lock().engine.state.sessions.contains_key(&b));
     }
 
@@ -68797,7 +69726,12 @@ bind - split-window -v -c "#{pane_current_path}"
             let inner = shared.inner.lock();
             let prompt = &inner.command_prompts[&client];
             assert_eq!(prompt.input, "work");
-            assert_eq!(prompt.template.as_deref(), Some("rename-session -- '%%'"));
+            assert_eq!(
+                prompt.template.as_ref(),
+                Some(&CommandPromptTemplate::String(
+                    "rename-session -- '%%'".to_owned()
+                ))
+            );
         }
         replace_and_submit(&mut context, "primary");
         assert_eq!(
@@ -68813,7 +69747,12 @@ bind - split-window -v -c "#{pane_current_path}"
             let inner = shared.inner.lock();
             let prompt = &inner.command_prompts[&client];
             assert_eq!(prompt.input, expected_window_name);
-            assert_eq!(prompt.template.as_deref(), Some("rename-window -- '%%'"));
+            assert_eq!(
+                prompt.template.as_ref(),
+                Some(&CommandPromptTemplate::String(
+                    "rename-window -- '%%'".to_owned()
+                ))
+            );
         }
         replace_and_submit(&mut context, "editor");
         {
@@ -68830,6 +69769,151 @@ bind - split-window -v -c "#{pane_current_path}"
             }) if snapshot.sessions[0].name == "primary"
                 && snapshot.sessions[0].windows[0].name == "editor"
         )));
+    }
+
+    #[test]
+    fn typed_command_prompt_templates_execute_their_constructed_commands() {
+        let (shared, client, _, mut context) = popup_test_workspace("prompt-alias");
+        for (index, value) in [
+            (90, "a10e=display-message"),
+            (
+                91,
+                "display-message=set-environment -g COMMAND_PROMPT_DOUBLE yes",
+            ),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("set prompt alias");
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("command-prompt", ["-I", "x", "{ a10e }"])
+                    .with_command_blocks([2]),
+            )
+            .expect("open typed prompt");
+        let template = shared.inner.lock().command_prompts[&client]
+            .template
+            .clone();
+        assert!(matches!(
+            &template,
+            Some(CommandPromptTemplate::Commands(commands))
+                if commands.len() == 1 && commands[0].name == "display-message"
+        ));
+        shared.submit_command_prompt(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandPromptSubmission {
+                input: "x".to_owned(),
+                template,
+            },
+        );
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("COMMAND_PROMPT_DOUBLE"),
+            None
+        );
+
+        shared.inner.lock().command_prompts.remove(&client);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-I",
+                        "x",
+                        "{ kill-session -t missing ; set-environment -g PROMPT_GROUP_SAME yes\nset-environment -g PROMPT_GROUP_NEXT yes }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("open grouped typed prompt");
+        let template = shared.inner.lock().command_prompts[&client]
+            .template
+            .clone();
+        shared.submit_command_prompt(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandPromptSubmission {
+                input: "x".to_owned(),
+                template,
+            },
+        );
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner
+                .engine
+                .global_environment_variable("PROMPT_GROUP_SAME"),
+            None
+        );
+        assert_eq!(
+            inner
+                .engine
+                .global_environment_variable("PROMPT_GROUP_NEXT"),
+            Some("yes".to_owned())
+        );
+    }
+
+    #[test]
+    fn typed_command_prompt_substitution_keeps_argument_boundaries() {
+        let (shared, client, _, mut context) = popup_test_workspace("prompt-substitution");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "command-prompt",
+                    [
+                        "-I",
+                        "x",
+                        "{ if-shell -F 1 { set-environment -g PROMPT_VALUE '%%:%%' } }",
+                    ],
+                )
+                .with_command_blocks([2]),
+            )
+            .expect("open nested typed prompt");
+        let template = shared.inner.lock().command_prompts[&client]
+            .template
+            .clone();
+        let input = "x\" ; set-environment -g PROMPT_INJECTED yes ; display-message -p \"";
+        shared.submit_command_prompt(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandPromptSubmission {
+                input: input.to_owned(),
+                template,
+            },
+        );
+
+        let inner = shared.inner.lock();
+        assert_eq!(
+            inner.engine.global_environment_variable("PROMPT_VALUE"),
+            Some(format!("{input}:%%"))
+        );
+        assert_eq!(
+            inner.engine.global_environment_variable("PROMPT_INJECTED"),
+            None
+        );
     }
 
     #[test]

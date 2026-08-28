@@ -14,5 +14,8 @@ smallvec.workspace = true
 thiserror.workspace = true
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

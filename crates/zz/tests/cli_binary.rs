@@ -1347,7 +1347,7 @@ mod daemon_autostart {
             (
                 "depth-bad-flag",
                 "source-file -z leaf.conf\n",
-                "source-file does not support -z",
+                "command source-file: unknown flag -z",
             ),
         ] {
             let directory = source_directory(&fixture, name);
@@ -2321,7 +2321,7 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn native_attach_accepts_the_tmux_target_for_both_spellings() {
+    fn native_attach_accepts_targets_and_stops_options_at_positional_sessions() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
             return;
@@ -2333,6 +2333,62 @@ mod daemon_autostart {
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stdout.is_empty());
             assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
+
+            let positional = fixture.run(&[command, "named", "-@"]);
+            assert_eq!(positional.status.code(), Some(1));
+            assert!(positional.stdout.is_empty());
+            assert_eq!(
+                positional.stderr,
+                b"zz: usage: zz [--host <name>] attach [--restart-daemon] [-dEr] [-c working-directory] [-f flags] [session]\n"
+            );
+        }
+    }
+
+    #[test]
+    fn native_attach_flag_errors_match_tmux_for_both_spellings() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        for command in ["attach", "attach-session"] {
+            for (arguments, expected) in [
+                (
+                    &["-0"][..],
+                    b"command attach-session: unknown flag -0\n".as_slice(),
+                ),
+                (
+                    &["-@"][..],
+                    b"command attach-session: invalid flag -@\n".as_slice(),
+                ),
+                (
+                    &["--bogus"][..],
+                    b"command attach-session: invalid flag --\n".as_slice(),
+                ),
+                (
+                    &["-?"][..],
+                    b"usage: attach-session [-dErx] [-c working-directory] [-f flags] [-t target-session]\n"
+                        .as_slice(),
+                ),
+                (
+                    &["-t"][..],
+                    b"command attach-session: -t expects an argument\n".as_slice(),
+                ),
+                (
+                    &["-x0"][..],
+                    b"command attach-session: unknown flag -0\n".as_slice(),
+                ),
+                (
+                    &["-x"][..],
+                    b"unsupported command: attach-session -x\n".as_slice(),
+                ),
+            ] {
+                let mut invocation = vec![command];
+                invocation.extend_from_slice(arguments);
+                let output = fixture.run(&invocation);
+                assert_eq!(output.status.code(), Some(1), "{invocation:?}");
+                assert!(output.stdout.is_empty(), "{invocation:?}");
+                assert_eq!(output.stderr, expected, "{invocation:?}");
+            }
         }
     }
 
@@ -3954,7 +4010,7 @@ mod daemon_autostart {
                     "flag-parse-return-status",
                     b"list-sessions -Z\n\n",
                     0,
-                    &["list-sessions does not support -Z"],
+                    &["command list-sessions: unknown flag -Z"],
                     true,
                 ),
                 (

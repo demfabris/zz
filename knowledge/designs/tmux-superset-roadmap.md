@@ -11,7 +11,7 @@ tags:
 - fleet
 - native-superset
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 last_updated_by: Codex
 ---
 
@@ -38,7 +38,7 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-27
 
-The live tracker has 86 active groups, 595 classified active items, 78 closed groups, and two known
+The live tracker has 86 active groups, 593 classified active items, 80 closed groups, and two known
 differentials. The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -53,15 +53,16 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The canonical checkpoint freshly rerun after positional-minimum closure covers 87 scenarios and
-1,484 steps.
+The canonical checkpoint freshly rerun after command-flag closure covers 88 scenarios and
+1,487 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`e78bdd3b173e371bb5da062fea2e5806fbc359c00bb16bd0914cad8006234987`. Requested flags, attached
+`6b7a0261956e84d7340c9ef34f4de0962964215b3cc8eb055a79236acdc257c6`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
-and both positional-bound closures each add one fail-closed three-step canonical scenario.
+and both positional-bound closures each add one fail-closed three-step canonical scenario. The
+three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
 
 Protocol v82 appends one bounded UTF-8 client-environment snapshot to `ClientHello`. Local and
 SSH-forwarded clients now seed fresh sessions and refresh existing sessions through the effective
@@ -435,9 +436,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
 
    `tracker.semantic-coverage` tracks runtime adoption of the six argument rules, open-ended or
    dynamic context formats, nonconstant formats, hook production, shared binding runtime behavior,
-   and option `BEHAVES` consumer truth. Daemon invalid-flag coverage closed on 2026-08-27: the
-   source-owned roster reconciles all 24 pinned daemon-dispatched commands and a runtime test executes
-   every absent alphanumeric short flag for every entry before command-specific work.
+   and option `BEHAVES` consumer truth. Daemon invalid-flag coverage first closed on 2026-08-27 with
+   a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
+   partial roster and routed daemon preflight through the catalog parser used by mux execution.
    The first eight positional maximum mismatches closed later that day, followed by all fourteen
    required minima. The full shared arity closure then removed the partial maximum roster: all 72
    implemented finite upstream commands now validate their catalog maximum after flags and minima
@@ -445,8 +446,11 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    replacing state. The three-step `positional-maximums` fixture checks 71 generic-CLI-routed
    command-drivable canonical names and 62 aliases with exact stderr and unchanged pane, buffer, and
    file state; an exhaustive daemon test covers all 72 engine paths and aliases. The minimum fixture
-   retains its exact canonical and alias proof. Shared flag errors and nested-session precedence
-   remain in `mux.error-shapes`.
+   retains its exact canonical and alias proof. The shared option parser now covers all 83
+   implemented upstream commands and 74 aliases, including stored commands and exact native attach.
+   Its three-step differential compares 516 probes against zz and the pin with exact diagnostics,
+   required-value absorption, optional-value lookahead, and unchanged sentinels. Only nested-session
+   precedence remains in `mux.error-shapes`.
    `knowledge/tmux/gaps.md` remains generated from the registry.
 
 Without this gate, easy compatibility fixes can land while the persisted proof quietly goes stale.
@@ -617,10 +621,10 @@ later-line continuation: both sides run 50 concurrent source invocations countin
 client-specific channel. A malformed invocation at that depth is diagnosed as malformed rather than
 refused for depth on both sides, because the pin rejects it while parsing the containing file and
 never consults its depth guard, and zz now runs its depth guard after the command's own flag and
-positional validation. Only the precedence, the stdout stream, and the exit status are closed there:
-the two sides still print different malformed text, which `mux.error-shapes` owns, and the pin then
-abandons the rest of the containing file where zz continues it, which `config.parser-edge-cases`
-owns. The refused nested command now uses the same flags-1 `%begin`/`%error` guard as the pin.
+positional validation. The later shared arity and flag closures also matched the malformed text.
+The pin still abandons the rest of the containing file where zz continues it, which
+`config.parser-edge-cases` owns. The refused nested command now uses the same flags-1
+`%begin`/`%error` guard as the pin.
 Same-line replay
 grouping is closed independently: synchronous invalid/runtime errors, depth refusal, and a loud
 zero-file source miss or glob error drop only later siblings on the same parser-owned source line,
@@ -918,6 +922,15 @@ permanent product decision has been recorded for them.
   The command palette follows the catalog's zero positional maximum for `select-pane` and offers
   live pane targets only after `-t`. The complete CLI binary and app-library suites pass all 102
   and 639 tests.
+- 2026-08-28: The shared command-flag slice replaced the partial daemon roster with one
+  catalog-driven parser across all 83 implemented upstream commands and 74 built-in aliases. Mux
+  execution, daemon preflight, stored binding and hook children, and exact native attach now agree
+  on canonical unknown and invalid flags, pinned help usage, missing required values, required-value
+  absorption, optional-value lookahead, and syntax-before-unsupported ordering. Product usage stays
+  truthful in `list-commands` and completion through a separate pinned diagnostic accessor. The
+  strict three-step fixture reports `COMMAND_FLAG_ERRORS=clean:516` on zz and the pin. Parser-group
+  atomicity, callback-specific grammar, and nested `new-session` precedence remain under their
+  existing owners. No wire protocol or version change was needed.
 
 # Related
 

@@ -62,7 +62,7 @@ use zz_mux::MuxEngine;
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, PreparedCommand,
-    PreparedCommandResult, ServerError, ServerHello, canonical_command,
+    PreparedCommandResult, ServerError, ServerHello, canonical_command, catalog_command_spec,
 };
 use zz_terminal::TerminalColorScheme;
 #[cfg(not(target_os = "ios"))]
@@ -1304,6 +1304,7 @@ fn tmux_command_starts_server(command: &str) -> bool {
 fn parse_native_attach_arguments(
     arguments: impl IntoIterator<Item = String>,
 ) -> Result<NativeAttachArguments, NativeAttachArgumentError> {
+    let spec = catalog_command_spec("attach-session").expect("attach-session catalog");
     let mut restart_daemon = false;
     let mut detach_others = false;
     let mut no_update_environment = false;
@@ -1312,28 +1313,54 @@ fn parse_native_attach_arguments(
     let mut working_directory = None;
     let mut target = None;
     let mut positional = None;
+    let mut unsupported = None;
+    let mut options_done = false;
+    let mut explicit_boundary = false;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
-        if argument == "--restart-daemon" {
+        if !explicit_boundary && argument == "--restart-daemon" {
             if restart_daemon {
                 return Err(NativeAttachArgumentError::Usage);
             }
             restart_daemon = true;
             continue;
         }
-        if !argument.starts_with('-') {
+        if options_done || !argument.starts_with('-') || argument == "-" {
             if positional.is_some() {
                 return Err(NativeAttachArgumentError::Usage);
             }
             positional = Some(argument);
+            options_done = true;
             continue;
         }
-        if argument == "-" || argument.starts_with("--") {
-            return Err(NativeAttachArgumentError::Usage);
+        if argument == "--" {
+            options_done = true;
+            explicit_boundary = true;
+            continue;
+        }
+        if argument.starts_with("--") {
+            return Err(NativeAttachArgumentError::Command(
+                ServerError::CommandParse("command attach-session: invalid flag --".to_owned()),
+            ));
         }
         let options = &argument[1..];
         for (index, option) in options.char_indices() {
             let name = format!("-{option}");
+            if option == '?' {
+                return Err(NativeAttachArgumentError::Command(
+                    ServerError::CommandParse(format!(
+                        "usage: attach-session {}",
+                        spec.pinned_tmux_usage()
+                    )),
+                ));
+            }
+            if !option.is_ascii_alphanumeric() {
+                return Err(NativeAttachArgumentError::Command(
+                    ServerError::CommandParse(format!(
+                        "command attach-session: invalid flag {name}"
+                    )),
+                ));
+            }
             match option {
                 'd' => detach_others = true,
                 'E' => no_update_environment = true,
@@ -1344,9 +1371,9 @@ fn parse_native_attach_arguments(
                         options[value_index..].to_owned()
                     } else {
                         arguments.next().ok_or_else(|| {
-                            NativeAttachArgumentError::Command(ServerError::InvalidCommand(
-                                format!("{name} requires an argument"),
-                            ))
+                            NativeAttachArgumentError::Command(ServerError::CommandParse(format!(
+                                "command attach-session: {name} expects an argument"
+                            )))
                         })?
                     };
                     match option {
@@ -1357,15 +1384,11 @@ fn parse_native_attach_arguments(
                     }
                     break;
                 }
-                'x' => {
-                    return Err(NativeAttachArgumentError::Command(
-                        ServerError::UnsupportedCommand(format!("attach-session {name}")),
-                    ));
-                }
+                'x' => unsupported = Some(name),
                 _ => {
                     return Err(NativeAttachArgumentError::Command(
-                        ServerError::InvalidCommand(format!(
-                            "attach-session does not support {name}"
+                        ServerError::CommandParse(format!(
+                            "command attach-session: unknown flag {name}"
                         )),
                     ));
                 }
@@ -1374,6 +1397,11 @@ fn parse_native_attach_arguments(
     }
     if target.is_some() && positional.is_some() {
         return Err(NativeAttachArgumentError::Usage);
+    }
+    if let Some(name) = unsupported {
+        return Err(NativeAttachArgumentError::Command(
+            ServerError::UnsupportedCommand(format!("attach-session {name}")),
+        ));
     }
     Ok(NativeAttachArguments {
         restart_daemon,
@@ -2233,14 +2261,15 @@ mod tests {
     use zz_terminal::TerminalColorScheme;
 
     use super::{
-        ApplicationArgumentError, CommandOutcome, TMUX_USAGE, TMUX_VERSION_OUTPUT,
-        application_arguments, application_working_directory, attach_prefix_uses_tui,
-        command_chain_uses_tui, command_error_message, command_reads_stdin, daemon_is_missing,
-        daemon_transport_failure, execute_command_chain, implicit_tmux_endpoint_conflict,
-        native_attach_command, new_session_uses_tui, parse_native_attach_arguments,
-        prepared_attach_uses_tui, prepared_command_chain_uses_tui, prepared_command_reads_stdin,
-        prepared_kill_server_recovery, prepared_native_attach, protocol_version_output,
-        run_command_mode, split_command_chain, terminal_color_scheme, tmux_command_starts_server,
+        ApplicationArgumentError, CommandOutcome, NativeAttachArgumentError, TMUX_USAGE,
+        TMUX_VERSION_OUTPUT, application_arguments, application_working_directory,
+        attach_prefix_uses_tui, command_chain_uses_tui, command_error_message, command_reads_stdin,
+        daemon_is_missing, daemon_transport_failure, execute_command_chain,
+        implicit_tmux_endpoint_conflict, native_attach_command, new_session_uses_tui,
+        parse_native_attach_arguments, prepared_attach_uses_tui, prepared_command_chain_uses_tui,
+        prepared_command_reads_stdin, prepared_kill_server_recovery, prepared_native_attach,
+        protocol_version_output, run_command_mode, split_command_chain, terminal_color_scheme,
+        tmux_command_starts_server,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
@@ -2469,6 +2498,10 @@ mod tests {
         assert!(!positional.detach_others);
         assert!(positional.restart_daemon);
         assert_eq!(positional.session.as_deref(), Some("work"));
+        assert_eq!(
+            parse_native_attach_arguments(["work", "-@"].map(str::to_owned)),
+            Err(NativeAttachArgumentError::Usage)
+        );
 
         let read_only =
             parse_native_attach_arguments(["-dr", "-t", "work"].map(str::to_owned)).unwrap();
@@ -2541,6 +2574,75 @@ mod tests {
             parse_native_attach_arguments(["-t", "one", "two"].map(str::to_owned)),
             Err(super::NativeAttachArgumentError::Usage)
         ));
+
+        for (arguments, expected) in [
+            (
+                vec!["-0"],
+                ServerError::CommandParse(
+                    "command attach-session: unknown flag -0".to_owned(),
+                ),
+            ),
+            (
+                vec!["-@"],
+                ServerError::CommandParse(
+                    "command attach-session: invalid flag -@".to_owned(),
+                ),
+            ),
+            (
+                vec!["--bogus"],
+                ServerError::CommandParse(
+                    "command attach-session: invalid flag --".to_owned(),
+                ),
+            ),
+            (
+                vec!["-?"],
+                ServerError::CommandParse(
+                    "usage: attach-session [-dErx] [-c working-directory] [-f flags] [-t target-session]"
+                        .to_owned(),
+                ),
+            ),
+            (
+                vec!["-t"],
+                ServerError::CommandParse(
+                    "command attach-session: -t expects an argument".to_owned(),
+                ),
+            ),
+            (
+                vec!["-x0"],
+                ServerError::CommandParse(
+                    "command attach-session: unknown flag -0".to_owned(),
+                ),
+            ),
+        ] {
+            assert_eq!(
+                parse_native_attach_arguments(arguments.into_iter().map(str::to_owned)),
+                Err(NativeAttachArgumentError::Command(expected))
+            );
+        }
+        assert_eq!(
+            parse_native_attach_arguments(["-x"].map(str::to_owned)),
+            Err(NativeAttachArgumentError::Command(
+                ServerError::UnsupportedCommand("attach-session -x".to_owned())
+            ))
+        );
+        assert_eq!(
+            parse_native_attach_arguments(["-t", "-?"].map(str::to_owned))
+                .unwrap()
+                .session
+                .as_deref(),
+            Some("-?")
+        );
+        assert_eq!(
+            parse_native_attach_arguments(["--", "work"].map(str::to_owned))
+                .unwrap()
+                .session
+                .as_deref(),
+            Some("work")
+        );
+        let literal_restart =
+            parse_native_attach_arguments(["--", "--restart-daemon"].map(str::to_owned)).unwrap();
+        assert!(!literal_restart.restart_daemon);
+        assert_eq!(literal_restart.session.as_deref(), Some("--restart-daemon"));
     }
 
     #[test]

@@ -11,7 +11,7 @@ tags:
 - control-mode
 - roadmap
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Overview
@@ -91,13 +91,13 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current canonical acceptance inventory contains 87 differential scenarios and 1,484 executable
+The current canonical acceptance inventory contains 88 differential scenarios and 1,487 executable
 steps against pinned tmux `d77c9dc6`, including 18 config/plugin smokes. The complete strict and
-attached run on 2026-08-27 left every ordinary row clean. `known/known-main-preset-two-panes` and
+attached run on 2026-08-28 left every ordinary row clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one documented GEO divergence with every other
 channel clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
-`e78bdd3b173e371bb5da062fea2e5806fbc359c00bb16bd0914cad8006234987`.
+`6b7a0261956e84d7340c9ef34f4de0962964215b3cc8eb055a79236acdc257c6`.
 `compat/attached-client.sh` drives real inner zz/tmux attaches through pinned-tmux PTYs, covering copy
 mode, command-output navigation, choosers, prompts, prefix tables, buffers, and nested attach. Its
 96-line command-output case checks line and page movement, search, selection-to-paste-buffer, live
@@ -1010,9 +1010,9 @@ files` on an attached status line. `-q` does not suppress it, a refused command 
 rather than one per path, and the containing file keeps running its later physical lines. A
 malformed invocation at that depth is diagnosed as malformed rather than as depth on both sides,
 because the pin rejects it while parsing the containing file and never consults its depth guard;
-that precedence, the stdout stream, and the rc-1 exit agree, while the differing malformed text
-belongs to `mux.error-shapes` and the pin's abandonment of the rest of the containing file belongs
-to `config.parser-edge-cases`. The refusal now appears inside the rejected nested command's own
+that precedence, the stdout stream, and the rc-1 exit agree. The later shared arity and flag
+closures also matched the malformed text. The pin's abandonment of the rest of the containing file
+belongs to `config.parser-edge-cases`. The refusal now appears inside the rejected nested command's own
 flags-1 `%begin`/`%error` guard. Same-line replay grouping now matches the pin: synchronous
 invalid/runtime failures, depth refusal, and loud zero-file source errors drop later siblings from
 the same parser-owned source line while the next physical line runs. Matched sources do not
@@ -1092,7 +1092,9 @@ flag ledger is untouched at 127 pairs across 29 commands — diagnostics are beh
    `COMMAND_SPECS` + `DAEMON_COMMAND_SPECS`, excluding the fourteen zz-native names derived
    against the pin's `cmd_table`. F0 inherits it rather than rebuilding it. (The roster's
    count is now 113: run 3 took `display-message -C -d` and the final run took
-   `command-prompt -1 -C -e -i -k -N -T`.) **Also in F0's
+   `command-prompt -1 -C -e -i -k -N -T`.) The later 2026-08-28 flag closure removed the partial
+   daemon roster and routed all implemented upstream command paths through one catalog option
+   parser. **Also in F0's
    housekeeping: collapse the three near-identical deadline dispatcher threads**
    (`zz-display-panes`, `zz-monitor-silence`, `zz-client-message`, each ~70 lines differing
    only in key type and two closures) into one `run_deadline_dispatcher<K>` with token
@@ -1100,9 +1102,11 @@ flag ledger is untouched at 127 pairs across 29 commands — diagnostics are beh
    D — collapsing them there would have reopened three independently reviewed surfaces for no
    behavioral gain — but three is the threshold at which a fix in one silently fails to reach
    the others, and D1 or the F tranche may make it four.
-1. Error contract, after F0: centralize pinned unknown-flag, missing-value, too-few and
-   too-many argument, alias, and usage fallback shapes. Treat this as a command-semantics
-   tranche rather than a text-only cleanup.
+1. Error contract, after F0: **COMPLETE 2026-08-28.** Catalog-owned positional bounds and the shared
+   option parser centralize pinned unknown and invalid flags, missing values, too-few and too-many
+   arguments, aliases, and usage diagnostics. The focused flag fixture compares 516 probes on zz
+   and the pin. Whole-command-group prevalidation, nested `new-session` precedence, callback-specific
+   grammar, and semantic value validation retain separate owners.
 2. Key grammar and tables: add a fallible canonical key parser, reject malformed modifier
    tails and pin the supported stock copy-table metadata,
    repeat flags, and actions. Preserve zz-native product bindings. Bare `list-keys` alignment
@@ -1736,8 +1740,8 @@ pane visibility). The harness (phase 2) does not wait for this.
 
 Closed by 7a (argv surface, `$TMUX` shape, `-V`), 7b (error-output shapes), and 7d
 (the alias smoke suite, `e45f0dd`). The only phase-7 residue is the optional 7c
-appendix: flag rejection wording, the `usage:` fallback, value diagnostics, and the
-`MissingTarget` inner texts. Command arity closed across the shared runtime on 2026-08-27.
+appendix: value diagnostics and the `MissingTarget` inner texts. Command arity closed across the
+shared runtime on 2026-08-27, followed by flag rejection and usage diagnostics on 2026-08-28.
 
 - tmux argv on the zz binary: `-L` (name → socket path), `-S`, `-f`, `-2`, `-u`, plus `-C`/
   `-CC` (front-end from phase 6) and `-V`.
@@ -1758,7 +1762,9 @@ appendix: flag rejection wording, the `usage:` fallback, value diagnostics, and 
   errors compose `%config-error <file>:<line>: <text>` exactly as the pin regress
   greps. The 2026-08-27 command-arity closure later completed every implemented
   positional minimum and finite maximum, including stored binding and hook children.
-  Flag wording, `usage:` fallback, remaining value diagnostics, and key-string strictness stay open.
+  The 2026-08-28 shared flag closure completed unknown and invalid flags, `usage:`, missing option
+  values, required-value absorption, and optional-value lookahead across 83 canonical commands and
+  74 aliases. Remaining semantic value diagnostics and key-string strictness stay open.
 - **SHIPPED 2026-08-18 (wave 7d):** the alias smoke suite runs real plugin configs through
   PATH-carried `tmux` exec shims against zz and the pin. The harness stages a scratch HOME,
   sources each config through control mode, compares stdout and stderr independently, checks
@@ -1947,9 +1953,9 @@ this list is the campaign-level index of it plus the items that never got a matr
 - `#{S:}` loop ordering follows the pin's global sort criteria default (index); if zz ever
   grows choose-tree sort commands, the loop default must track the mutable criteria
   (choose-tree work).
-- Positional-arity validation is unguarded and the daemon buffer family hand-rolls its
-  parsing (phase-0 leftovers). zz now rejects tmux-invalid `move-pane -p` and accepts the pin's
-  `move-pane -l` grammar.
+- Positional arity and leading option diagnostics now use catalog contracts across mux and daemon
+  execution. Whole-command-group prevalidation remains under `mux.chain-parse-abort`. zz rejects
+  tmux-invalid `move-pane -p` and accepts the pin's `move-pane -l` grammar.
 - The TTY attach contract closed 2026-08-20 (phase 8); protocol v70 then closed
   `switch-client` and the client-exit notice seam. Control mode is phase 6; `tmux -V`/`$TMUX`
   shape is phase 7.
@@ -1989,9 +1995,10 @@ this list is the campaign-level index of it plus the items that never got a matr
   no-tty attach = `open terminal failed: not a terminal`. Positional minimum
   and maximum diagnostics CLOSED on 2026-08-27 across all 72 implemented
   finite commands, built-in aliases, and stored `bind-key` and `set-hook`
-  children. Still zz-shaped by sequencing, not oversight: flag rejections
-  (`unknown flag -X`, `-X expects an argument`), the per-command `usage:`
-  fallback, ~24 `needs a value` sites. Companion ledger
+  children. Shared flag rejection, missing option value, and per-command `usage:` diagnostics
+  CLOSED on 2026-08-28 across all 83 implemented upstream commands, 74 aliases, stored children,
+  daemon dispatch, and exact native attach. Roughly 24 command-specific semantic value sites remain
+  zz-shaped. Companion ledger
   rows live in the divergence matrix: the command prefix-matching capability
   gap, and `set prefix` silently accepting unresolvable C-/M- keys.
 - Wave-5d-2 ledger (reviewer-CONFIRMED, non-blocking): `SocketGuard`'s drop

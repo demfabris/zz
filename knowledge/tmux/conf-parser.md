@@ -5,6 +5,8 @@ description: A single-pass tmux-style tokenizer plus the daemon replay layer tha
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
 timestamp: 2026-08-26T00:00:00-03:00
+last_updated: 2026-08-28
+last_updated_by: Codex
 ---
 
 # Overview
@@ -172,14 +174,14 @@ command's own flags-1 `%begin`/`%error` guard. The closed nested queue proof cov
 placement without widening the depth slice. Same-line replay grouping now matches the pin: the refused
 source's later `;` siblings are dropped, the next physical line runs, and a matched parent source
 still runs its own same-line sibling. Matched child runtime, parser, and OS or path read failures do
-not prune that parent group; zz retains those child failures in `ConfigLoadReport`. Exact diagnostic text,
-channel placement, and exit semantics remain under their existing gaps. A malformed
+not prune that parent group; zz retains those child failures in `ConfigLoadReport`. Whole-file abort
+and the remaining source-read semantics stay under their existing gaps. A malformed
 invocation at the refused depth is diagnosed as malformed rather than as depth on both sides,
 because the pin rejects it while parsing the containing file and never consults its depth guard, and
 zz runs its depth guard after the command's own flag and positional validation for the same reason.
-Precedence, the stdout stream, and the rc-1 exit agree there; the malformed text itself still
-differs and is tracked under `mux.error-shapes`, and the pin's abandonment of the rest of the
-containing file after it is tracked under `config.parser-edge-cases`. Startup configuration now uses
+Precedence, the stdout stream, the rc-1 exit, and the malformed text now agree through the shared
+arity and flag parsers. The pin's abandonment of the rest of the containing file remains tracked
+under `config.parser-edge-cases`. Startup configuration now uses
 one cumulative 50-command source budget across every top-level config. Top-level roots do not consume
 slots, quiet misses do, and one command with many paths consumes one slot. Invocation 51 and later
 retain `<file>:<line>: too many nested files` in the startup report while later ordinary commands
@@ -218,9 +220,10 @@ that parse, affects conditionals in later files, and persists. A parsed `set-env
 runs during replay, so it cannot change a later file's branch after that file has parsed, though the
 environment change persists after replay. Under `-n`, a bare assignment does not affect a later file
 and neither kind of assignment persists.
-This is no-effect source parsing, not full tmux parse validation: tmux also validates command names,
-flags, and arity while building its command list, while zz still performs those checks during replay.
-`config.parser-edge-cases`, `mux.error-shapes`, and `mux.chain-parse-abort` retain that boundary.
+This is no-effect source parsing, not full tmux parse validation: tmux validates command names and
+arguments while building its command list, while zz performs those checks during replay. Shared flag
+and arity diagnostics match at dispatch. `config.parser-edge-cases` and `mux.chain-parse-abort`
+retain the parse-unit boundary.
 `-t` resolves one pane target before path expansion and replay. A missing target follows tmux's
 `CMD_FIND_CANFAIL` path: the file still loads with an empty target context, while the invoking client
 cwd remains the source base. `-F` reads the resolved target context. `-v` emits canonical parsed

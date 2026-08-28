@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
     fs,
     path::{Path, PathBuf},
 };
@@ -7,8 +8,8 @@ use std::{
 use serde::Deserialize;
 use zz_protocol::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, CommandArgsParseRule, CommandResolution,
-    DAEMON_COMMAND_SPECS, DAEMON_INVALID_FLAG_BEHAVES, KeyTables, NATIVE_COMMAND_NAMES,
-    POSITIONAL_MINIMUMS, canonical_command, canonical_key, resolve_command,
+    DAEMON_COMMAND_SPECS, KeyTables, NATIVE_COMMAND_NAMES, POSITIONAL_MINIMUMS, canonical_command,
+    canonical_key, resolve_command,
 };
 
 use crate::{
@@ -46,6 +47,7 @@ struct Oracle {
 struct OracleCommand {
     name: String,
     aliases: Vec<String>,
+    usage: String,
     flags: BTreeMap<String, String>,
     min_args: usize,
     max_args: Option<usize>,
@@ -609,32 +611,62 @@ fn daemon_invalid_flag_runtime_inventory_matches_the_pin() {
         .map(|name| canonical_command(name))
         .filter(|name| upstream.contains_key(name))
         .collect::<BTreeSet<_>>();
-    let behaves = DAEMON_INVALID_FLAG_BEHAVES
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-
-    assert_eq!(
-        behaves.len(),
-        DAEMON_INVALID_FLAG_BEHAVES.len(),
-        "daemon invalid-flag behavior inventory contains duplicates"
-    );
-    assert!(
-        behaves.is_subset(&expected),
-        "daemon invalid-flag behavior inventory contains a native or non-daemon command"
-    );
-    for name in &behaves {
+    assert_eq!(expected.len(), 24);
+    assert!(!expected.contains("display-panes"));
+    for name in &expected {
+        let spec = zz_protocol::catalog_command_spec(name).expect("daemon command spec");
+        assert!(spec.uses_tmux_option_grammar(), "{name}");
         assert!(
-            !upstream[name].flags.contains_key("-G"),
-            "daemon invalid-flag fixture flag is now valid for {name}"
+            !upstream[name].flags.contains_key("-0"),
+            "daemon invalid-flag probe is now valid for {name}"
         );
     }
 
     let tracked = items.contains_key("semantic:tracker-daemon-invalid-flag-runtime");
+    assert!(!tracked, "daemon invalid-flag runtime remains tracked");
+}
+
+#[test]
+fn command_flag_fixture_matches_the_pin() {
+    let (oracle, _) = inventory();
+    let specs = specs();
+    let mut expected = String::new();
+    let mut rows = 0;
+    let mut aliases = 0;
+    let mut required = 0;
+
+    for command in &oracle.commands {
+        if !specs.contains_key(command.name.as_str()) {
+            continue;
+        }
+        assert!(command.aliases.len() <= 1, "{}", command.name);
+        let alias = command.aliases.first().map_or("-", String::as_str);
+        aliases += usize::from(alias != "-");
+        let required_option = command
+            .flags
+            .iter()
+            .find_map(|(name, shape)| (shape == "required").then_some(name.as_str()))
+            .unwrap_or("-");
+        required += usize::from(required_option != "-");
+        let usage = if command.usage.is_empty() {
+            "@EMPTY@"
+        } else {
+            &command.usage
+        };
+        writeln!(
+            expected,
+            "{}\t{alias}\t{required_option}\t{usage}",
+            command.name
+        )
+        .expect("write command flag fixture row");
+        rows += 1;
+    }
+
+    assert_eq!((rows, aliases, required), (83, 74, 79));
     assert_eq!(
-        tracked,
-        behaves != expected,
-        "daemon invalid-flag runtime inventory and tracker item disagree"
+        fs::read_to_string(root().join("compat/scenarios/smoke/fixtures/command-flag-errors.tsv"))
+            .expect("command flag fixture corpus"),
+        expected
     );
 }
 

@@ -10801,6 +10801,7 @@ version = "0.3.0-beta.1"
 dependencies = [
  "postcard",
  "serde",
+ "serde_json",
  "smallvec",
  "thiserror 2.0.20",
  "zz-terminal",

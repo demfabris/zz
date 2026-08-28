@@ -14,7 +14,7 @@ use zz_protocol::{
     DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES,
     MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES, PaneId, PaneKindSnapshot,
     PopupBorderLines, ServerError, SessionId, TerminalUiCommand, WindowId, catalog_command_spec,
-    command_specs, normalize_browser_profile_name, resolve_command,
+    command_specs, normalize_browser_profile_name, parse_tmux_options, resolve_command,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
@@ -6437,13 +6437,7 @@ impl MuxEngine {
         args: &[String],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("list-keys", args).map_err(|error| {
-            if error == ServerError::CommandParse("-O requires an argument".to_owned()) {
-                ServerError::CommandParse("command list-keys: -O expects an argument".to_owned())
-            } else {
-                error
-            }
-        })?;
+        let (options, positional) = parse_command_options("list-keys", args)?;
         if positional.len() > 1 {
             return Err(ServerError::CommandParse(
                 "command list-keys: too many arguments (need at most 1)".to_owned(),
@@ -12207,6 +12201,19 @@ fn parse_options_for_spec(
     args: &[String],
     spec: &zz_protocol::CommandSpec,
 ) -> Result<(Options, Vec<String>), ServerError> {
+    if spec.uses_tmux_option_grammar() {
+        let parsed = parse_tmux_options(spec, args)?;
+        let mut options = Options::default();
+        for option in parsed.options {
+            match option {
+                zz_protocol::TmuxOption::Flag(name) => options.flags.push(name.to_owned()),
+                zz_protocol::TmuxOption::Value(name, value) => {
+                    options.values.push((name.to_owned(), value.to_owned()));
+                }
+            }
+        }
+        return Ok((options, parsed.positionals.to_vec()));
+    }
     let value_options = spec
         .options
         .iter()
@@ -12232,11 +12239,6 @@ fn validate_options(
         .chain(options.values.iter().map(|(name, _)| name.as_str()))
     {
         let Some(option) = spec.option(name) else {
-            if command == "send-keys" && matches!(name, "-C" | "-P" | "-o") {
-                return Err(ServerError::CommandParse(format!(
-                    "command send-keys: unknown flag {name}"
-                )));
-            }
             return Err(ServerError::CommandParse(format!(
                 "{command} does not support {name}"
             )));
@@ -20512,6 +20514,108 @@ mod tests {
     }
 
     #[test]
+    fn tmux_option_errors_and_optional_values_follow_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        for (spelling, arguments, expected) in [
+            (
+                "ls",
+                &["-0".to_owned()][..],
+                "command list-sessions: unknown flag -0",
+            ),
+            (
+                "list-sessions",
+                &["-@".to_owned()][..],
+                "command list-sessions: invalid flag -@",
+            ),
+            (
+                "list-sessions",
+                &["--bogus".to_owned()][..],
+                "command list-sessions: invalid flag --",
+            ),
+            (
+                "list-sessions",
+                &["-?".to_owned()][..],
+                "usage: list-sessions [-r] [-F format] [-f filter] [-O order]",
+            ),
+            (
+                "lsk",
+                &["-O".to_owned()][..],
+                "command list-keys: -O expects an argument",
+            ),
+            (
+                "attach",
+                &["-xQ".to_owned()][..],
+                "command attach-session: unknown flag -Q",
+            ),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &CommandInvocation::new(spelling, arguments.to_vec()),
+                    )
+                    .expect_err("tmux option error"),
+                ServerError::CommandParse(expected.to_owned()),
+                "{spelling}"
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("attach", &["-x"]))
+                .expect_err("known unsupported flag"),
+            ServerError::UnsupportedCommand("attach-session -x".to_owned())
+        );
+
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[20]", "userls=list-sessions"],
+                ),
+            )
+            .expect("user alias");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("userls", &["-0"]))
+                .expect_err("user alias flag error"),
+            ServerError::CommandParse("command list-sessions: unknown flag -0".to_owned())
+        );
+        for value in ["-?", "-@"] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("resizep", &["-D", value]))
+                    .expect_err("optional adjustment"),
+                ServerError::InvalidCommand("adjustment invalid".to_owned())
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("resize-pane", &["-D", "--bogus"]))
+                .expect_err("optional long flag"),
+            ServerError::CommandParse("command resize-pane: invalid flag --".to_owned())
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("resize-pane", &["-D", "-Q"]))
+                .expect_err("optional next flag"),
+            ServerError::CommandParse("command resize-pane: unknown flag -Q".to_owned())
+        );
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("list-sessions", &["-F", "-?"]))
+                .expect("required value consumes help spelling")
+                .output,
+            "-?"
+        );
+    }
+
+    #[test]
     fn catalogued_positional_maximums_precede_mux_targets_and_effects() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -20566,7 +20670,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_commands_reject_positional_overflow_without_replacing_state() {
+    fn stored_commands_reject_parse_errors_without_replacing_state() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -20594,6 +20698,45 @@ mod tests {
             ServerError::CommandParse(
                 "command list-sessions: too many arguments (need at most 0)".to_owned()
             )
+        );
+        assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
+        for (body, expected) in [
+            (
+                &["F8", "ls", "-0"][..],
+                "command list-sessions: unknown flag -0",
+            ),
+            (
+                &["F8", "display-message", "-?"][..],
+                "usage: display-message [-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+            ),
+            (
+                &["F8", "lsk", "-O"][..],
+                "command list-keys: -O expects an argument",
+            ),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("bind-key", body))
+                    .expect_err("stored command parse error"),
+                ServerError::CommandParse(expected.to_owned())
+            );
+            assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-s", "command-alias[20]", "badls=list-sessions"],
+                ),
+            )
+            .expect("user alias");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("bind-key", &["F8", "badls", "-0"]),)
+                .expect_err("stored user alias error"),
+            ServerError::CommandParse("command list-sessions: unknown flag -0".to_owned())
         );
         assert_eq!(engine.keys.get("prefix", "F8"), Some(&binding));
 
@@ -20624,6 +20767,25 @@ mod tests {
             ServerError::CommandParse(
                 "command list-keys: too many arguments (need at most 1)".to_owned()
             )
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-hooks", &["-g", "session-created"]),
+                )
+                .unwrap()
+                .output,
+            hook
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-hook", &["-g", "session-created", "lsk -@"]),
+                )
+                .expect_err("stored hook flag error"),
+            ServerError::CommandParse("command list-keys: invalid flag -@".to_owned())
         );
         assert_eq!(
             engine
@@ -21554,7 +21716,7 @@ mod tests {
             engine
                 .execute(&mut context, &command("list-keys", &["-N", "-P"]))
                 .unwrap_err(),
-            ServerError::CommandParse("-P requires an argument".to_owned())
+            ServerError::CommandParse("command list-keys: -P expects an argument".to_owned())
         );
         assert_eq!(
             engine
@@ -22988,7 +23150,7 @@ mod tests {
                 &command("show-window-options", &["-H"]),
             ),
             Err(ServerError::CommandParse(message))
-                if message == "show-window-options does not support -H"
+                if message == "command show-window-options: unknown flag -H"
         ));
         assert_eq!(
             engine
@@ -30972,7 +31134,8 @@ mod tests {
                     ],
                 ),
             ),
-            Err(ServerError::CommandParse(message)) if message == "move-pane does not support -p"
+            Err(ServerError::CommandParse(message))
+                if message == "command move-pane: unknown flag -p"
         ));
         assert!(engine.state.validate().is_ok());
     }
@@ -31219,7 +31382,7 @@ mod tests {
         assert!(matches!(
             engine.execute(&mut context, &command("next-layout", &["-n"])),
             Err(ServerError::CommandParse(message))
-                if message == "next-layout does not support -n"
+                if message == "command next-layout: unknown flag -n"
         ));
     }
 
@@ -32113,7 +32276,7 @@ mod tests {
         assert!(matches!(
             engine.execute(&mut context, &command("rotate-window", &["-d"])),
             Err(ServerError::CommandParse(message))
-                if message == "rotate-window does not support -d"
+                if message == "command rotate-window: unknown flag -d"
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("select-pane", &["-m"])),

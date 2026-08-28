@@ -4647,6 +4647,12 @@ impl Shared {
         invoking_client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
         let canonical = canonical_command(&command.name);
+        if (daemon_command_dispatch(canonical).is_some() || canonical == "display-panes")
+            && let Some(spec) = zz_protocol::catalog_command_spec(canonical)
+            && spec.uses_tmux_option_grammar()
+        {
+            zz_protocol::parse_tmux_options(spec, &command.args)?;
+        }
         let unattached_watch = {
             let inner = self.inner.lock();
             inner
@@ -47132,35 +47138,192 @@ mod tests {
     }
 
     #[test]
-    fn every_upstream_daemon_command_rejects_an_invalid_flag_before_effects() {
+    fn tmux_option_preflight_covers_daemon_commands_and_display_panes() {
+        let daemon = zz_protocol::command_specs()
+            .filter(|spec| spec.uses_tmux_option_grammar())
+            .filter(|spec| daemon_command_dispatch(spec.name).is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(daemon.len(), 24);
+        assert!(daemon.iter().all(|spec| spec.name != "display-panes"));
+        let display_panes =
+            zz_protocol::catalog_command_spec("display-panes").expect("display-panes command spec");
+        assert!(display_panes.uses_tmux_option_grammar());
+        assert!(daemon_command_dispatch(display_panes.name).is_none());
+        assert!(
+            daemon
+                .iter()
+                .copied()
+                .chain(std::iter::once(display_panes))
+                .flat_map(|spec| spec.options)
+                .all(|option| option.unsupported || !option.optional_value)
+        );
+    }
+
+    #[test]
+    fn every_upstream_command_spelling_has_exact_flag_diagnostics_before_state_or_effects() {
         let shared = Arc::new(Shared::new(1));
-        for name in zz_protocol::DAEMON_INVALID_FLAG_BEHAVES {
-            let spec = zz_protocol::catalog_command_spec(name).expect("daemon command spec");
-            assert_eq!(spec.name, *name);
-            for flag in ('0'..='9').chain('A'..='Z').chain('a'..='z') {
-                let option = format!("-{flag}");
-                if spec.option(&option).is_some() {
+        switch_test_session(&shared, "preserved");
+        let (snapshot, keys) = {
+            let inner = shared.inner.lock();
+            (inner.engine.state.snapshot(), inner.engine.keys.snapshot())
+        };
+        let parse_error = |spelling: &str, arguments: Vec<String>| {
+            let error = shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(spelling, arguments),
+                )
+                .expect_err("flag syntax must not return an execution");
+            let DaemonError::Server(error) = error else {
+                panic!("{spelling} returned a non-server error: {error:?}");
+            };
+            assert!(error.is_command_parse(), "{spelling}: {error:?}");
+            let inner = shared.inner.lock();
+            assert_eq!(inner.engine.state.snapshot(), snapshot, "{spelling}");
+            assert_eq!(inner.engine.keys.snapshot(), keys, "{spelling}");
+            assert!(inner.attached.is_empty(), "{spelling}");
+            assert!(inner.paste_buffers.is_empty(), "{spelling}");
+            assert!(inner.choose_trees.is_empty(), "{spelling}");
+            assert!(inner.choose_buffers.is_empty(), "{spelling}");
+            assert!(inner.display_panes.is_empty(), "{spelling}");
+            assert!(inner.popups.is_empty(), "{spelling}");
+            assert!(inner.menus.is_empty(), "{spelling}");
+            assert!(inner.confirms.is_empty(), "{spelling}");
+            error
+        };
+
+        let specs = zz_protocol::command_specs()
+            .filter(|spec| spec.uses_tmux_option_grammar())
+            .collect::<Vec<_>>();
+        assert_eq!(specs.len(), 83);
+        assert_eq!(
+            specs.iter().map(|spec| spec.aliases.len()).sum::<usize>(),
+            74
+        );
+        let mut spellings = 0;
+        let mut diagnostic_cases = 0;
+        let mut required_cases = 0;
+        for spec in &specs {
+            let unknown = ('0'..='9')
+                .chain('A'..='Z')
+                .chain('a'..='z')
+                .map(|flag| format!("-{flag}"))
+                .find(|option| spec.option(option).is_none())
+                .expect("every command has an unknown alphanumeric flag");
+            for spelling in std::iter::once(spec.name).chain(spec.aliases.iter().copied()) {
+                spellings += 1;
+                for (arguments, expected) in [
+                    (
+                        vec![unknown.clone()],
+                        format!("command {}: unknown flag {unknown}", spec.name),
+                    ),
+                    (
+                        vec!["-@".to_owned()],
+                        format!("command {}: invalid flag -@", spec.name),
+                    ),
+                    (
+                        vec!["--bogus".to_owned()],
+                        format!("command {}: invalid flag --", spec.name),
+                    ),
+                    (
+                        vec!["-?".to_owned()],
+                        format!("usage: {} {}", spec.name, spec.pinned_tmux_usage()),
+                    ),
+                ] {
+                    diagnostic_cases += 1;
+                    assert_eq!(
+                        parse_error(spelling, arguments),
+                        ServerError::CommandParse(expected),
+                        "{spelling}"
+                    );
+                }
+                for option in spec.options.iter().filter(|option| {
+                    !option.optional_value && (option.value.is_some() || option.attached_value)
+                }) {
+                    required_cases += 1;
+                    assert_eq!(
+                        parse_error(spelling, vec![option.name.to_owned()]),
+                        ServerError::CommandParse(format!(
+                            "command {}: {} expects an argument",
+                            spec.name, option.name
+                        )),
+                        "{spelling} {}",
+                        option.name
+                    );
+                }
+            }
+        }
+        assert_eq!(spellings, 157);
+        assert_eq!(diagnostic_cases, 628);
+        assert_eq!(required_cases, 408);
+
+        let mut prefix_cases = 0;
+        for spec in &specs {
+            for end in 1..spec.name.len() {
+                let prefix = &spec.name[..end];
+                if zz_protocol::catalog_command_spec(prefix).is_some()
+                    || !matches!(
+                        zz_protocol::resolve_command(prefix),
+                        zz_protocol::CommandResolution::Canonical(name) if name == spec.name
+                    )
+                {
                     continue;
                 }
-
-                let error = shared
-                    .execute(
-                        ClientId(u64::MAX),
-                        ClientKind::Command,
-                        &mut ExecutionContext::default(),
-                        &CommandInvocation::new(*name, [option.as_str(), "invalid-flag-value"]),
-                    )
-                    .expect_err("invalid flag");
-                let DaemonError::Server(error) = error else {
-                    panic!("{name} {option} returned a non-server error: {error:?}");
-                };
-                assert!(error.is_command_parse(), "{name} {option}: {error:?}");
-                assert!(
-                    error.tmux_message().contains(&option),
-                    "{name} {option}: {error:?}"
+                prefix_cases += 1;
+                assert_eq!(
+                    parse_error(prefix, vec!["-0".to_owned()]),
+                    ServerError::CommandParse(format!("command {}: unknown flag -0", spec.name)),
+                    "{prefix}"
                 );
             }
         }
+        assert_eq!(prefix_cases, 517);
+
+        let mut unsupported_cases = 0;
+        for spec in &specs {
+            let unknown = ('0'..='9')
+                .chain('A'..='Z')
+                .chain('a'..='z')
+                .map(|flag| format!("-{flag}"))
+                .find(|option| spec.option(option).is_none())
+                .expect("every command has an unknown alphanumeric flag");
+            for option in spec.options.iter().filter(|option| option.unsupported) {
+                unsupported_cases += 1;
+                let mut arguments = if option.optional_value {
+                    vec![format!("{}1", option.name)]
+                } else if option.value.is_some() || option.attached_value {
+                    vec![option.name.to_owned(), "value".to_owned()]
+                } else {
+                    vec![option.name.to_owned()]
+                };
+                arguments.push(unknown.clone());
+                assert_eq!(
+                    parse_error(spec.name, arguments),
+                    ServerError::CommandParse(format!(
+                        "command {}: unknown flag {unknown}",
+                        spec.name
+                    )),
+                    "{} {}",
+                    spec.name,
+                    option.name
+                );
+            }
+        }
+        assert_eq!(unsupported_cases, 70);
+
+        assert_eq!(
+            parse_error(
+                "capturep",
+                ["-C", "-Z"].map(str::to_owned).into_iter().collect()
+            ),
+            ServerError::CommandParse("command capture-pane: unknown flag -Z".to_owned())
+        );
+        assert_eq!(
+            parse_error("displayp", vec!["-@".to_owned()]),
+            ServerError::CommandParse("command display-panes: invalid flag -@".to_owned())
+        );
     }
 
     #[test]
@@ -63622,7 +63785,7 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandResponse::Error {
                 error: ServerError::CommandParse(message),
                 ..
-            } if message == "set-option does not support -Z"
+            } if message == "command set-option: unknown flag -Z"
         ));
     }
 

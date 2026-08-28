@@ -5,6 +5,8 @@ description: How to run the pinned tmux differential corpus, read topology, geom
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
 timestamp: 2026-08-26T00:00:00-03:00
+last_updated: 2026-08-28
+last_updated_by: Codex
 ---
 
 # Overview
@@ -104,8 +106,9 @@ autospawn, an earlier starting command may take effect before a later unknown na
 unknown-name error shape is pinned here; malformed alias-body text remains zz-defined while
 `aliases.command-bodies` is open.
 Local attach, stdin, kill, and malformed-alias preprocessing also has focused binary coverage.
-Remote `--host` preparation, local flag or arity prevalidation, and config or source-file
-replay-group abort remain explicit tracker gaps.
+Remote `--host` preparation and whole-vector flag or arity prevalidation remain explicit tracker
+gaps, as does config or source-file replay-group abort. Per-command flag and arity diagnostics at
+dispatch now match the pin.
 
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands, and `COMMAND_ARGS_PARSE_BEHAVES` stays empty until runtime tests
@@ -116,11 +119,15 @@ the whole command.
 Six semantic gaps remain: runtime adoption of the inventoried argument rules, open-ended or dynamic
 context-format names, nonconstant format behavior, hook production, runtime behavior for shared
 bindings, and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns that
-work. Daemon invalid-flag coverage is now source-owned by `DAEMON_INVALID_FLAG_BEHAVES`. The manifest
-derives its complete 24-command pinned set from the live daemon spellings, and the daemon executes
-every absent alphanumeric short flag for every entry before the tracker accepts the roster.
-Differential scenarios, attached-client fixtures, unit tests, and manual GUI checks remain the
-behavioral evidence.
+work. Shared command-flag diagnostics closed on 2026-08-28 without retaining the earlier partial
+daemon roster. The catalog parser covers 83 implemented upstream canonical commands and 74 aliases
+through mux execution, daemon preflight, and stored commands. Exact native attach shares the
+leading-option diagnostics while keeping its positional-session boundary and extensions. The
+`smoke/command-flag-errors` fixture byte-compares 516 probes on each server: 513 failures covering
+unknown and invalid flags, help usage, missing required values, and unsupported-before-unknown
+ordering, plus three successes proving required-value absorption. It checks pane, buffer, file,
+binding, and hook sentinels. Differential scenarios, attached-client fixtures, unit tests, and
+manual GUI checks remain the behavioral evidence.
 
 Regenerate the readable report after changing the manifest:
 
@@ -149,8 +156,8 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted canonical artifact. The 2026-08-27 checkpoint contains
-87 scenarios and 1,484 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
+`compat/results/summary.md` is the persisted canonical artifact. The 2026-08-28 checkpoint contains
+88 scenarios and 1,487 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,
@@ -203,11 +210,11 @@ that rejected commands do not change menu, confirmation, or wait state.
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps, and
 `resize-directions` contains 16. The summary SHA-256 is
-`e78bdd3b173e371bb5da062fea2e5806fbc359c00bb16bd0914cad8006234987`.
+`6b7a0261956e84d7340c9ef34f4de0962964215b3cc8eb055a79236acdc257c6`.
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
-requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-27
+requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-28
 canonical checkpoint and exits before building or running either server. Linux CI first asserts that
 `compat/results/summary.md` is tracked, then runs
 the inventory and result check after checkout. A named partial run, a headless-only full run, a failed

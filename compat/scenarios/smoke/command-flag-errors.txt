@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/command-flag-errors.sh ~/command-flag-errors.sh
+stage: fixtures/command-flag-errors.tsv ~/command-flag-errors.tsv
+out: set-environment -gu COMMAND_FLAG_ERRORS
+run-shell 'sh ~/command-flag-errors.sh'
+out: show-environment -g COMMAND_FLAG_ERRORS

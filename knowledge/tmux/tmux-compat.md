@@ -5,6 +5,8 @@ description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmu
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, philosophy, reimplementation, cli]
 timestamp: 2026-08-24T00:00:00-03:00
+last_updated: 2026-08-28
+last_updated_by: Codex
 ---
 
 # Overview
@@ -96,10 +98,14 @@ open-ended or dynamic context-format names, nonconstant format behavior, hook pr
 behavior for shared bindings, or consumer truth for option `BEHAVES`.
 `tracker.semantic-coverage` owns those six blind spots. Its 12 `args-parse:` items name the
 implemented callback commands; `choose-client` and `switch-mode` remain covered by their
-unimplemented command items. Daemon invalid-flag coverage is source-owned: the gate derives its
-24-command roster from the pinned oracle and live daemon spellings, and the daemon tests every
-absent alphanumeric short flag through production dispatch. Differential scenarios, attached-client
-fixtures, unit tests, and manual GUI checks supply behavioral evidence.
+unimplemented command items. Shared command-flag diagnostics closed on 2026-08-28. One
+catalog-driven parser covers all 83 implemented upstream commands and 74 built-in aliases through
+mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option
+diagnostics, then stops scanning at its positional-session extension. The focused differential
+compares 516 probes against both zz and the pin, including unknown and invalid flags, help usage,
+missing values, required-value absorption, and optional-value lookahead. Whole-command-group
+prevalidation and custom `args_parse` behavior remain separate tracker work. Differential scenarios,
+attached-client fixtures, unit tests, and manual GUI checks supply behavioral evidence.
 
 The [2026-08-22 CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
 preserves the measured baseline at commit `202f322`. Its counts describe that audit date. The

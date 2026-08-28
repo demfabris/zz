@@ -32,6 +32,18 @@ pub struct CommandOptionSpec {
     pub unsupported: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TmuxOption<'a> {
+    Flag(&'static str),
+    Value(&'static str, &'a str),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TmuxOptionParse<'a> {
+    pub options: Vec<TmuxOption<'a>>,
+    pub positionals: &'a [String],
+}
+
 impl CommandOptionSpec {
     const fn flag(name: &'static str, description: &'static str) -> Self {
         Self {
@@ -93,14 +105,14 @@ impl CommandOptionSpec {
         }
     }
 
-    const fn unsupported_attached(name: &'static str) -> Self {
+    const fn unsupported_optional_value(name: &'static str) -> Self {
         Self {
             name,
             value: None,
             description: "unsupported tmux option",
             completable: false,
             attached_value: true,
-            optional_value: false,
+            optional_value: true,
             unsupported: true,
         }
     }
@@ -134,6 +146,19 @@ impl CommandSpec {
     #[must_use]
     pub fn option(&self, name: &str) -> Option<&CommandOptionSpec> {
         self.options.iter().find(|option| option.name == name)
+    }
+
+    #[must_use]
+    pub fn pinned_tmux_usage(&self) -> &'static str {
+        PINNED_TMUX_USAGE_OVERRIDES
+            .iter()
+            .find_map(|(name, usage)| (*name == self.name).then_some(*usage))
+            .unwrap_or(self.usage)
+    }
+
+    #[must_use]
+    pub fn uses_tmux_option_grammar(&self) -> bool {
+        !NATIVE_COMMAND_NAMES.contains(&self.name)
     }
 
     #[must_use]
@@ -176,6 +201,97 @@ impl CommandSpec {
         }
         Ok(())
     }
+}
+
+pub fn parse_tmux_options<'a>(
+    spec: &CommandSpec,
+    args: &'a [String],
+) -> Result<TmuxOptionParse<'a>, ServerError> {
+    let mut options = Vec::new();
+    let mut index = 0;
+    while let Some(argument) = args.get(index) {
+        if !argument.starts_with('-') || argument == "-" {
+            break;
+        }
+        index += 1;
+        if argument == "--" {
+            break;
+        }
+
+        for (offset, flag) in argument[1..].char_indices() {
+            if flag == '?' {
+                return Err(ServerError::CommandParse(format!(
+                    "usage: {} {}",
+                    spec.name,
+                    spec.pinned_tmux_usage()
+                )));
+            }
+            if !flag.is_ascii_alphanumeric() {
+                return Err(ServerError::CommandParse(format!(
+                    "command {}: invalid flag -{flag}",
+                    spec.name
+                )));
+            }
+            let option = spec
+                .options
+                .iter()
+                .find(|option| {
+                    let mut name = option.name.chars();
+                    name.next() == Some('-') && name.next() == Some(flag) && name.next().is_none()
+                })
+                .ok_or_else(|| {
+                    ServerError::CommandParse(format!(
+                        "command {}: unknown flag -{flag}",
+                        spec.name
+                    ))
+                })?;
+            let value_start = offset + flag.len_utf8() + 1;
+            let attached = &argument[value_start..];
+            if option.optional_value {
+                if !attached.is_empty() {
+                    options.push(TmuxOption::Value(option.name, attached));
+                } else if let Some(value) = args
+                    .get(index)
+                    .filter(|value| !optional_value_starts_option(value))
+                {
+                    options.push(TmuxOption::Value(option.name, value));
+                    index += 1;
+                } else {
+                    options.push(TmuxOption::Flag(option.name));
+                }
+                break;
+            }
+            if option.value.is_some() || option.attached_value {
+                let value = if attached.is_empty() {
+                    let value = args.get(index).ok_or_else(|| {
+                        ServerError::CommandParse(format!(
+                            "command {}: {} expects an argument",
+                            spec.name, option.name
+                        ))
+                    })?;
+                    index += 1;
+                    value.as_str()
+                } else {
+                    attached
+                };
+                options.push(TmuxOption::Value(option.name, value));
+                break;
+            }
+            options.push(TmuxOption::Flag(option.name));
+        }
+    }
+    Ok(TmuxOptionParse {
+        options,
+        positionals: &args[index..],
+    })
+}
+
+fn optional_value_starts_option(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.first() == Some(&b'-')
+        && bytes
+            .get(1)
+            .is_some_and(|byte| *byte == b'-' || byte.is_ascii_alphabetic())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -251,6 +367,87 @@ use CommandValueKind::{
     Boolean, FreeForm, KeyTable, Layout, Pane, PaneKind, Session, SetOption, Window,
 };
 
+static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
+    (
+        "attach-session",
+        "[-dErx] [-c working-directory] [-f flags] [-t target-session]",
+    ),
+    (
+        "break-pane",
+        "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",
+    ),
+    (
+        "capture-pane",
+        "[-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+    ),
+    (
+        "choose-buffer",
+        "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+    ),
+    (
+        "choose-tree",
+        "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
+    ),
+    ("clear-history", "[-H] [-t target-pane]"),
+    (
+        "command-prompt",
+        "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]",
+    ),
+    ("copy-mode", "[-dekHMqSu] [-s src-pane] [-t target-pane]"),
+    (
+        "detach-client",
+        "[-aP] [-E shell-command] [-s target-session] [-t target-client]",
+    ),
+    (
+        "display-message",
+        "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+    ),
+    (
+        "join-pane",
+        "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
+    ),
+    ("kill-session", "[-aCg] [-f filter] [-t target-session]"),
+    ("list-buffers", "[-F format] [-f filter] [-O order]"),
+    (
+        "list-clients",
+        "[-F format] [-f filter] [-O order][-t target-session]",
+    ),
+    (
+        "list-panes",
+        "[-asr] [-F format] [-f filter] [-O order][-t target-window]",
+    ),
+    (
+        "list-windows",
+        "[-ar] [-F format] [-f filter] [-O order][-t target-session]",
+    ),
+    (
+        "move-pane",
+        "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
+    ),
+    (
+        "refresh-client",
+        "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]",
+    ),
+    (
+        "resize-pane",
+        "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
+    ),
+    ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
+    (
+        "send-keys",
+        "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
+    ),
+    (
+        "set-buffer",
+        "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
+    ),
+    ("show-messages", "[-JT] [-t target-client]"),
+    (
+        "split-window",
+        "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
+    ),
+];
+
 pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "capture-pane",
     "capturep",
@@ -307,33 +504,6 @@ pub static DAEMON_COMMAND_NAMES: &[&str] = &[
     "lock",
     "lock-session",
     "locks",
-];
-
-pub static DAEMON_INVALID_FLAG_BEHAVES: &[&str] = &[
-    "capture-pane",
-    "clear-prompt-history",
-    "confirm-before",
-    "delete-buffer",
-    "display-menu",
-    "display-popup",
-    "if-shell",
-    "list-buffers",
-    "list-clients",
-    "load-buffer",
-    "lock-client",
-    "lock-server",
-    "lock-session",
-    "paste-buffer",
-    "pipe-pane",
-    "refresh-client",
-    "run-shell",
-    "save-buffer",
-    "set-buffer",
-    "show-buffer",
-    "show-messages",
-    "show-prompt-history",
-    "switch-client",
-    "wait-for",
 ];
 
 pub static POSITIONAL_MINIMUMS: &[(&str, usize)] = &[
@@ -1277,11 +1447,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-f", "fill target space"),
             CommandOptionSpec::flag("-h", "horizontal split"),
             CommandOptionSpec::flag("-v", "vertical split"),
-            CommandOptionSpec::unsupported_attached("-D"),
-            CommandOptionSpec::unsupported_attached("-L"),
+            CommandOptionSpec::unsupported_optional_value("-D"),
+            CommandOptionSpec::unsupported_optional_value("-L"),
             CommandOptionSpec::unsupported_value("-P"),
-            CommandOptionSpec::unsupported_attached("-R"),
-            CommandOptionSpec::unsupported_attached("-U"),
+            CommandOptionSpec::unsupported_optional_value("-R"),
+            CommandOptionSpec::unsupported_optional_value("-U"),
             CommandOptionSpec::unsupported_value("-X"),
             CommandOptionSpec::unsupported_value("-Y"),
             CommandOptionSpec::unsupported_value("-z"),
@@ -2114,6 +2284,8 @@ fn command_table() -> impl Iterator<Item = (&'static str, &'static [&'static str
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
+    use serde::Deserialize;
+
     use super::*;
 
     #[test]
@@ -2285,6 +2457,283 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Oracle {
+        commands: Vec<OracleCommand>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct OracleCommand {
+        name: String,
+        aliases: Vec<String>,
+        usage: String,
+        flags: BTreeMap<String, String>,
+    }
+
+    fn oracle_commands() -> Vec<OracleCommand> {
+        serde_json::from_str::<Oracle>(include_str!("../../../compat/tmux-oracle.json"))
+            .expect("pinned tmux oracle")
+            .commands
+    }
+
+    fn catalog_flag_shapes(spec: &CommandSpec) -> BTreeMap<String, String> {
+        spec.options
+            .iter()
+            .map(|option| {
+                let arity = if option.optional_value {
+                    "optional"
+                } else if option.value.is_some() || option.attached_value {
+                    "required"
+                } else {
+                    "none"
+                };
+                (option.name.to_owned(), arity.to_owned())
+            })
+            .collect()
+    }
+
+    fn owned(arguments: &[&str]) -> Vec<String> {
+        arguments
+            .iter()
+            .map(|argument| (*argument).to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn tmux_option_catalog_matches_the_pinned_oracle() {
+        let oracle = oracle_commands();
+        assert_eq!(oracle.len(), 92);
+        let upstream = oracle
+            .iter()
+            .map(|command| command.name.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut implemented = 0;
+        let mut aliases = 0;
+        let mut flag_shapes = BTreeMap::<&str, usize>::new();
+        let mut supported = 0;
+        let mut unsupported = 0;
+        let mut usage_overrides = BTreeSet::new();
+        for command in &oracle {
+            let Some(spec) = catalog_command_spec(&command.name) else {
+                continue;
+            };
+            implemented += 1;
+            aliases += command.aliases.len();
+            for arity in command.flags.values() {
+                *flag_shapes.entry(arity).or_default() += 1;
+            }
+            for option in spec.options {
+                if option.unsupported {
+                    unsupported += 1;
+                } else {
+                    supported += 1;
+                }
+            }
+            assert!(spec.uses_tmux_option_grammar(), "{}", spec.name);
+            assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
+            assert_eq!(
+                spec.pinned_tmux_usage(),
+                command.usage,
+                "usage for {}",
+                spec.name
+            );
+            assert_eq!(
+                catalog_flag_shapes(spec),
+                command.flags,
+                "flags for {}",
+                spec.name
+            );
+            if spec.usage != command.usage {
+                usage_overrides.insert(spec.name);
+            }
+        }
+        assert_eq!(implemented, 83);
+        assert_eq!(aliases, 74);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 503);
+        assert_eq!(
+            flag_shapes,
+            BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
+        );
+        assert_eq!((supported, unsupported), (433, 70));
+        assert_eq!(usage_overrides.len(), 24);
+        assert_eq!(
+            usage_overrides,
+            PINNED_TMUX_USAGE_OVERRIDES
+                .iter()
+                .map(|(name, _)| *name)
+                .collect()
+        );
+        for spec in command_specs().filter(|spec| spec.uses_tmux_option_grammar()) {
+            assert!(upstream.contains(spec.name), "{}", spec.name);
+        }
+    }
+
+    #[test]
+    fn tmux_option_diagnostics_use_the_canonical_command() {
+        let spec = command_spec("display").expect("display-message alias");
+        for (arguments, expected) in [
+            (
+                vec!["-?"],
+                format!("usage: display-message {}", spec.pinned_tmux_usage()),
+            ),
+            (
+                vec!["-Q"],
+                "command display-message: unknown flag -Q".to_owned(),
+            ),
+            (
+                vec!["-@"],
+                "command display-message: invalid flag -@".to_owned(),
+            ),
+            (
+                vec!["--bogus"],
+                "command display-message: invalid flag --".to_owned(),
+            ),
+        ] {
+            let arguments = owned(&arguments);
+            assert_eq!(
+                parse_tmux_options(spec, &arguments)
+                    .expect_err("tmux option diagnostic")
+                    .tmux_message(),
+                expected
+            );
+        }
+
+        let spec = command_spec("kill-server").expect("kill-server");
+        let arguments = owned(&["-?"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments)
+                .expect_err("usage")
+                .tmux_message(),
+            "usage: kill-server "
+        );
+
+        let spec = command_spec("attach-session").expect("attach-session");
+        let arguments = owned(&["-xQ"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments)
+                .expect_err("later unknown flag")
+                .tmux_message(),
+            "command attach-session: unknown flag -Q"
+        );
+
+        let spec = catalog_command_spec("detach-client").expect("detach-client");
+        let arguments = owned(&["-E"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments)
+                .expect_err("missing unsupported value")
+                .tmux_message(),
+            "command detach-client: -E expects an argument"
+        );
+    }
+
+    #[test]
+    fn tmux_required_values_accept_attached_and_flag_looking_arguments() {
+        let spec = command_spec("list-keys").expect("list-keys");
+        let arguments = owned(&["-rOname", "tail"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments).expect("attached value"),
+            TmuxOptionParse {
+                options: vec![TmuxOption::Flag("-r"), TmuxOption::Value("-O", "name")],
+                positionals: &arguments[1..],
+            }
+        );
+
+        let arguments = owned(&["-O", "-?"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments).expect("separated value"),
+            TmuxOptionParse {
+                options: vec![TmuxOption::Value("-O", "-?")],
+                positionals: &[],
+            }
+        );
+
+        let arguments = owned(&["-O"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments)
+                .expect_err("missing value")
+                .tmux_message(),
+            "command list-keys: -O expects an argument"
+        );
+    }
+
+    #[test]
+    fn tmux_optional_values_follow_the_pinned_lookahead() {
+        let spec = command_spec("resize-pane").expect("resize-pane");
+        for value in ["-?", "-@", "-2", "-"] {
+            let arguments = owned(&["-D", value]);
+            assert_eq!(
+                parse_tmux_options(spec, &arguments).expect("optional value"),
+                TmuxOptionParse {
+                    options: vec![TmuxOption::Value("-D", value)],
+                    positionals: &[],
+                }
+            );
+        }
+
+        let arguments = owned(&["-D10"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments).expect("attached optional value"),
+            TmuxOptionParse {
+                options: vec![TmuxOption::Value("-D", "10")],
+                positionals: &[],
+            }
+        );
+
+        let arguments = owned(&["-D", "-Z"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments).expect("next option"),
+            TmuxOptionParse {
+                options: vec![TmuxOption::Flag("-D"), TmuxOption::Flag("-Z")],
+                positionals: &[],
+            }
+        );
+
+        let arguments = owned(&["-D", "--bogus"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments)
+                .expect_err("invalid long option")
+                .tmux_message(),
+            "command resize-pane: invalid flag --"
+        );
+
+        let arguments = owned(&["-D"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments).expect("missing optional value"),
+            TmuxOptionParse {
+                options: vec![TmuxOption::Flag("-D")],
+                positionals: &[],
+            }
+        );
+    }
+
+    #[test]
+    fn tmux_option_scanning_stops_at_the_first_positional_or_boundary() {
+        let spec = catalog_command_spec("run-shell").expect("run-shell");
+        let arguments = owned(&["echo", "-?"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments).expect("positional boundary"),
+            TmuxOptionParse {
+                options: Vec::new(),
+                positionals: &arguments,
+            }
+        );
+
+        let spec = command_spec("kill-server").expect("kill-server");
+        let arguments = owned(&["--", "-?"]);
+        assert_eq!(
+            parse_tmux_options(spec, &arguments).expect("explicit boundary"),
+            TmuxOptionParse {
+                options: Vec::new(),
+                positionals: &arguments[1..],
+            }
+        );
+        assert!(
+            !catalog_command_spec("agent-send")
+                .expect("agent-send")
+                .uses_tmux_option_grammar()
+        );
     }
 
     #[test]

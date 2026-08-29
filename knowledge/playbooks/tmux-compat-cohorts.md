@@ -579,18 +579,18 @@ closure is that exception.
 | 10u | Warm local whole-vector argument preflight | Closed under `mux.command-group-argument-parse-abort` on 2026-08-28 | Complete | Six warm probes and one clean three-step scenario prove ordinary unaliased tmux grammar before effects; only vector-index-0 exact unaliased attach keeps the private positional parser |
 | 10v | Format vocabulary source registration | Closed under `tracker.format-vocabulary-registration` on 2026-08-28 | Complete | Schema 5 classifies all literal and derived context producers plus all modifier tokens without changing runtime behavior |
 | Registry correction | Config parser abort | Closed under `config.parser-abort` on 2026-08-29 | Complete | Existing first-diagnostic whole-file abort and assignment retention were already implemented and tested |
-| 10w | Repeat format modifier | Closed locally under `formats.repeat-modifier` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Exact `R` semantics, a deterministic 40,960,000-byte intermediate guard, default `P:` and `S:` row proof, and a clean 16-step differential |
-| 10x | New-session cwd edges | Closed locally under `sessions.new-session-attach-cwd` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Existing-attach one-pass cwd update, explicit-empty retained state, refusal ordering, and a clean ten-step differential |
-| 10y | Config and source replay alias snapshot | Closed locally under `aliases.config-parse-unit` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | One alias snapshot per parsed file, batch-before-replay construction, nested refresh, deferred error metadata, frozen Control classification, and a clean two-step differential |
-| 10z | Config and source replay construction | Closed locally under `mux.chain-parse-abort` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | File-unit construction before effects, parse-only validation, sibling and nested isolation, Control warning order, verbose traces, and a clean two-step differential |
-| Registry correction | Explicit-only queue hook | Closed under `hooks.queue` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Ordinary queues never produce `after-queue`; explicit `set-hook -R` runs it once, leaving three pane-event producer gaps |
-| 10aa | Session-active client context | Closed locally under `formats.session-runtime/format:session_active` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Three-state client backing, raw-invoker versus selected-target routing, selected-client facts audit, deferred output, and a clean 28-step `formats-values` row |
-| 10ab | Window activity timestamp | Closed locally under `formats.window-activity-time/format:window_activity` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Distinct Unix-second state covers creation, parsed nonempty pane output, pinned current-window transitions, direct `switch-client` clock refresh, and a clean 45-step `formats-values` row |
-| 10ac | Command and status job environment | Closed locally under `jobs.command-status-environment/semantic:shell-job-clean-environment` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Clean command and status children, modeled overlays and PATH, startup-aware TERM identity, a three-step differential, and attached global-only status proof; delayed callbacks, copy-pipe, popup jobs, and status cwd stay separate |
-| 10ad | Option-consumer source registration | Closed locally under `tracker.semantic-coverage/semantic:tracker-option-consumer-registration` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | The unchanged 105-name roster belongs to `command::TMUX_OPTION_CONSUMERS`; `BEHAVES` remains its public alias, and an exact guard proves the 180 = 105 consumers + 75 live gaps partition and tracker closure |
-| 10ae | Option-name format coverage | Closed locally under `options.option-name-format-coverage/semantic:option-name-format-coverage` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Generic precedence, four scopes, inheritance, array values, selected and missing targets, loops, direct daemon producers, detached status sharing, a clean 60-step differential, and attached status proof |
-| 10af | Positive-delay run-shell environment timing | Closed locally under `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Scheduling retains command, target, expanded arguments, and cwd; child launch reads global, original-session, terminal, startup, and cwd-fallback state; focused foreground daemon, twelve-check background differential, full corpus, and attached-client proof pass |
-| 10ag | Startup initial-client cwd | Closed locally under `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd` on 2026-08-29 | Included in authorized 2026-08-29 checkpoint | Private cold-launch cwd provenance, startup-only lifetime, nested and literal-path selection, later runtime expiry, and an exact isolated differential |
+| 10w | Repeat format modifier | Closed under `formats.repeat-modifier` on 2026-08-29 | Committed in `562b950c` | Exact `R` semantics, a deterministic 40,960,000-byte intermediate guard, default `P:` and `S:` row proof, and a clean 16-step differential |
+| 10x | New-session cwd edges | Closed under `sessions.new-session-attach-cwd` on 2026-08-29 | Committed in `562b950c` | Existing-attach one-pass cwd update, explicit-empty retained state, refusal ordering, and a clean ten-step differential |
+| 10y | Config and source replay alias snapshot | Closed under `aliases.config-parse-unit` on 2026-08-29 | Committed in `562b950c` | One alias snapshot per parsed file, batch-before-replay construction, nested refresh, deferred error metadata, frozen Control classification, and a clean two-step differential |
+| 10z | Config and source replay construction | Closed under `mux.chain-parse-abort` on 2026-08-29 | Committed in `562b950c` | File-unit construction before effects, parse-only validation, sibling and nested isolation, Control warning order, verbose traces, and a clean two-step differential |
+| Registry correction | Explicit-only queue hook | Closed under `hooks.queue` on 2026-08-29 | Committed in `562b950c` | Ordinary queues never produce `after-queue`; explicit `set-hook -R` runs it once, leaving three pane-event producer gaps |
+| 10aa | Session-active client context | Closed under `formats.session-runtime/format:session_active` on 2026-08-29 | Committed in `562b950c` | Three-state client backing, raw-invoker versus selected-target routing, selected-client facts audit, deferred output, and a clean 28-step `formats-values` row |
+| 10ab | Window activity timestamp | Closed under `formats.window-activity-time/format:window_activity` on 2026-08-29 | Committed in `562b950c` | Distinct Unix-second state covers creation, parsed nonempty pane output, pinned current-window transitions, direct `switch-client` clock refresh, and a clean 45-step `formats-values` row |
+| 10ac | Command and status job environment | Closed under `jobs.command-status-environment/semantic:shell-job-clean-environment` on 2026-08-29 | Committed in `562b950c` | Clean command and status children, modeled overlays and PATH, startup-aware TERM identity, a three-step differential, and attached global-only status proof; delayed callbacks, copy-pipe, popup jobs, and status cwd stay separate |
+| 10ad | Option-consumer source registration | Closed under `tracker.semantic-coverage/semantic:tracker-option-consumer-registration` on 2026-08-29 | Committed in `562b950c` | The unchanged 105-name roster belongs to `command::TMUX_OPTION_CONSUMERS`; `BEHAVES` remains its public alias, and an exact guard proves the 180 = 105 consumers + 75 live gaps partition and tracker closure |
+| 10ae | Option-name format coverage | Closed under `options.option-name-format-coverage/semantic:option-name-format-coverage` on 2026-08-29 | Committed in `562b950c` | Generic precedence, four scopes, inheritance, array values, selected and missing targets, loops, direct daemon producers, detached status sharing, a clean 60-step differential, and attached status proof |
+| 10af | Positive-delay run-shell environment timing | Closed under `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing` on 2026-08-29 | Committed in `562b950c` | Scheduling retains command, target, expanded arguments, and cwd; child launch reads global, original-session, terminal, startup, and cwd-fallback state; focused foreground daemon, twelve-check background differential, full corpus, and attached-client proof pass |
+| 10ag | Startup initial-client cwd | Closed under `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd` on 2026-08-29 | Committed in `562b950c` | Private cold-launch cwd provenance, startup-only lifetime, nested and literal-path selection, later runtime expiry, and an exact isolated differential |
 | 10ah | Control kill-server response order | `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` | Frozen next | Preserve the successful invoking command response before daemon shutdown closes the Control mailbox |
 | 10ai | Control exit pane-output discard | `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | Frozen later | Discard pending and later pane bytes after EOF or blank Return while draining non-pane Control records and one final exit |
 | Pending rerank | Immediate background run-shell ordering | `jobs.run-shell-immediate-background-environment` | Unranked | Match absent-delay and `-d 0` queue ordering without timing races |
@@ -598,8 +598,8 @@ closure is that exception.
 | Pending rerank | Context producer runtime fidelity | `formats.context-producer-fidelity` (`adopt`, open) | Unranked | Producer value fidelity remains separate from source registration |
 | Pending rerank | Remaining modifier runtime fidelity | `formats.modifier-fidelity` (`adopt`, open) | Unranked | `I`, `L`, `O`, and `V` need their context models; `w` also needs style parsing, live width overrides, the 162-entry cache, host policy, and Unicode proof |
 | Accepted partition | Native typed context producers | `formats.native-typed-context-producers` (`native`, accepted) | Complete | The 54 native literal pairs are registered without pretending they are tmux runtime gaps |
-| Completed slice | Startup initial-client cwd | Closed under `source-file.startup-client-cwd` in slice 10ag | Included in authorized 2026-08-29 checkpoint | Cold launch provenance expires after startup without a public protocol change |
-| Completed dependency | Config and source replay alias snapshot | Closed under `aliases.config-parse-unit` in slice 10y | Included in authorized 2026-08-29 checkpoint | One snapshot per parsed file is ready for eager validation |
+| Completed slice | Startup initial-client cwd | Closed under `source-file.startup-client-cwd` in slice 10ag | Committed in `562b950c` | Cold launch provenance expires after startup without a public protocol change |
+| Completed dependency | Config and source replay alias snapshot | Closed under `aliases.config-parse-unit` in slice 10y | Committed in `562b950c` | One snapshot per parsed file is ready for eager validation |
 | Pending rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Unranked | Record and classify all 95 pinned actions before behavior changes |
 | Pending rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Unranked | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
 | Pending rerank | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Unranked | Seven keys become honest only after their five actions exist |
@@ -608,8 +608,8 @@ closure is that exception.
 | Pending rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Unranked | Requires the interactive-refresh decision and remains broader than copy mode |
 | Pending rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Unranked | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10ag are closed. Cumulative slices 10w through 10ag await the
-authorized checkpoint commit. The post-10ag ledger has 87 active groups with 594 items and 116
+Slices 9a through 9f and 10a through 10ag are closed. Commit `562b950c` contains cumulative slices
+10w through 10ag. The post-10ag ledger has 87 active groups with 594 items and 116
 closed records: 45 open, 20 blocked, and 22 accepted, resolving 138 of 203 groups (68.0%). Slice
 10ah takes Control kill-server response order, followed by pane-output discard in 10ai. Under
 `detach-on-destroy on`, only flagged clients use
@@ -695,21 +695,46 @@ generic option-name lookup across mux and daemon format producers. Slice 10af cl
 shell-form `run-shell` environment timing. Slice 10ag closes startup initial-client cwd. Slice 10ah
 takes kill-server response order, followed by Control exit pane-output discard in 10ai.
 
-# Four-seat Codex pipeline
+# Multi-front Codex pipeline
 
-Use the four seats as one coordinator and three Codex subagents:
+The 2026-08-29 trial starts from `562b950c`. At that base, 36 of the 45 open groups declare no
+prerequisite. Use one coordinator and three front agents when their production and proof paths do
+not overlap. Fall back to one active slice with oracle, implementation, and review roles when a
+change crosses shared command, daemon, protocol, or tracker paths.
 
-1. The coordinator fixes the slice boundary, assigns file ownership, integrates changes, and owns
-   the commit.
-2. The oracle agent probes the pinned tmux commit and writes the acceptance contract plus the
-   smallest differential fixture that can disprove it.
-3. The implementation agent changes one owned subsystem and runs focused tests. When the campaign is
-   active, this seat may scout a successor after review starts without editing its files.
-4. The review agent hunts context, performs an independent code and proof review, then checks
-   tracker and knowledge claims against source.
+## Trial fronts
 
-Assign one owner to each path before agents edit. The coordinator resolves overlaps instead of
-letting two agents rewrite the same file. Use Codex subagents for this campaign.
+| Front | Worktree | Branch | Chunk | Exclusive production and proof zone |
+| --- | --- | --- | --- | --- |
+| Control response | `/Users/demfabris/dev/zz-tmux-control` | `codex/tmux-control-10ah` | Slice 10ah: `control-mode.kill-server-response-order` | Daemon response admission, Control client exit, and focused Control CLI tests |
+| Config parser | `/Users/demfabris/dev/zz-tmux-config` | `codex/tmux-config-edges` | `config.parser-edge-cases` | Config parser plus its dedicated grammar scenario and fixture |
+| Key grammar | `/Users/demfabris/dev/zz-tmux-keys` | `codex/tmux-key-validation` | `keys.strict-validation` | Protocol key parser plus a dedicated key-validation scenario and fixture |
+
+Integrate the Control front first. The config and key candidates may finish while it runs, but the
+coordinator reranks the remaining registry before accepting either candidate. Slice 10ai stays
+behind 10ah because it uses the same Control paths.
+
+## Ownership and handoff
+
+The coordinator alone edits `TMUX_COMPAT_TRACKER.md`, `compat/tmux-gaps.json`, the generated gap
+report, shared OKF pages, `compat/results/summary.md`, and shared attached or startup diagnostic
+scripts. Each front owns only its listed code, focused tests, and uniquely named scenario files. A
+front stops and reports the overlap if its proof needs a coordinator-owned or another front's path.
+
+Each front probes the pinned tmux build, freezes its acceptance contract, implements the smallest
+coherent change, runs focused proof, and creates a candidate commit. The coordinator reads and
+reviews each complete candidate, applies accepted changes to the campaign branch, updates shared
+artifacts, runs the integration gates, and creates the campaign milestone commit. Candidate branch
+commits are transport for review; the campaign commit remains the recorded milestone.
+
+Focused Rust tests and isolated scenarios may run in parallel from the worktrees. Keep each
+worktree's default `target` and `compat/.cache` directories. Serialize cache repair, oracle writes,
+tracker generation, the full corpus, attached-client diagnostics, startup diagnostics, full
+workspace tests, and clippy. The full corpus also uses the fixed `/tmp/zz-c1-history` path.
+
+After the trial, record merge conflicts, cross-front file requests, test interference, review
+repairs, abandoned work, and closures delivered to the campaign branch. Keep this model only if it
+raises completed, reviewed work without weakening the proof or making integration the bottleneck.
 
 # Validation ladder
 
@@ -774,7 +799,7 @@ surprise.
 Paste this prompt into the next session:
 
 ```text
-Continue the tmux compatibility campaign from the authorized 2026-08-29 checkpoint through slice
+Continue the tmux compatibility campaign from commit `562b950c`, which includes slices 10w through
 10ag. The persisted accepted slice 10ag artifact covers 103 scenarios and 1,630 steps with
 attached-client `PASS`, exactly two approved GEO rows, every other
 channel clean, and SHA-256
@@ -948,14 +973,15 @@ and hard until its proof covers style parsing, malformed markup, controls, live
 `unicode-width` 0.2.2. The alias snapshot prerequisite is closed.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
-source before editing. Use one coordinator and three Codex subagents to probe the selected
-pinned-tmux behavior, trace its current owners, and design the minimum differential proof. Freeze
-the contract before implementation and assign disjoint file ownership.
+source before editing. Use the three-front trial described above only while the selected chunks
+keep disjoint production and proof paths. Each front probes pinned tmux, traces its current owners,
+freezes the contract, and builds the minimum differential proof before implementation. The
+coordinator owns shared campaign artifacts and integration.
 
 Run focused tests, build a fresh debug binary, and run the full attached-client fixture when the
 slice touches attached clients. Rerun the canonical strict differential at the next campaign
 checkpoint, when a change invalidates the artifact, or when a new scenario joins the
 corpus. Update the tracker
-and OKF documents, validate them, and get an independent review. Create the authorized checkpoint
-commit only after every required gate passes. Do not push without explicit authorization.
+and OKF documents, validate them, and get an independent review. Commit each accepted integration
+only after every required gate passes. Do not push without explicit authorization.
 ```

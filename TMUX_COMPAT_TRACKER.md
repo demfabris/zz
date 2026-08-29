@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **AUTHORIZED 2026-08-29 CHECKPOINT FORMED THROUGH SLICE 10AG; KILL-SERVER RESPONSE ORDER NEXT**
+> Campaign state: **CHECKPOINT COMMITTED THROUGH SLICE 10AG; THREE-FRONT TRIAL ACTIVE**
 >
 > Tracker resolution progress: **68.0% (138 of 203 known groups)**
 >
-> Audited committed base: **2026-08-29** at `bbea66a347b19ff40e3b4f14699793bd0017f00b`
+> Integrated campaign base: **2026-08-29** at `562b950c617100031cd2159d0e1f5b6a1ba34c40`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -38,8 +38,8 @@ can close a client mailbox before its successful response is admitted. That resp
 the only `next` group; pane-output discard is frozen as slice 10ai. The persisted accepted slice
 10ag artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two approved
 GEO rows, every other channel clean, and SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Slices 10w through 10ag
-form the authorized 2026-08-29 checkpoint.
+`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Commit `562b950c`
+contains slices 10w through 10ag.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -65,18 +65,18 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited committed base | `bbea66a347b19ff40e3b4f14699793bd0017f00b` |
-| Delivery | Local and remote `main` contain the delivered 10v milestone; slices 10w through 10ag plus the hook reclassification form the authorized 2026-08-29 checkpoint |
-| Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
+| Integrated campaign base | `562b950c617100031cd2159d0e1f5b6a1ba34c40` |
+| Delivery | Local and remote `main` contain slices 10w through 10ag plus the hook reclassification in `562b950c` |
+| Campaign worktrees | Three short-lived trial worktrees branch from the integrated base; the table below owns their paths and file zones |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`; slice 10ah is frozen under `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`, followed by 10ai under `control-mode.exit-pane-output` |
+| Campaign point | Slice 10ah runs on the Control front; config parser edges and strict key grammar run as disjoint trial chunks; 10ai stays behind 10ah on the Control file zone |
 | Live registry | 87 active groups, 594 active items, 116 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The delivered 10v milestone is the committed base above. Resolve the commit
-containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
+Commit `562b950c` is the campaign code base for this trial. Resolve the commit containing the latest
+tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
 before acting because other agents may share it.
@@ -183,7 +183,7 @@ Work one bounded milestone at a time:
 The 2026-08-29 request resumed the campaign through slices 10w, 10x, 10y, 10z, 10aa, 10ab, 10ac,
 10ad, 10ae, 10af, and 10ag, and closed the false `after-queue` producer gap. Slice 10af closes
 positive-delay `run-shell` environment timing. Slice 10ag closes cold startup initial-client cwd.
-Slices 10w through 10ag form the authorized 2026-08-29 checkpoint.
+Commit `562b950c` contains slices 10w through 10ag.
 
 ## Persisted acceptance evidence for 10ag
 
@@ -213,8 +213,8 @@ the repaired 10p full-frame and focus proof. Slice 10q adds no differential scen
 does not change the digest. Slice 10ag validation passes the complete zz package at 653 unit tests
 plus 113 CLI binary tests, and the serialized daemon package at 736 unit tests plus two active agent
 integrations; one long soak remains ignored. The all-feature workspace run excluding the daemon,
-full workspace clippy, and `cargo fmt --check` pass. The artifact and digest above describe the
-authorized 2026-08-29 checkpoint through slice 10ag.
+full workspace clippy, and `cargo fmt --check` pass. The artifact and digest above describe commit
+`562b950c` through slice 10ag.
 Slice 10ad changes no runtime path, protocol, snapshot, scenario, step, attached fixture, or digest.
 Its compatibility gate passes 445 mux tests plus the three required daemon inventory tests. The
 complete workspace tests and clippy, formatting, tracker, summary, and diff checks also pass.
@@ -339,19 +339,19 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10t | Target-session path format under `formats.session-path` | `0da518e` |
 | 10u | Warm command-group argument preflight under `mux.command-group-argument-parse-abort` | `a91128c` |
 | 10v | Source-owned format producer and modifier registration under `tracker.format-vocabulary-registration` | `bbea66a` |
-| Registry correction | Already-shipped whole-file parser abort recorded under `config.parser-abort` | Included in authorized 2026-08-29 checkpoint |
-| 10w | `R` repeat format modifier under `formats.repeat-modifier` | Included in authorized 2026-08-29 checkpoint |
-| 10x | Existing-attach and explicit-empty cwd behavior under `sessions.new-session-attach-cwd` | Included in authorized 2026-08-29 checkpoint |
-| 10y | Config and source replay alias snapshot under `aliases.config-parse-unit` | Included in authorized 2026-08-29 checkpoint |
-| 10z | Config and source file-unit construction under `mux.chain-parse-abort` | Included in authorized 2026-08-29 checkpoint |
-| Registry correction | Explicit-only `after-queue` recorded under `hooks.queue` | Included in authorized 2026-08-29 checkpoint |
-| 10aa | Three-state session-active client context under `formats.session-runtime` | Included in authorized 2026-08-29 checkpoint |
-| 10ab | Window activity timestamp under `formats.window-activity-time` | Included in authorized 2026-08-29 checkpoint |
-| 10ac | Clean command and status job environment under `jobs.command-status-environment` | Included in authorized 2026-08-29 checkpoint |
-| 10ad | Option-consumer source registration under `tracker.semantic-coverage` | Included in authorized 2026-08-29 checkpoint; runtime-neutral |
-| 10ae | Complete option-name format coverage under `options.option-name-format-coverage` | Included in authorized 2026-08-29 checkpoint |
-| 10af | Positive-delay run-shell environment timing under `jobs.run-shell-positive-delay-environment` | Included in authorized 2026-08-29 checkpoint |
-| 10ag | Startup initial-client cwd under `source-file.startup-client-cwd` | Included in authorized 2026-08-29 checkpoint; isolated differential exact |
+| Registry correction | Already-shipped whole-file parser abort recorded under `config.parser-abort` | `562b950c` |
+| 10w | `R` repeat format modifier under `formats.repeat-modifier` | `562b950c` |
+| 10x | Existing-attach and explicit-empty cwd behavior under `sessions.new-session-attach-cwd` | `562b950c` |
+| 10y | Config and source replay alias snapshot under `aliases.config-parse-unit` | `562b950c` |
+| 10z | Config and source file-unit construction under `mux.chain-parse-abort` | `562b950c` |
+| Registry correction | Explicit-only `after-queue` recorded under `hooks.queue` | `562b950c` |
+| 10aa | Three-state session-active client context under `formats.session-runtime` | `562b950c` |
+| 10ab | Window activity timestamp under `formats.window-activity-time` | `562b950c` |
+| 10ac | Clean command and status job environment under `jobs.command-status-environment` | `562b950c` |
+| 10ad | Option-consumer source registration under `tracker.semantic-coverage` | `562b950c`; runtime-neutral |
+| 10ae | Complete option-name format coverage under `options.option-name-format-coverage` | `562b950c` |
+| 10af | Positive-delay run-shell environment timing under `jobs.run-shell-positive-delay-environment` | `562b950c` |
+| 10ag | Startup initial-client cwd under `source-file.startup-client-cwd` | `562b950c`; isolated differential exact |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -986,6 +986,46 @@ server-global `HOME`, falls back to the current user's passwd entry when that va
 unset, resolves named users through `getpwnam`, and reports a located syntax error only when the
 required account lookup fails. A tilde after either closing quote also expands. The sourced-hook
 cwd mismatch applies to Control replay only; Command replay already retains the caller cwd.
+
+## Three-front trial after 10ag
+
+The trial starts from commit `562b950c`. The registry has 45 open groups; 36 have no declared
+prerequisite. A source audit found three bounded chunks with separate production paths:
+
+| Front | Worktree and branch | Tracker contract | Exclusive production and test zone |
+| --- | --- | --- | --- |
+| Control response | `$HOME/dev/zz-tmux-control`, `codex/tmux-control-10ah` | Slice 10ah: `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` | `crates/zz-daemon/src/daemon.rs`, `crates/zz/src/control_mode.rs`, and Control sections of `crates/zz/tests/cli_binary.rs` |
+| Config parser | `$HOME/dev/zz-tmux-config`, `codex/tmux-config-edges` | `config.parser-edge-cases` and its three tilde-expansion items | `crates/zz-mux/src/parser.rs` plus the config-grammar scenario and fixture |
+| Key grammar | `$HOME/dev/zz-tmux-keys`, `codex/tmux-key-validation` | `keys.strict-validation` | `crates/zz-protocol/src/key.rs` plus a dedicated key-validation scenario and fixture |
+
+The Control response front enters integration first because 10ah is the sole `next` group. The
+other two fronts may finish candidate commits while 10ah runs. The coordinator reranks before each
+integration. Slice 10ai stays on the Control file zone and starts after 10ah; its read-only oracle
+work may run during 10ah.
+
+The integration coordinator owns `compat/tmux-gaps.json`, generated `knowledge/tmux/gaps.md`, this
+tracker, shared OKF status pages, `compat/results/summary.md`, `compat/attached-client.sh`, and
+`compat/startup-diagnostics.sh`. A front may add a scenario with a path unique to its chunk. If a
+front needs another front's zone or a coordinator-owned path, it stops and reports the overlap.
+
+Each front probes the pinned source and binary, freezes its acceptance contract, edits its owned
+paths, runs focused proof, and creates a candidate commit on its branch. The coordinator reviews
+the complete candidate diff, applies accepted work without preserving the branch commit as a main
+milestone, updates the registry and knowledge pages, runs the closure gates, and creates one
+milestone commit on `main`. Fabrico has authorized campaign commits. Pushes still require a new
+request.
+
+Focused Cargo tests and read checks may run at the same time in separate worktrees. Each worktree
+uses its default `<worktree>/target`; setting a shared `CARGO_TARGET_DIR` breaks the compatibility
+runner's binary lookup. Cache repair, oracle writes, tracker report generation, full corpus runs,
+attached-client runs, full workspace tests, and strict clippy run through the integration
+coordinator. Full corpus runs also touch `/tmp/zz-c1-history`, so two worktrees must not run them at
+the same time.
+
+After all three chunks reach a candidate result, review the trial itself. Record merge conflicts,
+cross-front file requests, test interference, review fixes, abandoned work, and the number of
+closures that reached `main`. Keep the model when it reduces idle time without weakening the
+per-slice proof or creating cleanup work.
 
 ## Validation and closure gates
 

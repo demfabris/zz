@@ -44,7 +44,7 @@ just compat-check
 ```
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
-and registry, requires eight named mux manifest tests, then runs the full `zz-mux` library suite.
+and registry, requires nine named mux manifest tests, then runs the full `zz-mux` library suite.
 It also requires three named daemon tests: the hook-producer partition, delegated-format consumer,
 and scoped-context registration tests. Each required test runs through `--exact`.
 Linux CI runs the same command after restoring the pinned tmux cache. A full
@@ -287,7 +287,7 @@ and `formats.modifier-fidelity` (`adopt`, open). Native typed producers remain a
 `formats.native-typed-context-producers` (`native`, accepted). Slice 10v changes no protocol,
 snapshot, differential scenario, or accepted artifact. The resumed rerank corrected the stale
 parser-abort ledger item because first-diagnostic whole-file abort was already implemented and
-tested. Slices 10w through 10ag form the authorized 2026-08-29 checkpoint. The tracker now
+tested. Commit `562b950c` contains slices 10w through 10ag. The tracker now
 has 87 active groups with 594 items and 116 closed records: 45 open, 20 blocked, and 22 accepted,
 for 138 of 203 groups resolved (68.0%). The persisted accepted slice 10ag artifact covers 103
 scenarios and 1,630 steps with attached-client `PASS`, exactly two approved GEO rows, every other
@@ -734,7 +734,7 @@ compat/run.sh --check-summary
 
 ## Startup diagnostic differential
 
-`compat/startup-diagnostics.sh` is a separate seven-case gate for clientless startup causes. Run it
+`compat/startup-diagnostics.sh` is a separate eight-case gate for clientless startup causes. Run it
 after building the debug binary and fetching the pinned oracle:
 
 ```sh
@@ -742,11 +742,11 @@ cargo build -p zz --bin zz
 compat/startup-diagnostics.sh target/debug/zz compat/.cache/tmux-src/tmux
 ```
 
-The script requires all seven cases: initial Control cold start; detached launch followed by late
+The script requires all eight cases: initial Control cold start; detached launch followed by late
 Control attach; startup list-output discard; explicit-root failure ordering; multiline cause
-prefixing and completion-line location; daemon-restart redelivery; and Interactive delivery with a
-global drain. It compares normalized Control transcripts, checks detached streams and status, and
-drives the attached Interactive view through real outer PTYs.
+prefixing and completion-line location; daemon-restart redelivery; startup initial-client cwd; and
+Interactive delivery with a global drain. It compares normalized Control transcripts, checks
+detached streams and status, and drives the attached Interactive view through real outer PTYs.
 
 The oracle must be the checkout-root `tmux` executable from a clean checkout at exact commit
 `d77c9dc6aa021e4bc61f0da128c591af695e6466`, report `tmux next-3.8`, and match the build stamp's
@@ -754,7 +754,7 @@ commit, version, fetch-script checksum, and binary checksum. The probe requires 
 commands in real 15-second deadlines, uses 500 ms bounded polls, and stops readiness loops after 10
 seconds. A missing case or any skip fails the run.
 
-The final debug run passes all seven cases with no skips. This focused script does not call
+The final debug run passes all eight cases with no skips. This focused script does not call
 `compat/run.sh` or regenerate the current `compat/results/summary.md`.
 
 Run the real attached-client fixture separately after building zz and fetching the pin when
@@ -1055,7 +1055,7 @@ than this corpus.
 | `compat/tmux-oracle.py` | Captures and verifies the oracle from a clean pinned source checkout |
 | `compat/tmux-tracker.py` | Validates the registry and generates the readable gap report |
 | `compat/run.sh` | Builds both binaries and selects scenarios; a full run with `--attached-client` writes the canonical combined summary |
-| `compat/startup-diagnostics.sh` | Runs the checksum-attested seven-case startup-cause differential without updating the canonical summary |
+| `compat/startup-diagnostics.sh` | Runs the checksum-attested eight-case startup-cause differential without updating the persisted summary |
 | `compat/fetch-tmux.sh` | Acquires tmux and validates its source-aware build stamp |
 | `compat/fetch-corpus.sh` | Acquires and verifies the pinned plugin corpus |
 | `compat/diff-scenario.sh` | Runs one scenario and emits per-step TOPO, GEO, FMT, OUT, and WARN diffs |

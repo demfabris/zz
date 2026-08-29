@@ -123,9 +123,12 @@ client or any command commits it.
 Only the unknown-name error shape is pinned here; malformed alias-body text remains zz-defined while
 `aliases.command-bodies` is open. Focused binary coverage also exercises routing-sensitive
 new-session and attach forms, `-N`, startup shadows, arbitrary startup aliases, invalid nested alias
-bodies, contender and pipeline races, and parked syntax. Warm unaliased argument groups plus config
-and source-file replay remain under `mux.chain-parse-abort`. Remote `--host`, Control mode, runtime
-rollback, and native zz command grammar fall outside this closure.
+bodies, contender and pipeline races, and parked syntax. The post-10t rerank splits warm unaliased
+argument preflight into the frozen slice 10u group
+`mux.command-group-argument-parse-abort`. The planned pass prepares the complete vector before
+effects while exact unaliased `attach` and `attach-session` keep the native parser. Config and
+source-file replay remain under the residual `mux.chain-parse-abort`. Remote `--host`, Control mode,
+runtime rollback, alias snapshots, and native zz command grammar fall outside 10u.
 
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to

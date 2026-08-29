@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10T DELIVERED: LIVE RERANK REQUIRED**
+> Campaign state: **SLICE 10U FROZEN: WARM COMMAND-GROUP PREFLIGHT**
 >
-> Tracker resolution progress: **64.6% (122 of 189 known groups)**
+> Tracker resolution progress: **64.2% (122 of 190 known groups)**
 >
-> Audited pre-close base: **2026-08-28** at `f5e5f026514f06f9692d5587743b5dfa2f7976c3`
+> Committed milestone base: **2026-08-28** at `0da518e8d5e391a4e261b0a392c3a31e92578297`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited pre-close base | `f5e5f026514f06f9692d5587743b5dfa2f7976c3` |
-| Delivery | The current local milestone closes 10t on top of its committed plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Committed milestone base | `0da518e8d5e391a4e261b0a392c3a31e92578297` |
+| Delivery | Local `main` contains the committed 10t closure and frozen 10u plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10t is complete; run a live full-registry rerank before freezing its successor |
-| Live registry | 88 active groups, 594 active items, 101 closed records |
-| Active status | 47 open, 20 blocked, 21 accepted |
+| Campaign point | Slice 10u is frozen on warm local command-group argument preflight; config and source replay remain separate |
+| Live registry | 89 active groups, 594 active items, 101 closed records |
+| Active status | 48 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10t closure descends from the committed plan above. Resolve the commit
+The 10u plan descends from the committed 10t milestone above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(101 + 21) / (101 + 88) = 122 / 189 = 64.6%
+(101 + 21) / (101 + 89) = 122 / 190 = 64.2%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -257,7 +257,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10q | Per-client no-detach-on-destroy fallback and attached proof | `8310fb7` |
 | 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | `02bb4a1` |
 | 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | `8e0ef67` |
-| 10t | Target-session path format under `formats.session-path` | Current milestone; resolve after commit |
+| 10t | Target-session path format under `formats.session-path` | `0da518e` |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -435,20 +435,59 @@ on fresh creation remains an empty session cwd. zz returns from its existing-ses
 applying `-c` and collapses an empty fresh value to omitted. The new
 `sessions.new-session-attach-cwd` group owns both silent mismatches; 10t changes neither.
 
-## Candidate queue after 10t
+## Frozen slice: 10u warm command-group argument preflight
+
+The full post-10t registry rerank overturned the forecast queue. Two independent audits ranked
+warm unaliased command-group preflight ahead of the newly exposed cwd pair because it protects
+every ordinary chained local script from partial effects and reuses a complete source-owned
+validator. The cwd audit also disproved its `easy` label: a direct store in the existing `-A` hit
+branch would leak through nested Control, attached Interactive, and `-A -d` refusals that zz
+currently classifies after mux execution.
+
+The registry therefore splits the old `mux.chain-parse-abort` container. Slice 10u freezes only
+`mux.command-group-argument-parse-abort/semantic:command-group-argument-parse-abort`:
+
+- against an already-running compatible daemon on the local default or an explicit socket, the
+  daemon validates every ordinary tmux command in one prepared vector before the CLI captures
+  stdin, selects attach or TUI routing, or executes the first effect;
+- canonical names, built-in aliases, unique prefixes, recognized parked commands, and user-alias
+  expansions receive the same generic flag, arity, required-value, and nested-block validation;
+- a later preparation error returns the pinned diagnostic and leaves earlier state untouched,
+  while runtime target or effect errors retain sequential queue ordering and prune only later
+  commands;
+- exact unaliased `attach` and `attach-session` keep zz's dedicated local parser and positional
+  session extension; an alias to attach remains an ordinary tmux command and uses catalog grammar;
+- callback commands keep their existing typed construction path, and valid native zz grammar is
+  not pulled into the tmux validator.
+
+The smallest implementation removes the user-alias-only gate around
+`validate_static_command_chain` in the daemon's immutable preparation pass, with one explicit
+exception for an exact unaliased native attach spelling. The CLI already scans every prepared
+result before preprocessing or execution. Focused daemon tests must turn ordinary invalid
+unaliased commands from `Ready` into `CommandParse` errors without weakening callback and alias
+coverage. A live-daemon CLI regression and the existing three-step `cli-chain-parse-abort`
+differential must prove later flag, arity, and missing-value errors preserve an earlier mutation
+sentinel; exact native attach routing must remain covered.
+
+Slice 10u changes no protocol or snapshot and excludes config or source-file replay construction,
+config alias snapshots, parser first-error policy, remote `--host`, Control input, runtime rollback,
+multi-command alias bodies, and native zz command grammar. The residual
+`mux.chain-parse-abort/semantic:config-source-group-parse-abort` remains active and later.
+
+## Candidate queue behind 10u
 
 The table records the fresh rerank, not permission to skip the next audit.
 
 | Order | Exact owner | Boundary |
 | --- | --- | --- |
-| 1 | `sessions.new-session-attach-cwd` | Align existing `-A -c` updates and explicit-empty fresh cwd retention |
-| 2 | `semantic:source-file-startup-initial-client-cwd` | Carry the launching cwd through the bounded cold-bootstrap provenance seam |
+| 1 | `sessions.new-session-attach-cwd` | Align existing `-A -c` and explicit-empty cwd without leaking through post-execution nested refusal |
+| 2 | `aliases.config-parse-unit` | Freeze one alias snapshot while constructing a config or source replay unit |
 | 3 | `format:session_active` | Model no client, unattached client, and attached session across every format producer |
-| 4 | File-wide config parse unit | Combine warm preparation, config/source construction, alias snapshots, and the stale first-error item honestly |
-| 5 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
-| 6 | `semantic:tracker-open-context-format-vocabulary` | Discover and register the omitted open context formats |
-| 7 | `semantic:control-mode-typed-config-diagnostics` | Replace prose sniffing with typed config diagnostics |
-| 8 | `semantic:client-resized-post-geometry-context` | Emit resize hooks after the matching geometry reaches the daemon |
+| 4 | `semantic:source-file-startup-initial-client-cwd` | Carry launching cwd through the private cold-bootstrap provenance seam |
+| 5 | `semantic:tracker-option-consumer-registration` | Replace the manually asserted option-consumer roster with source ownership |
+| 6 | `semantic:config-source-group-parse-abort` | Construct and validate the parser-owned replay group before effects |
+| 7 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
+| 8 | `semantic:tracker-open-context-format-vocabulary` | Discover and register omitted open context formats |
 
 The active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are
@@ -457,6 +496,13 @@ assigned only when a slice is frozen.
 Before selecting every later milestone, explicitly recheck attach-dependent and daily-use groups,
 including buffer file context, source-file client cwd variants, detach execution, parent-HUP exit,
 `display-popup.behavior-fidelity`, menu fidelity, and `active-pane`.
+
+The rerank also corrected four high-confidence registry premises. Floating `break-pane -W` geometry
+now depends on `pane.floating-model`; marked display-message target aliases depend on
+`pane.selection-state`; option-name format coverage follows source-owned option-consumer
+registration; and startup client cwd is a daemon bootstrap-provenance gap rather than an ordinary
+protocol/source-target repair. `formats.window-runtime` and `terminal.key-control` remain discovery
+containers that must split by producer before implementation.
 
 ## Validation and closure gates
 

@@ -38,8 +38,8 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 88 active groups, 594 classified active items, 101 closed groups, and two known
-differentials. Accepted active groups plus closed history resolve 122 of 189 known groups (64.6%).
+The live tracker has 89 active groups, 594 classified active items, 101 closed groups, and two known
+differentials. Accepted active groups plus closed history resolve 122 of 190 known groups (64.2%).
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -110,6 +110,13 @@ partition is now 93 direct mux values, 32 daemon-delegated values, and 73 live g
 `sessions.new-session-attach-cwd` group owns two adjacent mismatches: zz still lacks the pinned
 `new-session -A -c` cwd mutation, and fresh `new-session -c ''` inherits a cwd instead of retaining
 the pin's explicit empty value.
+The post-10t rerank freezes slice 10u on `mux.command-group-argument-parse-abort`. A warm local
+unaliased command vector must prepare every command's argument diagnostics before its first effect.
+Runtime target and effect errors keep sequential queue ordering. Exact native attach retains its
+dedicated parser. Config and source replay stay under the residual `mux.chain-parse-abort`, and 10u
+does not add alias snapshotting. This is a frozen plan; the accepted artifact remains the 10t
+checkpoint above. `sessions.new-session-attach-cwd` is the first alternate at small-medium effort
+because both cwd mutations must preserve nested-refusal ordering.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
@@ -1371,6 +1378,14 @@ permanent product decision has been recorded for them.
   artifact covers 98 scenarios and 1,522 steps, including an 18-step `formats-values` row, with
   attached-client `PASS`, two registered GEO rows, and SHA-256
   `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+- 2026-08-28: The post-10t rerank froze slice 10u on
+  `mux.command-group-argument-parse-abort`. It owns warm local unaliased whole-vector argument
+  preflight before effects while preserving runtime error ordering and exact native attach's
+  dedicated parser. Config and source replay remain in `mux.chain-parse-abort`; alias snapshotting
+  stays outside the slice. The registry split leaves 89 active groups with 594 items and 101 closed
+  entries: 48 open, 20 blocked, and 21 accepted, with 122 of 190 groups resolved (64.2%). No runtime
+  or artifact claim has shipped. `sessions.new-session-attach-cwd` is the first alternate, now rated
+  small-medium because both cwd mutations must preserve nested-refusal ordering.
 
 # Related
 

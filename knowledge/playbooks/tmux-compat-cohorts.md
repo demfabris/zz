@@ -197,9 +197,15 @@ creates, two explicit targets, filtered list output, and lexical `..`. Focused m
 missing retained state and the attach update. The 198-name source partition now contains 93 direct
 values, 32 delegated values, and 73 live gaps.
 
+The post-10t rerank freezes slice 10u on `mux.command-group-argument-parse-abort`. A warm local
+unaliased vector must prepare every command's argument diagnostics before its first effect. Runtime
+target and effect errors keep sequential queue ordering. Exact native attach retains its dedicated
+parser. Config and source replay remain in `mux.chain-parse-abort`, and alias snapshotting stays
+outside 10u. This freeze changes no runtime or accepted artifact.
+
 The accepted post-10t checkpoint has 98 scenarios and 1,522 steps. Every ordinary row is clean.
-The registry holds 88 active groups with 594 items and 101 closed records. Its status split is
-47 open, 20 blocked, and 21 accepted, for 64.6% resolution (122 of 189 groups).
+The registry holds 89 active groups with 594 items and 101 closed records. Its status split is
+48 open, 20 blocked, and 21 accepted, for 64.2% resolution (122 of 190 groups).
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the stored summary SHA-256
@@ -370,10 +376,11 @@ closure is that exception.
 | 10r | Local cold-start CLI parse abort | Closed under `mux.local-cli-autospawn-parse-abort` on 2026-08-28 | Complete | Static syntax covers 83 implemented and nine parked commands; exact attach, `-N`, post-config preparation, and one-shot generation ownership close before effects |
 | 10s | Nonconstant format behavior partition | Closed under `tracker.nonconstant-format-behavior` on 2026-08-28 | Complete | The single 198-name source table derives 92 mux and 32 daemon behavior registrations against 74 live gaps; an exact daemon test proves its delegated consumers |
 | 10t | Target session path format | Closed under `formats.session-path/format:session_path` on 2026-08-28 | Complete | Retained target-session cwd expands at use time; five differential steps and focused mux tests prove targeting, missing state, lexical state, and production attach updates |
-| Live rerank candidate | New-session attach cwd edges | `sessions.new-session-attach-cwd` | Small-medium research | Pin existing-session `new-session -A -c` mutation and fresh explicit-empty `new-session -c ''` retention without reopening `session_path` |
-| Live rerank candidate | Startup initial-client cwd | Not frozen | Medium | Carry the launching cwd through the bounded cold-bootstrap provenance seam for startup-relative sources |
+| 10u | Warm local whole-vector argument preflight | Frozen on `mux.command-group-argument-parse-abort` on 2026-08-28 | Small | Prepare an unaliased vector's complete argument grammar before effects while preserving runtime ordering and exact native attach's dedicated parser |
+| First alternate | New-session attach cwd edges | `sessions.new-session-attach-cwd` | Small-medium | Pin existing-session `new-session -A -c` mutation and fresh explicit-empty `new-session -c ''` retention while preserving nested-refusal ordering |
+| Live rerank candidate | Startup initial-client cwd | `source-file.startup-client-cwd` | Hard | Carry the launching cwd through the cold-bootstrap provenance seam for startup-relative sources |
 | Live rerank candidate | Session-active client context | `format:session_active` | Medium research | Audit no format client, an unattached client, and a client attached to the target across each producer before changing the backing |
-| Post-rerank | File-wide config parse unit | Four related active items | Medium-hard | Prepare warm vectors and whole source files under frozen alias state without changing runtime-error queue semantics |
+| Post-rerank | Config and source replay parse unit | `mux.chain-parse-abort` | Medium-hard | Construct and validate parser-owned groups without folding alias snapshotting or warm local vector work into the slice |
 | Post-rerank forecast | Remaining source-owned tracker registrations | Open context formats, then option consumers | Small research | Register every claimed consumer before broader behavior slices |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | Post-rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
@@ -426,9 +433,20 @@ to that target, and `0` for an unattached client or one attached elsewhere. Its 
 a producer-by-producer tri-state audit. Slice 10t also exposed two `new-session` cwd edges that now
 belong to `sessions.new-session-attach-cwd`: zz lacks the pinned existing-session `new-session -A -c`
 mutation, and fresh `new-session -c ''` inherits a cwd instead of preserving an explicit empty
-value. The next live rerank must weigh those edges against startup initial-client cwd, the file-wide
-config parse unit, open context formats, option consumers, and daily attach work before freezing a
-milestone.
+value. The post-10t rerank weighed those edges against startup initial-client cwd, config and source
+replay, open context formats, option consumers, and daily attach work.
+
+The post-10t rerank selected `semantic:command-group-argument-parse-abort` and split it into
+`mux.command-group-argument-parse-abort`, leaving only
+`semantic:config-source-group-parse-abort` in the later `mux.chain-parse-abort`. Frozen slice 10u
+owns warm local unaliased whole-vector argument preflight. A later flag, arity, option-value, or other
+argument-preparation error must prevent the vector's earlier effect, while target and effect errors
+retain sequential queue behavior. Exact native attach keeps its dedicated parser. Config and source
+replay and alias snapshotting remain outside the slice.
+
+`sessions.new-session-attach-cwd` is the first alternate. Its two cwd mutations are bounded, but the
+implementation must preserve nested-refusal ordering, so the rerank estimates it at small-medium.
+Every row after 10u remains a non-frozen forecast.
 
 # Four-seat Codex pipeline
 
@@ -538,8 +556,15 @@ and SHA-256 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 
 Keep `format:session_active` open for its tri-state producer audit. Keep both newly classified cwd
 edges under `sessions.new-session-attach-cwd`: existing-session `new-session -A -c` mutation and
-fresh explicit-empty `new-session -c ''` retention. Regenerate and rerank the complete live tracker
-before freezing the next slice.
+fresh explicit-empty `new-session -c ''` retention.
+
+Confirm that slice 10u is frozen, not delivered, on `mux.command-group-argument-parse-abort`. Preflight
+the complete argument grammar of a warm local unaliased vector before its first effect while keeping
+runtime target and effect errors sequential. Preserve exact native attach's dedicated parser. Leave
+config and source replay under `mux.chain-parse-abort`, and do not add alias snapshotting. The split
+registry has 89 active groups and 594 items: 48 open, 20 blocked, and 21 accepted, plus 101 closed
+records; 122 of 190 groups are resolved (64.2%). Treat `sessions.new-session-attach-cwd` as the first
+alternate at small-medium effort because both cwd mutations must preserve nested-refusal ordering.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
 source before editing. Use one coordinator and three Codex subagents to probe the selected

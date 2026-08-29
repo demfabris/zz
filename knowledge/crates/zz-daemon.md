@@ -559,9 +559,12 @@ kind-specific server branch.
 Protocol v76 appends `ServerError::CommandParse` at tail tag 12. Mux and daemon handlers use it for
 command-name, flag, arity, and preparation failures, while target and runtime failures keep their
 existing variants. Callers can abort a parse failure before effects without changing runtime queue
-ordering. The cold local CLI closure covers autospawn. `mux.chain-parse-abort` now retains warm
-unaliased argument groups plus config and source-file group construction. Remote `--host`, Control
-mode, and runtime rollback stay outside that closure.
+ordering. The cold local CLI closure covers autospawn. The post-10t rerank freezes slice 10u on
+`mux.command-group-argument-parse-abort`: warm local preparation will validate every ordinary
+unaliased invocation in the vector before effects, while exact unaliased `attach` and
+`attach-session` retain their dedicated native parser. Config and source-file group construction
+remain under the residual `mux.chain-parse-abort`. Remote `--host`, Control mode, alias snapshots,
+runtime rollback, and native zz command grammar stay outside 10u.
 
 Protocol v76 originally appended `EventPayload::SourcedCommandGuard` at tail tag 47 for Control
 replay. Protocol v77 renames that tag in place to

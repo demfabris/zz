@@ -130,6 +130,16 @@ unattached-client, and attached-session producer audit. `sessions.new-session-at
 cwd mutations that 10t does not change: an existing `new-session -A -c` target skips its cwd update,
 and fresh explicit-empty `-c ''` collapses to omitted cwd inheritance.
 
+The post-10t rerank freezes slice 10u on
+`mux.command-group-argument-parse-abort/semantic:command-group-argument-parse-abort`. It will extend
+the warm local daemon preparation pass from names, callbacks, and alias expansions to the complete
+argument grammar of every ordinary unaliased command before any effect. Exact unaliased `attach`
+and `attach-session` retain their dedicated native parser; a user alias with either spelling still
+uses the ordinary tmux catalog. Runtime target and effect errors remain sequential. Config and
+source-file replay construction stays in the residual `mux.chain-parse-abort`, while alias
+snapshotting remains under `aliases.config-parse-unit`. This is a frozen implementation and proof
+contract, not a delivered runtime or accepted-artifact claim.
+
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.
 `choose-client` and `switch-mode` remain covered by their unimplemented command items. `if-shell`

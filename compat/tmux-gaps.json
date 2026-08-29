@@ -794,8 +794,10 @@
       "acceptance": [
         "display-message -t matches CMD_FIND_PANE for relative window offsets and the pin's special window, pane, active, current, and marked target aliases, while preserving the same componentwise CANFAIL state after a miss."
       ],
-      "depends_on": [],
-      "reason": "The closed target-client slice proves exact session, window, and pane names plus numeric pane misses. zz's shared pane resolver still models only part of tmux's relative and special target vocabulary."
+      "depends_on": [
+        "pane.selection-state"
+      ],
+      "reason": "The closed target-client slice proves exact session, window, and pane names plus numeric pane misses. zz's shared pane resolver still models only part of tmux's relative and special target vocabulary, and the bundled marked aliases cannot resolve until pane.selection-state supplies marked-pane identity."
     },
     {
       "id": "display-message.verbose-trace",
@@ -1190,7 +1192,7 @@
         "Window activity timestamps and each client's viewport offsets expand in the correct target context."
       ],
       "depends_on": [],
-      "reason": "The data exists in separate state paths but is not retained as target-aware format input."
+      "reason": "This is a discovery container, not one implementation slice: window_activity is mux-owned timestamp state, window_bigger and viewport offsets are per-client, and cell metrics come from terminal geometry. Split those producer families before scheduling runtime work."
     },
     {
       "id": "history.hyperlink-reset",
@@ -1939,18 +1941,43 @@
     },
     {
       "id": "mux.chain-parse-abort",
-      "title": "Abort invalid command groups before effects",
+      "title": "Construct config and source groups before effects",
       "decision": "adopt",
       "status": "open",
-      "priority": "next",
-      "ease": "medium",
+      "priority": "later",
+      "ease": "hard",
       "impact": [
         "scripts"
       ],
-      "owner": "mux",
+      "owner": "daemon",
       "items": [
-        "semantic:command-group-argument-parse-abort",
         "semantic:config-source-group-parse-abort"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Config and source-file replay construct and validate tmux's required command-group boundary before its first effect while preserving exact first-diagnostic and source-location behavior."
+      ],
+      "depends_on": [],
+      "reason": "Warm local CLI argument preflight has its own source and proof seam under mux.command-group-argument-parse-abort. Config and source-file replay still construct and dispatch parser-owned commands incrementally, with separate first-diagnostic, source-location, alias-snapshot, and asynchronous replay boundaries."
+    },
+    {
+      "id": "mux.command-group-argument-parse-abort",
+      "title": "Preflight warm command arguments before effects",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "easy",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:command-group-argument-parse-abort"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/message.rs",
@@ -1962,11 +1989,12 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Generic flag, arity, option-value, and other command-argument preparation errors abort a command group before its first effect, while runtime target and effect errors retain tmux queue ordering.",
-        "Config and source-file replay construct and validate tmux's required command-group boundary before its first effect while preserving exact first-diagnostic and source-location behavior."
+        "Against an already-running compatible local default or explicit-socket daemon, one prepared snapshot validates every ordinary tmux command's flags, arity, required values, and nested command blocks across the complete CLI vector before stdin capture, attach or TUI routing, or the first effect.",
+        "A later preparation failure returns the pinned diagnostic without an earlier mutation, while runtime target and effect errors retain sequential tmux queue ordering and prune only later commands.",
+        "Exact unaliased attach and attach-session keep their dedicated local parser and positional-session superset, aliases to attach use ordinary tmux catalog grammar, and native zz command grammar remains unchanged."
       ],
       "depends_on": [],
-      "reason": "Protocol v76 separates parse and preparation failures as ServerError::CommandParse from target and runtime failures. Local CLI vectors now receive whole-group validation both against a live daemon and across cold autospawn, but an unaliased vector sent to an already-running daemon still validates generic arguments only as each command reaches dispatch. Config and source-file replay also remain dispatch-at-a-time rather than constructing and validating the full parser-owned group before effects."
+      "reason": "The daemon already prepares one immutable command vector and the mux already has the complete static tmux argument validator, but the warm preparation path applies that validator only after a user alias match. Ordinary unaliased flag, arity, and value failures can therefore follow an earlier effect even though unknown names and alias-body errors already abort the vector."
     },
     {
       "id": "options.lock-program",
@@ -2095,8 +2123,10 @@
       "acceptance": [
         "Every supported option-name format resolves through the pinned target scope and inheritance chain, with source-owned coverage for the complete intended roster."
       ],
-      "depends_on": [],
-      "reason": "The status and display-message paths resolve the consumer-backed option families, but there is no complete source-owned proof for every stored option name."
+      "depends_on": [
+        "tracker.semantic-coverage"
+      ],
+      "reason": "The status and display-message paths resolve selected hard-coded option families, but the intended consumer roster is not yet source-owned. tracker.semantic-coverage must register that roster before this group can prove complete target-scope and inheritance behavior."
     },
     {
       "id": "options.pane-chrome",
@@ -2248,7 +2278,7 @@
     },
     {
       "id": "pane.break-geometry",
-      "title": "Complete break-pane placement",
+      "title": "Complete floating break-pane placement",
       "decision": "adopt",
       "status": "open",
       "priority": "later",
@@ -2272,8 +2302,10 @@
       "acceptance": [
         "Differential geometry tests cover target window creation, name, size, and placement coordinates."
       ],
-      "depends_on": [],
-      "reason": "The mux owns the needed window and layout state."
+      "depends_on": [
+        "pane.floating-model"
+      ],
+      "reason": "Pinned -W enters the floating-pane path, where -x, -y, -X, and -Y size and place the floating pane. These flags do not describe ordinary tiled destination-window geometry and cannot ship before pane.floating-model."
     },
     {
       "id": "pane.floating-model",
@@ -2629,7 +2661,7 @@
       "decision": "adopt",
       "status": "open",
       "priority": "next",
-      "ease": "easy",
+      "ease": "medium",
       "impact": [
         "scripts"
       ],
@@ -2640,14 +2672,16 @@
       ],
       "evidence": [
         "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
         "When new-session -A finds an existing session, -c expands exactly once in the resolved target and invoking-client context, updates that target before attach terminal preflight, survives terminal-open failure, isolates other sessions, and leaves a clientless -A inert.",
+        "A nested Control, attached Interactive, or -A -d hit refuses before target selection, -c expansion, or cwd mutation, while a permitted Control hit updates and attaches.",
         "Fresh creation and an -A miss distinguish omitted -c from an explicitly empty expansion, retain the empty session cwd like the pin, and preserve the existing initial-pane fallback."
       ],
       "depends_on": [],
-      "reason": "Pinned new-session delegates an existing -A target to attach-session, including its -c cwd update, and retains an explicitly empty cwd for fresh creation. zz returns from the existing-session branch before calculating or storing -c and collapses an empty fresh value to omitted, leaving the retained session cwd and session_path wrong in both cases."
+      "reason": "Pinned new-session delegates an existing -A target to attach-session, including its -c cwd update, and retains an explicitly empty cwd for fresh creation. zz returns from the existing-session branch before calculating or storing -c and collapses an empty fresh value to omitted. A direct hit-branch store is unsafe because zz's nested Control, attached Interactive, and -A -d classifier currently refuses existing attaches after mux execution; the repair must suppress target selection, expansion, and mutation on that path."
     },
     {
       "id": "source-file.event-hook-client-cwd",
@@ -2707,7 +2741,7 @@
       "impact": [
         "scripts"
       ],
-      "owner": "protocol",
+      "owner": "daemon",
       "items": [
         "semantic:source-file-startup-initial-client-cwd"
       ],
@@ -2720,7 +2754,7 @@
         "When the first client launches a new server from a cwd different from the daemon process, relative startup sources use that initial client cwd until startup completes, including nested replay and a metacharacter-bearing path."
       ],
       "depends_on": [],
-      "reason": "Pinned tmux keeps cfg_client available while startup configuration runs, so server_client_get_cwd uses the launching client's cwd. zz loads startup configuration before any client registers and has no initial-client cwd to select."
+      "reason": "Pinned tmux keeps cfg_client available while startup configuration runs, so server_client_get_cwd uses the launching client's cwd. zz loads startup configuration before any client registers and has no initial-client cwd to select; the missing seam is cold-spawn provenance from the launcher into daemon bootstrap, not ordinary source target resolution."
     },
     {
       "id": "terminal.key-control",
@@ -2751,7 +2785,7 @@
         "Terminal and attached-client tests cover reset, clear, key-table injection, high bytes, counts, and copy commands; both a bare no-key -N count and `send-keys -N <n> -X` with no action live on the pane mode and survive the pin's cross-client invocation rules."
       ],
       "depends_on": [],
-      "reason": "The terminal input path exists but lacks several tmux key and reset operations."
+      "reason": "This is a discovery container that must split before scheduling: -K needs the invoking queue key event, -R resets terminal parser and palette state, -c targets a client, high hex needs byte semantics, and no-key counts need pane-owned cross-client mode state."
     },
     {
       "id": "terminal.resize-pane-trim",
@@ -3856,7 +3890,7 @@
         "scenario:compat/scenarios/smoke/cli-chain-parse-abort.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "Against an already-running compatible daemon, local default and explicit-socket CLI preflight scans the complete prepared vector for typed name and alias-body errors before stdin capture, attach or TUI routing, or command execution. A later unknown command returns exit 1 with the pinned error shape and no earlier effect; malformed alias bodies use zz's loud unknown-command shape while aliases.command-bodies remains open. Prepared runtime command failures keep sequential queue ordering, including earlier effects and pruning later commands. A focused binary regression uses a malformed live alias after a mutating command, and the strict three-step smoke scenario proves unknown-name parse atomicity and runtime-error ordering with zero differential mismatches. The later mux.local-cli-autospawn-parse-abort closure extends whole-vector preparation across the missing-daemon seam. Remote --host remains excluded, and warm unaliased flag or arity validation plus config or source-file replay remains open under mux.chain-parse-abort."
+      "resolution": "Against an already-running compatible daemon, local default and explicit-socket CLI preflight scans the complete prepared vector for typed name and alias-body errors before stdin capture, attach or TUI routing, or command execution. A later unknown command returns exit 1 with the pinned error shape and no earlier effect; malformed alias bodies use zz's loud unknown-command shape while aliases.command-bodies remains open. Prepared runtime command failures keep sequential queue ordering, including earlier effects and pruning later commands. A focused binary regression uses a malformed live alias after a mutating command, and the strict three-step smoke scenario proves unknown-name parse atomicity and runtime-error ordering with zero differential mismatches. The later mux.local-cli-autospawn-parse-abort closure extends whole-vector preparation across the missing-daemon seam. Remote --host remains excluded. Warm unaliased flag and arity validation is frozen separately under mux.command-group-argument-parse-abort; config and source-file replay remains open under mux.chain-parse-abort."
     },
     {
       "id": "mux.positional-maximums",

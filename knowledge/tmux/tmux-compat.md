@@ -49,27 +49,26 @@ The reference commit is tmux `d77c9dc6aa021e4bc61f0da128c591af695e6466`
 
 The pin is an oracle, not a dependency. Updating it is a separate compatibility event.
 
-Oracle schema 4 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
+Oracle schema 5 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
 valueless, 246 required-value, and 8 optional-value. Each command also carries positional minimum
 and maximum metadata. It parses nine custom `args_parse` callbacks used by 14 commands and reduces
 them to six effective rules. The remaining inventories contain 180 options, 198 global format-table
-names, 14 source-enumerated names across three selected format contexts, 68 hooks, and 303 default
-bindings across five tables. The 198 global names divide into 93 values resolved directly by the
-mux, 32 delegated to daemon `StatusHooks`, and 73 constant-backed names that remain active
-`format:` gaps. The context selection consists of 1 shared `command-item` name, 3
-`list-commands` names, and 10 `list-keys` names. zz implements all 14. The 13 list-specific names
-came first, and `formats.command-item-context` closed on 2026-08-24 when the shared `command` name
-became a command-queue-item fact that every command the mux engine runs carries.
+names, 31 literal context-producer scopes with 153 scoped pairs and 108 unique names, 10 derived
+context families, five propagation records, 36 format modifiers, 68 hooks, and 303 default bindings
+across five tables. The 198 global names divide into 93 values resolved directly by the mux, 32
+delegated to daemon `StatusHooks`, and 73 constant-backed names that remain active `format:` gaps.
+The literal scoped pairs divide into 58 implemented, 54 native, and 41 active gaps. The derived
+families divide into eight implemented and two active gaps; the modifier vocabulary divides into 30
+implemented and six active gaps. `formats.command-item-context` closed on 2026-08-24 when the shared
+`command` name became a command-queue-item fact that every command the mux engine runs carries.
 
 The same command-item hooks reach the five arguments that tmux expands: both rename names, both
 show-option names, and `select-pane -T`. Each handler expands after target resolution in the old
 target context. Directional `select-pane -T` reads the original pane and writes the expanded title
 to the destination pane.
 
-The selected context rosters do not describe tmux's whole context-format vocabulary. Queue state,
-hook arguments, options, user options, and environment variables can contribute names at runtime.
-The frozen 10v contract assigns registration of that surface and the modifier vocabulary to
-`tracker.format-vocabulary-registration`; runtime behavior remains separate.
+Schema 5 registers source producers and modifier tokens. It does not establish context-value or
+modifier-runtime parity. Those semantics remain with the successor groups described below.
 
 The canonical check recaptures the inventory from a `tmux next-3.8` binary at the root of a clean
 source checkout at the exact pin. The companion build stamp must also match the commit, version,
@@ -85,11 +84,11 @@ stores its update date, active gaps, and closed history. The generated
 product disposition as open, blocked, or accepted. `depends_on` records delivery order and does not
 set status.
 
-`just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, runs
-the full `zz-mux` library suite, then requires the daemon hook-producer partition and
-delegated-format consumer tests and runs each through `--exact`. The Rust gate reconciles upstream
-command and alias names, flag arities, positional bounds, custom argument rules, option names,
-global and selected context-format names, and hook names. It classifies native commands, native aliases, zz-only flags
+`just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, requires
+eight named mux compatibility tests in the full `zz-mux` library run, then runs three named daemon
+compatibility tests through `--exact`. The Rust gate reconciles upstream command and alias names,
+flag arities, positional bounds, custom argument rules, option names, global formats, literal and
+derived context producers, format modifiers, and hook names. It classifies native commands, native aliases, zz-only flags
 on tmux command names, and every zz-only default key. It derives the guarded native-name roster from
 the catalog minus the pinned oracle, then checks every pinned canonical prefix against the live
 resolver. It pairs every
@@ -107,9 +106,12 @@ names. It also rejects duplicate explicit names and produced-versus-tracked over
 closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves commands and
 unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
 unbound after ensuring its table. Structural key equality still does not prove every downstream
-command or copy action. Those consumers retain their existing owners. The gate still does not prove
-open-ended or dynamic context-format names or consumer truth for option `BEHAVES`. The post-10u
-freeze gives context and modifier registration to `tracker.format-vocabulary-registration`;
+command or copy action. Those consumers retain their existing owners. Slice 10v closes the
+open-ended context and modifier registration blind spot. The gate still does not prove context
+values, modifier semantics, or consumer truth for option `BEHAVES`.
+`formats.context-producer-fidelity` owns context values as adopt/open,
+`formats.modifier-fidelity` owns modifier semantics as adopt/open, and
+`formats.native-typed-context-producers` records native typed producers as native/accepted.
 `tracker.semantic-coverage` retains option-consumer truth. At the slice 10s close, the nonconstant
 global-format registration partitioned the 198-name pin into 92 direct mux values, 32
 daemon-delegated values, and 74 active constant-backed `format:` gaps. The mux invariant kept those
@@ -153,29 +155,21 @@ name, invalid flag, excessive arity, missing value, later `attach`, and later `a
 zero differential channels. Slice 10u changes no protocol or snapshot and leaves the 98-scenario,
 1,522-step attached-client `PASS` artifact unchanged.
 
-The post-10u rerank freezes slice 10v on `tracker.format-vocabulary-registration`. Schema 4 and its
-Rust gate both select the same three scopes and 14 names. Direct literal calls in the pinned source
-span 31 `path:function` scopes, 153 scoped pairs, and 108 unique names; 94 names are outside the
-current selection. The pin recognizes 36 modifier tokens while zz accepts 30. `w`, `I`, `L`, `O`,
-`V`, and `R` are absent. Direct scratch-socket probes show silent differences for `w` display-cell
-width, `R` repeat, `O` option loops, and `V` environment loops. Pinned source and the manual
-classify `I` as client feature, termcap, and environment interrogation; the pinned modifier
-regression classifies `L` as an attached-client loop.
+Slice 10v closes `tracker.format-vocabulary-registration` on 2026-08-28. Oracle schema 5 registers
+31 literal producer scopes, 153 scoped pairs, and 108 unique names, plus 10 derived families, five
+propagation records, and all 36 modifier tokens. The source-owned partitions classify literal pairs
+as 58 implemented, 54 native, and 41 active gaps; derived families as eight implemented and two
+active gaps; and modifiers as 30 implemented and six active gaps. The two adopt/open successors are
+`formats.context-producer-fidelity` and `formats.modifier-fidelity`.
+`formats.native-typed-context-producers` records the native/accepted source registrations.
 
-Schema 5 will register the literal producers, queue-added `current_file`, `hook`, and
-`hook_arguments`, numbered run-shell
-argument keys, `hook_argument_<n>`, `hook_flag_<char>`, `hook_flag_<char>_<n>`,
-`next_window_index`, `next_window_active`, `prev_window_index`, `prev_window_active`, `next_@*` and
-`prev_@*` user-option families, and all modifier tokens. Production-owned implemented, native, and
-active-gap partitions must be disjoint and exhaustive. One semantic owner classifies the six absent
-tokens without creating six runtime items. Slice 10v does not change runtime modifier behavior,
-context-value semantics, option consumers, protocol, snapshots, scenarios, or the accepted
-artifact. The frozen registry has 89 active groups and 594 items, with 102 closed records: 48 open,
-20 blocked, and 21 accepted; 123 of 191 groups are resolved (64.4%). The accepted artifact remains
-98 scenarios and 1,522 steps with attached-client `PASS` and SHA-256
-`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
-`sessions.new-session-attach-cwd` is the first runtime alternate, subject to another rerank after
-schema 5 expands the classification.
+Slice 10v changes no runtime modifier behavior, context values, option consumers, protocol,
+snapshots, scenarios, or accepted artifact. The registry now has 91 active groups and 595 items,
+with 103 closed records: 49 open, 20 blocked, and 22 accepted. Closed records plus accepted active
+groups resolve 125 of 194 known groups (64.4%). The accepted artifact remains 98 scenarios and
+1,522 steps with attached-client `PASS` and SHA-256
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`. The user paused the campaign
+after 10v. No rerank or next slice is selected.
 
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.

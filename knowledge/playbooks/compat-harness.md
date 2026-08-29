@@ -44,30 +44,31 @@ just compat-check
 ```
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
-and registry, requires seven named mux manifest tests, then runs the full `zz-mux` library suite.
-It also requires two named daemon tests, the hook-producer partition and delegated-format consumer
-tests, and runs each through `--exact`.
+and registry, requires eight named mux manifest tests, then runs the full `zz-mux` library suite.
+It also requires three named daemon tests: the hook-producer partition, delegated-format consumer,
+and scoped-context registration tests. Each required test runs through `--exact`.
 Linux CI runs the same command after restoring the pinned tmux cache. A full
 `compat/run.sh` checks the oracle and tracker before executing scenarios.
 
-Oracle schema 4 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
+Oracle schema 5 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
 valueless, 246 required-value, and 8 optional-value. Every command also carries its positional
 minimum and maximum. The source pass also records 14 commands that use nine custom `args_parse`
 callbacks as six effective rules. The remaining inventories contain 180 options, 198 global
-format-table names, 14 source-enumerated names across the selected `command-item`, `list-commands`,
-and `list-keys` contexts, 68 hooks, and 303 default bindings across `root`, `prefix`, `copy-mode`,
-`copy-mode-vi`, and `move`. The 198 global names divide into 93 values resolved directly by the mux,
-32 delegated to daemon `StatusHooks`, and 73 constant-backed names that remain active `format:`
-gaps.
+format-table names, 31 literal context-producer scopes with 153 scoped pairs and 108 unique names,
+10 derived families, five propagation records, 36 modifier tokens, 68 hooks, and 303 default
+bindings across `root`, `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. The 198 global names
+divide into 93 values resolved directly by the mux, 32 delegated to daemon `StatusHooks`, and 73
+constant-backed names that remain active `format:` gaps.
 
 The Rust gate reconciles command and alias names, flag arities, positional bounds, custom argument
-rules, option names, global and selected context-format names, and hook names. It also classifies
+rules, option names, global formats, the complete schema 5 context and modifier inventories, and
+hook names. It also classifies
 native commands, native aliases, zz-only flags on tmux command names, and every zz-only default key.
 It derives the guarded native-name roster from the catalog minus the pinned oracle and checks every
 pinned canonical prefix against the resolver. It pairs every constant-backed format with a manifest
 item and tracks every missing default key across all five tmux tables. For each shared default key,
 it also reconciles the rendered command and repeat bit or requires a named `binding:` divergence. The
-three selected context rosters contain 1 `command-item` name, 3 `list-commands` names, and 10
+earlier selected context rosters contain 1 `command-item` name, 3 `list-commands` names, and 10
 `list-keys` names. zz implements all 14. `formats.command-item-context` closed on 2026-08-24: the
 mux dispatch chokepoint carries the canonical entry name into every command it runs, so `#{command}`
 expands inside any command item and stays empty outside one. The daemon-preempted half closed under
@@ -75,11 +76,10 @@ expands inside any command item and stays empty outside one. The daemon-preempte
 and the daemon's post-spawn `new-window`/`split-window -P -F` pass retains it while adding live pane
 facts. Delayed subscriptions and prompts stay outside an item.
 
-Schema 4 does not cover the full context or modifier vocabulary. Its Python capture and Rust gate
-repeat the same three-scope selection, so they can agree while omitting source producers. The
-post-10u audit found 31 literal `path:function` scopes, 153 scoped name pairs, and 108 unique names
-in the pin. Ninety-four names sit outside the selected 14. Pinned `format_build_modifiers`
-recognizes 36 tokens; zz accepts 30 and omits `w`, `I`, `L`, `O`, `V`, and `R`.
+Slice 10v closes the former selected-context blind spot. The literal partition is 58 implemented
+pairs, 54 native pairs, and 41 active gaps. The derived partition is eight implemented families and
+two active gaps. The modifier partition is 30 implemented tokens and six active gaps. These are
+source-registration facts, not runtime or context-value-parity claims.
 
 `formats.command-argument-expansion` closed five target-sensitive paths on 2026-08-24. The current
 `command-item-format` scenario covers the positional names for `rename-session` and
@@ -170,24 +170,17 @@ and all 74 format gaps retained their runtime owners at that checkpoint. The ora
 snapshots, scenarios, and accepted compatibility artifact did not change. Slice 10m already closed
 the shared-binding
 runtime mismatch for bare key-only `bind-key`; downstream command and copy-action behavior retains
-its separate owners. The post-10u rerank freezes slice 10v on
-`tracker.format-vocabulary-registration`. Schema 5 will source-register all literal context
-producers by `path:function`, the complete modifier token set, queue-added `current_file`, `hook`,
-and `hook_arguments`, and explicit dynamic families: numbered run-shell argument keys, `hook_argument_<n>`,
-`hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`, `next_window_active`,
-`prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*` user options. Production-owned zz inventories
-must classify each entry as implemented, native, or an active gap. Those partitions must be disjoint and
-exhaustive. New or stale source entries must fail `just compat-check`.
+its separate owners. Slice 10v closes `tracker.format-vocabulary-registration` with the schema 5
+source inventory and disjoint, exhaustive production-owned partitions. New or stale literal,
+derived, propagation, or modifier entries fail `just compat-check`.
 
-The single semantic registration owner records the six absent modifiers without creating six
-runtime items or claiming runtime support. Direct scratch-socket probes already show silent
-differences for `w` display-cell width, `R` repeat, `O` option loops, and `V` environment loops.
-Pinned source and the manual classify `I` as client feature, termcap, and environment
-interrogation; the pinned modifier regression classifies `L` as an attached-client loop. Context-specific value
-parity and option `BEHAVES` consumer truth stay open. Slice 10v
-changes no protocol, snapshot, differential scenario, or accepted artifact. Its frozen registry
-state is 89 active groups with 594 items and 102 closed records: 48 open, 20 blocked, and 21
-accepted, for 123 of 191 groups resolved (64.4%). Shared command-flag diagnostics
+Runtime and context-value fidelity remain under `formats.context-producer-fidelity` (`adopt`, open)
+and `formats.modifier-fidelity` (`adopt`, open). Native typed producers remain accepted under
+`formats.native-typed-context-producers` (`native`, accepted). Slice 10v changes no protocol,
+snapshot, differential scenario, or accepted artifact. The tracker now has 91 active groups with
+595 items and 103 closed records: 49 open, 20 blocked, and 22 accepted, for 125 of 194 groups
+resolved (64.4%). The campaign is paused by user request after 10v, so there is no rerank or next
+slice. Shared command-flag diagnostics
 closed on 2026-08-28 without retaining the earlier partial
 daemon roster. The catalog parser covers 83 implemented upstream canonical commands and 74 aliases
 through mux execution, daemon preflight, and stored commands. Exact native attach shares the
@@ -334,8 +327,8 @@ Slice 10u keeps `smoke/cli-chain-parse-abort` at three harness steps and now run
 without changing the scenario count, persisted step count, or attached result. All six finish with
 zero TOPO, GEO, FMT, OUT, or WARN differences. Runtime target and effect errors retain the existing
 sequential probe: the earlier effect remains and the failed command prunes the later effect.
-Slice 10v is a source-registration plan freeze. It adds no canonical scenario or step and does not
-change the attached-client result. The accepted artifact remains 98 scenarios and 1,522 steps with
+Slice 10v is a delivered source-registration closure. It adds no canonical scenario or step and
+does not change the attached-client result. The accepted artifact remains 98 scenarios and 1,522 steps with
 attached-client `PASS` and SHA-256
 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
@@ -756,8 +749,9 @@ Register a gap before implementing it:
    update the same active ID and its evidence. Regenerate `knowledge/tmux/gaps.md`, then run
    `just compat-check` again.
 
-Use the generated report to choose the next slice. The roadmap supplies dependency order, and the
-divergence matrix supplies detailed rationale; neither owns live status.
+When the user resumes the campaign, use the generated report to rerank and choose a slice. The
+roadmap supplies dependency order, and the divergence matrix supplies detailed rationale; neither
+owns live status.
 
 ## Adding a smoke scenario
 
@@ -836,7 +830,7 @@ than this corpus.
 | --- | --- |
 | `compat/check.sh` | Runs the oracle, registry, and full `zz-mux` library gate |
 | `compat/tmux-gaps.json` | Owns active gaps, product status, ordering, evidence, and closed history |
-| `compat/tmux-oracle.json` | Records schema 4 source and runtime inventories from the pin |
+| `compat/tmux-oracle.json` | Records schema 5 source and runtime inventories from the pin |
 | `compat/tmux-oracle.py` | Captures and verifies the oracle from a clean pinned source checkout |
 | `compat/tmux-tracker.py` | Validates the registry and generates the readable gap report |
 | `compat/run.sh` | Builds both binaries and selects scenarios; a full run with `--attached-client` writes the canonical combined summary |

@@ -25,6 +25,12 @@ pub use command::{
     hook_format_variables, if_shell_truthy, send_keys_is_read_only_safe,
     validate_static_command_chain,
 };
+#[doc(hidden)]
+pub use command::{
+    accepted_native_literal_format_context_scopes, missing_derived_format_context_families,
+    missing_literal_format_context_scopes, mux_derived_format_context_families,
+    mux_literal_format_context_scopes,
+};
 pub use formats::{
     TmuxColour, delegated_format_variable_names, display_width, format_true, indexed_colour_rgb,
     parse_tmux_colour,

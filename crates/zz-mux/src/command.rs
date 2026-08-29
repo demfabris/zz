@@ -61,10 +61,11 @@ const MAX_COMMAND_PROMPT_TEMPLATE_BYTES: usize = 8 * 1024;
 const DEFAULT_DISPLAY_MESSAGE: &str = "[#{session_name}] #{window_index}:#{window_name}, current pane #{pane_index} - (%H:%M %d-%b-%y)";
 const DEFAULT_NEW_SESSION_FORMAT: &str = "#{session_name}:";
 const DEFAULT_PANE_CREATION_FORMAT: &str = "#{session_name}:#{window_index}.#{pane_index}";
-pub(crate) const COMMAND_ITEM_CONTEXT_FORMATS: &[&str] = &["command"];
+const COMMAND_ITEM_CONTEXT_FORMATS: &[&str] = &["command"];
+const ROW_CONTEXT_FORMATS: &[&str] = &["line"];
 const DEFAULT_LIST_COMMANDS_FORMAT: &str =
     "#{command_list_name}#{?command_list_alias, (#{command_list_alias}),} #{command_list_usage}";
-pub(crate) const LIST_COMMAND_CONTEXT_FORMATS: &[&str] = &[
+const LIST_COMMAND_CONTEXT_FORMATS: &[&str] = &[
     "command_list_alias",
     "command_list_name",
     "command_list_usage",
@@ -80,18 +81,280 @@ const DEFAULT_LIST_KEYS_FORMAT: &str = concat!(
     "#{p|#{key_string_width}:#{q|a:key_string}} ",
     "#{key_command}}",
 );
-pub(crate) const LIST_KEY_CONTEXT_FORMATS: &[&str] = &[
+const LIST_KEY_BINDING_CONTEXT_FORMATS: &[&str] = &[
     "key_command",
-    "key_has_repeat",
     "key_note",
     "key_prefix",
     "key_repeat",
     "key_string",
-    "key_string_width",
     "key_table",
+];
+const LIST_KEY_SUMMARY_CONTEXT_FORMATS: &[&str] = &[
+    "key_has_repeat",
+    "key_string_width",
     "key_table_width",
     "notes_only",
 ];
+const HOOK_CONTEXT_FORMAT: &str = "hook";
+const HOOK_ARGUMENTS_CONTEXT_FORMAT: &str = "hook_arguments";
+const HOOK_ARGUMENT_CONTEXT_PATTERN: &str = "hook_argument_N";
+const HOOK_ARGUMENT_CONTEXT_PREFIX: &str = "hook_argument_";
+const HOOK_FLAG_CONTEXT_PATTERN: &str = "hook_flag_X";
+const HOOK_FLAG_CONTEXT_PREFIX: &str = "hook_flag_";
+const HOOK_FLAG_VALUE_CONTEXT_PATTERN: &str = "hook_flag_X_N";
+
+const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
+    (
+        "cmd-list-commands.c",
+        "cmd_list_single_command",
+        LIST_COMMAND_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-list-keys.c",
+        "cmd_list_keys_exec",
+        LIST_KEY_SUMMARY_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-list-keys.c",
+        "cmd_list_keys_format_add_key_binding",
+        LIST_KEY_BINDING_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-list-panes.c",
+        "cmd_list_panes_window",
+        ROW_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-list-sessions.c",
+        "cmd_list_sessions_exec",
+        ROW_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-list-windows.c",
+        "cmd_list_windows_exec",
+        ROW_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-queue.c",
+        "cmdq_merge_formats",
+        COMMAND_ITEM_CONTEXT_FORMATS,
+    ),
+    ("notify.c", "notify_hook", &[HOOK_CONTEXT_FORMAT]),
+];
+
+const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
+    ("hook", &[HOOK_CONTEXT_FORMAT], &[]),
+    ("hook-arguments", &[HOOK_ARGUMENTS_CONTEXT_FORMAT], &[]),
+    ("hook-argument", &[], &[HOOK_ARGUMENT_CONTEXT_PATTERN]),
+    ("hook-flag", &[], &[HOOK_FLAG_CONTEXT_PATTERN]),
+    ("hook-flag-value", &[], &[HOOK_FLAG_VALUE_CONTEXT_PATTERN]),
+];
+
+const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
+    (
+        "mode-tree.c",
+        "mode_tree_draw",
+        &[
+            "mode_tree_branch",
+            "mode_tree_expanded",
+            "mode_tree_flat",
+            "mode_tree_has_children",
+            "mode_tree_key",
+            "mode_tree_key_width",
+            "mode_tree_last",
+            "mode_tree_parent_last",
+            "mode_tree_repeat",
+            "mode_tree_selected",
+        ],
+    ),
+    (
+        "prompt.c",
+        "prompt_expand",
+        &[
+            "command_prompt",
+            "message",
+            "prompt_flags",
+            "prompt_input",
+            "prompt_type",
+        ],
+    ),
+    (
+        "status.c",
+        "status_message_redraw",
+        &["command_prompt", "message"],
+    ),
+    (
+        "window-client.c",
+        "window_client_get_key",
+        ROW_CONTEXT_FORMATS,
+    ),
+    (
+        "window-copy.c",
+        "window_copy_formats",
+        &[
+            "copy_cursor_hyperlink",
+            "copy_cursor_line",
+            "copy_cursor_word",
+            "copy_cursor_x",
+            "copy_cursor_y",
+            "copy_position",
+            "copy_position_limit",
+            "rectangle_toggle",
+            "scroll_position",
+            "search_count",
+            "search_count_partial",
+            "search_match",
+            "search_present",
+            "search_timed_out",
+            "selection_active",
+            "selection_end_x",
+            "selection_end_y",
+            "selection_mode",
+            "selection_present",
+            "selection_start_x",
+            "selection_start_y",
+            "top_line_time",
+        ],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build",
+        &["is_key", "is_option"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_array",
+        &["option_name", "option_value"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_keys",
+        &["is_key", "is_option", "key", "key_note"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_option",
+        &[
+            "option_is_array",
+            "option_is_global",
+            "option_name",
+            "option_scope",
+            "option_unit",
+            "option_value",
+        ],
+    ),
+];
+const OPTION_LOOP_CONTEXT_FORMATS: &[&str] = &[
+    "loop_index",
+    "loop_last_flag",
+    "option_array_count",
+    "option_array_first",
+    "option_array_index",
+    "option_array_key",
+    "option_array_last",
+    "option_is_array",
+    "option_is_hook",
+    "option_is_user",
+    "option_name",
+    "option_value",
+];
+const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
+    (
+        "format.c",
+        "format_loop_add_array_item",
+        OPTION_LOOP_CONTEXT_FORMATS,
+    ),
+    (
+        "format.c",
+        "format_loop_add_option",
+        OPTION_LOOP_CONTEXT_FORMATS,
+    ),
+    (
+        "format.c",
+        "format_loop_clients",
+        &["loop_index", "loop_last_flag"],
+    ),
+    (
+        "format.c",
+        "format_loop_environ",
+        &[
+            "environ_hidden",
+            "environ_name",
+            "environ_removed",
+            "environ_value",
+            "loop_index",
+            "loop_last_flag",
+        ],
+    ),
+    (
+        "notify.c",
+        "notify_monitor_cb",
+        &[
+            "hook",
+            "hook_last",
+            "hook_pane",
+            "hook_session",
+            "hook_session_name",
+            "hook_value",
+            "hook_window",
+            "hook_window_index",
+            "hook_window_name",
+        ],
+    ),
+];
+const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
+    ("current-file", &["current_file"], &[]),
+    ("window-neighbour-user-option", &[], &["next_@*", "prev_@*"]),
+];
+
+#[doc(hidden)]
+pub fn mux_literal_format_context_scopes()
+-> impl Iterator<Item = (&'static str, &'static str, &'static [&'static str])> {
+    LITERAL_FORMAT_CONTEXT_SCOPES
+        .iter()
+        .copied()
+        .chain(crate::formats::literal_format_context_scopes())
+}
+
+#[doc(hidden)]
+pub fn accepted_native_literal_format_context_scopes()
+-> impl Iterator<Item = (&'static str, &'static str, &'static [&'static str])> {
+    ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES
+        .iter()
+        .copied()
+}
+
+#[doc(hidden)]
+pub fn missing_literal_format_context_scopes()
+-> impl Iterator<Item = (&'static str, &'static str, &'static [&'static str])> {
+    MISSING_LITERAL_FORMAT_CONTEXT_SCOPES.iter().copied()
+}
+
+#[doc(hidden)]
+pub fn mux_derived_format_context_families() -> impl Iterator<
+    Item = (
+        &'static str,
+        &'static [&'static str],
+        &'static [&'static str],
+    ),
+> {
+    DERIVED_FORMAT_CONTEXT_FAMILIES
+        .iter()
+        .copied()
+        .chain(crate::formats::derived_format_context_families())
+}
+
+#[doc(hidden)]
+pub fn missing_derived_format_context_families() -> impl Iterator<
+    Item = (
+        &'static str,
+        &'static [&'static str],
+        &'static [&'static str],
+    ),
+> {
+    MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES.iter().copied()
+}
+
 const DEFAULT_LIST_SESSIONS_FORMAT: &str = concat!(
     "#{session_name}: #{session_windows} windows (created #{t:session_created})",
     "#{?session_grouped, (group ,}#{session_group}#{?session_grouped,),}",
@@ -168,7 +431,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
-        if name == "line" {
+        if ROW_CONTEXT_FORMATS.contains(&name) {
             Some(self.line.to_string())
         } else {
             self.inner.variable(name, context)
@@ -789,7 +1052,9 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
-        if !LIST_KEY_CONTEXT_FORMATS.contains(&name) {
+        if !LIST_KEY_BINDING_CONTEXT_FORMATS.contains(&name)
+            && !LIST_KEY_SUMMARY_CONTEXT_FORMATS.contains(&name)
+        {
             return self.inner.variable(name, context);
         }
         match name {
@@ -14050,9 +14315,9 @@ fn push_shown_hook_option(
 #[must_use]
 pub fn hook_format_variables(command: &CommandInvocation, hook: &str) -> BTreeMap<String, String> {
     let mut variables = BTreeMap::from([
-        ("hook".to_owned(), hook.to_owned()),
+        (HOOK_CONTEXT_FORMAT.to_owned(), hook.to_owned()),
         (
-            "hook_arguments".to_owned(),
+            HOOK_ARGUMENTS_CONTEXT_FORMAT.to_owned(),
             format_command_arguments(command),
         ),
     ]);
@@ -14062,18 +14327,24 @@ pub fn hook_format_variables(command: &CommandInvocation, hook: &str) -> BTreeMa
         .and_then(|spec| parse_options_for_spec(&command.args, spec).ok())
         .unwrap_or_else(|| (Options::default(), command.args.clone()));
     for (index, argument) in positional.iter().enumerate() {
-        variables.insert(format!("hook_argument_{index}"), argument.clone());
+        variables.insert(
+            format!("{HOOK_ARGUMENT_CONTEXT_PREFIX}{index}"),
+            argument.clone(),
+        );
     }
     for flag in &options.flags {
         let flag = flag.trim_start_matches('-');
-        variables.insert(format!("hook_flag_{flag}"), "1".to_owned());
+        variables.insert(format!("{HOOK_FLAG_CONTEXT_PREFIX}{flag}"), "1".to_owned());
     }
     let mut counts = BTreeMap::<&str, usize>::new();
     for (flag, value) in &options.values {
         let flag = flag.trim_start_matches('-');
-        variables.insert(format!("hook_flag_{flag}"), value.clone());
+        variables.insert(format!("{HOOK_FLAG_CONTEXT_PREFIX}{flag}"), value.clone());
         let index = counts.entry(flag).or_default();
-        variables.insert(format!("hook_flag_{flag}_{index}"), value.clone());
+        variables.insert(
+            format!("{HOOK_FLAG_CONTEXT_PREFIX}{flag}_{index}"),
+            value.clone(),
+        );
         *index += 1;
     }
     variables

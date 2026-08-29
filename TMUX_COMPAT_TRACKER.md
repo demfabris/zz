@@ -1,14 +1,17 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10V FROZEN: FORMAT VOCABULARY REGISTRATION**
+> Campaign state: **PAUSED BY USER AFTER DELIVERED SLICE 10V**
 >
-> Tracker resolution progress: **64.4% (123 of 191 known groups)**
+> Tracker resolution progress: **64.4% (125 of 194 known groups)**
 >
-> Audited committed base: **2026-08-28** at `a91128cb7c5ad8b968f4e25ee600f9257e45fda8`
+> Audited committed base: **2026-08-28** at `009c1a79f549b4590500a8830df99425d9c3e723`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
 without reconstructing the history from chat.
+
+Fabrico paused the campaign after slice 10v. Do not rerank the registry, freeze another slice, or
+start successor work until he asks to resume.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -34,17 +37,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited committed base | `a91128cb7c5ad8b968f4e25ee600f9257e45fda8` |
-| Delivery | Local `main` contains committed 10u plus the frozen 10v plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Audited committed base | `009c1a79f549b4590500a8830df99425d9c3e723` |
+| Delivery | Local `main` contains the delivered 10v milestone; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10v is frozen for source-owned format vocabulary registration |
-| Live registry | 89 active groups, 594 active items, 102 closed records |
-| Active status | 48 open, 20 blocked, 21 accepted |
+| Campaign point | Slice 10v is delivered and closed; Fabrico paused the campaign before any rerank or next-slice selection |
+| Live registry | 91 active groups, 595 active items, 103 closed records |
+| Active status | 49 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10v plan descends from the committed 10u base above. Resolve the commit
+The delivered 10v milestone descends from the committed freeze above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +60,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(102 + 21) / (102 + 89) = 123 / 191 = 64.4%
+(103 + 22) / (103 + 91) = 125 / 194 = 64.4%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -149,10 +152,10 @@ Work one bounded milestone at a time:
    current task authorizes commits.
 9. Never push unless Fabrico explicitly asks.
 
-Fabrico granted standing authority to commit each reviewed campaign milestone and continue into the
-next reranked slice. Pushes still require an explicit request.
+Fabrico's explicit post-10v pause suspends the earlier standing authority to continue into another
+slice. Milestone commits and pushes still require the authority stated in the current task.
 
-## Accepted evidence after 10t
+## Accepted evidence retained through 10v
 
 Slice 10t adds five focused steps to the existing `formats-values` scenario and refreshes the full
 differential-plus-attached checkpoint:
@@ -220,7 +223,7 @@ uninterrupted 712-test daemon-package process.
 
 ## Shipped history
 
-The 102 entries under the generated report's
+The 103 entries under the generated report's
 [`Closed history`](knowledge/tmux/gaps.md#closed-history) section are the complete item-level record.
 The table below is the milestone rollup an agent needs for orientation.
 
@@ -266,7 +269,7 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | `8e0ef67` |
 | 10t | Target-session path format under `formats.session-path` | `0da518e` |
 | 10u | Warm command-group argument preflight under `mux.command-group-argument-parse-abort` | `a91128c` |
-| 10v | Source-owned format producer and modifier registration under `tracker.format-vocabulary-registration` | Current frozen plan; resolve after commit |
+| 10v | Source-owned format producer and modifier registration under `tracker.format-vocabulary-registration` | Delivered 2026-08-28; resolve the milestone commit with `git log` |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -493,46 +496,48 @@ config alias snapshots, parser first-error policy, remote `--host`, Control inpu
 multi-command alias bodies, and native zz command grammar. The residual
 `mux.chain-parse-abort/semantic:config-source-group-parse-abort` remains active and later.
 
-## Frozen slice: 10v format vocabulary registration
+## Completed slice: 10v format vocabulary registration
 
-The full post-10u rerank initially put `sessions.new-session-attach-cwd` first. An adversarial
-oracle audit overturned that forecast: the schema-4 oracle and its Rust invariant were confirming
-the same hand-selected three source scopes and 14 context names. Pinned tmux actually exposes 31
-literal producer scopes keyed by source path and function, 153 scoped literal registrations, and
-108 unique literal names. Ninety-four of those names sit outside the selected set, so neither side
-could detect their omission. The pinned modifier parser also accepts exactly 36 modifier tokens;
-zz implements 30 and leaves `w`, `I`, `L`, `O`, `V`, and `R` unclassified.
+The post-10u oracle audit found that schema 4 and its Rust invariant confirmed the same
+hand-selected three source scopes and 14 context names. Pinned tmux exposes 31 literal producer
+scopes keyed by source path and function, 153 scoped literal registrations, and 108 unique literal
+names. The pinned modifier parser accepts 36 modifier tokens.
 
-Slice 10v freezes only
-`tracker.format-vocabulary-registration/semantic:tracker-format-modifier-vocabulary` and
-`semantic:tracker-open-context-format-vocabulary`. It will:
+Slice 10v closes `tracker.format-vocabulary-registration`. Oracle schema 5 now records:
 
-- advance the oracle to schema 5 and source-register every literal producer as a
-  `(path, function, name)` tuple;
-- explicitly register queue-added `current_file`, `hook`, and `hook_arguments`, plus run-shell
-  positional, hook argument and flag, and window-loop next/previous families, while rejecting every
-  unclassified nonliteral insertion;
-- source-register the complete 36-token modifier vocabulary;
-- reconcile those source sets against exact, disjoint Rust partitions for implemented behavior,
-  native behavior, and active gap ownership;
-- fail the required compatibility gate on any duplicate, stale, missing, or newly unclassified
-  producer or modifier.
+- all 31 literal producer scopes as 153 `(path, function, name)` pairs with 108 unique names;
+- 10 queue-added or derived families, including `current_file`, hook arguments and flags,
+  run-shell positions, and window-neighbour facts;
+- 5 format propagation records;
+- all 36 outer modifier tokens.
 
-This is a registration and classification milestone, not a value-parity claim. It does not
-implement any of the six missing modifiers, repair any context value, register option consumers,
-change the protocol or snapshot, add a differential scenario, refresh the accepted artifact, or
-touch cwd, `session_active`, config replay, or startup provenance. The accepted checkpoint remains
-98 scenarios, 1,522 steps, attached-client `PASS`, and SHA-256
-`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+The Rust and daemon gates keep each source set disjoint and exhaustive. The 153 literal pairs split
+into 58 implemented producers, 54 accepted native producers, and 41 active gaps. The 10 derived
+families split into 8 implemented families and 2 active gaps. The parser owns 30 modifier tokens;
+`w`, `I`, `L`, `O`, `V`, and `R` remain active gaps. The exact daemon test proves the 32
+daemon-owned literal pairs and the run-shell positional family against their production consumers.
+The mux gate rejects duplicate, stale, missing, or unclassified registrations.
 
-## Candidate queue behind 10v
+Runtime work remains under three successor groups. `formats.context-producer-fidelity` (`adopt`,
+open) owns the 41 missing literal pairs plus `current_file` and `next_@*` or `prev_@*` user-option
+families. `formats.modifier-fidelity` (`adopt`, open) owns the six missing tokens. The accepted
+native partition stays under `formats.native-typed-context-producers` (`native`, accepted).
 
-The table records a forecast, not permission to skip the required live rerank. The new source
-partitions can expose a more important owner and overturn this order again.
+This registration changes no format value, protocol, snapshot, scenario, or accepted artifact. It
+does not register option consumers or touch cwd, `session_active`, config replay, or startup
+provenance. The accepted checkpoint remains 98 scenarios, 1,522 steps, attached-client `PASS`, and
+SHA-256 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+
+Fabrico paused the campaign after 10v. No post-10v rerank ran, and no next slice is selected.
+
+## Unranked candidate queue after 10v
+
+The table preserves the pre-pause forecast. It does not select a next slice. Run a full live rerank
+only after Fabrico resumes the campaign.
 
 | Order | Forecast owner | Boundary |
 | --- | --- | --- |
-| 1 | Post-10v source-classified format owners | Rerank every modifier and context gap exposed by the complete registration before choosing an implementation |
+| 1 | Source-classified format owners | Rerank `formats.modifier-fidelity` and `formats.context-producer-fidelity` before choosing an implementation |
 | 2 | `sessions.new-session-attach-cwd` | Align existing `-A -c` and explicit-empty cwd without leaking through post-execution nested refusal |
 | 3 | `aliases.config-parse-unit` | Freeze one alias snapshot while constructing a config or source replay unit |
 | 4 | `config.parser-edge-cases/semantic:config-parse-abort` | Preserve pinned whole-file abort behavior before a later config statement mutates state |
@@ -607,7 +612,8 @@ or delivery state changes:
 2. Recompute the percentage from `compat/tmux-gaps.json`; update the numerator, denominator, active
    counts, status split, and known differential count.
 3. Add the completed milestone row with its exact tracker owner and commit.
-4. Replace the current-slice contract and exclusions with the next frozen slice.
+4. Replace the current-slice contract and exclusions with the next frozen slice, or record an
+   explicit pause without selecting one.
 5. Record the newest accepted scenario count, step count, attached result, digest, and any incomplete
    or qualified validation.
 6. Update the dependency queue after a full live rerank.

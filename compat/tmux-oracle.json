@@ -1,5 +1,5 @@
 {
-  "schema": 4,
+  "schema": 5,
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "version": "tmux next-3.8",
   "commands": [
@@ -1956,27 +1956,552 @@
     "wrap_flag"
   ],
   "format_contexts": {
-    "command-item": [
-      "command"
+    "literal_scopes": [
+      {
+        "path": "cmd-display-menu.c",
+        "function": "cmd_display_menu_get_pos",
+        "names": [
+          "popup_centre_x",
+          "popup_centre_y",
+          "popup_height",
+          "popup_last_x",
+          "popup_last_y",
+          "popup_mouse_bottom",
+          "popup_mouse_centre_x",
+          "popup_mouse_centre_y",
+          "popup_mouse_top",
+          "popup_mouse_x",
+          "popup_mouse_y",
+          "popup_pane_bottom",
+          "popup_pane_left",
+          "popup_pane_right",
+          "popup_pane_top",
+          "popup_status_line_y",
+          "popup_width",
+          "popup_window_status_line_x",
+          "popup_window_status_line_y"
+        ]
+      },
+      {
+        "path": "cmd-list-clients.c",
+        "function": "cmd_list_clients_exec",
+        "names": [
+          "line"
+        ]
+      },
+      {
+        "path": "cmd-list-commands.c",
+        "function": "cmd_list_single_command",
+        "names": [
+          "command_list_alias",
+          "command_list_name",
+          "command_list_usage"
+        ]
+      },
+      {
+        "path": "cmd-list-keys.c",
+        "function": "cmd_list_keys_exec",
+        "names": [
+          "key_has_repeat",
+          "key_string_width",
+          "key_table_width",
+          "notes_only"
+        ]
+      },
+      {
+        "path": "cmd-list-keys.c",
+        "function": "cmd_list_keys_format_add_key_binding",
+        "names": [
+          "key_command",
+          "key_note",
+          "key_prefix",
+          "key_repeat",
+          "key_string",
+          "key_table"
+        ]
+      },
+      {
+        "path": "cmd-list-panes.c",
+        "function": "cmd_list_panes_window",
+        "names": [
+          "line"
+        ]
+      },
+      {
+        "path": "cmd-list-sessions.c",
+        "function": "cmd_list_sessions_exec",
+        "names": [
+          "line"
+        ]
+      },
+      {
+        "path": "cmd-list-windows.c",
+        "function": "cmd_list_windows_exec",
+        "names": [
+          "line"
+        ]
+      },
+      {
+        "path": "cmd-queue.c",
+        "function": "cmdq_merge_formats",
+        "names": [
+          "command"
+        ]
+      },
+      {
+        "path": "cmd-show-messages.c",
+        "function": "cmd_show_messages_exec",
+        "names": [
+          "message_number",
+          "message_text",
+          "message_time"
+        ]
+      },
+      {
+        "path": "format.c",
+        "function": "format_loop_add_array_item",
+        "names": [
+          "loop_index",
+          "loop_last_flag",
+          "option_array_count",
+          "option_array_first",
+          "option_array_index",
+          "option_array_key",
+          "option_array_last",
+          "option_is_array",
+          "option_is_hook",
+          "option_is_user",
+          "option_name",
+          "option_value"
+        ]
+      },
+      {
+        "path": "format.c",
+        "function": "format_loop_add_option",
+        "names": [
+          "loop_index",
+          "loop_last_flag",
+          "option_array_count",
+          "option_array_first",
+          "option_array_index",
+          "option_array_key",
+          "option_array_last",
+          "option_is_array",
+          "option_is_hook",
+          "option_is_user",
+          "option_name",
+          "option_value"
+        ]
+      },
+      {
+        "path": "format.c",
+        "function": "format_loop_clients",
+        "names": [
+          "loop_index",
+          "loop_last_flag"
+        ]
+      },
+      {
+        "path": "format.c",
+        "function": "format_loop_environ",
+        "names": [
+          "environ_hidden",
+          "environ_name",
+          "environ_removed",
+          "environ_value",
+          "loop_index",
+          "loop_last_flag"
+        ]
+      },
+      {
+        "path": "format.c",
+        "function": "format_loop_panes",
+        "names": [
+          "loop_index",
+          "loop_last_flag"
+        ]
+      },
+      {
+        "path": "format.c",
+        "function": "format_loop_sessions",
+        "names": [
+          "loop_index",
+          "loop_last_flag"
+        ]
+      },
+      {
+        "path": "format.c",
+        "function": "format_loop_windows",
+        "names": [
+          "loop_index",
+          "loop_last_flag",
+          "window_after_active",
+          "window_before_active"
+        ]
+      },
+      {
+        "path": "mode-tree.c",
+        "function": "mode_tree_draw",
+        "names": [
+          "mode_tree_branch",
+          "mode_tree_expanded",
+          "mode_tree_flat",
+          "mode_tree_has_children",
+          "mode_tree_key",
+          "mode_tree_key_width",
+          "mode_tree_last",
+          "mode_tree_parent_last",
+          "mode_tree_repeat",
+          "mode_tree_selected"
+        ]
+      },
+      {
+        "path": "notify.c",
+        "function": "notify_add",
+        "names": [
+          "hook",
+          "hook_client",
+          "hook_pane",
+          "hook_session",
+          "hook_session_name",
+          "hook_window",
+          "hook_window_name"
+        ]
+      },
+      {
+        "path": "notify.c",
+        "function": "notify_hook",
+        "names": [
+          "hook"
+        ]
+      },
+      {
+        "path": "notify.c",
+        "function": "notify_monitor_cb",
+        "names": [
+          "hook",
+          "hook_last",
+          "hook_pane",
+          "hook_session",
+          "hook_session_name",
+          "hook_value",
+          "hook_window",
+          "hook_window_index",
+          "hook_window_name"
+        ]
+      },
+      {
+        "path": "prompt.c",
+        "function": "prompt_expand",
+        "names": [
+          "command_prompt",
+          "message",
+          "prompt_flags",
+          "prompt_input",
+          "prompt_type"
+        ]
+      },
+      {
+        "path": "status.c",
+        "function": "status_message_redraw",
+        "names": [
+          "command_prompt",
+          "message"
+        ]
+      },
+      {
+        "path": "window-buffer.c",
+        "function": "window_buffer_get_key",
+        "names": [
+          "line"
+        ]
+      },
+      {
+        "path": "window-client.c",
+        "function": "window_client_get_key",
+        "names": [
+          "line"
+        ]
+      },
+      {
+        "path": "window-copy.c",
+        "function": "window_copy_formats",
+        "names": [
+          "copy_cursor_hyperlink",
+          "copy_cursor_line",
+          "copy_cursor_word",
+          "copy_cursor_x",
+          "copy_cursor_y",
+          "copy_position",
+          "copy_position_limit",
+          "rectangle_toggle",
+          "scroll_position",
+          "search_count",
+          "search_count_partial",
+          "search_match",
+          "search_present",
+          "search_timed_out",
+          "selection_active",
+          "selection_end_x",
+          "selection_end_y",
+          "selection_mode",
+          "selection_present",
+          "selection_start_x",
+          "selection_start_y",
+          "top_line_time"
+        ]
+      },
+      {
+        "path": "window-customize.c",
+        "function": "window_customize_build",
+        "names": [
+          "is_key",
+          "is_option"
+        ]
+      },
+      {
+        "path": "window-customize.c",
+        "function": "window_customize_build_array",
+        "names": [
+          "option_name",
+          "option_value"
+        ]
+      },
+      {
+        "path": "window-customize.c",
+        "function": "window_customize_build_keys",
+        "names": [
+          "is_key",
+          "is_option",
+          "key",
+          "key_note"
+        ]
+      },
+      {
+        "path": "window-customize.c",
+        "function": "window_customize_build_option",
+        "names": [
+          "option_is_array",
+          "option_is_global",
+          "option_name",
+          "option_scope",
+          "option_unit",
+          "option_value"
+        ]
+      },
+      {
+        "path": "window-tree.c",
+        "function": "window_tree_get_key",
+        "names": [
+          "line"
+        ]
+      }
     ],
-    "list-commands": [
-      "command_list_alias",
-      "command_list_name",
-      "command_list_usage"
+    "derived_families": [
+      {
+        "family": "current-file",
+        "names": [
+          "current_file"
+        ],
+        "patterns": [],
+        "producers": [
+          {
+            "path": "cfg.c",
+            "function": "load_cfg"
+          },
+          {
+            "path": "cfg.c",
+            "function": "load_cfg_from_buffer"
+          }
+        ]
+      },
+      {
+        "family": "hook",
+        "names": [
+          "hook"
+        ],
+        "patterns": [],
+        "producers": [
+          {
+            "path": "cmd-queue.c",
+            "function": "cmdq_insert_hook"
+          }
+        ]
+      },
+      {
+        "family": "hook-argument",
+        "names": [],
+        "patterns": [
+          "hook_argument_N"
+        ],
+        "producers": [
+          {
+            "path": "cmd-queue.c",
+            "function": "cmdq_insert_hook"
+          }
+        ]
+      },
+      {
+        "family": "hook-arguments",
+        "names": [
+          "hook_arguments"
+        ],
+        "patterns": [],
+        "producers": [
+          {
+            "path": "cmd-queue.c",
+            "function": "cmdq_insert_hook"
+          }
+        ]
+      },
+      {
+        "family": "hook-flag",
+        "names": [],
+        "patterns": [
+          "hook_flag_X"
+        ],
+        "producers": [
+          {
+            "path": "cmd-queue.c",
+            "function": "cmdq_insert_hook"
+          }
+        ]
+      },
+      {
+        "family": "hook-flag-value",
+        "names": [],
+        "patterns": [
+          "hook_flag_X_N"
+        ],
+        "producers": [
+          {
+            "path": "cmd-queue.c",
+            "function": "cmdq_insert_hook"
+          }
+        ]
+      },
+      {
+        "family": "run-shell-position",
+        "names": [],
+        "patterns": [
+          "N"
+        ],
+        "producers": [
+          {
+            "path": "cmd-run-shell.c",
+            "function": "cmd_run_shell_exec"
+          }
+        ]
+      },
+      {
+        "family": "window-neighbour-active",
+        "names": [
+          "next_window_active",
+          "prev_window_active"
+        ],
+        "patterns": [],
+        "producers": [
+          {
+            "path": "format.c",
+            "function": "format_add_window_neighbour"
+          }
+        ]
+      },
+      {
+        "family": "window-neighbour-index",
+        "names": [
+          "next_window_index",
+          "prev_window_index"
+        ],
+        "patterns": [],
+        "producers": [
+          {
+            "path": "format.c",
+            "function": "format_add_window_neighbour"
+          }
+        ]
+      },
+      {
+        "family": "window-neighbour-user-option",
+        "names": [],
+        "patterns": [
+          "next_@*",
+          "prev_@*"
+        ],
+        "producers": [
+          {
+            "path": "format.c",
+            "function": "format_add_window_neighbour"
+          }
+        ]
+      }
     ],
-    "list-keys": [
-      "key_command",
-      "key_has_repeat",
-      "key_note",
-      "key_prefix",
-      "key_repeat",
-      "key_string",
-      "key_string_width",
-      "key_table",
-      "key_table_width",
-      "notes_only"
+    "propagation": [
+      {
+        "path": "cmd-queue.c",
+        "function": "cmdq_add_format",
+        "callee": "format_add"
+      },
+      {
+        "path": "cmd-queue.c",
+        "function": "cmdq_add_formats",
+        "callee": "format_merge"
+      },
+      {
+        "path": "cmd-queue.c",
+        "function": "cmdq_merge_formats",
+        "callee": "format_merge"
+      },
+      {
+        "path": "format.c",
+        "function": "format_merge",
+        "callee": "format_add"
+      },
+      {
+        "path": "notify.c",
+        "function": "notify_parse_hook",
+        "callee": "format_merge"
+      }
     ]
   },
+  "format_modifiers": [
+    "!",
+    "!!",
+    "!=",
+    "&&",
+    "<",
+    "<=",
+    "=",
+    "==",
+    ">",
+    ">=",
+    "C",
+    "E",
+    "I",
+    "L",
+    "N",
+    "O",
+    "P",
+    "R",
+    "S",
+    "T",
+    "V",
+    "W",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "l",
+    "m",
+    "n",
+    "p",
+    "q",
+    "s",
+    "t",
+    "w",
+    "||"
+  ],
   "hooks": [
     "after-bind-key",
     "after-capture-pane",

@@ -918,6 +918,64 @@
       "reason": "Slice 10p consumes the daemon-published popup terminal in raw zz-tui and proves bounded keyboard, paste, tracked pointer, focus, exit, and cache ownership. Exact live resize and style refresh, native popup pointer affordances, popup-to-pane conversion, and popup Kitty image presentation remain separate cross-daemon and client fidelity work. Real mouse and status format facts remain under formats.mouse-context; Control presentation and read-only popup policy keep their existing native-client owners."
     },
     {
+      "id": "formats.context-producer-fidelity",
+      "title": "Implement missing context-format producers",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "scripts",
+        "gui"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:format-context-producer-fidelity"
+      ],
+      "evidence": [
+        "resource:compat/tmux-oracle.json",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Split the source-registered missing partition by producer before implementation: option and array loops, environment and client loops, monitor hooks, current_file, and next or previous user-option copying retain independent value and context tests.",
+        "Each implemented producer moves its exact path:function/name tuples or derived family out of the active-gap partition without weakening the exhaustive schema-5 gate or treating a same-spelled global format as context proof."
+      ],
+      "depends_on": [],
+      "reason": "Schema 5 classifies 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. One successor owner keeps that exact derived partition active without turning the registration milestone into 43 speculative runtime items; later slices must split it by the real producer dependency."
+    },
+    {
+      "id": "formats.modifier-fidelity",
+      "title": "Implement missing format modifiers",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "next",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:format-modifier-fidelity"
+      ],
+      "evidence": [
+        "resource:compat/tmux-oracle.json",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Split and implement the pinned w, I, L, O, V, and R tokens with focused source or live proofs for display-cell width, client interrogation, client loops, option loops, environment loops, and repetition.",
+        "Every token moves from the active-gap partition into the parser-owned support roster only when its runtime behavior is implemented; malformed and nested modifier fallback remains pinned."
+      ],
+      "depends_on": [],
+      "reason": "The parser-owned schema-5 partition proves zz supports 30 of the pin's 36 modifier tokens. The six missing tokens can return plausible wrong output instead of an error, so their runtime behavior remains active after vocabulary registration closes."
+    },
+    {
       "id": "formats.mouse-context",
       "title": "Expose mouse event formats",
       "decision": "park",
@@ -975,6 +1033,33 @@
       ],
       "depends_on": [],
       "reason": "zz does not render tmux buffer, client, or tree mode screens."
+    },
+    {
+      "id": "formats.native-typed-context-producers",
+      "title": "Keep typed native context producers explicit",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "gui"
+      ],
+      "owner": "client",
+      "items": [
+        "semantic:native-format-context-producers"
+      ],
+      "evidence": [
+        "resource:compat/tmux-oracle.json",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-client/src/core.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "The schema-5 invariant keeps exactly 54 pinned mode-tree, prompt, message-overlay, choose-client, copy-mode, and customize producer/name tuples in the accepted-native partition.",
+        "A tuple leaves this partition only when zz exposes its tmux producer rather than merely retaining equivalent typed native UI state."
+      ],
+      "depends_on": [],
+      "reason": "zz deliberately replaces these tmux format-driven mode and overlay producers with typed client state and native rendering. The explicit accepted partition prevents their 54 source tuples from being mistaken for either implemented tmux contexts or unclassified omissions."
     },
     {
       "id": "formats.pane-process",
@@ -2782,38 +2867,6 @@
       "reason": "The mux cannot inspect cursor, history, or terminal mode state."
     },
     {
-      "id": "tracker.format-vocabulary-registration",
-      "title": "Register the pinned format vocabulary",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "protocol",
-      "items": [
-        "semantic:tracker-format-modifier-vocabulary",
-        "semantic:tracker-open-context-format-vocabulary"
-      ],
-      "evidence": [
-        "resource:compat/tmux-oracle.py",
-        "resource:compat/tmux-oracle.json",
-        "resource:crates/zz-mux/src/formats.rs",
-        "resource:crates/zz-mux/src/command.rs",
-        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
-        "resource:knowledge/playbooks/compat-harness.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Oracle schema 5 source-registers literal format insertions from 31 path:function producer scopes as exactly 153 scoped pairs and 108 unique names, explicitly registers queue-added current_file, hook, and hook_arguments plus every dynamic family, and fails on every unclassified nonliteral insertion.",
-        "All 36 pinned outer format modifier tokens are source-registered and reconcile exactly against a parser-owned zz support roster plus active gap items, with w, I, L, O, V, and R remaining classified as unsupported.",
-        "The literal-producer and modifier partitions are source-owned, pairwise disjoint, exhaustive, and runtime-neutral: registration changes no format value, parser dispatch, protocol, snapshot, scenario, or differential result."
-      ],
-      "depends_on": [],
-      "reason": "Oracle schema 4 hard-codes only 3 scopes and 14 names even though pinned production has 108 unique literal context names across 153 scoped producer pairs, leaving 94 unique literals outside the selected surface. zz supports 30 of the pin's 36 outer modifier tokens and silently diverges for the unregistered w, I, L, O, V, and R tokens."
-    },
-    {
       "id": "tracker.semantic-coverage",
       "title": "Register the remaining option consumers",
       "decision": "adopt",
@@ -2836,7 +2889,7 @@
         "A consumer-owned inventory reconciles option consumption against the live manifest without treating storage-only option definitions as behavior."
       ],
       "depends_on": [],
-      "reason": "The existing parser, hook, default-binding, and global-format partitions plus the separately frozen format-vocabulary registration leave option consumption as this group's only semantic discovery item. The option definitions include storage-only gaps, so they cannot stand in for a source-owned roster of actual consumers."
+      "reason": "The source-owned parser, hook, default-binding, global-format, and schema-5 format-vocabulary partitions leave option consumption as this group's only semantic discovery item. The option definitions include storage-only gaps, so they cannot stand in for a source-owned roster of actual consumers."
     }
   ],
   "closed": [
@@ -4323,6 +4376,24 @@
         "resource:knowledge/tmux/tmux-compat.md"
       ],
       "resolution": "This milestone introduced source-derived production-dispatch coverage for all 24 pinned tmux commands that daemon dispatch preempts. Its strict three-step fixture used one absent alphanumeric short flag across buffer, shell callback, branch callback, lock, and blocking command families and proved rejection without buffer mutation. The later mux.command-flag-errors closure removed the partial daemon roster. Daemon preflight now calls the shared catalog parser, and exhaustive tests cover exact diagnostics for the full implemented command and alias surface before command-specific work. The seven daemon-native commands remain outside the pinned grammar. Callback argument rules retain their existing owner."
+    },
+    {
+      "id": "tracker.format-vocabulary-registration",
+      "title": "Register the pinned format vocabulary",
+      "closed_on": "2026-08-28",
+      "evidence": [
+        "resource:compat/tmux-oracle.py",
+        "resource:compat/tmux-oracle.json",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "file:compat/check.sh",
+        "resource:knowledge/playbooks/compat-harness.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Oracle schema 5 now source-registers 153 literal format producer/name pairs across 31 path:function scopes and 108 unique names, ten queue-added or derived families, five propagation sites, and all 36 outer modifier tokens. The required Rust partition classifies the literal pairs as 58 implemented, 54 accepted native, and 41 missing; the derived families as eight implemented and two missing; and the modifier tokens as 30 parser-owned implementations plus the missing w, I, L, O, V, and R set. Production constants drive parser dispatch and mux context insertion, while an exact required daemon test proves all 32 delegated context tuples against their real consumers. Every partition is disjoint and exhaustive, and unclassified source insertions, dynamic families, modifiers, or stale production registrations fail the compatibility gate. The runtime-neutral registration changes no format value, protocol, snapshot, scenario, or accepted artifact. Missing runtime behavior remains explicit under formats.context-producer-fidelity and formats.modifier-fidelity; typed native replacements remain explicit under formats.native-typed-context-producers."
     },
     {
       "id": "tracker.hook-producer-partition",

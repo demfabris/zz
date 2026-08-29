@@ -294,6 +294,7 @@ def validate_manifest(manifest, oracle, include_report):
             "options",
             "formats",
             "format_contexts",
+            "format_modifiers",
             "hooks",
             "key_bindings",
         }
@@ -303,8 +304,8 @@ def validate_manifest(manifest, oracle, include_report):
                 + ", ".join(sorted(expected_oracle))
                 + f"; got {', '.join(sorted(oracle))}"
             )
-        if oracle.get("schema") != 4:
-            errors.append("compat/tmux-oracle.json schema must be 4")
+        if oracle.get("schema") != 5:
+            errors.append("compat/tmux-oracle.json schema must be 5")
         if oracle.get("pin") != pin:
             errors.append("manifest and oracle pins differ")
         if not isinstance(oracle.get("version"), str) or not oracle.get("version"):
@@ -424,26 +425,122 @@ def validate_manifest(manifest, oracle, include_report):
                 if re.fullmatch(pattern, value) is None:
                     errors.append(f"oracle.{field} contains a non-normalized name: {value!r}")
         format_contexts = oracle.get("format_contexts")
-        expected_contexts = {"command-item", "list-commands", "list-keys"}
         if not isinstance(format_contexts, dict):
             errors.append("compat/tmux-oracle.json format_contexts must be an object")
             format_contexts = {}
-        if set(format_contexts) != expected_contexts:
+        expected_context_fields = {"literal_scopes", "derived_families", "propagation"}
+        if set(format_contexts) != expected_context_fields:
             errors.append(
-                "oracle.format_contexts scopes must be "
-                + ", ".join(sorted(expected_contexts))
+                "oracle.format_contexts fields must be "
+                + ", ".join(sorted(expected_context_fields))
             )
-        for scope, raw_names in format_contexts.items():
-            names = string_list(
-                raw_names, f"oracle.format_contexts[{scope!r}]", errors, allow_empty=False
-            )
+        literal_scopes = format_contexts.get("literal_scopes")
+        if not isinstance(literal_scopes, list):
+            errors.append("oracle.format_contexts.literal_scopes must be an array")
+            literal_scopes = []
+        literal_order = []
+        literal_pairs = set()
+        literal_names = set()
+        for index, scope in enumerate(literal_scopes):
+            location = f"oracle.format_contexts.literal_scopes[{index}]"
+            if not isinstance(scope, dict) or set(scope) != {"path", "function", "names"}:
+                errors.append(f"{location} fields must be function, names, path")
+                continue
+            path = scope.get("path")
+            function = scope.get("function")
+            if not isinstance(path, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*\.c", path) is None:
+                errors.append(f"{location}.path is not a normalized C basename: {path!r}")
+            if not isinstance(function, str) or re.fullmatch(r"[a-z0-9][a-z0-9_]*", function) is None:
+                errors.append(f"{location}.function is not normalized: {function!r}")
+            names = string_list(scope.get("names"), f"{location}.names", errors, allow_empty=False)
             if names != sorted(names):
-                errors.append(f"oracle.format_contexts[{scope!r}] must be sorted")
-            for name in names:
-                if re.fullmatch(r"[a-z0-9][a-z0-9_]*", name) is None:
-                    errors.append(
-                        f"oracle.format_contexts[{scope!r}] contains a non-normalized name: {name!r}"
-                    )
+                errors.append(f"{location}.names must be sorted")
+            if isinstance(path, str) and isinstance(function, str):
+                literal_order.append((path, function))
+                for name in names:
+                    if re.fullmatch(r"[a-z0-9][a-z0-9_]*", name) is None:
+                        errors.append(f"{location}.names contains a non-normalized name: {name!r}")
+                    literal_pairs.add((path, function, name))
+                    literal_names.add(name)
+        if literal_order != sorted(literal_order) or len(literal_order) != len(set(literal_order)):
+            errors.append("oracle.format_contexts.literal_scopes must be unique and sorted")
+        if (len(literal_scopes), len(literal_pairs), len(literal_names)) != (31, 153, 108):
+            errors.append(
+                "oracle format literals must contain 31 scopes, 153 scoped pairs, and 108 unique names"
+            )
+        derived_families = format_contexts.get("derived_families")
+        if not isinstance(derived_families, list):
+            errors.append("oracle.format_contexts.derived_families must be an array")
+            derived_families = []
+        derived_order = []
+        for index, family in enumerate(derived_families):
+            location = f"oracle.format_contexts.derived_families[{index}]"
+            expected_fields = {"family", "names", "patterns", "producers"}
+            if not isinstance(family, dict) or set(family) != expected_fields:
+                errors.append(f"{location} fields must be family, names, patterns, producers")
+                continue
+            name = family.get("family")
+            if not isinstance(name, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) is None:
+                errors.append(f"{location}.family is not normalized: {name!r}")
+            else:
+                derived_order.append(name)
+            for field in ("names", "patterns"):
+                values = string_list(family.get(field), f"{location}.{field}", errors)
+                if values != sorted(values):
+                    errors.append(f"{location}.{field} must be sorted")
+            producers = family.get("producers")
+            if not isinstance(producers, list) or not producers:
+                errors.append(f"{location}.producers must be a nonempty array")
+                producers = []
+            producer_order = []
+            for producer_index, producer in enumerate(producers):
+                producer_location = f"{location}.producers[{producer_index}]"
+                if not isinstance(producer, dict) or set(producer) != {"path", "function"}:
+                    errors.append(f"{producer_location} fields must be function, path")
+                    continue
+                path = producer.get("path")
+                function = producer.get("function")
+                if not isinstance(path, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*\.c", path) is None:
+                    errors.append(f"{producer_location}.path is not a normalized C basename")
+                    continue
+                if not isinstance(function, str) or re.fullmatch(r"[a-z0-9][a-z0-9_]*", function) is None:
+                    errors.append(f"{producer_location}.function is not normalized")
+                    continue
+                producer_order.append((path, function))
+            if producer_order != sorted(producer_order) or len(producer_order) != len(set(producer_order)):
+                errors.append(f"{location}.producers must be unique and sorted")
+        if derived_order != sorted(derived_order) or len(derived_order) != len(set(derived_order)):
+            errors.append("oracle.format_contexts.derived_families must be unique and sorted")
+        if len(derived_families) != 10:
+            errors.append("oracle.format_contexts.derived_families must contain 10 families")
+        propagation = format_contexts.get("propagation")
+        if not isinstance(propagation, list):
+            errors.append("oracle.format_contexts.propagation must be an array")
+            propagation = []
+        propagation_order = []
+        for index, site in enumerate(propagation):
+            location = f"oracle.format_contexts.propagation[{index}]"
+            if not isinstance(site, dict) or set(site) != {"path", "function", "callee"}:
+                errors.append(f"{location} fields must be callee, function, path")
+                continue
+            path = site.get("path")
+            function = site.get("function")
+            callee = site.get("callee")
+            if not all(isinstance(value, str) for value in (path, function, callee)):
+                errors.append(f"{location} values must be strings")
+                continue
+            propagation_order.append((path, function, callee))
+        if propagation_order != sorted(propagation_order) or len(propagation_order) != len(set(propagation_order)):
+            errors.append("oracle.format_contexts.propagation must be unique and sorted")
+        if len(propagation) != 5:
+            errors.append("oracle.format_contexts.propagation must contain 5 sites")
+        format_modifiers = string_list(
+            oracle.get("format_modifiers"), "oracle.format_modifiers", errors, allow_empty=False
+        )
+        if format_modifiers != sorted(format_modifiers):
+            errors.append("oracle.format_modifiers must be sorted")
+        if len(format_modifiers) != 36:
+            errors.append("oracle.format_modifiers must contain 36 tokens")
         key_bindings = oracle.get("key_bindings")
         if not isinstance(key_bindings, list):
             errors.append("compat/tmux-oracle.json key_bindings must be an array")
@@ -620,7 +717,10 @@ def render_report(manifest, oracle):
     flag_arities = Counter(
         arity for command in oracle["commands"] for arity in command["flags"].values()
     )
-    context_format_count = sum(len(names) for names in oracle["format_contexts"].values())
+    literal_context_count = sum(
+        len(scope["names"]) for scope in oracle["format_contexts"]["literal_scopes"]
+    )
+    derived_context_count = len(oracle["format_contexts"]["derived_families"])
     lines = [
         "---",
         "type: Reference",
@@ -657,7 +757,10 @@ def render_report(manifest, oracle):
         f"({flag_arities['none']} valueless, {flag_arities['required']} required-value, "
         f"{flag_arities['optional']} optional-value), positional minimum and maximum bounds, "
         f"{len(oracle['options'])} options, {len(oracle['formats'])} global formats, "
-        f"{context_format_count} selected context formats, "
+        f"{literal_context_count} scoped literal context pairs across "
+        f"{len(oracle['format_contexts']['literal_scopes'])} source producers, "
+        f"{derived_context_count} derived context families, "
+        f"{len(oracle['format_modifiers'])} format modifiers, "
         f"{len(oracle['hooks'])} hooks, and {len(oracle['key_bindings'])} default bindings across "
         f"{len({binding['table'] for binding in oracle['key_bindings']})} tables. zz has catalog "
         f"entries for {len(oracle['commands']) - command_items} of those commands. The registry "
@@ -672,8 +775,8 @@ def render_report(manifest, oracle):
         f"{item_counts['native-command']} native command names, "
         f"{item_counts['option']} options absent from `BEHAVES`, "
         f"{item_counts['format']} known limited formats, "
-        f"{item_counts['context-format']} selected context-format gaps, "
-        f"{item_counts['native-context-format']} zz-only selected context-format names, "
+        f"{item_counts['context-format']} scoped context-format gaps, "
+        f"{item_counts['native-context-format']} accepted-native context-format names, "
         f"{item_counts['hook']} currently documented hook-producer gaps, "
         f"{item_counts['key']} omitted default keys, "
         f"{item_counts['binding']} divergent shared default bindings, "
@@ -682,7 +785,8 @@ def render_report(manifest, oracle):
         "## Enforcement boundary",
         "",
         "The gate reconciles command names, aliases, flag arities, positional bounds, custom",
-        "`args_parse` rules, option names, global and selected context-format names, hook names,",
+        "`args_parse` rules, option names, global formats, scoped and derived context producers,",
+        "format modifiers, hook names,",
         "and default key presence against the clean pinned tmux source and binary. It also reconciles",
         "options absent from `BEHAVES`, constant-backed formats against the live registry, omitted",
         "and zz-only default keys against zz's key tables, rendered commands plus repeat bits for",
@@ -690,7 +794,7 @@ def render_report(manifest, oracle):
         "canonical prefix against the resolver, and known scenarios against exact tuples.",
         "",
         "These structural checks cannot prove that runtime parsing applies each inventoried `args_parse`",
-        "rule, open-ended dynamic format contexts, nonconstant format correctness, or whether a hook fires,",
+        "rule, context-format value correctness, nonconstant format correctness, or whether a hook fires,",
         "or that a structurally matching binding behaves identically at runtime. Differential scenarios,",
         "attached-client fixtures, unit tests, and manual GUI checks supply that behavioral evidence. The",
         "tracker keeps the remaining semantic discovery work explicit instead of treating matching",

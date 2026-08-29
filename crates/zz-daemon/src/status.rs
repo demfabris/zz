@@ -29,6 +29,9 @@ use crate::{configure_tmux_shim, shell_process};
 const SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 const SHELL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_SHELL_OUTPUT_BYTES: u64 = 4 * 1024;
+pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
+pub(crate) const SHOW_MESSAGES_CONTEXT_FORMATS: [&str; 3] =
+    ["message_number", "message_text", "message_time"];
 
 #[derive(Default)]
 pub(crate) struct StatusRenderer {
@@ -675,6 +678,8 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                 )
                 .map(str::to_owned);
         }
+        let [list_clients_line] = LIST_CLIENTS_CONTEXT_FORMATS;
+        let [message_number, message_text, message_time] = SHOW_MESSAGES_CONTEXT_FORMATS;
         match name {
             "pane_kind" => self
                 .facts
@@ -721,10 +726,10 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "client_utf8" => Some(self.facts.client.as_ref()?.utf8.clone()),
             "client_width" => Some(self.facts.client.as_ref()?.width.clone()),
             "client_written" => Some(self.facts.client.as_ref()?.written.clone()),
-            "line" => Some(self.facts.client.as_ref()?.line.to_string()),
-            "message_number" => Some(self.facts.message.as_ref()?.number.to_string()),
-            "message_text" => Some(self.facts.message.as_ref()?.text.clone()),
-            "message_time" => Some(
+            _ if name == list_clients_line => Some(self.facts.client.as_ref()?.line.to_string()),
+            _ if name == message_number => Some(self.facts.message.as_ref()?.number.to_string()),
+            _ if name == message_text => Some(self.facts.message.as_ref()?.text.clone()),
+            _ if name == message_time => Some(
                 self.facts
                     .message
                     .as_ref()?

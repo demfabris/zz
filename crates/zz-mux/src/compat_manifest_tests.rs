@@ -15,35 +15,81 @@ use zz_protocol::{
 use crate::{
     BEHAVES, COMMAND_SPECS,
     command::{
-        COMMAND_ITEM_CONTEXT_FORMATS, LIST_COMMAND_CONTEXT_FORMATS, LIST_KEY_CONTEXT_FORMATS,
-        format_key_command,
+        accepted_native_literal_format_context_scopes, format_key_command,
+        missing_derived_format_context_families, missing_literal_format_context_scopes,
+        mux_derived_format_context_families, mux_literal_format_context_scopes,
     },
     formats::{
         constant_format_variable_names, delegated_format_variable_names,
-        direct_format_variable_names, format_variable_names,
+        direct_format_variable_names, format_modifier_names, format_variable_names,
     },
 };
 
 #[derive(Deserialize)]
 struct Manifest {
     gaps: Vec<Gap>,
+    closed: Vec<ClosedGap>,
 }
 
 #[derive(Deserialize)]
 struct Gap {
     id: String,
+    decision: String,
+    status: String,
     items: Vec<String>,
 }
 
 #[derive(Deserialize)]
+struct ClosedGap {
+    id: String,
+}
+
+#[derive(Deserialize)]
 struct Oracle {
+    schema: usize,
     commands: Vec<OracleCommand>,
     args_parse: BTreeMap<String, String>,
     options: Vec<String>,
     formats: Vec<String>,
-    format_contexts: BTreeMap<String, Vec<String>>,
+    format_contexts: OracleFormatContexts,
+    format_modifiers: Vec<String>,
     hooks: Vec<String>,
     key_bindings: Vec<OracleKey>,
+}
+
+#[derive(Deserialize)]
+struct OracleFormatContexts {
+    literal_scopes: Vec<OracleLiteralFormatScope>,
+    derived_families: Vec<OracleDerivedFormatFamily>,
+    propagation: Vec<OracleFormatPropagation>,
+}
+
+#[derive(Deserialize)]
+struct OracleLiteralFormatScope {
+    path: String,
+    function: String,
+    names: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct OracleDerivedFormatFamily {
+    family: String,
+    names: Vec<String>,
+    patterns: Vec<String>,
+    producers: Vec<OracleFormatProducer>,
+}
+
+#[derive(Deserialize)]
+struct OracleFormatProducer {
+    path: String,
+    function: String,
+}
+
+#[derive(Deserialize)]
+struct OracleFormatPropagation {
+    path: String,
+    function: String,
+    callee: String,
 }
 
 #[derive(Deserialize)]
@@ -455,64 +501,309 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
             }
         }
     }
+}
 
-    let supported_contexts = BTreeMap::from([
-        (
-            "command-item",
-            COMMAND_ITEM_CONTEXT_FORMATS.iter().copied().collect(),
-        ),
-        (
-            "list-commands",
-            LIST_COMMAND_CONTEXT_FORMATS.iter().copied().collect(),
-        ),
-        (
-            "list-keys",
-            LIST_KEY_CONTEXT_FORMATS.iter().copied().collect(),
-        ),
-    ]);
-    let mut missing_contexts = BTreeSet::new();
-    let mut native_contexts = BTreeSet::new();
-    for (scope, upstream_names) in &oracle.format_contexts {
-        let upstream_names = upstream_names
-            .iter()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        let supported_names = supported_contexts
-            .get(scope.as_str())
-            .unwrap_or_else(|| panic!("unrecognized oracle format context: {scope}"));
-        missing_contexts.extend(
-            upstream_names
-                .difference(supported_names)
-                .map(|name| format!("context-format:{scope}:{name}")),
+#[test]
+fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
+    let (oracle, items) = inventory();
+    assert_eq!(oracle.schema, 5);
+
+    let mut upstream_literals = BTreeSet::new();
+    let mut upstream_scopes = BTreeSet::new();
+    let mut upstream_names = BTreeSet::new();
+    for scope in &oracle.format_contexts.literal_scopes {
+        assert!(
+            upstream_scopes.insert((scope.path.clone(), scope.function.clone())),
+            "duplicate oracle literal context scope: {}:{}",
+            scope.path,
+            scope.function
         );
-        native_contexts.extend(
-            supported_names
-                .difference(&upstream_names)
-                .map(|name| format!("native-context-format:{scope}:{name}")),
+        let names = scope.names.iter().cloned().collect::<BTreeSet<_>>();
+        assert_eq!(
+            names.len(),
+            scope.names.len(),
+            "duplicate oracle literal context name in {}:{}",
+            scope.path,
+            scope.function
+        );
+        for name in names {
+            upstream_names.insert(name.clone());
+            assert!(
+                upstream_literals.insert((scope.path.clone(), scope.function.clone(), name)),
+                "duplicate oracle literal context tuple"
+            );
+        }
+    }
+    assert_eq!(upstream_scopes.len(), 31);
+    assert_eq!(upstream_literals.len(), 153);
+    assert_eq!(upstream_names.len(), 108);
+
+    let mut mux_literals = BTreeSet::new();
+    for (path, function, names) in mux_literal_format_context_scopes() {
+        for &name in names {
+            assert!(
+                mux_literals.insert((path.to_owned(), function.to_owned(), name.to_owned(),)),
+                "duplicate mux literal context: {path}:{function}:{name}"
+            );
+        }
+    }
+    assert_eq!(mux_literals.len(), 26);
+    assert!(mux_literals.is_subset(&upstream_literals));
+
+    let mut accepted_native_literals = BTreeSet::new();
+    for (path, function, names) in accepted_native_literal_format_context_scopes() {
+        for &name in names {
+            assert!(
+                accepted_native_literals.insert((
+                    path.to_owned(),
+                    function.to_owned(),
+                    name.to_owned(),
+                )),
+                "duplicate accepted-native literal context: {path}:{function}:{name}"
+            );
+        }
+    }
+    assert_eq!(accepted_native_literals.len(), 54);
+    assert!(accepted_native_literals.is_subset(&upstream_literals));
+    assert!(mux_literals.is_disjoint(&accepted_native_literals));
+
+    let mut missing_literals = BTreeSet::new();
+    for (path, function, names) in missing_literal_format_context_scopes() {
+        for &name in names {
+            assert!(
+                missing_literals.insert((path.to_owned(), function.to_owned(), name.to_owned(),)),
+                "duplicate missing literal context: {path}:{function}:{name}"
+            );
+        }
+    }
+    assert_eq!(missing_literals.len(), 41);
+    assert!(missing_literals.is_subset(&upstream_literals));
+    assert!(mux_literals.is_disjoint(&missing_literals));
+    assert!(accepted_native_literals.is_disjoint(&missing_literals));
+
+    let mut classified_literals = mux_literals.clone();
+    classified_literals.extend(accepted_native_literals.iter().cloned());
+    classified_literals.extend(missing_literals.iter().cloned());
+    let delegated_literals = upstream_literals
+        .difference(&classified_literals)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(delegated_literals.len(), 32);
+    assert_eq!(
+        classified_literals
+            .union(&delegated_literals)
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        upstream_literals
+    );
+
+    let mut upstream_families = BTreeMap::new();
+    let mut family_producers = BTreeSet::new();
+    for family in &oracle.format_contexts.derived_families {
+        let names = family.names.iter().cloned().collect::<BTreeSet<_>>();
+        let patterns = family.patterns.iter().cloned().collect::<BTreeSet<_>>();
+        assert_eq!(names.len(), family.names.len(), "{} names", family.family);
+        assert_eq!(
+            patterns.len(),
+            family.patterns.len(),
+            "{} patterns",
+            family.family
+        );
+        assert!(
+            !names.is_empty() || !patterns.is_empty(),
+            "{}",
+            family.family
+        );
+        assert!(
+            upstream_families
+                .insert(family.family.clone(), (names, patterns))
+                .is_none(),
+            "duplicate oracle derived format family: {}",
+            family.family
+        );
+        assert!(!family.producers.is_empty(), "{}", family.family);
+        for producer in &family.producers {
+            assert!(
+                family_producers.insert((
+                    family.family.clone(),
+                    producer.path.clone(),
+                    producer.function.clone(),
+                )),
+                "duplicate oracle derived format producer"
+            );
+        }
+    }
+    assert_eq!(upstream_families.len(), 10);
+
+    let mut mux_families = BTreeSet::new();
+    for (family, names, patterns) in mux_derived_format_context_families() {
+        let registration = (
+            names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<BTreeSet<_>>(),
+            patterns
+                .iter()
+                .map(|pattern| (*pattern).to_owned())
+                .collect::<BTreeSet<_>>(),
+        );
+        assert_eq!(
+            upstream_families.get(family),
+            Some(&registration),
+            "mux derived format family differs from the oracle: {family}"
+        );
+        assert!(
+            mux_families.insert(family),
+            "duplicate mux derived format family: {family}"
+        );
+    }
+    assert_eq!(mux_families.len(), 7);
+
+    let mut missing_families = BTreeSet::new();
+    for (family, names, patterns) in missing_derived_format_context_families() {
+        let registration = (
+            names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<BTreeSet<_>>(),
+            patterns
+                .iter()
+                .map(|pattern| (*pattern).to_owned())
+                .collect::<BTreeSet<_>>(),
+        );
+        assert_eq!(
+            upstream_families.get(family),
+            Some(&registration),
+            "missing derived format family differs from the oracle: {family}"
+        );
+        assert!(
+            missing_families.insert(family),
+            "duplicate missing derived format family: {family}"
         );
     }
     assert_eq!(
-        supported_contexts.keys().copied().collect::<BTreeSet<_>>(),
-        oracle.format_contexts.keys().map(String::as_str).collect(),
-        "zz and oracle selected format context scopes differ"
+        missing_families,
+        BTreeSet::from(["current-file", "window-neighbour-user-option"])
     );
-    let tracked_missing_contexts = items
-        .keys()
-        .filter(|item| item.starts_with("context-format:"))
-        .cloned()
+    assert!(mux_families.is_disjoint(&missing_families));
+    let classified_families = mux_families
+        .union(&missing_families)
+        .copied()
         .collect::<BTreeSet<_>>();
-    let tracked_native_contexts = items
+    let upstream_family_names = upstream_families
         .keys()
-        .filter(|item| item.starts_with("native-context-format:"))
-        .cloned()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let delegated_families = upstream_family_names
+        .difference(&classified_families)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(delegated_families, BTreeSet::from(["run-shell-position"]));
+
+    let propagation = oracle
+        .format_contexts
+        .propagation
+        .iter()
+        .map(|entry| {
+            (
+                entry.path.as_str(),
+                entry.function.as_str(),
+                entry.callee.as_str(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(propagation.len(), 5);
+    assert_eq!(propagation.len(), oracle.format_contexts.propagation.len());
+    assert!(
+        propagation
+            .iter()
+            .all(|(_, _, callee)| matches!(*callee, "format_add" | "format_merge"))
+    );
+
+    let upstream_modifiers = oracle
+        .format_modifiers
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(upstream_modifiers.len(), 36);
+    assert_eq!(upstream_modifiers.len(), oracle.format_modifiers.len());
+    let implemented_modifiers = format_modifier_names().collect::<BTreeSet<_>>();
+    assert_eq!(implemented_modifiers.len(), 30);
+    let missing_modifiers = upstream_modifiers
+        .difference(&implemented_modifiers)
+        .copied()
         .collect::<BTreeSet<_>>();
     assert_eq!(
-        tracked_missing_contexts, missing_contexts,
-        "missing selected context formats and tracked items differ"
+        missing_modifiers,
+        BTreeSet::from(["I", "L", "O", "R", "V", "w"])
     );
-    assert_eq!(
-        tracked_native_contexts, native_contexts,
-        "native selected context formats and tracked items differ"
+    assert!(implemented_modifiers.is_subset(&upstream_modifiers));
+
+    assert!(
+        items.keys().all(|item| !item.starts_with("context-format:")
+            && !item.starts_with("native-context-format:")),
+        "registration-only context partitions must not mint runtime tuple items"
+    );
+
+    let manifest: Manifest = read_json(&root().join("compat/tmux-gaps.json"));
+    let groups = manifest
+        .gaps
+        .iter()
+        .map(|gap| {
+            (
+                gap.id.as_str(),
+                (gap.decision.as_str(), gap.status.as_str()),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    for (item, owner, decision, status) in [
+        (
+            "semantic:format-context-producer-fidelity",
+            "formats.context-producer-fidelity",
+            "adopt",
+            "open",
+        ),
+        (
+            "semantic:format-modifier-fidelity",
+            "formats.modifier-fidelity",
+            "adopt",
+            "open",
+        ),
+        (
+            "semantic:native-format-context-producers",
+            "formats.native-typed-context-producers",
+            "native",
+            "accepted",
+        ),
+    ] {
+        assert_eq!(
+            items.get(item).map(String::as_str),
+            Some(owner),
+            "wrong manifest owner for {item}"
+        );
+        assert_eq!(
+            groups.get(owner).copied(),
+            Some((decision, status)),
+            "wrong manifest decision or status for {owner}"
+        );
+    }
+    let closed = manifest
+        .closed
+        .iter()
+        .map(|gap| gap.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(
+        closed.contains("tracker.format-vocabulary-registration"),
+        "format vocabulary registration tracker must be closed"
+    );
+    assert!(
+        [
+            "semantic:tracker-format-modifier-vocabulary",
+            "semantic:tracker-open-context-format-vocabulary",
+        ]
+        .iter()
+        .all(|item| !items.contains_key(*item)),
+        "closed registration items must not remain active"
     );
 }
 

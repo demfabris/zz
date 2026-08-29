@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; slice 10u is delivered and slice 10v is frozen on source-owned format vocabulary registration
+status: Original nine phases shipped 2026-08-20; slice 10v delivered 2026-08-28; campaign paused by user before rerank
 tags:
 - tmux
 - compatibility
@@ -91,7 +91,7 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The accepted compatibility inventory retained through slice 10u contains 98 differential scenarios and
+The accepted compatibility inventory retained through slice 10v contains 98 differential scenarios and
 1,522 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The
 complete differential and attached run on 2026-08-28 left every ordinary row clean.
 `known/known-main-preset-two-panes` and
@@ -149,23 +149,23 @@ grammar, alias snapshots, and runtime rollback remain excluded. Six warm fixture
 focused three-step scenario report zero differences. The accepted canonical artifact remains 98
 scenarios and 1,522 steps with attached-client `PASS` and the digest above.
 
-The post-10u rerank freezes slice 10v on `tracker.format-vocabulary-registration`. Oracle schema 4
-checks only three format contexts with 14 names, and the Rust gate repeats that selection. A pinned
-source sweep found 31 literal `path:function` producers, 153 scoped name pairs, and 108 unique
-names. Ninety-four names sit outside the current selection. The same sweep found 36
-upstream-recognized format modifier tokens while zz parses 30. The missing `w`, `I`, `L`, `O`, `V`,
-and `R` tokens can return plausible wrong output without an error. Direct scratch-socket probes show
-silent differences for `w` display-cell width, `R` repeat, `O` option loops, and `V` environment
-loops. Pinned source and the manual classify `I` as client feature, termcap, and environment
-interrogation; the pinned modifier regression classifies `L` as an attached-client loop.
-Schema 5 will register the complete literal producer partition, the modifier vocabulary,
-queue-added `current_file`, `hook`, and `hook_arguments`, numbered run-shell argument keys,
-`hook_argument_<n>`,
-`hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`, `next_window_active`,
-`prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*` user-option families.
-Production-owned implemented, native, and active-gap inventories must be disjoint and exhaustive.
+Slice 10v closes `tracker.format-vocabulary-registration`. Oracle schema 5 records 31 literal
+`path:function` producers, 153 scoped name pairs, 108 unique names, 10 derived families, 5
+propagation records, and all 36 outer modifier tokens. The literal partition contains 58
+implemented pairs, 54 accepted native pairs, and 41 active gaps. The derived partition contains 8
+implemented families and 2 active gaps. The parser owns 30 modifiers; `w`, `I`, `L`, `O`, `V`, and
+`R` remain active gaps.
+
+The mux and daemon gates reject duplicate, stale, missing, and unclassified registrations. The
+exact daemon test proves its 32 literal pairs and run-shell positional family through production
+consumers. `formats.context-producer-fidelity` (`adopt`, open) owns the 41 missing literal pairs plus
+`current_file` and the `next_@*` or `prev_@*` families. `formats.modifier-fidelity` (`adopt`, open)
+owns the six missing modifier tokens. `formats.native-typed-context-producers` (`native`, accepted)
+records the accepted native partition.
+
 Slice 10v changes no runtime format behavior and claims no context-value parity. It also excludes
 option-consumer registration, protocol and snapshot work, scenarios, and the accepted artifact.
+Fabrico paused the campaign after delivery, before a rerank or next-slice selection.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -298,15 +298,15 @@ catalog-declared pairs, inventoried in the matrix and enforced by
 `the_unsupported_flag_ledger_matches_the_catalog`. Sixty commands have no catalog-declared
 flag gap, but accepted semantic divergences remain outside that count.
 
-**The current queue** is dependency-ordered in the
+**The campaign history and unranked queue** live in the
 [tmux superset roadmap](/designs/tmux-superset-roadmap.md). Shared key structure and bare bind
 mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
 menu descriptor consumption in slice 10o, popup consumption in slice 10p, per-client destruction
 fallback in slice 10q, cold local CLI parse atomicity in slice 10r, nonconstant global-format source
 registration in slice 10s, target-session path expansion in slice 10t, and warm local whole-vector
-argument preflight in slice 10u. The post-10u rerank freezes source-owned format vocabulary
-registration as slice 10v. The frozen registry has 89 active groups, 594 classified active items,
-and 102 closed records: 48 open, 20 blocked, and 21 accepted; 123 of 191 groups are resolved
+argument preflight in slice 10u. Slice 10v then closes source-owned format vocabulary registration.
+The registry has 91 active groups, 595 classified active items, and 103 closed records: 49 open, 20
+blocked, and 22 accepted; 125 of 194 groups are resolved
 (64.4%). Slice 10t moves the 198-name partition to 93 direct mux values, 32 daemon-delegated values,
 and 73 live gaps. `format:session_active` still needs its tri-state producer audit. The adjacent
 `sessions.new-session-attach-cwd` group now records both missing `new-session -A -c` mutation parity
@@ -314,11 +314,10 @@ and fresh explicit-empty `new-session -c ''` retention. Slice 10u is delivered: 
 prepared across a warm local Command-client vector before effects, with only vector-index-0 exact
 unaliased attach using the private positional parser. Control, remote `--host`, config and source
 replay, native zz grammar, alias snapshots, and runtime rollback keep their existing owners.
-Slice 10v will replace the shared context-format blind spot with schema 5 source partitions. Its single
-semantic registration owner classifies the six absent modifier tokens; it does not create six
-runtime items, implement the tokens, or register option consumers.
-`sessions.new-session-attach-cwd` is the first runtime alternate, but the team
-must rerank after 10v expands the classified surface before promoting it. Client
+Slice 10v replaces the shared context-format blind spot with schema 5 source partitions. The
+successor groups retain runtime modifier and producer work without minting one item per missing
+tuple. Fabrico paused the campaign before the required live rerank, so no group is the selected next
+slice. Client
 targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading
 `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order

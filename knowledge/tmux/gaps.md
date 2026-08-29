@@ -17,22 +17,23 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **89**. Classified items: **594**.
+Tracked gap groups: **91**. Classified items: **595**.
 
-- Status: open: 48, blocked: 20, accepted: 21.
-- Decision: adopt: 53, native: 15, park: 15, never: 6.
-- Priority: next: 2, later: 66, none: 21.
-- Closed history entries: 102.
-- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 73, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 113, presentation: 8, protocol: 2.
+- Status: open: 49, blocked: 20, accepted: 22.
+- Decision: adopt: 54, native: 16, park: 15, never: 6.
+- Priority: next: 2, later: 67, none: 22.
+- Closed history entries: 103.
+- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 73, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 114, presentation: 8, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 14 selected context formats, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 70 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 73 known limited formats, 0 selected context-format gaps, 0 zz-only selected context-format names, 4 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 70 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 73 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 4 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
 The gate reconciles command names, aliases, flag arities, positional bounds, custom
-`args_parse` rules, option names, global and selected context-format names, hook names,
+`args_parse` rules, option names, global formats, scoped and derived context producers,
+format modifiers, hook names,
 and default key presence against the clean pinned tmux source and binary. It also reconciles
 options absent from `BEHAVES`, constant-backed formats against the live registry, omitted
 and zz-only default keys against zz's key tables, rendered commands plus repeat bits for
@@ -40,7 +41,7 @@ shared default bindings, the native roster against catalog minus oracle, every p
 canonical prefix against the resolver, and known scenarios against exact tuples.
 
 These structural checks cannot prove that runtime parsing applies each inventoried `args_parse`
-rule, open-ended dynamic format contexts, nonconstant format correctness, or whether a hook fires,
+rule, context-format value correctness, nonconstant format correctness, or whether a hook fires,
 or that a structurally matching binding behaves identically at runtime. Differential scenarios,
 attached-client fixtures, unit tests, and manual GUI checks supply that behavioral evidence. The
 tracker keeps the remaining semantic discovery work explicit instead of treating matching
@@ -50,8 +51,8 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `formats.modifier-fidelity` | Implement missing format modifiers | adopt | open | medium | mux | scripts | none |
 | `sessions.new-session-attach-cwd` | Align new-session cwd edge behavior | adopt | open | medium | mux | scripts | none |
-| `tracker.format-vocabulary-registration` | Register the pinned format vocabulary | adopt | open | medium | protocol | scripts | none |
 
 ## Later
 
@@ -98,6 +99,7 @@ structure as proof.
 | `display-panes.command-template` | Execute display-panes selection templates | park | blocked | hard | daemon | daily, scripts | none |
 | `display-panes.queue-semantics` | Wait for display-panes overlays | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `display-popup.behavior-fidelity` | Match remaining display-popup behavior | adopt | open | hard | daemon | daily, remote, scripts | none |
+| `formats.context-producer-fidelity` | Implement missing context-format producers | adopt | open | hard | mux | scripts, gui | none |
 | `formats.mouse-context` | Expose mouse event formats | park | blocked | hard | protocol | scripts, gui | mouse.bound-context |
 | `formats.pane-process` | Expose remaining pane process formats | adopt | blocked | hard | daemon | scripts | protocol.binary-streams |
 | `formats.pane-runtime` | Expose pane mode formats | park | blocked | hard | client | scripts, daily | clients.interactive-refresh |
@@ -133,6 +135,7 @@ structure as proof.
 | `commands.native-client-tools` | Use native client tools | native | accepted | none | gui | daily, gui | none |
 | `commands.native-superset` | Keep the zz-native command namespace explicit | native | accepted | none | protocol | daily, gui, scripts | none |
 | `formats.native-modes` | Keep native mode row formats | native | accepted | none | client | daily, gui | none |
+| `formats.native-typed-context-producers` | Keep typed native context producers explicit | native | accepted | none | client | gui | none |
 | `formats.session-activity-wake-lifecycle` | Keep native wake lifecycle outside session activity | native | accepted | none | daemon | remote | none |
 | `keys.copy-mode-native-mouse` | Keep native copy-mode mouse handling | native | accepted | none | client | daily, gui | none |
 | `keys.copy-mode-native-numeric-prefix` | Keep native vi numeric prefix capture | native | accepted | none | protocol | daily, gui, scripts | none |
@@ -728,6 +731,49 @@ Slice 10p consumes the daemon-published popup terminal in raw zz-tui and proves 
   - `Pinned pointer probes cover popup context-menu and border-drag policy without input leakage or duplicate action execution.`
   - `Attached clients cover popup-to-pane conversion and popup Kitty image rendering, replacement, and close cleanup.`
 
+### `formats.context-producer-fidelity`: Implement missing context-format producers
+
+Schema 5 classifies 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. One successor owner keeps that exact derived partition active without turning the registration milestone into 43 speculative runtime items; later slices must split it by the real producer dependency.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `hard`
+- Owner: `mux`
+- User impact: scripts, gui
+- Items: `semantic:format-context-producer-fidelity`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-daemon/src/status.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `Split the source-registered missing partition by producer before implementation: option and array loops, environment and client loops, monitor hooks, current_file, and next or previous user-option copying retain independent value and context tests.`
+  - `Each implemented producer moves its exact path:function/name tuples or derived family out of the active-gap partition without weakening the exhaustive schema-5 gate or treating a same-spelled global format as context proof.`
+
+### `formats.modifier-fidelity`: Implement missing format modifiers
+
+The parser-owned schema-5 partition proves zz supports 30 of the pin's 36 modifier tokens. The six missing tokens can return plausible wrong output instead of an error, so their runtime behavior remains active after vocabulary registration closes.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `medium`
+- Owner: `mux`
+- User impact: scripts
+- Items: `semantic:format-modifier-fidelity`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `Split and implement the pinned w, I, L, O, V, and R tokens with focused source or live proofs for display-cell width, client interrogation, client loops, option loops, environment loops, and repetition.`
+  - `Every token moves from the active-gap partition into the parser-owned support roster only when its runtime behavior is implemented; malformed and nested modifier fallback remains pinned.`
+
 ### `formats.mouse-context`: Expose mouse event formats
 
 Command expansion does not retain the originating mouse event.
@@ -759,6 +805,26 @@ zz does not render tmux buffer, client, or tree mode screens.
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
   - `Native choosers remain format-driven through their own row models instead of advertising tmux mode rows.`
+
+### `formats.native-typed-context-producers`: Keep typed native context producers explicit
+
+zz deliberately replaces these tmux format-driven mode and overlay producers with typed client state and native rendering. The explicit accepted partition prevents their 54 source tuples from being mistaken for either implemented tmux contexts or unclassified omissions.
+
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
+- Owner: `client`
+- User impact: gui
+- Items: `semantic:native-format-context-producers`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+  - `resource:crates/zz-client/src/core.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `The schema-5 invariant keeps exactly 54 pinned mode-tree, prompt, message-overlay, choose-client, copy-mode, and customize producer/name tuples in the accepted-native partition.`
+  - `A tuple leaves this partition only when zz exposes its tmux producer rather than merely retaining equivalent typed native UI state.`
 
 ### `formats.pane-process`: Expose remaining pane process formats
 
@@ -1705,33 +1771,9 @@ The mux cannot inspect cursor, history, or terminal mode state.
 - Acceptance:
   - `One atomic terminal action trims cursor-derived history, advances the cursor, and no-ops in pane mode.`
 
-### `tracker.format-vocabulary-registration`: Register the pinned format vocabulary
-
-Oracle schema 4 hard-codes only 3 scopes and 14 names even though pinned production has 108 unique literal context names across 153 scoped producer pairs, leaving 94 unique literals outside the selected surface. zz supports 30 of the pin's 36 outer modifier tokens and silently diverges for the unregistered w, I, L, O, V, and R tokens.
-
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `next` / `medium`
-- Owner: `protocol`
-- User impact: scripts
-- Items: `semantic:tracker-format-modifier-vocabulary`, `semantic:tracker-open-context-format-vocabulary`
-- Depends on: none
-- Evidence:
-  - `resource:compat/tmux-oracle.py`
-  - `resource:compat/tmux-oracle.json`
-  - `resource:crates/zz-mux/src/formats.rs`
-  - `resource:crates/zz-mux/src/command.rs`
-  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
-  - `resource:knowledge/playbooks/compat-harness.md`
-  - `resource:knowledge/tmux/divergences.md`
-- Acceptance:
-  - `Oracle schema 5 source-registers literal format insertions from 31 path:function producer scopes as exactly 153 scoped pairs and 108 unique names, explicitly registers queue-added current_file, hook, and hook_arguments plus every dynamic family, and fails on every unclassified nonliteral insertion.`
-  - `All 36 pinned outer format modifier tokens are source-registered and reconcile exactly against a parser-owned zz support roster plus active gap items, with w, I, L, O, V, and R remaining classified as unsupported.`
-  - `The literal-producer and modifier partitions are source-owned, pairwise disjoint, exhaustive, and runtime-neutral: registration changes no format value, parser dispatch, protocol, snapshot, scenario, or differential result.`
-
 ### `tracker.semantic-coverage`: Register the remaining option consumers
 
-The existing parser, hook, default-binding, and global-format partitions plus the separately frozen format-vocabulary registration leave option consumption as this group's only semantic discovery item. The option definitions include storage-only gaps, so they cannot stand in for a source-owned roster of actual consumers.
+The source-owned parser, hook, default-binding, global-format, and schema-5 format-vocabulary partitions leave option consumption as this group's only semantic discovery item. The option definitions include storage-only gaps, so they cannot stand in for a source-owned roster of actual consumers.
 
 - Decision: `adopt`
 - Status: `open`
@@ -1857,6 +1899,7 @@ The existing parser, hook, default-binding, and global-format partitions plus th
 | `tracker.args-parse-set-hook` | 2026-08-28 | Protocol v84 lexical command-block positions now drive `set-hook`'s pinned monitor-or-value rule without another wire change. Without `-B`, only positional 1 accepts a string or typed block; position 0 and extra typed positionals remain string-only. With `-B`, every positional lexically accepts either type, while `-B` and `-t` values remain strings. zz still rejects `-B` during execution because format-monitor semantics remain unsupported. Every typed child constructs before parent type, arity, or effects. Accepted typed values normalize for built-in hooks, custom `@` options, and values forwarded to `set-option`. Built-in hooks perform a second construction pass and flatten physical groups; custom `@` typed values retain textual ` ;; ` groups. Quoted braces act as runtime syntax for built-in hooks but remain literal deferred storage for custom hooks. An unindexed malformed runtime value clears the existing built-in hook before failing, while an indexed failure preserves its entry. An unindexed empty block clears without adding an entry, `-a` with an empty block does nothing, and an indexed empty block remains present. Local array creation occurs before empty-append or runtime-parse handling, so an empty or failing local append installs an empty local array that shadows the inherited global hook. `-R` constructs and can reject a typed ignored value, while it ignores a quoted string value and runs the stored hook. Preexisting aliases, the stored bind path, exact Control framing, and `default-client-command` forwarding are covered by the strict three-step, 24-check fixture. Eager whole-file construction, same-source alias mutation, multiline inner-source placement, `-B` monitor semantics, and broader replay placement remain with their existing owners. Four implemented callback commands across two effective rules remain under `tracker.semantic-coverage`. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/scenarios/smoke/fixtures/args-parse-set-hook.sh`, `scenario:compat/scenarios/smoke/args-parse-set-hook.txt`, `resource:knowledge/playbooks/compat-harness.md` |
 | `tracker.args-parse-set-option` | 2026-08-28 | Protocol v84 lexical command-block positions now drive the shared pinned value rule for `set-option` and `set-window-option` without another wire change. The option name, flag values, and extra positionals remain strings while positional 1 accepts a string or typed command block. Typed failures use exact canonical diagnostics before arity, targets, or effects. Accepted blocks stringify through recursive canonical command printing, preserving same-line `;` and physical-line `;;` groups; empty blocks become empty values, quoted braces stay literal, and `-F` runs after normalization. Canonical, built-in, prefix, preexisting user-alias, `--`, late-flag, real command-option, stored-binding, source-file, and Control paths are covered by a strict 21-check fixture. Eager whole-file construction, parse-only `source-file -n`, same-source alias creation, and the outer-user-alias plus nested-user-alias cross-case remain with their existing parser and alias owners. Eight implemented callback commands across three effective rules remain under `tracker.semantic-coverage`. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-protocol/src/message.rs`, `resource:crates/zz-mux/src/parser.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/scenarios/smoke/fixtures/args-parse-set-option.sh`, `scenario:compat/scenarios/smoke/args-parse-set-option.txt`, `resource:knowledge/playbooks/compat-harness.md` |
 | `tracker.daemon-invalid-flag-runtime` | 2026-08-27 | This milestone introduced source-derived production-dispatch coverage for all 24 pinned tmux commands that daemon dispatch preempts. Its strict three-step fixture used one absent alphanumeric short flag across buffer, shell callback, branch callback, lock, and blocking command families and proved rejection without buffer mutation. The later mux.command-flag-errors closure removed the partial daemon roster. Daemon preflight now calls the shared catalog parser, and exhaustive tests cover exact diagnostics for the full implemented command and alias surface before command-specific work. The seven daemon-native commands remain outside the pinned grammar. Callback argument rules retain their existing owner. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/check.sh`, `file:compat/scenarios/smoke/fixtures/daemon-invalid-flags.sh`, `scenario:compat/scenarios/smoke/daemon-invalid-flags.txt`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/tmux-compat.md` |
+| `tracker.format-vocabulary-registration` | 2026-08-28 | Oracle schema 5 now source-registers 153 literal format producer/name pairs across 31 path:function scopes and 108 unique names, ten queue-added or derived families, five propagation sites, and all 36 outer modifier tokens. The required Rust partition classifies the literal pairs as 58 implemented, 54 accepted native, and 41 missing; the derived families as eight implemented and two missing; and the modifier tokens as 30 parser-owned implementations plus the missing w, I, L, O, V, and R set. Production constants drive parser dispatch and mux context insertion, while an exact required daemon test proves all 32 delegated context tuples against their real consumers. Every partition is disjoint and exhaustive, and unclassified source insertions, dynamic families, modifiers, or stale production registrations fail the compatibility gate. The runtime-neutral registration changes no format value, protocol, snapshot, scenario, or accepted artifact. Missing runtime behavior remains explicit under formats.context-producer-fidelity and formats.modifier-fidelity; typed native replacements remain explicit under formats.native-typed-context-producers. | `resource:compat/tmux-oracle.py`, `resource:compat/tmux-oracle.json`, `resource:crates/zz-mux/src/formats.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-daemon/src/status.rs`, `file:compat/check.sh`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/divergences.md` |
 | `tracker.hook-producer-partition` | 2026-08-28 | A daemon-owned invariant now partitions all 68 pinned hook names without changing runtime behavior. The source roster names 27 explicit event producers, while the test derives 37 generic `after-<command>` producers from pinned hook names whose suffix is an implemented canonical command. It reads the four active `hook:` items from the live tracker, rejects duplicate explicit names and produced-versus-tracked overlap, and requires the 64 produced names plus those four gaps to equal the pinned oracle exactly. `just compat-check` requires and runs the exact daemon partition test after the full mux suite. `after-queue`, `pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard` remain open under their runtime owners. | `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `file:compat/check.sh`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/tmux-compat.md` |
 | `tracker.key-binding-behavior` | 2026-08-28 | The manifest invariant now makes the default-binding structural partition explicit: 303 pinned bindings and 251 zz defaults yield 193 shared keys, 110 tracked omissions, 58 tracked native keys, 51 tracked command-or-repeat divergences, and 142 structurally matching shared bindings. Those 142 divide into 49 copy-mode, 61 copy-mode-vi, and 32 prefix entries. Matching rendered commands and repeat bits are recorded only as structural evidence; command consumers, copy actions, prefix timing, prompts, and native behavior retain their existing owners. Runtime inspection also exposed and closed the bare key-only `bind-key` contract. The command now ensures the selected table, silently leaves an absent key unbound, preserves an existing binding's commands and unspecified metadata, replaces its note only with `-N`, and sets repeat monotonically with `-r`; a later command-bearing bind replaces all metadata normally. The focused source-file fixture grew from 16 to 17 checks and reports zero differences. No protocol change was needed. | `resource:crates/zz-protocol/src/key.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/scenarios/smoke/fixtures/args-parse-bind-key.sh`, `scenario:compat/scenarios/smoke/args-parse-bind-key.txt`, `resource:knowledge/tmux/key-tables.md`, `resource:knowledge/playbooks/compat-harness.md` |
 | `tracker.nonconstant-format-behavior` | 2026-08-28 | The source-owned global-format partition now classifies all 198 pinned names without changing runtime behavior. The zz format table derives 92 direct mux values and 32 values delegated through `StatusHooks`; those 124 nonconstant behavior registrations are pairwise disjoint from the 74 active constant-backed `format:` gaps and their union equals the pinned oracle exactly. A required exact daemon test seeds buffer, client, and session facts and proves every delegated name resolves through the production `DaemonFormatHooks` consumer. This registration does not claim context-specific value parity. All 74 active format gaps remain with their runtime owners, while open-ended context formats and option consumer truth remain under `tracker.semantic-coverage`. No oracle, protocol, snapshot, scenario, or accepted artifact changed. | `resource:crates/zz-mux/src/formats.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `resource:crates/zz-daemon/src/status.rs`, `file:compat/check.sh`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/tmux-compat.md` |

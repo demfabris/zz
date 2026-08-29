@@ -2438,6 +2438,24 @@ struct PendingHookEvent {
     exclude_client: Option<ClientId>,
 }
 
+const HOOK_CONTEXT_FORMAT: &str = "hook";
+const HOOK_CLIENT_CONTEXT_FORMAT: &str = "hook_client";
+const HOOK_PANE_CONTEXT_FORMAT: &str = "hook_pane";
+const HOOK_SESSION_CONTEXT_FORMAT: &str = "hook_session";
+const HOOK_SESSION_NAME_CONTEXT_FORMAT: &str = "hook_session_name";
+const HOOK_WINDOW_CONTEXT_FORMAT: &str = "hook_window";
+const HOOK_WINDOW_NAME_CONTEXT_FORMAT: &str = "hook_window_name";
+#[cfg(test)]
+const NOTIFY_ADD_CONTEXT_FORMATS: [&str; 7] = [
+    HOOK_CONTEXT_FORMAT,
+    HOOK_CLIENT_CONTEXT_FORMAT,
+    HOOK_PANE_CONTEXT_FORMAT,
+    HOOK_SESSION_CONTEXT_FORMAT,
+    HOOK_SESSION_NAME_CONTEXT_FORMAT,
+    HOOK_WINDOW_CONTEXT_FORMAT,
+    HOOK_WINDOW_NAME_CONTEXT_FORMAT,
+];
+
 #[cfg(test)]
 const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "alert-activity",
@@ -2512,9 +2530,12 @@ impl PendingHookEvent {
             context,
             exclude_client: None,
             variables: BTreeMap::from([
-                ("hook".to_owned(), name.to_owned()),
-                ("hook_session".to_owned(), session.to_string()),
-                ("hook_session_name".to_owned(), state.name.clone()),
+                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
+                (
+                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                ),
             ]),
         }
     }
@@ -2535,12 +2556,21 @@ impl PendingHookEvent {
             context: snapshot.window_context(window),
             exclude_client: None,
             variables: BTreeMap::from([
-                ("hook".to_owned(), name.to_owned()),
-                ("hook_session".to_owned(), state.session.to_string()),
-                ("hook_session_name".to_owned(), session_name),
-                ("hook_window".to_owned(), window.to_string()),
-                ("hook_window_name".to_owned(), state.name.clone()),
-                ("hook_pane".to_owned(), state.active_pane.to_string()),
+                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+                (
+                    HOOK_SESSION_CONTEXT_FORMAT.to_owned(),
+                    state.session.to_string(),
+                ),
+                (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
+                (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
+                (
+                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                ),
+                (
+                    HOOK_PANE_CONTEXT_FORMAT.to_owned(),
+                    state.active_pane.to_string(),
+                ),
             ]),
         }
     }
@@ -2558,11 +2588,17 @@ impl PendingHookEvent {
             context: snapshot.window_context(window),
             exclude_client: None,
             variables: BTreeMap::from([
-                ("hook".to_owned(), name.to_owned()),
-                ("hook_session".to_owned(), session.to_string()),
-                ("hook_session_name".to_owned(), session_state.name.clone()),
-                ("hook_window".to_owned(), window.to_string()),
-                ("hook_window_name".to_owned(), window_state.name.clone()),
+                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
+                (
+                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                    session_state.name.clone(),
+                ),
+                (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
+                (
+                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                    window_state.name.clone(),
+                ),
             ]),
         }
     }
@@ -2588,12 +2624,18 @@ impl PendingHookEvent {
             context: ExecutionContext::new(Some(state.session), Some(state.window), Some(pane)),
             exclude_client: None,
             variables: BTreeMap::from([
-                ("hook".to_owned(), name.to_owned()),
-                ("hook_session".to_owned(), state.session.to_string()),
-                ("hook_session_name".to_owned(), session_name),
-                ("hook_window".to_owned(), state.window.to_string()),
-                ("hook_window_name".to_owned(), window_name),
-                ("hook_pane".to_owned(), pane.to_string()),
+                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
+                (
+                    HOOK_SESSION_CONTEXT_FORMAT.to_owned(),
+                    state.session.to_string(),
+                ),
+                (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
+                (
+                    HOOK_WINDOW_CONTEXT_FORMAT.to_owned(),
+                    state.window.to_string(),
+                ),
+                (HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(), window_name),
+                (HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string()),
             ]),
         }
     }
@@ -2605,9 +2647,9 @@ impl PendingHookEvent {
         client_name: Option<&str>,
     ) -> Self {
         let variables = BTreeMap::from([
-            ("hook".to_owned(), name.to_owned()),
+            (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
             (
-                "hook_client".to_owned(),
+                HOOK_CLIENT_CONTEXT_FORMAT.to_owned(),
                 client_name.map_or_else(|| format!("device-{}", client.0), str::to_owned),
             ),
         ]);
@@ -2625,7 +2667,7 @@ impl PendingHookEvent {
             context: ExecutionContext::new(None, None, None),
             exclude_client: None,
             variables: BTreeMap::from([
-                ("hook".to_owned(), name.to_owned()),
+                (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 ("hook_paste_buffer".to_owned(), buffer),
             ]),
         }
@@ -8212,14 +8254,11 @@ impl Shared {
                     }
                 } else {
                     let mut variables = command_context.format_variables.clone();
-                    variables.extend(
-                        parsed
-                            .positional
-                            .iter()
-                            .skip(1)
-                            .enumerate()
-                            .map(|(index, value)| ((index + 1).to_string(), value.clone())),
-                    );
+                    variables.extend(parsed.positional.iter().skip(1).enumerate().map(
+                        |(index, value)| {
+                            (run_shell_position_context_name(index + 1), value.clone())
+                        },
+                    ));
                     let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables)
                         .with_command_item(command_name);
                     InsertedCommandSource::Shell(expand_format_values(
@@ -23939,6 +23978,48 @@ fn popup_client_geometry(
     )))
 }
 
+const POPUP_CENTRE_X_CONTEXT_FORMAT: &str = "popup_centre_x";
+const POPUP_CENTRE_Y_CONTEXT_FORMAT: &str = "popup_centre_y";
+const POPUP_HEIGHT_CONTEXT_FORMAT: &str = "popup_height";
+const POPUP_LAST_X_CONTEXT_FORMAT: &str = "popup_last_x";
+const POPUP_LAST_Y_CONTEXT_FORMAT: &str = "popup_last_y";
+const POPUP_MOUSE_BOTTOM_CONTEXT_FORMAT: &str = "popup_mouse_bottom";
+const POPUP_MOUSE_CENTRE_X_CONTEXT_FORMAT: &str = "popup_mouse_centre_x";
+const POPUP_MOUSE_CENTRE_Y_CONTEXT_FORMAT: &str = "popup_mouse_centre_y";
+const POPUP_MOUSE_TOP_CONTEXT_FORMAT: &str = "popup_mouse_top";
+const POPUP_MOUSE_X_CONTEXT_FORMAT: &str = "popup_mouse_x";
+const POPUP_MOUSE_Y_CONTEXT_FORMAT: &str = "popup_mouse_y";
+const POPUP_PANE_BOTTOM_CONTEXT_FORMAT: &str = "popup_pane_bottom";
+const POPUP_PANE_LEFT_CONTEXT_FORMAT: &str = "popup_pane_left";
+const POPUP_PANE_RIGHT_CONTEXT_FORMAT: &str = "popup_pane_right";
+const POPUP_PANE_TOP_CONTEXT_FORMAT: &str = "popup_pane_top";
+const POPUP_STATUS_LINE_Y_CONTEXT_FORMAT: &str = "popup_status_line_y";
+const POPUP_WIDTH_CONTEXT_FORMAT: &str = "popup_width";
+const POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT: &str = "popup_window_status_line_x";
+const POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT: &str = "popup_window_status_line_y";
+#[cfg(test)]
+const POPUP_POSITION_CONTEXT_FORMATS: [&str; 19] = [
+    POPUP_CENTRE_X_CONTEXT_FORMAT,
+    POPUP_CENTRE_Y_CONTEXT_FORMAT,
+    POPUP_HEIGHT_CONTEXT_FORMAT,
+    POPUP_LAST_X_CONTEXT_FORMAT,
+    POPUP_LAST_Y_CONTEXT_FORMAT,
+    POPUP_MOUSE_BOTTOM_CONTEXT_FORMAT,
+    POPUP_MOUSE_CENTRE_X_CONTEXT_FORMAT,
+    POPUP_MOUSE_CENTRE_Y_CONTEXT_FORMAT,
+    POPUP_MOUSE_TOP_CONTEXT_FORMAT,
+    POPUP_MOUSE_X_CONTEXT_FORMAT,
+    POPUP_MOUSE_Y_CONTEXT_FORMAT,
+    POPUP_PANE_BOTTOM_CONTEXT_FORMAT,
+    POPUP_PANE_LEFT_CONTEXT_FORMAT,
+    POPUP_PANE_RIGHT_CONTEXT_FORMAT,
+    POPUP_PANE_TOP_CONTEXT_FORMAT,
+    POPUP_STATUS_LINE_Y_CONTEXT_FORMAT,
+    POPUP_WIDTH_CONTEXT_FORMAT,
+    POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT,
+    POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
+];
+
 fn popup_position_variables(
     engine: &MuxEngine,
     target: &ExecutionContext,
@@ -23968,30 +24049,45 @@ fn popup_position_variables(
     };
     let pane_right = i64::from(pane_left) + i64::from(pane_width) - i64::from(width);
     let mut variables = BTreeMap::from([
-        ("popup_width".to_owned(), width.to_string()),
-        ("popup_height".to_owned(), height.to_string()),
-        ("popup_centre_x".to_owned(), centre_x.to_string()),
-        ("popup_centre_y".to_owned(), centre_y.to_string()),
-        ("popup_pane_top".to_owned(), pane_popup_top.to_string()),
+        (POPUP_WIDTH_CONTEXT_FORMAT.to_owned(), width.to_string()),
+        (POPUP_HEIGHT_CONTEXT_FORMAT.to_owned(), height.to_string()),
         (
-            "popup_pane_bottom".to_owned(),
+            POPUP_CENTRE_X_CONTEXT_FORMAT.to_owned(),
+            centre_x.to_string(),
+        ),
+        (
+            POPUP_CENTRE_Y_CONTEXT_FORMAT.to_owned(),
+            centre_y.to_string(),
+        ),
+        (
+            POPUP_PANE_TOP_CONTEXT_FORMAT.to_owned(),
+            pane_popup_top.to_string(),
+        ),
+        (
+            POPUP_PANE_BOTTOM_CONTEXT_FORMAT.to_owned(),
             pane_top.saturating_add(pane_height).to_string(),
         ),
-        ("popup_pane_left".to_owned(), pane_left.to_string()),
-        ("popup_pane_right".to_owned(), pane_right.max(0).to_string()),
-        ("popup_last_x".to_owned(), "0".to_owned()),
-        ("popup_last_y".to_owned(), height.to_string()),
+        (
+            POPUP_PANE_LEFT_CONTEXT_FORMAT.to_owned(),
+            pane_left.to_string(),
+        ),
+        (
+            POPUP_PANE_RIGHT_CONTEXT_FORMAT.to_owned(),
+            pane_right.max(0).to_string(),
+        ),
+        (POPUP_LAST_X_CONTEXT_FORMAT.to_owned(), "0".to_owned()),
+        (POPUP_LAST_Y_CONTEXT_FORMAT.to_owned(), height.to_string()),
     ]);
     for (name, value) in [
-        ("popup_mouse_x", i64::from(columns) / 2),
-        ("popup_mouse_y", i64::from(rows) / 2),
-        ("popup_mouse_centre_x", centre_x),
-        ("popup_mouse_centre_y", centre_y),
-        ("popup_mouse_top", centre_y),
-        ("popup_mouse_bottom", centre_y),
-        ("popup_status_line_y", centre_y),
-        ("popup_window_status_line_x", centre_x),
-        ("popup_window_status_line_y", centre_y),
+        (POPUP_MOUSE_X_CONTEXT_FORMAT, i64::from(columns) / 2),
+        (POPUP_MOUSE_Y_CONTEXT_FORMAT, i64::from(rows) / 2),
+        (POPUP_MOUSE_CENTRE_X_CONTEXT_FORMAT, centre_x),
+        (POPUP_MOUSE_CENTRE_Y_CONTEXT_FORMAT, centre_y),
+        (POPUP_MOUSE_TOP_CONTEXT_FORMAT, centre_y),
+        (POPUP_MOUSE_BOTTOM_CONTEXT_FORMAT, centre_y),
+        (POPUP_STATUS_LINE_Y_CONTEXT_FORMAT, centre_y),
+        (POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT, centre_x),
+        (POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT, centre_y),
     ] {
         variables.insert(name.to_owned(), value.to_string());
     }
@@ -26013,8 +26109,11 @@ fn parsed_chooser_row_key(expanded: &str) -> String {
     canonical
 }
 
+const CHOOSER_ROW_CONTEXT_FORMATS: [&str; 1] = ["line"];
+
 fn chooser_row_variables(line: usize) -> BTreeMap<String, String> {
-    BTreeMap::from([("line".to_owned(), line.to_string())])
+    let [line_name] = CHOOSER_ROW_CONTEXT_FORMATS;
+    BTreeMap::from([(line_name.to_owned(), line.to_string())])
 }
 
 fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
@@ -26245,6 +26344,13 @@ struct ParsedIfShellArgs {
     target: Option<String>,
     positional: Vec<String>,
     positional_start: usize,
+}
+
+#[cfg(test)]
+const RUN_SHELL_POSITION_CONTEXT_PATTERN: &str = "N";
+
+fn run_shell_position_context_name(position: usize) -> String {
+    position.to_string()
 }
 
 fn parse_run_shell_args(args: &[String]) -> Result<ParsedRunShellArgs, ServerError> {
@@ -28906,6 +29012,162 @@ mod tests {
 
     use super::*;
     use crate::{CommandClient, InteractiveClient};
+
+    #[test]
+    fn daemon_context_format_registration_matches_the_oracle() {
+        let literal_scopes = [
+            (
+                "cmd-display-menu.c",
+                "cmd_display_menu_get_pos",
+                POPUP_POSITION_CONTEXT_FORMATS.as_slice(),
+            ),
+            (
+                "cmd-list-clients.c",
+                "cmd_list_clients_exec",
+                crate::status::LIST_CLIENTS_CONTEXT_FORMATS.as_slice(),
+            ),
+            (
+                "cmd-show-messages.c",
+                "cmd_show_messages_exec",
+                crate::status::SHOW_MESSAGES_CONTEXT_FORMATS.as_slice(),
+            ),
+            (
+                "notify.c",
+                "notify_add",
+                NOTIFY_ADD_CONTEXT_FORMATS.as_slice(),
+            ),
+            (
+                "window-buffer.c",
+                "window_buffer_get_key",
+                CHOOSER_ROW_CONTEXT_FORMATS.as_slice(),
+            ),
+            (
+                "window-tree.c",
+                "window_tree_get_key",
+                CHOOSER_ROW_CONTEXT_FORMATS.as_slice(),
+            ),
+        ];
+        assert_eq!(
+            literal_scopes
+                .iter()
+                .map(|(_, _, names)| names.len())
+                .sum::<usize>(),
+            32
+        );
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let oracle: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join("compat/tmux-oracle.json"))
+                .expect("read pinned tmux oracle"),
+        )
+        .expect("parse pinned tmux oracle");
+        let oracle_literals = oracle["format_contexts"]["literal_scopes"]
+            .as_array()
+            .expect("literal format context scopes")
+            .iter()
+            .flat_map(|scope| {
+                let path = scope["path"].as_str().expect("literal context path");
+                let function = scope["function"]
+                    .as_str()
+                    .expect("literal context function");
+                scope["names"]
+                    .as_array()
+                    .expect("literal context names")
+                    .iter()
+                    .map(move |name| {
+                        (
+                            path.to_owned(),
+                            function.to_owned(),
+                            name.as_str().expect("literal context name").to_owned(),
+                        )
+                    })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(oracle_literals.len(), 153);
+
+        let mut non_daemon_literals = BTreeSet::new();
+        for (path, function, names) in zz_mux::mux_literal_format_context_scopes()
+            .chain(zz_mux::accepted_native_literal_format_context_scopes())
+            .chain(zz_mux::missing_literal_format_context_scopes())
+        {
+            for name in names {
+                assert!(non_daemon_literals.insert((
+                    path.to_owned(),
+                    function.to_owned(),
+                    (*name).to_owned(),
+                )));
+            }
+        }
+        assert_eq!(non_daemon_literals.len(), 121);
+        assert!(non_daemon_literals.is_subset(&oracle_literals));
+        let delegated_literals = oracle_literals
+            .difference(&non_daemon_literals)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let daemon_literals = literal_scopes
+            .into_iter()
+            .flat_map(|(path, function, names)| {
+                names
+                    .iter()
+                    .map(move |name| (path.to_owned(), function.to_owned(), (*name).to_owned()))
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(daemon_literals, delegated_literals);
+
+        let oracle_derived_families = oracle["format_contexts"]["derived_families"]
+            .as_array()
+            .expect("derived format context families");
+        let classified_families = zz_mux::mux_derived_format_context_families()
+            .chain(zz_mux::missing_derived_format_context_families())
+            .map(|(family, names, patterns)| {
+                let oracle_family = oracle_derived_families
+                    .iter()
+                    .find(|entry| entry["family"].as_str() == Some(family))
+                    .unwrap_or_else(|| panic!("missing derived format family {family}"));
+                assert_eq!(
+                    oracle_family["names"],
+                    serde_json::json!(names),
+                    "{family} names"
+                );
+                assert_eq!(
+                    oracle_family["patterns"],
+                    serde_json::json!(patterns),
+                    "{family} patterns"
+                );
+                family
+            })
+            .collect::<BTreeSet<_>>();
+        let delegated_families = oracle_derived_families
+            .iter()
+            .filter(|family| {
+                !classified_families.contains(
+                    family["family"]
+                        .as_str()
+                        .expect("derived format family name"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(delegated_families.len(), 1);
+        let run_shell_family = delegated_families[0];
+        assert_eq!(
+            run_shell_family["family"],
+            serde_json::json!("run-shell-position")
+        );
+        assert_eq!(run_shell_family["names"], serde_json::json!([]));
+        assert_eq!(
+            run_shell_family["patterns"],
+            serde_json::json!([RUN_SHELL_POSITION_CONTEXT_PATTERN])
+        );
+        assert_eq!(
+            run_shell_family["producers"],
+            serde_json::json!([{
+                "path": "cmd-run-shell.c",
+                "function": "cmd_run_shell_exec"
+            }])
+        );
+        assert_eq!(run_shell_position_context_name(1), "1");
+        assert_eq!(run_shell_position_context_name(42), "42");
+    }
 
     #[test]
     fn pinned_hook_producer_partition_matches_the_oracle() {

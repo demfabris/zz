@@ -11,6 +11,50 @@ use crate::{MuxEngine, PaneKind, WindowSize, layout::CellLayout};
 
 const FORMAT_LOOP_LIMIT: usize = 100;
 const FORMAT_MAX_WIDTH: isize = 10_000;
+const LOOP_CONTEXT_FORMATS: &[&str] = &["loop_index", "loop_last_flag"];
+const WINDOW_LOOP_CONTEXT_FORMATS: &[&str] = &["window_after_active", "window_before_active"];
+const WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS: &[&str] = &["next_window_index", "prev_window_index"];
+const WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS: &[&str] =
+    &["next_window_active", "prev_window_active"];
+
+const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
+    ("format.c", "format_loop_panes", LOOP_CONTEXT_FORMATS),
+    ("format.c", "format_loop_sessions", LOOP_CONTEXT_FORMATS),
+    ("format.c", "format_loop_windows", LOOP_CONTEXT_FORMATS),
+    (
+        "format.c",
+        "format_loop_windows",
+        WINDOW_LOOP_CONTEXT_FORMATS,
+    ),
+];
+
+const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
+    (
+        "window-neighbour-index",
+        WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS,
+        &[],
+    ),
+    (
+        "window-neighbour-active",
+        WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS,
+        &[],
+    ),
+];
+
+pub(crate) fn literal_format_context_scopes()
+-> impl Iterator<Item = (&'static str, &'static str, &'static [&'static str])> {
+    LITERAL_FORMAT_CONTEXT_SCOPES.iter().copied()
+}
+
+pub(crate) fn derived_format_context_families() -> impl Iterator<
+    Item = (
+        &'static str,
+        &'static [&'static str],
+        &'static [&'static str],
+    ),
+> {
+    DERIVED_FORMAT_CONTEXT_FAMILIES.iter().copied()
+}
 
 pub fn display_width(value: &str) -> usize {
     value
@@ -1538,22 +1582,17 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             }
             let remaining = &body[position..];
             let mut matched = None;
-            for (text, kind) in [
-                ("||", ModifierKind::Or),
-                ("&&", ModifierKind::And),
-                ("!!", ModifierKind::NotNot),
-                ("!=", ModifierKind::NotEqual),
-                ("==", ModifierKind::Equal),
-                ("<=", ModifierKind::LessEqual),
-                (">=", ModifierKind::GreaterEqual),
-            ] {
-                if remaining.starts_with(text)
+            for spec in FORMAT_MODIFIER_SPECS
+                .iter()
+                .filter(|spec| spec.text.len() > 1)
+            {
+                if remaining.starts_with(spec.text)
                     && remaining
                         .as_bytes()
-                        .get(text.len())
+                        .get(spec.text.len())
                         .is_some_and(|next| is_modifier_end(*next))
                 {
-                    matched = Some((kind, text.len()));
+                    matched = Some((spec.kind, spec.text.len()));
                     break;
                 }
             }
@@ -1565,48 +1604,23 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 position += size;
                 continue;
             }
-            let character = remaining.as_bytes()[0] as char;
+            let character = remaining.as_bytes()[0];
             let next = remaining.as_bytes().get(1).copied();
-            let no_arguments = match character {
-                'l' => Some(ModifierKind::Literal),
-                'b' => Some(ModifierKind::Basename),
-                'd' => Some(ModifierKind::Dirname),
-                'n' => Some(ModifierKind::Length),
-                'E' => Some(ModifierKind::Expand),
-                'T' => Some(ModifierKind::ExpandTime),
-                'a' => Some(ModifierKind::Character),
-                '!' => Some(ModifierKind::Not),
-                '<' => Some(ModifierKind::Less),
-                '>' => Some(ModifierKind::Greater),
-                _ => None,
-            };
-            if let Some(kind) = no_arguments
-                && next.is_some_and(is_modifier_end)
-            {
+            let spec = FORMAT_MODIFIER_SPECS
+                .iter()
+                .find(|spec| spec.text.as_bytes() == [character])?;
+            if next.is_some_and(is_modifier_end) {
                 modifiers.push(Modifier {
-                    kind,
+                    kind: spec.kind,
                     args: Vec::new(),
                 });
                 position += 1;
                 continue;
             }
-            let kind = match character {
-                'm' => ModifierKind::Match,
-                's' => ModifierKind::Substitute,
-                't' => ModifierKind::Time,
-                '=' => ModifierKind::Limit,
-                'q' => ModifierKind::Quote,
-                'p' => ModifierKind::Padding,
-                'e' => ModifierKind::Expression,
-                'c' => ModifierKind::Colour,
-                'N' => ModifierKind::NameExists,
-                'S' => ModifierKind::Sessions,
-                'W' => ModifierKind::Windows,
-                'P' => ModifierKind::Panes,
-                'C' => ModifierKind::ContentSearch,
-                'a' => ModifierKind::Character,
-                _ => return None,
-            };
+            if !spec.arguments {
+                return None;
+            }
+            let kind = spec.kind;
             position += 1;
             if position >= body.len() {
                 return None;
@@ -1836,39 +1850,39 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             let mut item = items[index].clone();
             item.context.format_universe = Arc::clone(&universe);
             let mut dynamic = BTreeMap::from([
-                ("loop_index".to_owned(), index.to_string()),
+                (LOOP_CONTEXT_FORMATS[0].to_owned(), index.to_string()),
                 (
-                    "loop_last_flag".to_owned(),
+                    LOOP_CONTEXT_FORMATS[1].to_owned(),
                     bool_string(index == last).to_owned(),
                 ),
             ]);
             if target == LoopTarget::Windows {
                 dynamic.insert(
-                    "window_after_active".to_owned(),
+                    WINDOW_LOOP_CONTEXT_FORMATS[0].to_owned(),
                     bool_string(index > 0 && items[index - 1].active).to_owned(),
                 );
                 dynamic.insert(
-                    "window_before_active".to_owned(),
+                    WINDOW_LOOP_CONTEXT_FORMATS[1].to_owned(),
                     bool_string(index + 1 < items.len() && items[index + 1].active).to_owned(),
                 );
                 if let Some(next) = items.get(index + 1) {
                     dynamic.insert(
-                        "next_window_index".to_owned(),
+                        WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS[0].to_owned(),
                         next.context.window_index.to_string(),
                     );
                     dynamic.insert(
-                        "next_window_active".to_owned(),
+                        WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS[0].to_owned(),
                         bool_string(next.active).to_owned(),
                     );
                 }
                 if index > 0 {
                     let previous = &items[index - 1];
                     dynamic.insert(
-                        "prev_window_index".to_owned(),
+                        WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS[1].to_owned(),
                         previous.context.window_index.to_string(),
                     );
                     dynamic.insert(
-                        "prev_window_active".to_owned(),
+                        WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS[1].to_owned(),
                         bool_string(previous.active).to_owned(),
                     );
                 }
@@ -2032,6 +2046,61 @@ enum ModifierKind {
     Windows,
     Panes,
     ContentSearch,
+}
+
+#[derive(Clone, Copy)]
+struct FormatModifierSpec {
+    text: &'static str,
+    kind: ModifierKind,
+    arguments: bool,
+}
+
+impl FormatModifierSpec {
+    const fn new(text: &'static str, kind: ModifierKind, arguments: bool) -> Self {
+        Self {
+            text,
+            kind,
+            arguments,
+        }
+    }
+}
+
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 30] = [
+    FormatModifierSpec::new("||", ModifierKind::Or, false),
+    FormatModifierSpec::new("&&", ModifierKind::And, false),
+    FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
+    FormatModifierSpec::new("!=", ModifierKind::NotEqual, false),
+    FormatModifierSpec::new("==", ModifierKind::Equal, false),
+    FormatModifierSpec::new("<=", ModifierKind::LessEqual, false),
+    FormatModifierSpec::new(">=", ModifierKind::GreaterEqual, false),
+    FormatModifierSpec::new("l", ModifierKind::Literal, false),
+    FormatModifierSpec::new("b", ModifierKind::Basename, false),
+    FormatModifierSpec::new("d", ModifierKind::Dirname, false),
+    FormatModifierSpec::new("n", ModifierKind::Length, false),
+    FormatModifierSpec::new("E", ModifierKind::Expand, false),
+    FormatModifierSpec::new("T", ModifierKind::ExpandTime, false),
+    FormatModifierSpec::new("a", ModifierKind::Character, true),
+    FormatModifierSpec::new("!", ModifierKind::Not, false),
+    FormatModifierSpec::new("<", ModifierKind::Less, false),
+    FormatModifierSpec::new(">", ModifierKind::Greater, false),
+    FormatModifierSpec::new("m", ModifierKind::Match, true),
+    FormatModifierSpec::new("s", ModifierKind::Substitute, true),
+    FormatModifierSpec::new("t", ModifierKind::Time, true),
+    FormatModifierSpec::new("=", ModifierKind::Limit, true),
+    FormatModifierSpec::new("q", ModifierKind::Quote, true),
+    FormatModifierSpec::new("p", ModifierKind::Padding, true),
+    FormatModifierSpec::new("e", ModifierKind::Expression, true),
+    FormatModifierSpec::new("c", ModifierKind::Colour, true),
+    FormatModifierSpec::new("N", ModifierKind::NameExists, true),
+    FormatModifierSpec::new("S", ModifierKind::Sessions, true),
+    FormatModifierSpec::new("W", ModifierKind::Windows, true),
+    FormatModifierSpec::new("P", ModifierKind::Panes, true),
+    FormatModifierSpec::new("C", ModifierKind::ContentSearch, true),
+];
+
+#[cfg(test)]
+pub(crate) fn format_modifier_names() -> impl Iterator<Item = &'static str> {
+    FORMAT_MODIFIER_SPECS.iter().map(|spec| spec.text)
 }
 
 struct Modifier {

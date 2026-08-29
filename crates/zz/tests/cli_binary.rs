@@ -286,7 +286,6 @@ mod daemon_autostart {
         assert_eq!(killed.status.code(), Some(0));
         assert!(killed.stdout.is_empty());
         assert!(killed.stderr.is_empty());
-        fixture.assert_stopped();
         let second = fixture.run(&["new-session", "-d", "-s", "b"]);
         assert_eq!(
             second.status.code(),

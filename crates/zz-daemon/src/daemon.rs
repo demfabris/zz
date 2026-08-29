@@ -1083,7 +1083,7 @@ impl Daemon {
         })?;
         restrict_socket_permissions(&self.socket_path)?;
         listener.set_nonblocking(true)?;
-        let socket_guard = SocketGuard::new(self.socket_path.clone());
+        let socket_guard = SocketGuard::new(self.socket_path.clone())?;
         let identity_guard = DaemonIdentityGuard::install(&self.socket_path)?;
 
         self.run_foreground_listener::<LocalTransport>(
@@ -1158,12 +1158,13 @@ impl Daemon {
         }
         accept_result?;
         shared.request_shutdown();
-        shared.wait_for_response_admissions(SHUTDOWN_RESPONSE_TIMEOUT);
+        let (mut socket_guard, identity_guard) = socket_guards;
+        socket_guard.release();
+        drop(socket_guard);
+        shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
         shared.publish(EventPayload::ServerStopping);
         shared.drain_client_writers_for_shutdown(SHUTDOWN_WRITER_TIMEOUT);
-        drop(socket_guards);
-        // The adapter children are told to close and joined before the socket
-        // goes; what refuses to settle is the acp crate's problem, not ours.
+        drop(identity_guard);
         #[cfg(feature = "agent")]
         shared.shutdown_agents();
         shared.log_diagnostic_snapshot("shutdown");
@@ -1251,30 +1252,75 @@ fn accept_connections<T: Transport>(
 }
 
 #[cfg(unix)]
-struct SocketGuard(PathBuf);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SocketIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(unix)]
+struct SocketGuard {
+    path: PathBuf,
+    identity: SocketIdentity,
+    armed: bool,
+}
 
 #[cfg(windows)]
 struct SocketGuard;
 
 impl SocketGuard {
-    fn new(path: PathBuf) -> Self {
-        #[cfg(unix)]
-        {
-            Self(path)
+    #[cfg(unix)]
+    fn new(path: PathBuf) -> std::io::Result<Self> {
+        let identity = socket_identity(&path)?;
+        Ok(Self {
+            path,
+            identity,
+            armed: true,
+        })
+    }
+
+    #[cfg(windows)]
+    fn new(path: PathBuf) -> std::io::Result<Self> {
+        let _ = path;
+        Ok(Self)
+    }
+
+    #[cfg(unix)]
+    fn release(&mut self) {
+        if !std::mem::take(&mut self.armed) {
+            return;
         }
-        #[cfg(windows)]
-        {
-            let _ = path;
-            Self
+        if socket_identity(&self.path).ok() == Some(self.identity) {
+            let _ = fs::remove_file(&self.path);
         }
     }
+
+    #[cfg(windows)]
+    fn release(&mut self) {}
 }
 
 #[cfg(unix)]
 impl Drop for SocketGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        self.release();
     }
+}
+
+#[cfg(unix)]
+fn socket_identity(path: &Path) -> std::io::Result<SocketIdentity> {
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
+
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_socket() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            format!("{} is not a Unix socket", path.display()),
+        ));
+    }
+    Ok(SocketIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
 }
 
 #[cfg(unix)]
@@ -2429,7 +2475,7 @@ fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
 struct Shared {
     inner: Mutex<ServerState>,
     client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
-    response_admissions: Mutex<usize>,
+    response_admissions: Mutex<ResponseAdmissionState>,
     response_admissions_changed: Condvar,
     default_attach_effects: Mutex<()>,
     pipe_effects: Mutex<()>,
@@ -3226,6 +3272,12 @@ struct ResponseAdmissionGuard {
     armed: bool,
 }
 
+#[derive(Default)]
+struct ResponseAdmissionState {
+    active: usize,
+    frozen: bool,
+}
+
 #[cfg(test)]
 struct ResponseAdmissionHook {
     reached: crossbeam_channel::Sender<()>,
@@ -3278,24 +3330,33 @@ impl Drop for ClientWriterRegistrationGuard {
 }
 
 impl ResponseAdmissionGuard {
-    fn new(shared: &Arc<Shared>) -> Self {
-        let mut active = shared.response_admissions.lock();
-        *active = active.checked_add(1).expect("response admission overflow");
-        drop(active);
-        Self {
+    fn new(shared: &Arc<Shared>) -> Option<Self> {
+        let mut state = shared.response_admissions.lock();
+        if state.frozen {
+            return None;
+        }
+        state.active = state
+            .active
+            .checked_add(1)
+            .expect("response admission overflow");
+        drop(state);
+        Some(Self {
             shared: Arc::clone(shared),
             armed: true,
-        }
+        })
     }
 
     fn finish(&mut self) {
         if !std::mem::take(&mut self.armed) {
             return;
         }
-        let mut active = self.shared.response_admissions.lock();
-        *active = active.checked_sub(1).expect("response admission underflow");
-        let notify = *active == 0;
-        drop(active);
+        let mut state = self.shared.response_admissions.lock();
+        state.active = state
+            .active
+            .checked_sub(1)
+            .expect("response admission underflow");
+        let notify = state.active == 0;
+        drop(state);
         if notify {
             self.shared.response_admissions_changed.notify_all();
         }
@@ -3460,7 +3521,7 @@ impl Shared {
         Self {
             inner: Mutex::new(state),
             client_writers: Mutex::new(BTreeMap::new()),
-            response_admissions: Mutex::new(0),
+            response_admissions: Mutex::new(ResponseAdmissionState::default()),
             response_admissions_changed: Condvar::new(),
             default_attach_effects: Mutex::new(()),
             pipe_effects: Mutex::new(()),
@@ -3841,18 +3902,19 @@ impl Shared {
             .map_err(|error| DaemonError::Thread(error.to_string()))
     }
 
-    fn wait_for_response_admissions(&self, timeout: Duration) -> bool {
+    fn freeze_response_admissions_and_wait(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        let mut active = self.response_admissions.lock();
-        while *active != 0 {
+        let mut state = self.response_admissions.lock();
+        state.frozen = true;
+        while state.active != 0 {
             if self
                 .response_admissions_changed
-                .wait_until(&mut active, deadline)
+                .wait_until(&mut state, deadline)
                 .timed_out()
             {
                 log::warn!(
                     "shutdown proceeding before {} command responses were admitted",
-                    *active
+                    state.active
                 );
                 return false;
             }
@@ -4752,7 +4814,9 @@ impl Shared {
         command: &CommandInvocation,
         prepared: bool,
     ) -> bool {
-        let mut admission = ResponseAdmissionGuard::new(self);
+        let Some(mut admission) = ResponseAdmissionGuard::new(self) else {
+            return false;
+        };
         let response = self.execute_command_request_with_prepared(
             client, kind, context, request_id, command, prepared,
         );
@@ -36029,12 +36093,14 @@ mod tests {
                 .recv_timeout(Duration::from_secs(2))
                 .expect("response reached admission hook");
             assert!(shared.stopping.load(Ordering::Acquire));
-            assert_eq!(*shared.response_admissions.lock(), 1);
-            assert!(!shared.wait_for_response_admissions(Duration::ZERO));
+            assert_eq!(shared.response_admissions.lock().active, 1);
+            assert!(!shared.freeze_response_admissions_and_wait(Duration::ZERO));
 
             let shutdown_shared = Arc::clone(&shared);
             let shutdown = thread::spawn(move || {
-                assert!(shutdown_shared.wait_for_response_admissions(Duration::from_secs(2)));
+                assert!(
+                    shutdown_shared.freeze_response_admissions_and_wait(Duration::from_secs(2))
+                );
                 shutdown_shared.publish(EventPayload::ServerStopping);
                 assert!(shutdown_shared.drain_client_writers_for_shutdown(Duration::from_secs(2)));
             });
@@ -36109,7 +36175,60 @@ mod tests {
             false,
         );
         assert!(!admitted);
-        assert!(shared.wait_for_response_admissions(Duration::ZERO));
+        assert!(shared.freeze_response_admissions_and_wait(Duration::ZERO));
+    }
+
+    #[test]
+    fn frozen_response_admission_rejects_late_control_and_command_execution() {
+        for (index, kind) in [ClientKind::Control, ClientKind::Command]
+            .into_iter()
+            .enumerate()
+        {
+            let shared = Arc::new(Shared::new(index as u64 + 1));
+            assert!(shared.freeze_response_admissions_and_wait(Duration::ZERO));
+            let outbound = OutboundMailbox::new();
+            assert!(!shared.execute_command_request_with_prepared_into(
+                &outbound,
+                ClientId(index as u64 + 1),
+                kind,
+                &mut ExecutionContext::default(),
+                41,
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+                false,
+            ));
+            assert!(!shared.stopping.load(Ordering::Acquire));
+            assert_eq!(outbound.queued_reliable(), Some((0, 0)));
+            let state = shared.response_admissions.lock();
+            assert!(state.frozen);
+            assert_eq!(state.active, 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_socket_survives_stalled_old_writer_shutdown() {
+        let directory = tempfile::tempdir().expect("temporary socket directory");
+        let path = directory.path().join("daemon.sock");
+        let old_listener = std::os::unix::net::UnixListener::bind(&path).expect("old listener");
+        let mut socket_guard = SocketGuard::new(path.clone()).expect("old socket guard");
+        let shared = Arc::new(Shared::new(1));
+        let stalled = OutboundMailbox::new();
+        let mut registration =
+            ClientWriterRegistrationGuard::new(&shared, ClientId(7), Arc::clone(&stalled));
+
+        drop(old_listener);
+        fs::remove_file(&path).expect("unlink old socket");
+        let replacement =
+            std::os::unix::net::UnixListener::bind(&path).expect("replacement listener");
+        socket_guard.release();
+        assert!(!shared.drain_client_writers_for_shutdown(Duration::ZERO));
+        drop(socket_guard);
+
+        let client = std::os::unix::net::UnixStream::connect(&path).expect("connect replacement");
+        let (server, _) = replacement.accept().expect("accept replacement client");
+        drop(client);
+        drop(server);
+        registration.unregister();
     }
 
     #[cfg(unix)]

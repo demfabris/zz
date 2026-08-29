@@ -68,7 +68,8 @@ to the destination pane.
 
 The selected context rosters do not describe tmux's whole context-format vocabulary. Queue state,
 hook arguments, options, user options, and environment variables can contribute names at runtime.
-The tracker treats that open-ended surface as semantic work.
+The frozen 10v contract assigns registration of that surface and the modifier vocabulary to
+`tracker.format-vocabulary-registration`; runtime behavior remains separate.
 
 The canonical check recaptures the inventory from a `tmux next-3.8` binary at the root of a clean
 source checkout at the exact pin. The companion build stamp must also match the commit, version,
@@ -107,8 +108,9 @@ closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves
 unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
 unbound after ensuring its table. Structural key equality still does not prove every downstream
 command or copy action. Those consumers retain their existing owners. The gate still does not prove
-open-ended or dynamic context-format names or consumer truth for option `BEHAVES`.
-`tracker.semantic-coverage` owns those two gaps. At the slice 10s close, the nonconstant
+open-ended or dynamic context-format names or consumer truth for option `BEHAVES`. The post-10u
+freeze gives context and modifier registration to `tracker.format-vocabulary-registration`;
+`tracker.semantic-coverage` retains option-consumer truth. At the slice 10s close, the nonconstant
 global-format registration partitioned the 198-name pin into 92 direct mux values, 32
 daemon-delegated values, and 74 active constant-backed `format:` gaps. The mux invariant kept those
 sets pairwise disjoint. The exact
@@ -150,6 +152,30 @@ closure. The strict three-step `smoke/cli-chain-parse-abort` scenario now runs s
 name, invalid flag, excessive arity, missing value, later `attach`, and later `attach-session`, with
 zero differential channels. Slice 10u changes no protocol or snapshot and leaves the 98-scenario,
 1,522-step attached-client `PASS` artifact unchanged.
+
+The post-10u rerank freezes slice 10v on `tracker.format-vocabulary-registration`. Schema 4 and its
+Rust gate both select the same three scopes and 14 names. Direct literal calls in the pinned source
+span 31 `path:function` scopes, 153 scoped pairs, and 108 unique names; 94 names are outside the
+current selection. The pin recognizes 36 modifier tokens while zz accepts 30. `w`, `I`, `L`, `O`,
+`V`, and `R` are absent. Direct scratch-socket probes show silent differences for `w` display-cell
+width, `R` repeat, `O` option loops, and `V` environment loops. Pinned source and the manual
+classify `I` as client feature, termcap, and environment interrogation; the pinned modifier
+regression classifies `L` as an attached-client loop.
+
+Schema 5 will register the literal producers, queue-added `current_file`, `hook`, and
+`hook_arguments`, numbered run-shell
+argument keys, `hook_argument_<n>`, `hook_flag_<char>`, `hook_flag_<char>_<n>`,
+`next_window_index`, `next_window_active`, `prev_window_index`, `prev_window_active`, `next_@*` and
+`prev_@*` user-option families, and all modifier tokens. Production-owned implemented, native, and
+active-gap partitions must be disjoint and exhaustive. One semantic owner classifies the six absent
+tokens without creating six runtime items. Slice 10v does not change runtime modifier behavior,
+context-value semantics, option consumers, protocol, snapshots, scenarios, or the accepted
+artifact. The frozen registry has 89 active groups and 594 items, with 102 closed records: 48 open,
+20 blocked, and 21 accepted; 123 of 191 groups are resolved (64.4%). The accepted artifact remains
+98 scenarios and 1,522 steps with attached-client `PASS` and SHA-256
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+`sessions.new-session-attach-cwd` is the first runtime alternate, subject to another rerank after
+schema 5 expands the classification.
 
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.

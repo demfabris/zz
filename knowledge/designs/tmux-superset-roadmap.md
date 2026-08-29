@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress
+status: In Progress; slice 10v frozen on tracker.format-vocabulary-registration
 tags:
 - tmux
 - compatibility
@@ -38,8 +38,9 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 88 active groups, 593 classified active items, 102 closed groups, and two known
-differentials. Accepted active groups plus closed history resolve 123 of 190 known groups (64.7%).
+The frozen slice 10v tracker has 89 active groups, 594 classified active items, 102 closed groups,
+and two known differentials. Accepted active groups plus closed history resolve 123 of 191 known
+groups (64.4%).
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -80,8 +81,7 @@ closed in slice 10p. Its attached A/B/C cases cover live title-only modification
 exact content-relative pointer and wheel input, dead `-k` retention, live external focus
 suppression, dead focus-close, and pane-input isolation. Six broader popup contracts remain under
 `display-popup.behavior-fidelity`, while broader menu behavior stays under
-`display-menu.behavior-fidelity`. Open context formats and option consumers remain two independent
-discovery slices.
+`display-menu.behavior-fidelity`.
 Slice 10q closes the per-client `no-detach-on-destroy` fallback with two real raw clients and no new
 differential row. Slice 10r closes the cold local CLI parse-abort contract. An alias-free raw pass
 validates the complete vector against all 83 implemented and nine recognized parked tmux verbs,
@@ -118,8 +118,27 @@ spellings and aliases use the catalog. Control, remote `--host`, config and sour
 grammar, alias snapshots, and runtime rollback remain excluded. Six warm fixture probes and the
 focused three-step scenario report zero differences. The accepted artifact remains the 98-scenario,
 1,522-step checkpoint above with attached-client `PASS` and the same digest. The full live tracker
-must be reranked before the next slice is selected; the post-10t first-alternate forecast does not
-promote automatically.
+rerank then froze slice 10v on `tracker.format-vocabulary-registration`.
+
+Schema 4 gives false confidence on format discovery because the oracle and Rust gate both select
+the same three scopes and 14 names. The pinned source contains 31 literal `path:function` scopes,
+153 scoped pairs, and 108 unique names, with 94 names outside that selection. It recognizes 36
+format modifier tokens while zz parses 30. Live scratch-socket probes show silent differences for
+`w` display-cell width, `R` repeat, `O` option loops, and `V` environment loops. Pinned source and
+the manual classify `I` as client feature, termcap, and environment interrogation; the pinned
+modifier regression classifies `L` as an attached-client loop.
+
+Slice 10v will move the oracle to schema 5 and register both surfaces. The source partition includes
+literal producers plus queue-added `current_file`, `hook`, and `hook_arguments`, numbered run-shell argument keys,
+`hook_argument_<n>`, `hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`,
+`next_window_active`, `prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*`
+user-option families. Production-owned inventories must form a disjoint, exhaustive implemented,
+native, and active-gap partition. One semantic registration owner classifies `w`, `I`, `L`, `O`, `V`, and
+`R` as absent from zz. It does not create six runtime items, implement them, or claim context-value
+parity. Option-consumer registration stays open.
+Protocol, snapshots, scenarios, and the accepted artifact remain unchanged. After 10v lands, the
+team must rerank the expanded registry. `sessions.new-session-attach-cwd` remains the first runtime
+alternate until that rerank.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
@@ -530,6 +549,12 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    oracle and registry checks, the full `zz-mux` library suite, and an exact-filtered daemon
    hook-producer partition test.
 
+   The post-10u rerank proved that the 14-name context check self-confirms one shared selection. A
+   pinned scan found 31 literal producer scopes, 153 scoped pairs, and 108 unique names. Schema 5 is
+   frozen for slice 10v to register those producers, the explicit dynamic families, and all 36
+   upstream-recognized modifier tokens against production-owned zz partitions. One semantic owner
+   classifies the six tokens absent from zz without claiming runtime behavior.
+
    `mux.resize-pane-optional-values` closed on 2026-08-25 as a catalog-only reconciliation.
    Runtime already accepted bare direction flags with amount 1 and attached or separated integer
    amounts. The four direction entries now expose optional values to the manifest gate. Nine focused
@@ -642,8 +667,9 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    reply paths that prove the response does not reach the pane. Slice 10s partitions all 198 pinned
    global format names into 92 direct mux values, 32 values delegated through `StatusHooks`, and 74
    constant-backed live gaps. The required daemon test resolves each delegated name through the
-   production consumer. `tracker.semantic-coverage` now tracks only open-ended or dynamic context
-   formats and option `BEHAVES` consumer truth. Daemon invalid-flag
+   production consumer. Slice 10v is frozen to replace the open-ended or dynamic context-format
+   blind spot with schema 5 source ownership. Option `BEHAVES` consumer truth remains separate.
+   Daemon invalid-flag
    coverage first closed on 2026-08-27 with
    a 24-command production-dispatch roster. The shared flag closure on 2026-08-28 removed that
    partial roster and routed daemon preflight through the catalog parser used by mux execution.
@@ -1405,6 +1431,25 @@ permanent product decision has been recorded for them.
   A sequential run passed 711 of 712 tests; its unrelated viewport-queue assertion also passed
   immediately alone. No uninterrupted full-daemon result is claimed here. Slice 10u is delivered,
   and the live tracker must be reranked before selecting the next slice.
+- 2026-08-28: The post-10u rerank froze slice 10v on
+  `tracker.format-vocabulary-registration`. Oracle schema 4 and its Rust gate both select three
+  format contexts with 14 names. The pin instead contains 31 literal `path:function` scopes, 153
+  scoped pairs, and 108 unique names, 94 of them outside the selection. The pin recognizes 36
+  modifier tokens while zz accepts 30; `w`, `I`, `L`, `O`, `V`, and `R` remain absent. Direct
+  scratch-socket probes show silent differences for `w` display-cell width, `R` repeat, `O` option
+  loops, and `V` environment loops. Pinned source and the manual classify `I` as client feature,
+  termcap, and environment interrogation; the pinned modifier regression classifies `L` as an
+  attached-client loop. Schema 5 will register literal producers, modifier syntax, queue-added
+  `current_file`, `hook`, and `hook_arguments`, numbered run-shell argument keys,
+  `hook_argument_<n>`, `hook_flag_<char>`,
+  `hook_flag_<char>_<n>`, `next_window_index`, `next_window_active`, `prev_window_index`,
+  `prev_window_active`, and `next_@*` or `prev_@*` user-option families against
+  production-owned partitions. The slice makes no runtime,
+  context-value, option-consumer, protocol, snapshot, scenario, or accepted-artifact claim. The
+  frozen registry has 89 active groups and 594 active items, with 102 closed entries: 48 open, 20
+  blocked, and 21 accepted. Closed history plus accepted groups resolve 123 of 191 groups (64.4%).
+  The accepted artifact remains 98 scenarios and 1,522 steps with attached-client `PASS` and
+  SHA-256 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 
 # Related
 

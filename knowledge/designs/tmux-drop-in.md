@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; the approved core campaign closed 2026-08-22; selected F and G follow-up slices shipped, while client, terminal, stream, and model contracts remain open or parked
+status: Original nine phases shipped 2026-08-20; slice 10u is delivered and slice 10v is frozen on source-owned format vocabulary registration
 tags:
 - tmux
 - compatibility
@@ -71,7 +71,7 @@ The target splits in two:
    session-scoped prefixes stay parked.
 10. Each reviewed wave commits to `main` locally; pushes stay explicit.
 
-# Where this stands (2026-08-22)
+# Where this stands (2026-08-28)
 
 **All nine original implementation phases shipped.** A human typing `tmux new -s foo` lands inside
 the session, explicit attach works, and bare packaged `zz` now lazily creates and attaches session
@@ -147,8 +147,25 @@ is exact unaliased `attach` or `attach-session` keeps the private positional par
 spellings and aliases use the catalog. Control, remote `--host`, config and source replay, native zz
 grammar, alias snapshots, and runtime rollback remain excluded. Six warm fixture probes and the
 focused three-step scenario report zero differences. The accepted canonical artifact remains 98
-scenarios and 1,522 steps with attached-client `PASS` and the digest above. The next slice requires
-a fresh live-tracker rerank.
+scenarios and 1,522 steps with attached-client `PASS` and the digest above.
+
+The post-10u rerank freezes slice 10v on `tracker.format-vocabulary-registration`. Oracle schema 4
+checks only three format contexts with 14 names, and the Rust gate repeats that selection. A pinned
+source sweep found 31 literal `path:function` producers, 153 scoped name pairs, and 108 unique
+names. Ninety-four names sit outside the current selection. The same sweep found 36
+upstream-recognized format modifier tokens while zz parses 30. The missing `w`, `I`, `L`, `O`, `V`,
+and `R` tokens can return plausible wrong output without an error. Direct scratch-socket probes show
+silent differences for `w` display-cell width, `R` repeat, `O` option loops, and `V` environment
+loops. Pinned source and the manual classify `I` as client feature, termcap, and environment
+interrogation; the pinned modifier regression classifies `L` as an attached-client loop.
+Schema 5 will register the complete literal producer partition, the modifier vocabulary,
+queue-added `current_file`, `hook`, and `hook_arguments`, numbered run-shell argument keys,
+`hook_argument_<n>`,
+`hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`, `next_window_active`,
+`prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*` user-option families.
+Production-owned implemented, native, and active-gap inventories must be disjoint and exhaustive.
+Slice 10v changes no runtime format behavior and claims no context-value parity. It also excludes
+option-consumer registration, protocol and snapshot work, scenarios, and the accepted artifact.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -287,18 +304,21 @@ mutation closed in slice 10m, followed by raw-TUI confirmation consumption in sl
 menu descriptor consumption in slice 10o, popup consumption in slice 10p, per-client destruction
 fallback in slice 10q, cold local CLI parse atomicity in slice 10r, nonconstant global-format source
 registration in slice 10s, target-session path expansion in slice 10t, and warm local whole-vector
-argument preflight in slice 10u. The live registry now has 88 active groups, 593 classified active
-items, and 102 closed records: 47 open, 20 blocked, and 21 accepted; 123 of 190 groups are resolved
-(64.7%). Slice 10t moves the 198-name partition to 93 direct mux values, 32 daemon-delegated values,
+argument preflight in slice 10u. The post-10u rerank freezes source-owned format vocabulary
+registration as slice 10v. The frozen registry has 89 active groups, 594 classified active items,
+and 102 closed records: 48 open, 20 blocked, and 21 accepted; 123 of 191 groups are resolved
+(64.4%). Slice 10t moves the 198-name partition to 93 direct mux values, 32 daemon-delegated values,
 and 73 live gaps. `format:session_active` still needs its tri-state producer audit. The adjacent
 `sessions.new-session-attach-cwd` group now records both missing `new-session -A -c` mutation parity
-and fresh explicit-empty `new-session -c ''` retention. Open context formats and option consumers
-remain independent discovery milestones. Slice 10u is delivered: ordinary unaliased tmux grammar is
+and fresh explicit-empty `new-session -c ''` retention. Slice 10u is delivered: ordinary unaliased tmux grammar is
 prepared across a warm local Command-client vector before effects, with only vector-index-0 exact
 unaliased attach using the private positional parser. Control, remote `--host`, config and source
 replay, native zz grammar, alias snapshots, and runtime rollback keep their existing owners.
-`sessions.new-session-attach-cwd` was the first alternate in the post-10t forecast, but closure now
-requires regenerating and reranking the full live tracker before selecting the next slice. Client
+Slice 10v will replace the shared context-format blind spot with schema 5 source partitions. Its single
+semantic registration owner classifies the six absent modifier tokens; it does not create six
+runtime items, implement the tokens, or register option consumers.
+`sessions.new-session-attach-cwd` is the first runtime alternate, but the team
+must rerank after 10v expands the classified surface before promoting it. Client
 targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading
 `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order

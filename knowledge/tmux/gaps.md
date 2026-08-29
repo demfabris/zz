@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **88**. Classified items: **593**.
+Tracked gap groups: **89**. Classified items: **594**.
 
-- Status: open: 47, blocked: 20, accepted: 21.
-- Decision: adopt: 52, native: 15, park: 15, never: 6.
-- Priority: next: 2, later: 65, none: 21.
+- Status: open: 48, blocked: 20, accepted: 21.
+- Decision: adopt: 53, native: 15, park: 15, never: 6.
+- Priority: next: 2, later: 66, none: 21.
 - Closed history entries: 102.
-- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 73, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 112, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 73, hook: 4, key: 110, binding: 51, native-key: 58, semantic: 113, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -51,7 +51,7 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `sessions.new-session-attach-cwd` | Align new-session cwd edge behavior | adopt | open | medium | mux | scripts | none |
-| `tracker.semantic-coverage` | Close the remaining semantic discovery blind spots | adopt | open | medium | protocol | scripts | none |
+| `tracker.format-vocabulary-registration` | Register the pinned format vocabulary | adopt | open | medium | protocol | scripts | none |
 
 ## Later
 
@@ -80,6 +80,7 @@ structure as proof.
 | `rendering.geometry-residue` | Close bounded geometry reporting gaps | adopt | open | medium | client | scripts, gui | none |
 | `terminal.key-control` | Complete terminal key control flags | adopt | open | medium | terminal | scripts, daily | none |
 | `terminal.resize-pane-trim` | Add terminal history trim action | adopt | blocked | medium | terminal | daily, scripts | none |
+| `tracker.semantic-coverage` | Register the remaining option consumers | adopt | open | medium | protocol | scripts | none |
 | `aliases.remote-client-preflight` | Prepare remote CLI aliases without starting SSH | adopt | open | hard | client | remote, scripts | none |
 | `buffers.client-file-context` | Route buffer files through client path context | adopt | open | hard | protocol | scripts, remote | none |
 | `clients.active-pane` | Retain per-client active panes | adopt | open | hard | daemon | daily, remote, scripts | none |
@@ -1704,24 +1705,47 @@ The mux cannot inspect cursor, history, or terminal mode state.
 - Acceptance:
   - `One atomic terminal action trims cursor-derived history, advances the cursor, and no-ops in pane mode.`
 
-### `tracker.semantic-coverage`: Close the remaining semantic discovery blind spots
+### `tracker.format-vocabulary-registration`: Register the pinned format vocabulary
 
-All six `args_parse` rules, the pinned hook producer partition, the shared default-binding structural partition, and the nonconstant global-format behavior partition now have source-owned registrations. Bare key-only bind mutation also matches the pin. Option consumption plus open-ended formats remain the two discovery blind spots.
+Oracle schema 4 hard-codes only 3 scopes and 14 names even though pinned production has 108 unique literal context names across 153 scoped producer pairs, leaving 94 unique literals outside the selected surface. zz supports 30 of the pin's 36 outer modifier tokens and silently diverges for the unregistered w, I, L, O, V, and R tokens.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `next` / `medium`
 - Owner: `protocol`
 - User impact: scripts
-- Items: `semantic:tracker-open-context-format-vocabulary`, `semantic:tracker-option-consumer-registration`
+- Items: `semantic:tracker-format-modifier-vocabulary`, `semantic:tracker-open-context-format-vocabulary`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.py`
-  - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:compat/tmux-oracle.json`
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+  - `resource:knowledge/playbooks/compat-harness.md`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `Oracle schema 5 source-registers literal format insertions from 31 path:function producer scopes as exactly 153 scoped pairs and 108 unique names, explicitly registers queue-added current_file, hook, and hook_arguments plus every dynamic family, and fails on every unclassified nonliteral insertion.`
+  - `All 36 pinned outer format modifier tokens are source-registered and reconcile exactly against a parser-owned zz support roster plus active gap items, with w, I, L, O, V, and R remaining classified as unsupported.`
+  - `The literal-producer and modifier partitions are source-owned, pairwise disjoint, exhaustive, and runtime-neutral: registration changes no format value, parser dispatch, protocol, snapshot, scenario, or differential result.`
+
+### `tracker.semantic-coverage`: Register the remaining option consumers
+
+The existing parser, hook, default-binding, and global-format partitions plus the separately frozen format-vocabulary registration leave option consumption as this group's only semantic discovery item. The option definitions include storage-only gaps, so they cannot stand in for a source-owned roster of actual consumers.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `medium`
+- Owner: `protocol`
+- User impact: scripts
+- Items: `semantic:tracker-option-consumer-registration`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-mux/src/tmux_options.rs`
   - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
   - `resource:knowledge/playbooks/compat-harness.md`
 - Acceptance:
-  - `Consumer-owned inventories reconcile open-ended context formats plus option consumption against the live manifest.`
+  - `A consumer-owned inventory reconciles option consumption against the live manifest without treating storage-only option definitions as behavior.`
 
 ## Known differential scenarios
 

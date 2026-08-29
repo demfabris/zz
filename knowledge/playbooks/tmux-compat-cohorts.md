@@ -209,9 +209,26 @@ One parallel daemon run hit two unrelated failures that both pass alone. A seque
 711 of 712 tests; its unrelated viewport-queue assertion also passed immediately alone. No
 uninterrupted full-daemon result is claimed at this checkpoint.
 
-The accepted canonical checkpoint retained through 10u has 98 scenarios and 1,522 steps. Every
-ordinary row is clean. The registry holds 88 active groups with 593 items and 102 closed records.
-Its status split is 47 open, 20 blocked, and 21 accepted, for 64.7% resolution (123 of 190 groups).
+The post-10u rerank freezes slice 10v on `tracker.format-vocabulary-registration`. Schema 4 checks
+three context scopes with 14 names on both sides of the gate. The pin contains 31 literal
+`path:function` scopes, 153 scoped pairs, and 108 unique names, including 94 outside that selected
+set. The pin recognizes 36 modifier tokens while zz accepts 30. The absent tokens are `w`, `I`,
+`L`, `O`, `V`, and `R`. Direct probes return silent wrong output for `w` display-cell width, `R`
+repeat, `O` option loops, and `V` environment loops. Pinned source and the manual classify `I` as
+client feature, termcap, and environment interrogation; the pinned modifier regression classifies
+`L` as an attached-client loop. Schema 5 will register literal producers, modifier syntax,
+queue-added `current_file`, `hook`, and `hook_arguments`, numbered run-shell argument keys,
+`hook_argument_<n>`,
+`hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`, `next_window_active`,
+`prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*` user-option families against
+production-owned partitions. The
+slice classifies vocabulary only. It changes no runtime format behavior, context-value semantics,
+option consumers, protocol, snapshot, scenario, or accepted artifact.
+
+The accepted canonical checkpoint retained through the 10v freeze has 98 scenarios and 1,522
+steps. Every ordinary row is clean. The frozen registry holds 89 active groups with 594 items and
+102 closed records. Its status split is 48 open, 20 blocked, and 21 accepted, for 64.4% resolution
+(123 of 191 groups).
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The sizing milestone's expanded multi-client
 attached fixture passes, and `compat/run.sh --check-summary` confirms the stored summary SHA-256
@@ -385,12 +402,12 @@ closure is that exception.
 | 10s | Nonconstant format behavior partition | Closed under `tracker.nonconstant-format-behavior` on 2026-08-28 | Complete | The single 198-name source table derives 92 mux and 32 daemon behavior registrations against 74 live gaps; an exact daemon test proves its delegated consumers |
 | 10t | Target session path format | Closed under `formats.session-path/format:session_path` on 2026-08-28 | Complete | Retained target-session cwd expands at use time; five differential steps and focused mux tests prove targeting, missing state, lexical state, and production attach updates |
 | 10u | Warm local whole-vector argument preflight | Closed under `mux.command-group-argument-parse-abort` on 2026-08-28 | Complete | Six warm probes and one clean three-step scenario prove ordinary unaliased tmux grammar before effects; only vector-index-0 exact unaliased attach keeps the private positional parser |
-| Next selection | Full live-tracker rerank | Decision gate | Required after 10u | Recompute practical priority before promoting any post-10t forecast |
-| Prior first alternate | New-session attach cwd edges | `sessions.new-session-attach-cwd` | Small-medium forecast | Pin existing-session `new-session -A -c` mutation and fresh explicit-empty `new-session -c ''` retention while preserving nested-refusal ordering |
-| Live rerank candidate | Startup initial-client cwd | `source-file.startup-client-cwd` | Hard | Carry the launching cwd through the cold-bootstrap provenance seam for startup-relative sources |
-| Live rerank candidate | Session-active client context | `format:session_active` | Medium research | Audit no format client, an unattached client, and a client attached to the target across each producer before changing the backing |
+| 10v | Format vocabulary source registration | Frozen under `tracker.format-vocabulary-registration` | Small research | Schema 5 will classify literal and dynamic context producers plus all modifier tokens without changing runtime behavior |
+| First runtime alternate | New-session attach cwd edges | `sessions.new-session-attach-cwd` | Small-medium forecast | Pin existing-session `new-session -A -c` mutation and fresh explicit-empty `new-session -c ''` retention while preserving nested-refusal ordering; rerank after 10v lands |
+| Post-10v rerank | Startup initial-client cwd | `source-file.startup-client-cwd` | Hard | Carry the launching cwd through the cold-bootstrap provenance seam for startup-relative sources |
+| Post-10v rerank | Session-active client context | `format:session_active` | Medium research | Audit no format client, an unattached client, and a client attached to the target across each producer before changing the backing |
 | Post-rerank | Config and source replay parse unit | `mux.chain-parse-abort` | Medium-hard | Construct and validate parser-owned groups without folding alias snapshotting or warm local vector work into the slice |
-| Post-rerank forecast | Remaining source-owned tracker registrations | Open context formats, then option consumers | Small research | Register every claimed consumer before broader behavior slices |
+| Post-10v rerank | Option-consumer registration | `semantic:tracker-option-consumer-registration` | Small research | Register each claimed option consumer before broader option behavior slices |
 | Post-rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Small research | Record and classify all 95 pinned actions before behavior changes |
 | Post-rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Hard | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
 | Post-rerank | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Medium after action fidelity | Seven keys become honest only after their five actions exist |
@@ -399,7 +416,8 @@ closure is that exception.
 | Post-rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Hard | Requires the interactive-refresh decision and remains broader than copy mode |
 | Post-rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Medium after generic prompts | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10u are closed. Under `detach-on-destroy on`, only flagged clients use
+Slices 9a through 9f and 10a through 10u are closed. Slice 10v is frozen. Under
+`detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
 and only flagged clients fall back to the newest attached session when no detached survivor exists.
 Flagged and unflagged clients on one destroyed session must diverge, while no remaining session
@@ -428,7 +446,8 @@ values and 32 daemon-hook values from its production backings. Those 124 behavio
 plus the 74 live `format:` gaps form a complete disjoint partition. A required exact daemon test
 seeds buffer, client, and session facts and resolves all 32 delegated names through
 `DaemonFormatHooks`. The slice changes no runtime value and claims no context-specific value parity.
-Open context formats and option consumers remain separate.
+Slice 10v now owns source registration for context formats and modifier syntax. Option consumers
+remain separate.
 
 The full post-10s rerank first selected `formats.session-runtime`, then independent source and oracle
 audits disproved the group's shared-client premise. Slice 10t closes the resulting
@@ -456,9 +475,22 @@ vector-index-0 exact unaliased `attach` or `attach-session` keeps the private po
 later exact spellings and aliases use the catalog. Control, remote `--host`, config and source
 replay, native zz grammar, alias snapshots, and runtime rollback remain outside the slice.
 
-`sessions.new-session-attach-cwd` was the first alternate in the post-10t checkpoint. Its two cwd
-mutations remain bounded and must preserve nested-refusal ordering, but 10u closure requires a full
-live-tracker rerank before any forecast is promoted. Every row after 10u remains non-frozen.
+The post-10u rerank found that schema 4 self-confirms only three context scopes and 14 names. Direct
+literal calls in the pin span 31 `path:function` scopes, 153 scoped pairs, and 108 unique names;
+94 names fall outside the selected set. Pinned modifier syntax contains 36 tokens, while zz parses
+30 and omits `w`, `I`, `L`, `O`, `V`, and `R`. Direct silent probes cover `w` display-cell width,
+`R` repeat, `O` option loops, and `V` environment loops. Pinned source and the manual classify `I`
+as client feature, termcap, and environment interrogation; the pinned modifier regression
+classifies `L` as an attached-client loop. Slice 10v will add schema 5 source partitions for those
+literals, queue-added `current_file`, `hook`, and `hook_arguments`, numbered run-shell argument keys,
+`hook_argument_<n>`,
+`hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`, `next_window_active`,
+`prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*` user-option families. Runtime behavior and option-consumer work remain
+outside its acceptance contract.
+
+`sessions.new-session-attach-cwd` is the first runtime alternate. Its two mutations remain bounded
+and must preserve nested-refusal ordering. The expanded classification can change practical
+priority, so the team must rerank after 10v lands before promoting that alternate.
 
 # Four-seat Codex pipeline
 
@@ -576,12 +608,29 @@ effects while runtime target and effect errors remain sequential. Only vector-in
 unaliased `attach` or `attach-session` keeps the private positional parser; later exact spellings and
 aliases use the catalog. Leave Control, remote `--host`, config and source replay, native zz grammar,
 alias snapshots, and runtime rollback outside the closure. Confirm six warm fixture probes and the
-focused three-step scenario report zero differences. The registry has 88 active groups and 593
-items: 47 open, 20 blocked, and 21 accepted, plus 102 closed records; 123 of 190 groups are resolved
-(64.7%). The accepted artifact remains 98 scenarios and 1,522 steps with attached-client `PASS` and
-SHA-256 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`. Rerank the full
-live tracker before selecting the next slice; do not promote the post-10t first alternate without
-that rerank.
+focused three-step scenario report zero differences.
+
+Confirm that slice 10v is frozen on `tracker.format-vocabulary-registration`. Schema 4
+self-confirms three scopes and 14 names. The pin has 31 literal `path:function` scopes, 153 scoped
+pairs, 108 unique names, and 94 names outside that selection. It recognizes 36 modifier tokens
+against zz's 30; the absent tokens are `w`, `I`, `L`, `O`, `V`, and `R`. Record direct silent probes
+only for `w` display-cell width, `R` repeat, `O` option loops, and `V` environment loops. Use pinned
+source and the manual to classify `I` as client feature, termcap, and environment interrogation,
+and the pinned modifier regression to classify `L` as an attached-client loop. Schema 5 must
+register the literal producers, queue-added `current_file`, `hook`, and `hook_arguments`, numbered run-shell argument keys,
+`hook_argument_<n>`, `hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`,
+`next_window_active`, `prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*`
+user-option families in disjoint, exhaustive implemented, native, and
+active-gap source-owned partitions. This is registration and classification only. Do not add runtime
+modifier or context parity, option-consumer work, protocol, snapshots, scenarios, or a new accepted
+artifact.
+
+The frozen registry has 89 active groups and 594 items: 48 open, 20 blocked, and 21 accepted, plus
+102 closed records; 123 of 191 groups are resolved (64.4%). The accepted artifact remains 98
+scenarios and 1,522 steps with attached-client `PASS` and SHA-256
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+`sessions.new-session-attach-cwd` is the first runtime alternate, but rerank the expanded
+classification after 10v lands before promoting it.
 
 Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
 source before editing. Use one coordinator and three Codex subagents to probe the selected

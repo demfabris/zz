@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10U DELIVERED: LIVE RERANK REQUIRED**
+> Campaign state: **SLICE 10V FROZEN: FORMAT VOCABULARY REGISTRATION**
 >
-> Tracker resolution progress: **64.7% (123 of 190 known groups)**
+> Tracker resolution progress: **64.4% (123 of 191 known groups)**
 >
-> Audited pre-close base: **2026-08-28** at `1d8c9652f59e013f5b126d6ca3373c3238761bff`
+> Audited committed base: **2026-08-28** at `a91128cb7c5ad8b968f4e25ee600f9257e45fda8`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -34,17 +34,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited pre-close base | `1d8c9652f59e013f5b126d6ca3373c3238761bff` |
-| Delivery | The current local milestone closes 10u on top of its committed plan; `origin/main` remains at `7cad19e` until an explicit push |
+| Audited committed base | `a91128cb7c5ad8b968f4e25ee600f9257e45fda8` |
+| Delivery | Local `main` contains committed 10u plus the frozen 10v plan; `origin/main` remains at `7cad19e` until an explicit push |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10u is complete; run a live full-registry rerank before freezing its successor |
-| Live registry | 88 active groups, 593 active items, 102 closed records |
-| Active status | 47 open, 20 blocked, 21 accepted |
+| Campaign point | Slice 10v is frozen for source-owned format vocabulary registration |
+| Live registry | 89 active groups, 594 active items, 102 closed records |
+| Active status | 48 open, 20 blocked, 21 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The 10u closure descends from the committed plan above. Resolve the commit
+The 10v plan descends from the committed 10u base above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -57,7 +57,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(102 + 21) / (102 + 88) = 123 / 190 = 64.7%
+(102 + 21) / (102 + 89) = 123 / 191 = 64.4%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -265,7 +265,8 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10r | Local cold-start CLI parse abort under `mux.local-cli-autospawn-parse-abort` | `02bb4a1` |
 | 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | `8e0ef67` |
 | 10t | Target-session path format under `formats.session-path` | `0da518e` |
-| 10u | Warm command-group argument preflight under `mux.command-group-argument-parse-abort` | Current milestone; resolve after commit |
+| 10u | Warm command-group argument preflight under `mux.command-group-argument-parse-abort` | `a91128c` |
+| 10v | Source-owned format producer and modifier registration under `tracker.format-vocabulary-registration` | Current frozen plan; resolve after commit |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -492,20 +493,53 @@ config alias snapshots, parser first-error policy, remote `--host`, Control inpu
 multi-command alias bodies, and native zz command grammar. The residual
 `mux.chain-parse-abort/semantic:config-source-group-parse-abort` remains active and later.
 
-## Candidate queue after 10u
+## Frozen slice: 10v format vocabulary registration
 
-The table records the pre-close forecast, not permission to skip the required live rerank.
+The full post-10u rerank initially put `sessions.new-session-attach-cwd` first. An adversarial
+oracle audit overturned that forecast: the schema-4 oracle and its Rust invariant were confirming
+the same hand-selected three source scopes and 14 context names. Pinned tmux actually exposes 31
+literal producer scopes keyed by source path and function, 153 scoped literal registrations, and
+108 unique literal names. Ninety-four of those names sit outside the selected set, so neither side
+could detect their omission. The pinned modifier parser also accepts exactly 36 modifier tokens;
+zz implements 30 and leaves `w`, `I`, `L`, `O`, `V`, and `R` unclassified.
 
-| Order | Exact owner | Boundary |
+Slice 10v freezes only
+`tracker.format-vocabulary-registration/semantic:tracker-format-modifier-vocabulary` and
+`semantic:tracker-open-context-format-vocabulary`. It will:
+
+- advance the oracle to schema 5 and source-register every literal producer as a
+  `(path, function, name)` tuple;
+- explicitly register queue-added `current_file`, `hook`, and `hook_arguments`, plus run-shell
+  positional, hook argument and flag, and window-loop next/previous families, while rejecting every
+  unclassified nonliteral insertion;
+- source-register the complete 36-token modifier vocabulary;
+- reconcile those source sets against exact, disjoint Rust partitions for implemented behavior,
+  native behavior, and active gap ownership;
+- fail the required compatibility gate on any duplicate, stale, missing, or newly unclassified
+  producer or modifier.
+
+This is a registration and classification milestone, not a value-parity claim. It does not
+implement any of the six missing modifiers, repair any context value, register option consumers,
+change the protocol or snapshot, add a differential scenario, refresh the accepted artifact, or
+touch cwd, `session_active`, config replay, or startup provenance. The accepted checkpoint remains
+98 scenarios, 1,522 steps, attached-client `PASS`, and SHA-256
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+
+## Candidate queue behind 10v
+
+The table records a forecast, not permission to skip the required live rerank. The new source
+partitions can expose a more important owner and overturn this order again.
+
+| Order | Forecast owner | Boundary |
 | --- | --- | --- |
-| 1 | `sessions.new-session-attach-cwd` | Align existing `-A -c` and explicit-empty cwd without leaking through post-execution nested refusal |
-| 2 | `aliases.config-parse-unit` | Freeze one alias snapshot while constructing a config or source replay unit |
-| 3 | `format:session_active` | Model no client, unattached client, and attached session across every format producer |
-| 4 | `semantic:source-file-startup-initial-client-cwd` | Carry launching cwd through the private cold-bootstrap provenance seam |
-| 5 | `semantic:tracker-option-consumer-registration` | Replace the manually asserted option-consumer roster with source ownership |
-| 6 | `semantic:config-source-group-parse-abort` | Construct and validate the parser-owned replay group before effects |
-| 7 | `semantic:copy-mode-action-vocabulary` | Inventory all 95 pinned copy actions before behavior changes |
-| 8 | `semantic:tracker-open-context-format-vocabulary` | Discover and register omitted open context formats |
+| 1 | Post-10v source-classified format owners | Rerank every modifier and context gap exposed by the complete registration before choosing an implementation |
+| 2 | `sessions.new-session-attach-cwd` | Align existing `-A -c` and explicit-empty cwd without leaking through post-execution nested refusal |
+| 3 | `aliases.config-parse-unit` | Freeze one alias snapshot while constructing a config or source replay unit |
+| 4 | `config.parser-edge-cases/semantic:config-parse-abort` | Preserve pinned whole-file abort behavior before a later config statement mutates state |
+| 5 | `mux.chain-parse-abort/semantic:config-source-group-parse-abort` | Construct and validate the parser-owned replay group before effects |
+| 6 | `semantic:tracker-option-consumer-registration` | Replace the manually asserted option-consumer roster with source ownership |
+| 7 | `formats.session-runtime/format:session_active` | Model no client, unattached client, and attached session across every format producer |
+| 8 | `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd` | Carry launching cwd through the private cold-bootstrap provenance seam |
 
 The active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are

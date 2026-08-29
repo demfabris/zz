@@ -75,6 +75,12 @@ expands inside any command item and stays empty outside one. The daemon-preempte
 and the daemon's post-spawn `new-window`/`split-window -P -F` pass retains it while adding live pane
 facts. Delayed subscriptions and prompts stay outside an item.
 
+Schema 4 does not cover the full context or modifier vocabulary. Its Python capture and Rust gate
+repeat the same three-scope selection, so they can agree while omitting source producers. The
+post-10u audit found 31 literal `path:function` scopes, 153 scoped name pairs, and 108 unique names
+in the pin. Ninety-four names sit outside the selected 14. Pinned `format_build_modifiers`
+recognizes 36 tokens; zz accepts 30 and omits `w`, `I`, `L`, `O`, `V`, and `R`.
+
 `formats.command-argument-expansion` closed five target-sensitive paths on 2026-08-24. The current
 `command-item-format` scenario covers the positional names for `rename-session` and
 `rename-window`, optional option names for both show commands, `select-pane -T`, both
@@ -164,8 +170,24 @@ and all 74 format gaps retained their runtime owners at that checkpoint. The ora
 snapshots, scenarios, and accepted compatibility artifact did not change. Slice 10m already closed
 the shared-binding
 runtime mismatch for bare key-only `bind-key`; downstream command and copy-action behavior retains
-its separate owners. Two semantic discovery gaps remain: open-ended or dynamic context-format names
-and consumer truth for names in option `BEHAVES`. `tracker.semantic-coverage` owns that work. Shared command-flag diagnostics
+its separate owners. The post-10u rerank freezes slice 10v on
+`tracker.format-vocabulary-registration`. Schema 5 will source-register all literal context
+producers by `path:function`, the complete modifier token set, queue-added `current_file`, `hook`,
+and `hook_arguments`, and explicit dynamic families: numbered run-shell argument keys, `hook_argument_<n>`,
+`hook_flag_<char>`, `hook_flag_<char>_<n>`, `next_window_index`, `next_window_active`,
+`prev_window_index`, `prev_window_active`, and `next_@*` or `prev_@*` user options. Production-owned zz inventories
+must classify each entry as implemented, native, or an active gap. Those partitions must be disjoint and
+exhaustive. New or stale source entries must fail `just compat-check`.
+
+The single semantic registration owner records the six absent modifiers without creating six
+runtime items or claiming runtime support. Direct scratch-socket probes already show silent
+differences for `w` display-cell width, `R` repeat, `O` option loops, and `V` environment loops.
+Pinned source and the manual classify `I` as client feature, termcap, and environment
+interrogation; the pinned modifier regression classifies `L` as an attached-client loop. Context-specific value
+parity and option `BEHAVES` consumer truth stay open. Slice 10v
+changes no protocol, snapshot, differential scenario, or accepted artifact. Its frozen registry
+state is 89 active groups with 594 items and 102 closed records: 48 open, 20 blocked, and 21
+accepted, for 123 of 191 groups resolved (64.4%). Shared command-flag diagnostics
 closed on 2026-08-28 without retaining the earlier partial
 daemon roster. The catalog parser covers 83 implemented upstream canonical commands and 74 aliases
 through mux execution, daemon preflight, and stored commands. Exact native attach shares the
@@ -312,6 +334,10 @@ Slice 10u keeps `smoke/cli-chain-parse-abort` at three harness steps and now run
 without changing the scenario count, persisted step count, or attached result. All six finish with
 zero TOPO, GEO, FMT, OUT, or WARN differences. Runtime target and effect errors retain the existing
 sequential probe: the earlier effect remains and the failed command prunes the later effect.
+Slice 10v is a source-registration plan freeze. It adds no canonical scenario or step and does not
+change the attached-client result. The accepted artifact remains 98 scenarios and 1,522 steps with
+attached-client `PASS` and SHA-256
+`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,

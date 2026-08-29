@@ -2782,8 +2782,8 @@
       "reason": "The mux cannot inspect cursor, history, or terminal mode state."
     },
     {
-      "id": "tracker.semantic-coverage",
-      "title": "Close the remaining semantic discovery blind spots",
+      "id": "tracker.format-vocabulary-registration",
+      "title": "Register the pinned format vocabulary",
       "decision": "adopt",
       "status": "open",
       "priority": "next",
@@ -2793,20 +2793,50 @@
       ],
       "owner": "protocol",
       "items": [
-        "semantic:tracker-open-context-format-vocabulary",
-        "semantic:tracker-option-consumer-registration"
+        "semantic:tracker-format-modifier-vocabulary",
+        "semantic:tracker-open-context-format-vocabulary"
       ],
       "evidence": [
         "resource:compat/tmux-oracle.py",
-        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:compat/tmux-oracle.json",
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:knowledge/playbooks/compat-harness.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Oracle schema 5 source-registers literal format insertions from 31 path:function producer scopes as exactly 153 scoped pairs and 108 unique names, explicitly registers queue-added current_file, hook, and hook_arguments plus every dynamic family, and fails on every unclassified nonliteral insertion.",
+        "All 36 pinned outer format modifier tokens are source-registered and reconcile exactly against a parser-owned zz support roster plus active gap items, with w, I, L, O, V, and R remaining classified as unsupported.",
+        "The literal-producer and modifier partitions are source-owned, pairwise disjoint, exhaustive, and runtime-neutral: registration changes no format value, parser dispatch, protocol, snapshot, scenario, or differential result."
+      ],
+      "depends_on": [],
+      "reason": "Oracle schema 4 hard-codes only 3 scopes and 14 names even though pinned production has 108 unique literal context names across 153 scoped producer pairs, leaving 94 unique literals outside the selected surface. zz supports 30 of the pin's 36 outer modifier tokens and silently diverges for the unregistered w, I, L, O, V, and R tokens."
+    },
+    {
+      "id": "tracker.semantic-coverage",
+      "title": "Register the remaining option consumers",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "protocol",
+      "items": [
+        "semantic:tracker-option-consumer-registration"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/tmux_options.rs",
         "resource:crates/zz-mux/src/compat_manifest_tests.rs",
         "resource:knowledge/playbooks/compat-harness.md"
       ],
       "acceptance": [
-        "Consumer-owned inventories reconcile open-ended context formats plus option consumption against the live manifest."
+        "A consumer-owned inventory reconciles option consumption against the live manifest without treating storage-only option definitions as behavior."
       ],
       "depends_on": [],
-      "reason": "All six `args_parse` rules, the pinned hook producer partition, the shared default-binding structural partition, and the nonconstant global-format behavior partition now have source-owned registrations. Bare key-only bind mutation also matches the pin. Option consumption plus open-ended formats remain the two discovery blind spots."
+      "reason": "The existing parser, hook, default-binding, and global-format partitions plus the separately frozen format-vocabulary registration leave option consumption as this group's only semantic discovery item. The option definitions include storage-only gaps, so they cannot stand in for a source-owned roster of actual consumers."
     }
   ],
   "closed": [

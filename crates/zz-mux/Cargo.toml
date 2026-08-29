@@ -16,6 +16,9 @@ unicode-width = "0.2.2"
 zz-protocol = { path = "../zz-protocol" }
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29.0", features = ["user"] }
+
 [dev-dependencies]
 serde.workspace = true
 serde_json.workspace = true

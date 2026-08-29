@@ -4,7 +4,10 @@ corpus: none
 # ticketed in the drop-in plan — not part of the grammar wave). The abort SEMANTICS
 # are still pinned both sides by the GRAMMAR_PARSE_ASSIGN / *_ERROR readbacks below.
 expect-warn: tmux /tmp/zz-config-grammar-error.conf:2: invalid octal escape
+stage: fixtures/config-tilde-grammar.sh ~/config-tilde-grammar.sh
 conf: fixtures/config-grammar.conf
+run-shell 'sh ~/config-tilde-grammar.sh'
+out: show-environment -g CONFIG_TILDE_GRAMMAR
 out: show-environment -g GRAMMAR_BARE
 out: show-environment -g GRAMMAR_BRACED
 out: show-environment -g GRAMMAR_ORDER

@@ -28,6 +28,10 @@ pub(crate) trait ConfigContext {
     fn variable(&mut self, name: &str) -> Option<String>;
     fn condition(&mut self, condition: &str) -> bool;
 
+    fn user_home(&mut self, name: Option<&str>) -> Option<String> {
+        user_home(name)
+    }
+
     fn expand_variables(&self) -> bool {
         true
     }
@@ -79,6 +83,16 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
 
     fn expand_variables(&self) -> bool {
         self.context.expand_variables()
+    }
+
+    fn home_directory(&mut self, name: &str) -> Option<String> {
+        if !name.is_empty() {
+            return self.context.user_home(Some(name));
+        }
+        if let Some(home) = self.variable("HOME").filter(|home| !home.is_empty()) {
+            return Some(home);
+        }
+        self.context.user_home(None)
     }
 
     fn aborted(&self) -> bool {
@@ -393,6 +407,14 @@ enum Quote {
     Double,
 }
 
+#[derive(Debug)]
+struct Tilde {
+    name: String,
+    line: u32,
+    column: u32,
+    quote: Quote,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Block {
     depth: u32,
@@ -523,8 +545,8 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
 
     let mut characters = input.chars().peekable();
     let mut reprocess: Option<char> = None;
-    let mut tilde: Option<String> = None;
-    let mut tilde_after_quote = false;
+    let mut tilde: Option<Tilde> = None;
+    let mut last_quote: Option<Quote> = None;
     loop {
         if builder.aborted() {
             break;
@@ -538,18 +560,26 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
             column = column.saturating_add(1);
             character
         };
-        if let Some(name) = tilde.as_mut() {
+        if let Some(state) = tilde.as_mut() {
             if matches!(character, '/' | ' ' | '\t' | '\n' | '"' | '\'') {
-                let name = tilde.take().unwrap_or_default();
-                expand_tilde(&mut word, &name);
+                let state = tilde.take().expect("tilde state exists");
+                expand_tilde(
+                    &mut builder,
+                    &mut word,
+                    &state.name,
+                    state.line,
+                    state.column,
+                );
+                last_quote = Some(state.quote);
                 reprocess = Some(character);
             } else {
-                name.push(character);
+                state.name.push(character);
             }
             continue;
         }
         if let Some(state) = block.as_mut() {
             word.push(character);
+            last_quote = Some(Quote::None);
             if character == '\n' {
                 line = line.saturating_add(1);
                 column = 0;
@@ -584,13 +614,13 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                 column = 0;
                 command_line = line;
                 command_column = 1;
+                last_quote = None;
             }
             continue;
         }
         if character == '\\' && quote != Quote::Single {
             let escape_line = line;
             let escape_column = column;
-            tilde_after_quote = false;
             if !word_started && words.is_empty() {
                 command_line = line;
                 command_column = column;
@@ -603,16 +633,17 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     builder.diagnostic(escape_line, escape_column, message);
                 }
             }
+            last_quote = Some(quote);
             continue;
         }
         if character == '\\' && quote == Quote::Single && characters.peek() == Some(&'\n') {
             take_character(&mut characters, &mut column);
             line = line.saturating_add(1);
             column = 0;
+            last_quote = Some(quote);
             continue;
         }
         if character == '$' && quote != Quote::Single && builder.expand_variables() {
-            tilde_after_quote = false;
             if !word_started && words.is_empty() {
                 command_line = line;
                 command_column = column;
@@ -624,18 +655,29 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     builder.diagnostic(line, column, message);
                 }
             }
+            last_quote = Some(quote);
+            continue;
+        }
+        if character == '~' && quote != Quote::Single && last_quote != Some(quote) {
+            if !word_started && words.is_empty() {
+                command_line = line;
+                command_column = column;
+            }
+            word_started = true;
+            tilde = Some(Tilde {
+                name: String::new(),
+                line,
+                column,
+                quote,
+            });
             continue;
         }
         match quote {
             Quote::Single if character == '\'' => quote = Quote::None,
             Quote::Double if character == '"' => quote = Quote::None,
-            Quote::Double if character == '~' && tilde_after_quote => {
-                tilde_after_quote = false;
-                tilde = Some(String::new());
-            }
             Quote::Single | Quote::Double => {
-                tilde_after_quote = false;
                 word.push(character);
+                last_quote = Some(quote);
                 if character == '\n' {
                     line = line.saturating_add(1);
                     column = 0;
@@ -663,7 +705,6 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     }
                     word_started = true;
                     quote = Quote::Double;
-                    tilde_after_quote = true;
                 }
                 '#' if !word_started
                     && words
@@ -717,14 +758,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     }
                     command_line = line;
                     command_column = column.saturating_add(1);
-                }
-                '~' if !word_started => {
-                    if words.is_empty() {
-                        command_line = line;
-                        command_column = column;
-                    }
-                    word_started = true;
-                    tilde = Some(String::new());
+                    last_quote = None;
                 }
                 value if value.is_whitespace() => {
                     builder.finish_word(
@@ -737,6 +771,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         &mut command_block_words,
                         &mut eager_assignment,
                     );
+                    last_quote = None;
                 }
                 value => {
                     if words.is_empty() && !word_started {
@@ -745,43 +780,78 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     }
                     word_started = true;
                     word.push(value);
+                    last_quote = Some(quote);
                 }
             },
         }
     }
     if !builder.aborted() {
-        if let Some(name) = tilde.take() {
-            expand_tilde(&mut word, &name);
-        }
-        if let Some(state) = block {
-            builder.diagnostic(state.line, state.column, "unterminated command block");
-        } else {
-            builder.finish_statement(
-                command_line,
-                command_column,
-                line,
+        if let Some(state) = tilde.take() {
+            expand_tilde(
+                &mut builder,
                 &mut word,
-                &mut word_started,
-                &mut word_is_command_block,
-                &mut words,
-                &mut command_block_words,
-                &mut eager_assignment,
+                &state.name,
+                state.line,
+                state.column,
             );
+        }
+        if !builder.aborted() {
+            if let Some(state) = block {
+                builder.diagnostic(state.line, state.column, "unterminated command block");
+            } else {
+                builder.finish_statement(
+                    command_line,
+                    command_column,
+                    line,
+                    &mut word,
+                    &mut word_started,
+                    &mut word_is_command_block,
+                    &mut words,
+                    &mut command_block_words,
+                    &mut eager_assignment,
+                );
+            }
         }
     }
     builder.finish(line, column)
 }
 
-fn expand_tilde(word: &mut String, name: &str) {
-    if name.is_empty()
-        && let Ok(home) = std::env::var("HOME")
-        && !home.is_empty()
-    {
-        word.push_str(&home);
+fn expand_tilde<C: ConfigContext>(
+    builder: &mut ConfigBuilder<'_, C>,
+    word: &mut String,
+    name: &str,
+    line: u32,
+    column: u32,
+) {
+    let Some(home) = builder.home_directory(name) else {
+        builder.diagnostic(line, column, "syntax error");
         return;
+    };
+    word.push_str(&home);
+}
+
+#[cfg(unix)]
+fn user_home(name: Option<&str>) -> Option<String> {
+    use nix::unistd::{Uid, User};
+
+    let user = match name {
+        Some(name) => User::from_name(name),
+        None => User::from_uid(Uid::current()),
     }
-    word.push('~');
-    word.push_str(name);
+    .ok()
+    .flatten()?;
+    user.dir.into_os_string().into_string().ok()
+}
+
+#[cfg(not(unix))]
+fn user_home(name: Option<&str>) -> Option<String> {
+    if name.is_some() {
+        return None;
+    }
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .filter(|home| !home.is_empty())
 }
 
 fn finish_word(
@@ -1058,21 +1128,142 @@ fn strip_quoted_line_prefix<I>(
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct HomeContext {
+        home: Option<String>,
+        current_user_home: Option<String>,
+        named_user_homes: BTreeMap<String, String>,
+    }
+
+    impl ConfigContext for HomeContext {
+        fn variable(&mut self, name: &str) -> Option<String> {
+            if name == "HOME" {
+                self.home.clone()
+            } else {
+                None
+            }
+        }
+
+        fn condition(&mut self, _condition: &str) -> bool {
+            false
+        }
+
+        fn user_home(&mut self, name: Option<&str>) -> Option<String> {
+            match name {
+                Some(name) => self.named_user_homes.get(name).cloned(),
+                None => self.current_user_home.clone(),
+            }
+        }
+    }
+
     #[test]
     fn expands_leading_tildes_like_the_pin() {
-        let home = std::env::var("HOME").expect("test environment has HOME");
-        let parsed = parse_config(
+        let mut context = HomeContext {
+            home: Some("/server/home".to_owned()),
+            current_user_home: Some("/passwd/home".to_owned()),
+            named_user_homes: BTreeMap::from([("alice".to_owned(), "/users/alice".to_owned())]),
+        };
+        let parsed = parse_config_with(
             "<test>",
-            "run-shell ~/bin/x \"~/quoted\" '~/literal' \\~/escaped ~name/x ~",
+            r#"run-shell ~/bin/x "~/quoted" '~/literal' \~/escaped prefix~literal ~ 'single'~/after-single "double"~/after-double ''~/empty-single ""~/empty-double prefix''~/not-expanded prefix""~/not-expanded ~alice/bin"#,
+            &mut context,
         );
         assert!(parsed.diagnostics.is_empty());
         let command = &parsed.commands[0];
-        assert_eq!(command.args[0], format!("{home}/bin/x"));
-        assert_eq!(command.args[1], format!("{home}/quoted"));
+        assert_eq!(command.args[0], "/server/home/bin/x");
+        assert_eq!(command.args[1], "/server/home/quoted");
         assert_eq!(command.args[2], "~/literal");
         assert_eq!(command.args[3], "~/escaped");
-        assert_eq!(command.args[4], "~name/x");
-        assert_eq!(command.args[5], home);
+        assert_eq!(command.args[4], "prefix~literal");
+        assert_eq!(command.args[5], "/server/home");
+        assert_eq!(command.args[6], "single/server/home/after-single");
+        assert_eq!(command.args[7], "double/server/home/after-double");
+        assert_eq!(command.args[8], "/server/home/empty-single");
+        assert_eq!(command.args[9], "/server/home/empty-double");
+        assert_eq!(command.args[10], "prefix~/not-expanded");
+        assert_eq!(command.args[11], "prefix~/not-expanded");
+        assert_eq!(command.args[12], "/users/alice/bin");
+    }
+
+    #[test]
+    fn resolves_bare_tildes_from_server_home_then_passwd() {
+        let mut server = HomeContext {
+            home: Some("/server/home".to_owned()),
+            current_user_home: Some("/passwd/home".to_owned()),
+            ..HomeContext::default()
+        };
+        let parsed = parse_config_with("<test>", "display-message -p ~", &mut server);
+        assert_eq!(parsed.commands[0].args, ["-p", "/server/home"]);
+
+        for home in [Some(String::new()), None] {
+            let mut fallback = HomeContext {
+                home,
+                current_user_home: Some("/passwd/home".to_owned()),
+                ..HomeContext::default()
+            };
+            let parsed = parse_config_with("<test>", "display-message -p ~", &mut fallback);
+            assert!(parsed.diagnostics.is_empty());
+            assert_eq!(parsed.commands[0].args, ["-p", "/passwd/home"]);
+        }
+    }
+
+    #[test]
+    fn parse_only_tilde_expansion_uses_the_pre_file_environment() {
+        let mut normal = HomeContext {
+            home: Some("/server/home".to_owned()),
+            current_user_home: Some("/passwd/home".to_owned()),
+            ..HomeContext::default()
+        };
+        let parsed = parse_config_with(
+            "<test>",
+            "HOME=/file/home\ndisplay-message -p ~/normal\n",
+            &mut normal,
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands[0].args, ["-p", "/file/home/normal"]);
+
+        let mut parse_only = HomeContext {
+            home: Some("/server/home".to_owned()),
+            current_user_home: Some("/passwd/home".to_owned()),
+            ..HomeContext::default()
+        };
+        let parsed = parse_config_without_assignment_overlay(
+            "<test>",
+            "HOME=/file/home\ndisplay-message -p ~/parse-only\n",
+            &mut parse_only,
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands[0].args, ["-p", "/server/home/parse-only"]);
+        assert_eq!(parsed.environment[0].name, "HOME");
+        assert_eq!(parsed.environment[0].value, "/file/home");
+    }
+
+    #[test]
+    fn missing_required_tilde_lookups_abort_with_a_location() {
+        let mut context = HomeContext {
+            home: Some("/server/home".to_owned()),
+            current_user_home: Some("/passwd/home".to_owned()),
+            ..HomeContext::default()
+        };
+        let literal = parse_config_with(
+            "<test>",
+            "display-message -p prefix~missing/path",
+            &mut context,
+        );
+        assert!(literal.diagnostics.is_empty());
+        assert_eq!(literal.commands[0].args, ["-p", "prefix~missing/path"]);
+
+        let failed = parse_config_with(
+            "tilde.conf",
+            "display-message -p before\ndisplay-message -p ~missing/path\n",
+            &mut context,
+        );
+        assert!(failed.commands.is_empty());
+        assert_eq!(failed.diagnostics.len(), 1);
+        assert_eq!(failed.diagnostics[0].source, "tilde.conf");
+        assert_eq!(failed.diagnostics[0].line, 2);
+        assert_eq!(failed.diagnostics[0].column, 20);
+        assert_eq!(failed.diagnostics[0].message, "syntax error");
     }
 
     #[test]

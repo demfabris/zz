@@ -103,11 +103,13 @@ notifications, and executes the prepared invocation with ordinary read-only auth
 tests do not claim tmux-compatible empty or multi-command alias bodies. The strict
 `smoke/control-alias-prepare` fixture adds pinned proof for one whole-line alias snapshot and a
 whole-line preparation error that aborts before either surrounding effect. The strict
-`smoke/cli-chain-parse-abort` fixture proves that a local CLI unknown-name parse failure aborts
-before an earlier mutation while a runtime command failure keeps the earlier effect and prunes the
-later command. Its three harness steps now include eleven cold probes on each engine. Those probes
-cover implemented and parked command syntax through canonical and alias spellings, exact native
-attach tails, and `-N` no-spawn routing.
+`smoke/cli-chain-parse-abort` fixture proves that a local CLI preparation failure aborts before an
+earlier mutation while a runtime command failure keeps the earlier effect and prunes the later
+command. Its three harness steps now run six warm probes and eleven cold probes on each engine. The
+warm set covers an unknown name, an invalid flag, excessive arity, a missing required value, a later
+exact `attach`, and a later exact `attach-session`. The cold set covers implemented and parked
+command syntax through canonical and alias spellings, exact native attach tails, and `-N` no-spawn
+routing.
 
 Against a missing local socket, the CLI validates the complete raw vector without user aliases
 before routing, stdin capture, TUI handoff, daemon spawn, startup config, or effects. The pass covers
@@ -123,12 +125,17 @@ client or any command commits it.
 Only the unknown-name error shape is pinned here; malformed alias-body text remains zz-defined while
 `aliases.command-bodies` is open. Focused binary coverage also exercises routing-sensitive
 new-session and attach forms, `-N`, startup shadows, arbitrary startup aliases, invalid nested alias
-bodies, contender and pipeline races, and parked syntax. The post-10t rerank splits warm unaliased
-argument preflight into the frozen slice 10u group
-`mux.command-group-argument-parse-abort`. The planned pass prepares the complete vector before
-effects while exact unaliased `attach` and `attach-session` keep the native parser. Config and
-source-file replay remain under the residual `mux.chain-parse-abort`. Remote `--host`, Control mode,
-runtime rollback, alias snapshots, and native zz command grammar fall outside 10u.
+bodies, contender and pipeline races, and parked syntax. Slice 10u closes warm ordinary argument
+preflight under `mux.command-group-argument-parse-abort`. The daemon applies the existing static
+grammar to ordinary invocations with no user-alias match for a registered `ClientKind::Command`.
+Callback construction and user-alias validation retain their prior paths, while native zz names
+remain runtime-owned. The sole generic-validation bypass covers exact unaliased `attach` and
+`attach-session` at vector index zero, where the CLI's private positional-session and
+`--restart-daemon` parser owns them. Later exact spellings and every user-alias expansion to either
+attach name use the ordinary catalog. Control preparation and framing remain unchanged. Config and
+source-file replay stay under the residual `mux.chain-parse-abort`; remote `--host`, replay alias
+snapshots, runtime rollback, and native zz grammar remain outside the closure. Slice 10u changes
+neither the protocol nor the snapshot schema.
 
 Oracle schema 4 closes callback discovery, not callback behavior. The typed Rust sidecar mirrors the
 12 implemented callback commands. Protocol v84 adds zero-based lexical command-block positions to
@@ -280,9 +287,9 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. The slice 10t checkpoint from
-2026-08-28 contains 98 scenarios and 1,522 steps against pinned tmux `d77c9dc6`. Every ordinary row
-is clean, and the attached-client fixture is `PASS`.
+`compat/results/summary.md` is the persisted acceptance artifact. The slice 10u closure from
+2026-08-28 leaves it at 98 scenarios and 1,522 steps against pinned tmux `d77c9dc6`. Every ordinary
+row is clean, and the attached-client fixture is `PASS`.
 Slices 10l and 10m add no differential scenario or step. Slice 10n adds seven confirmation cases and
 a pane-input sentinel to the attached fixture. Slice 10o adds bounded menu cases for a visible
 title, shortcut precedence, unusable-row skipping, cancel, an unusable PageUp landing with stay-open
@@ -301,6 +308,10 @@ state and visibility after the production `attach-session -c` path updates one s
 `sessions.new-session-attach-cwd` group owns two cwd mutation differences outside this slice:
 existing-target `new-session -A -c` skips the target update, and fresh explicit-empty `-c ''`
 collapses to omitted cwd inheritance.
+Slice 10u keeps `smoke/cli-chain-parse-abort` at three harness steps and now runs six warm probes
+without changing the scenario count, persisted step count, or attached result. All six finish with
+zero TOPO, GEO, FMT, OUT, or WARN differences. Runtime target and effect errors retain the existing
+sequential probe: the earlier effect remains and the failed command prunes the later effect.
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The attached-client fixture is `PASS`. The expanded
 corpus pins capture routing and ranges, manual window geometry,

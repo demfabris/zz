@@ -130,15 +130,26 @@ unattached-client, and attached-session producer audit. `sessions.new-session-at
 cwd mutations that 10t does not change: an existing `new-session -A -c` target skips its cwd update,
 and fresh explicit-empty `-c ''` collapses to omitted cwd inheritance.
 
-The post-10t rerank freezes slice 10u on
-`mux.command-group-argument-parse-abort/semantic:command-group-argument-parse-abort`. It will extend
-the warm local daemon preparation pass from names, callbacks, and alias expansions to the complete
-argument grammar of every ordinary unaliased command before any effect. Exact unaliased `attach`
-and `attach-session` retain their dedicated native parser; a user alias with either spelling still
-uses the ordinary tmux catalog. Runtime target and effect errors remain sequential. Config and
-source-file replay construction stays in the residual `mux.chain-parse-abort`, while alias
-snapshotting remains under `aliases.config-parse-unit`. This is a frozen implementation and proof
-contract, not a delivered runtime or accepted-artifact claim.
+Slice 10u closes
+`mux.command-group-argument-parse-abort/semantic:command-group-argument-parse-abort` on 2026-08-28.
+For a preparation request from a registered `ClientKind::Command`, the daemon applies the existing
+static tmux grammar to every ordinary invocation with no user-alias match before the first effect.
+The pass covers flags, arity, required values, and nested command blocks. Callback construction and
+user-alias validation keep their prior preparation paths, while native zz names remain runtime-owned.
+The sole generic-validation bypass covers exact unaliased `attach` and `attach-session` at vector
+index zero, where the CLI's private parser owns the positional-session and `--restart-daemon`
+extensions. Later exact spellings and every user-alias expansion to either attach name use the
+ordinary catalog.
+
+When preparation returns an error, the CLI rejects the complete local vector before stdin capture,
+attach or TUI routing, or any effect. Runtime target and effect errors remain sequential, preserving
+earlier effects and pruning later commands. Control preparation and framing remain unchanged. Config
+and source-file replay construction stays in the residual `mux.chain-parse-abort`; remote `--host`,
+replay alias snapshots under `aliases.config-parse-unit`, and runtime rollback remain outside the
+closure. The strict three-step `smoke/cli-chain-parse-abort` scenario now runs six warm probes for unknown
+name, invalid flag, excessive arity, missing value, later `attach`, and later `attach-session`, with
+zero differential channels. Slice 10u changes no protocol or snapshot and leaves the 98-scenario,
+1,522-step attached-client `PASS` artifact unchanged.
 
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.
@@ -228,8 +239,8 @@ catalog-driven parser covers all 83 implemented upstream commands and 74 built-i
 mux execution, daemon preflight, and stored commands. Exact native attach shares the leading-option
 diagnostics, then stops scanning at its positional-session extension. The focused differential
 compares 516 probes against both zz and the pin, including unknown and invalid flags, help usage,
-missing values, required-value absorption, and optional-value lookahead. Parser-group atomicity and
-eager whole-file construction stay separate tracker work. Positional bounds run after option
+missing values, required-value absorption, and optional-value lookahead. Config and source-file
+command-group construction stays under `mux.chain-parse-abort`. Positional bounds run after option
 grammar and before recognized parked capability rejection on direct, daemon-preflight, and stored
 command paths. Differential scenarios,
 attached-client fixtures, unit tests, and manual GUI checks supply behavioral evidence.

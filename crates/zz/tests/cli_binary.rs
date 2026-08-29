@@ -2354,7 +2354,7 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn exact_native_attach_executes_a_valid_command_chain_tail() {
+    fn exact_native_attach_executes_a_valid_command_chain_tail_after_a_positional_session() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
             return;
@@ -2369,7 +2369,6 @@ mod daemon_autostart {
                 &fixture,
                 &[
                     command,
-                    "-t",
                     "named",
                     ";",
                     "set-environment",
@@ -2751,6 +2750,94 @@ mod daemon_autostart {
         assert_eq!(alive.status.code(), Some(0));
         assert_eq!(alive.stdout, b"atomic\n");
         assert!(alive.stderr.is_empty());
+    }
+
+    #[test]
+    fn prepared_cli_chain_rejects_later_unaliased_argument_errors_before_effects() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "atomic-unaliased"])
+                .status
+                .success()
+        );
+
+        let cases: &[(&str, &[&str], &[u8])] = &[
+            (
+                "CLI_CHAIN_INVALID_FLAG",
+                &["list-sessions", "-Z"],
+                b"command list-sessions: unknown flag -Z\n",
+            ),
+            (
+                "CLI_CHAIN_TOO_MANY",
+                &["list-sessions", "extra"],
+                b"command list-sessions: too many arguments (need at most 0)\n",
+            ),
+            (
+                "CLI_CHAIN_MISSING_VALUE",
+                &["list-sessions", "-F"],
+                b"command list-sessions: -F expects an argument\n",
+            ),
+            (
+                "CLI_CHAIN_LATE_ATTACH",
+                &["attach", "atomic-unaliased"],
+                b"command attach-session: too many arguments (need at most 0)\n",
+            ),
+            (
+                "CLI_CHAIN_LATE_ATTACH_SESSION",
+                &["attach-session", "atomic-unaliased"],
+                b"command attach-session: too many arguments (need at most 0)\n",
+            ),
+        ];
+        for &(marker, later, expected) in cases {
+            let mut arguments = vec!["set-environment", "-g", marker, "mutated", ";"];
+            arguments.extend_from_slice(later);
+            let rejected = fixture.run(&arguments);
+            assert_eq!(rejected.status.code(), Some(1), "{marker}");
+            assert!(rejected.stdout.is_empty(), "{marker}");
+            assert_eq!(rejected.stderr, expected, "{marker}");
+
+            let marker_output = fixture.run(&["show-environment", "-g", marker]);
+            assert_eq!(marker_output.status.code(), Some(1), "{marker}");
+            assert!(marker_output.stdout.is_empty(), "{marker}");
+            assert_eq!(
+                marker_output.stderr,
+                format!("unknown variable: {marker}\n").as_bytes(),
+                "{marker}"
+            );
+        }
+
+        let runtime = fixture.run(&[
+            "set-environment",
+            "-g",
+            "CLI_RUNTIME_BEFORE",
+            "kept",
+            ";",
+            "has-session",
+            "-t",
+            "missing",
+            ";",
+            "set-environment",
+            "-g",
+            "CLI_RUNTIME_AFTER",
+            "bad",
+        ]);
+        assert_eq!(runtime.status.code(), Some(1));
+        assert!(runtime.stdout.is_empty());
+        assert_eq!(runtime.stderr, b"can't find session: missing\n");
+
+        let before = fixture.run(&["show-environment", "-g", "CLI_RUNTIME_BEFORE"]);
+        assert_eq!(before.status.code(), Some(0));
+        assert_eq!(before.stdout, b"CLI_RUNTIME_BEFORE=kept\n");
+        assert!(before.stderr.is_empty());
+
+        let after = fixture.run(&["show-environment", "-g", "CLI_RUNTIME_AFTER"]);
+        assert_eq!(after.status.code(), Some(1));
+        assert!(after.stdout.is_empty());
+        assert_eq!(after.stderr, b"unknown variable: CLI_RUNTIME_AFTER\n");
     }
 
     #[test]

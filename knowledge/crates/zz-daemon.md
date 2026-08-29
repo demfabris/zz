@@ -559,12 +559,23 @@ kind-specific server branch.
 Protocol v76 appends `ServerError::CommandParse` at tail tag 12. Mux and daemon handlers use it for
 command-name, flag, arity, and preparation failures, while target and runtime failures keep their
 existing variants. Callers can abort a parse failure before effects without changing runtime queue
-ordering. The cold local CLI closure covers autospawn. The post-10t rerank freezes slice 10u on
-`mux.command-group-argument-parse-abort`: warm local preparation will validate every ordinary
-unaliased invocation in the vector before effects, while exact unaliased `attach` and
-`attach-session` retain their dedicated native parser. Config and source-file group construction
-remain under the residual `mux.chain-parse-abort`. Remote `--host`, Control mode, alias snapshots,
-runtime rollback, and native zz command grammar stay outside 10u.
+ordering. The cold local CLI closure covers autospawn. Slice 10u closes
+`mux.command-group-argument-parse-abort` for a registered `ClientKind::Command`: the preparation RPC
+applies the existing static tmux grammar to every ordinary invocation with no user-alias match.
+It validates flags, arity, required values, and nested command blocks across the complete vector
+before the local CLI captures stdin, selects attach or TUI routing, or executes the first effect.
+Callback construction and user-alias validation keep their existing preparation paths. Native zz
+names reach their runtime parsers.
+
+The sole generic-validation bypass covers exact unaliased `attach` and `attach-session` at vector
+index zero, where the CLI's private parser owns the positional-session and `--restart-daemon`
+extensions. A later exact spelling and every user-alias expansion to either attach name use the
+ordinary tmux catalog. A preparation error rejects the complete vector before any effect. Target
+lookup and effect failures keep their sequential runtime ordering: an earlier effect remains and the
+failure prunes later commands. Control preparation and framing are unchanged. Config and source-file
+group construction remain under the residual `mux.chain-parse-abort`; remote `--host`, replay alias
+snapshots, and runtime rollback remain excluded. Slice 10u changes no protocol tag or snapshot
+schema.
 
 Protocol v76 originally appended `EventPayload::SourcedCommandGuard` at tail tag 47 for Control
 replay. Protocol v77 renames that tag in place to

@@ -11,27 +11,47 @@ else
     }
 fi
 
-parse_out="$HOME/cli-chain-parse-abort.out"
-parse_err="$HOME/cli-chain-parse-abort.err"
-parse_expected="$HOME/cli-chain-parse-abort.expected"
-marker_expected="$HOME/cli-chain-marker.expected"
-printf '%s\n' 'unknown command: frobnicate' >"$parse_expected"
-printf '%s\n' 'unknown variable: CLI_CHAIN_BEFORE' >"$marker_expected"
-set +e
-main_client set-environment -g CLI_CHAIN_BEFORE mutated ';' frobnicate >"$parse_out" 2>"$parse_err"
-parse_status=$?
-main_client show-environment -g CLI_CHAIN_BEFORE >"$parse_out.marker" 2>"$parse_err.marker"
-marker_status=$?
-set -e
+parse_clean=1
+parse_count=0
+probe_parse_abort() {
+    parse_label="$1"
+    parse_marker="$2"
+    parse_message="$3"
+    shift 3
+    parse_count=$((parse_count + 1))
+    parse_out="$HOME/cli-chain-parse-abort-$parse_label.out"
+    parse_err="$HOME/cli-chain-parse-abort-$parse_label.err"
+    parse_expected="$HOME/cli-chain-parse-abort-$parse_label.expected"
+    marker_expected="$HOME/cli-chain-parse-abort-$parse_label.marker.expected"
+    printf '%s\n' "$parse_message" >"$parse_expected"
+    printf 'unknown variable: %s\n' "$parse_marker" >"$marker_expected"
+    set +e
+    main_client set-environment -g "$parse_marker" mutated ';' "$@" >"$parse_out" 2>"$parse_err"
+    parse_status=$?
+    main_client show-environment -g "$parse_marker" >"$parse_out.marker" 2>"$parse_err.marker"
+    marker_status=$?
+    set -e
 
-if [ "$parse_status" -eq 1 ] && [ ! -s "$parse_out" ] && \
-   cmp -s "$parse_expected" "$parse_err" && \
-   [ "$marker_status" -eq 1 ] && [ ! -s "$parse_out.marker" ] && \
-   cmp -s "$marker_expected" "$parse_err.marker"; then
-    parse_clean=1
-else
-    parse_clean=0
-fi
+    if [ "$parse_status" -ne 1 ] || [ -s "$parse_out" ] || \
+       ! cmp -s "$parse_expected" "$parse_err" || \
+       [ "$marker_status" -ne 1 ] || [ -s "$parse_out.marker" ] || \
+       ! cmp -s "$marker_expected" "$parse_err.marker"; then
+        parse_clean=0
+    fi
+}
+
+probe_parse_abort unknown CLI_CHAIN_UNKNOWN \
+    'unknown command: frobnicate' frobnicate
+probe_parse_abort invalid-flag CLI_CHAIN_INVALID_FLAG \
+    'command list-sessions: unknown flag -Z' list-sessions -Z
+probe_parse_abort too-many CLI_CHAIN_TOO_MANY \
+    'command list-sessions: too many arguments (need at most 0)' list-sessions extra
+probe_parse_abort missing-value CLI_CHAIN_MISSING_VALUE \
+    'command list-sessions: -F expects an argument' list-sessions -F
+probe_parse_abort late-attach CLI_CHAIN_LATE_ATTACH \
+    'command attach-session: too many arguments (need at most 0)' attach campaign
+probe_parse_abort late-attach-session CLI_CHAIN_LATE_ATTACH_SESSION \
+    'command attach-session: too many arguments (need at most 0)' attach-session campaign
 
 cold_socket="/tmp/zz-cli-chain-cold-$$.sock"
 cold_out="$HOME/cli-chain-cold.out"
@@ -78,8 +98,8 @@ probe_cold -N attach
 probe_cold -N attach-session
 rm -f "$cold_socket" "${cold_socket}.identity" "${cold_socket}.lock"
 
-if [ "$parse_clean" -eq 1 ] && [ "$cold_clean" -eq 1 ]; then
-    main_client set-environment -g CLI_PARSE_ABORT clean
+if [ "$parse_clean" -eq 1 ] && [ "$parse_count" -eq 6 ] && [ "$cold_clean" -eq 1 ]; then
+    main_client set-environment -g CLI_PARSE_ABORT clean:6
 else
     main_client set-environment -g CLI_PARSE_ABORT broken
 fi

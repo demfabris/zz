@@ -38,8 +38,8 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-28
 
-The live tracker has 89 active groups, 594 classified active items, 101 closed groups, and two known
-differentials. Accepted active groups plus closed history resolve 122 of 190 known groups (64.2%).
+The live tracker has 88 active groups, 593 classified active items, 102 closed groups, and two known
+differentials. Accepted active groups plus closed history resolve 123 of 190 known groups (64.7%).
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -54,7 +54,7 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The 10t checkpoint contains 98 scenarios and 1,522 steps.
+The accepted canonical artifact retained through slice 10u contains 98 scenarios and 1,522 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one documented GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
@@ -110,13 +110,16 @@ partition is now 93 direct mux values, 32 daemon-delegated values, and 73 live g
 `sessions.new-session-attach-cwd` group owns two adjacent mismatches: zz still lacks the pinned
 `new-session -A -c` cwd mutation, and fresh `new-session -c ''` inherits a cwd instead of retaining
 the pin's explicit empty value.
-The post-10t rerank freezes slice 10u on `mux.command-group-argument-parse-abort`. A warm local
-unaliased command vector must prepare every command's argument diagnostics before its first effect.
-Runtime target and effect errors keep sequential queue ordering. Exact native attach retains its
-dedicated parser. Config and source replay stay under the residual `mux.chain-parse-abort`, and 10u
-does not add alias snapshotting. This is a frozen plan; the accepted artifact remains the 10t
-checkpoint above. `sessions.new-session-attach-cwd` is the first alternate at small-medium effort
-because both cwd mutations must preserve nested-refusal ordering.
+Slice 10u closes `mux.command-group-argument-parse-abort` on 2026-08-28. Warm local Command-client
+vectors now validate ordinary unaliased tmux grammar across the complete vector before any effect,
+while runtime target and effect errors keep sequential queue ordering. Only vector index 0 when it
+is exact unaliased `attach` or `attach-session` retains the private positional parser; later exact
+spellings and aliases use the catalog. Control, remote `--host`, config and source replay, native zz
+grammar, alias snapshots, and runtime rollback remain excluded. Six warm fixture probes and the
+focused three-step scenario report zero differences. The accepted artifact remains the 98-scenario,
+1,522-step checkpoint above with attached-client `PASS` and the same digest. The full live tracker
+must be reranked before the next slice is selected; the post-10t first-alternate forecast does not
+promote automatically.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
@@ -1386,6 +1389,22 @@ permanent product decision has been recorded for them.
   entries: 48 open, 20 blocked, and 21 accepted, with 122 of 190 groups resolved (64.2%). No runtime
   or artifact claim has shipped. `sessions.new-session-attach-cwd` is the first alternate, now rated
   small-medium because both cwd mutations must preserve nested-refusal ordering.
+- 2026-08-28: Slice 10u closed `mux.command-group-argument-parse-abort`. Warm local Command-client
+  vectors now prepare ordinary unaliased tmux grammar across the complete vector before effects,
+  while runtime target and effect errors remain sequential. Only vector-index-0 exact unaliased
+  `attach` or `attach-session` retains the private positional parser; later exact spellings and
+  aliases use the catalog. Control, remote `--host`, config and source replay, native zz grammar,
+  alias snapshots, and runtime rollback remain excluded. Six warm fixture probes and the focused
+  three-step scenario report zero differences. The registry now has 88 active groups, 593 active
+  items, and 102 closed entries: 47 open, 20 blocked, and 21 accepted, with 123 of 190 groups
+  resolved (64.7%). The accepted artifact remains 98 scenarios and 1,522 steps with attached-client
+  `PASS` and SHA-256
+  `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`. All 112 CLI tests, the
+  all-feature workspace suite excluding `zz-daemon`, strict workspace clippy, formatting, and the
+  focused daemon test pass. One parallel daemon run hit two unrelated failures that both pass alone.
+  A sequential run passed 711 of 712 tests; its unrelated viewport-queue assertion also passed
+  immediately alone. No uninterrupted full-daemon result is claimed here. Slice 10u is delivered,
+  and the live tracker must be reranked before selecting the next slice.
 
 # Related
 

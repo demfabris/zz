@@ -91,7 +91,7 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The current 10t acceptance inventory contains 98 differential scenarios and
+The accepted compatibility inventory retained through slice 10u contains 98 differential scenarios and
 1,522 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The
 complete differential and attached run on 2026-08-28 left every ordinary row clean.
 `known/known-main-preset-two-panes` and
@@ -140,11 +140,15 @@ The source partition now contains 93 direct values, 32 daemon-delegated values, 
 `format:session_active` remains open for a tri-state producer audit. The newly classified
 `sessions.new-session-attach-cwd` group owns the adjacent pinned `new-session -A -c` mutation that
 zz lacks and the fresh explicit-empty `new-session -c ''` case where zz inherits a cwd.
-The post-10t rerank freezes slice 10u on `mux.command-group-argument-parse-abort`. The slice will
-preflight a warm local unaliased command vector's complete argument grammar before its first effect
-while retaining sequential runtime target and effect errors. Exact native attach keeps its dedicated
-parser. Config and source replay remain under `mux.chain-parse-abort`, and alias snapshotting stays
-outside 10u. The accepted artifact still belongs to delivered slice 10t.
+Slice 10u closes `mux.command-group-argument-parse-abort` on 2026-08-28. Warm local Command-client
+vectors now validate ordinary unaliased tmux grammar across the complete vector before any effect,
+while runtime target and effect errors retain sequential queue ordering. Only vector index 0 when it
+is exact unaliased `attach` or `attach-session` keeps the private positional parser; later exact
+spellings and aliases use the catalog. Control, remote `--host`, config and source replay, native zz
+grammar, alias snapshots, and runtime rollback remain excluded. Six warm fixture probes and the
+focused three-step scenario report zero differences. The accepted canonical artifact remains 98
+scenarios and 1,522 steps with attached-client `PASS` and the digest above. The next slice requires
+a fresh live-tracker rerank.
 The historical 10i artifact remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h artifact remains 96 scenarios and 1,511 steps at SHA-256
@@ -282,18 +286,20 @@ flag gap, but accepted semantic divergences remain outside that count.
 mutation closed in slice 10m, followed by raw-TUI confirmation consumption in slice 10n and bounded
 menu descriptor consumption in slice 10o, popup consumption in slice 10p, per-client destruction
 fallback in slice 10q, cold local CLI parse atomicity in slice 10r, nonconstant global-format source
-registration in slice 10s, and target-session path expansion in slice 10t. The live registry now has
-89 active groups, 594 classified active items, and 101 closed records; 122 of 190 groups are resolved
-(64.2%). Slice 10t moves the 198-name partition to 93 direct mux values, 32 daemon-delegated values,
+registration in slice 10s, target-session path expansion in slice 10t, and warm local whole-vector
+argument preflight in slice 10u. The live registry now has 88 active groups, 593 classified active
+items, and 102 closed records: 47 open, 20 blocked, and 21 accepted; 123 of 190 groups are resolved
+(64.7%). Slice 10t moves the 198-name partition to 93 direct mux values, 32 daemon-delegated values,
 and 73 live gaps. `format:session_active` still needs its tri-state producer audit. The adjacent
 `sessions.new-session-attach-cwd` group now records both missing `new-session -A -c` mutation parity
 and fresh explicit-empty `new-session -c ''` retention. Open context formats and option consumers
-remain independent discovery milestones. Slice 10u is frozen on warm local unaliased whole-vector
-argument preflight. It leaves exact native attach, config and source replay, and alias snapshotting
-with their existing owners. `sessions.new-session-attach-cwd` is the first alternate at small-medium
-effort because both cwd mutations must preserve nested-refusal ordering. After 10u closes,
-regenerate and re-rank the full live tracker so a newly exposed practical gate can move ahead of
-that forecast. Client targeting and ordinary detach are complete;
+remain independent discovery milestones. Slice 10u is delivered: ordinary unaliased tmux grammar is
+prepared across a warm local Command-client vector before effects, with only vector-index-0 exact
+unaliased attach using the private positional parser. Control, remote `--host`, config and source
+replay, native zz grammar, alias snapshots, and runtime rollback keep their existing owners.
+`sessions.new-session-attach-cwd` was the first alternate in the post-10t forecast, but closure now
+requires regenerating and reranking the full live tracker before selecting the next slice. Client
+targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading
 `/dev/` removal, exactly one optional trailing colon, no final basename, and global creation-order
 collision precedence. Native aliases remain. Unsupported `command-prompt -t`, `show-messages -t`,

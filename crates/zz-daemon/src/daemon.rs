@@ -4526,7 +4526,7 @@ impl Shared {
     #[cfg(test)]
     fn prepare_command_list(&self, commands: Vec<CommandInvocation>) -> Vec<PreparedCommand> {
         let inner = self.inner.lock();
-        Self::prepare_command_list_with_engine(&inner.engine, commands)
+        Self::prepare_command_list_with_engine(&inner.engine, commands, true)
     }
 
     fn prepare_command_list_for_request(
@@ -4543,7 +4543,9 @@ impl Shared {
             commands.pop();
         }
         let mut inner = self.inner.lock();
-        let commands = Self::prepare_command_list_with_engine(&inner.engine, commands);
+        let preflight_unaliased = inner.client_kinds.get(&client) == Some(&ClientKind::Command);
+        let commands =
+            Self::prepare_command_list_with_engine(&inner.engine, commands, preflight_unaliased);
         if abort_server_id == Some(self.server_id) {
             let failed = commands
                 .iter()
@@ -4556,10 +4558,14 @@ impl Shared {
     fn prepare_command_list_with_engine(
         engine: &MuxEngine,
         commands: Vec<CommandInvocation>,
+        preflight_unaliased: bool,
     ) -> Vec<PreparedCommand> {
         commands
             .into_iter()
-            .map(|typed| {
+            .enumerate()
+            .map(|(index, typed)| {
+                let exact_native_attach =
+                    index == 0 && matches!(typed.name.as_str(), "attach" | "attach-session");
                 let (mut invocation, alias_matched, alias_error) =
                     match engine.resolve_command_alias(&typed) {
                         CommandAliasResolution::Miss => (typed, false, None),
@@ -4609,7 +4615,7 @@ impl Shared {
                             result: PreparedCommandResult::Error(error),
                         };
                     }
-                } else if alias_matched
+                } else if (alias_matched || (preflight_unaliased && !exact_native_attach))
                     && let Err(error) =
                         validate_static_command_chain(std::slice::from_ref(&invocation))
                 {
@@ -65589,7 +65595,12 @@ bind - split-window -v -c "#{pane_current_path}"
         }
         let ordinary_invalid =
             shared.prepare_command_list(vec![CommandInvocation::new("list-sessions", ["-Z"])]);
-        assert_eq!(ordinary_invalid[0].result, PreparedCommandResult::Ready);
+        assert_eq!(
+            ordinary_invalid[0].result,
+            PreparedCommandResult::Error(ServerError::CommandParse(
+                "command list-sessions: unknown flag -Z".to_owned()
+            ))
+        );
         let mutation = CommandInvocation::new(
             "set-option",
             ["-s", "command-alias[40]", "a=display-message -p new"],
@@ -65653,7 +65664,7 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn prepared_alias_expansions_reject_static_syntax_before_ready() {
+    fn prepared_commands_reject_static_syntax_before_ready_except_exact_native_attach() {
         let shared = Arc::new(Shared::new(1));
         let client = ClientId(91);
         let mut context = ExecutionContext::default();
@@ -65665,6 +65676,41 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("new-session", ["-d", "-s", "work"]),
             )
             .expect("session");
+
+        let exact_native_attach = [
+            shared
+                .prepare_command_list(vec![CommandInvocation::new(
+                    "attach",
+                    ["--restart-daemon", "work"],
+                )])
+                .remove(0),
+            shared
+                .prepare_command_list(vec![CommandInvocation::new("attach-session", ["work"])])
+                .remove(0),
+        ];
+        for command in exact_native_attach {
+            assert!(!command.alias_matched);
+            assert_eq!(command.canonical_name.as_deref(), Some("attach-session"));
+            assert_eq!(command.result, PreparedCommandResult::Ready);
+        }
+
+        let later_exact_attach = shared.prepare_command_list(vec![
+            CommandInvocation::new("list-sessions", [] as [&str; 0]),
+            CommandInvocation::new("attach", ["work"]),
+            CommandInvocation::new("attach-session", ["work"]),
+        ]);
+        assert_eq!(later_exact_attach[0].result, PreparedCommandResult::Ready);
+        for command in &later_exact_attach[1..] {
+            assert!(!command.alias_matched);
+            assert_eq!(command.canonical_name.as_deref(), Some("attach-session"));
+            assert_eq!(
+                command.result,
+                PreparedCommandResult::Error(ServerError::CommandParse(
+                    "command attach-session: too many arguments (need at most 0)".to_owned()
+                ))
+            );
+        }
+
         for (index, value) in [
             (60, "badflag10r=list-sessions -Z"),
             (61, "badarity10r=list-sessions extra"),
@@ -65674,6 +65720,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 "nested10r=confirm-before { if-shell -F 1 { bind-key -T { display-message bad-table } F2 display-message } }",
             ),
             (64, "parked10r=capture-pane -C"),
+            (65, "go10u=attach-session work"),
+            (66, "attach=attach-session work"),
         ] {
             shared
                 .execute(
@@ -65690,43 +65738,71 @@ bind - split-window -v -c "#{pane_current_path}"
 
         let prepared = shared.prepare_command_list(vec![
             CommandInvocation::new("list-windows", ["-Z"]),
+            CommandInvocation::new("ls", ["extra"]),
+            CommandInvocation::new("list-sess", ["-F"]),
+            CommandInvocation::new("clock-mode", ["-Z"]),
+            CommandInvocation::new("agent-send", ["--submit", "hello"]),
             CommandInvocation::new("badflag10r", [] as [&str; 0]),
             CommandInvocation::new("badarity10r", [] as [&str; 0]),
             CommandInvocation::new("list-sessions", [] as [&str; 0]),
             CommandInvocation::new("nested10r", [] as [&str; 0]),
             CommandInvocation::new("parked10r", [] as [&str; 0]),
+            CommandInvocation::new("go10u", [] as [&str; 0]),
+            CommandInvocation::new("attach", [] as [&str; 0]),
         ]);
 
-        assert!(!prepared[0].alias_matched);
-        assert_eq!(prepared[0].result, PreparedCommandResult::Ready);
+        for (command, expected) in prepared[..4].iter().zip([
+            "command list-windows: unknown flag -Z",
+            "command list-sessions: too many arguments (need at most 0)",
+            "command list-sessions: -F expects an argument",
+            "command clock-mode: unknown flag -Z",
+        ]) {
+            assert!(!command.alias_matched);
+            assert_eq!(
+                command.result,
+                PreparedCommandResult::Error(ServerError::CommandParse(expected.to_owned()))
+            );
+        }
+        assert_eq!(prepared[4].canonical_name.as_deref(), Some("agent-send"));
+        assert_eq!(prepared[4].result, PreparedCommandResult::Ready);
         assert_eq!(
-            prepared[1].result,
+            prepared[5].result,
             PreparedCommandResult::Error(ServerError::CommandParse(
                 "command list-sessions: unknown flag -Z".to_owned()
             ))
         );
         assert_eq!(
-            prepared[2].result,
+            prepared[6].result,
             PreparedCommandResult::Error(ServerError::CommandParse(
                 "command list-sessions: too many arguments (need at most 0)".to_owned()
             ))
         );
-        assert!(prepared[3].alias_matched);
+        assert!(prepared[7].alias_matched);
         assert_eq!(
-            prepared[3].canonical_name.as_deref(),
+            prepared[7].canonical_name.as_deref(),
             Some("display-message")
         );
-        assert_eq!(prepared[3].invocation.args, ["-p", "shadow"]);
-        assert_eq!(prepared[3].result, PreparedCommandResult::Ready);
+        assert_eq!(prepared[7].invocation.args, ["-p", "shadow"]);
+        assert_eq!(prepared[7].result, PreparedCommandResult::Ready);
         assert_eq!(
-            prepared[4].result,
+            prepared[8].result,
             PreparedCommandResult::Error(ServerError::CommandParse(
                 "command bind-key: -T argument must be a string".to_owned()
             ))
         );
-        assert!(prepared[5].alias_matched);
-        assert_eq!(prepared[5].canonical_name.as_deref(), Some("capture-pane"));
-        assert_eq!(prepared[5].result, PreparedCommandResult::Ready);
+        assert!(prepared[9].alias_matched);
+        assert_eq!(prepared[9].canonical_name.as_deref(), Some("capture-pane"));
+        assert_eq!(prepared[9].result, PreparedCommandResult::Ready);
+        for command in &prepared[10..] {
+            assert!(command.alias_matched);
+            assert_eq!(command.canonical_name.as_deref(), Some("attach-session"));
+            assert_eq!(
+                command.result,
+                PreparedCommandResult::Error(ServerError::CommandParse(
+                    "command attach-session: too many arguments (need at most 0)".to_owned()
+                ))
+            );
+        }
     }
 
     #[test]

@@ -12870,14 +12870,10 @@ fn parse_tmux_key(value: &str) -> Option<String> {
         base = short_control.as_deref().unwrap_or(unmodified);
     }
     loop {
-        if let Some(unmodified) =
-            strip_prefix_ascii_case(base, "C-").or_else(|| base.strip_prefix("Ctrl-"))
-        {
+        if let Some(unmodified) = strip_prefix_ascii_case(base, "C-") {
             control = true;
             base = unmodified;
-        } else if let Some(unmodified) =
-            strip_prefix_ascii_case(base, "M-").or_else(|| base.strip_prefix("Alt-"))
-        {
+        } else if let Some(unmodified) = strip_prefix_ascii_case(base, "M-") {
             meta = true;
             base = unmodified;
         } else if let Some(unmodified) = strip_prefix_ascii_case(base, "S-") {
@@ -33704,6 +33700,119 @@ mod tests {
                 "{key} -> {canonical}"
             );
         }
+    }
+
+    #[test]
+    fn tmux_key_parser_matches_pinned_modifier_and_named_key_vocabulary() {
+        for (key, canonical) in [
+            ("^A", "C-a"),
+            ("^Escape", "C-Escape"),
+            ("BTab", "BTab"),
+            ("btab", "BTab"),
+            ("KP/", "KP/"),
+            ("KPEnter", "KPEnter"),
+            ("KP5", "KP5"),
+            ("C-KPEnter", "C-KPEnter"),
+            ("c-b", "C-b"),
+            ("M-C-a", "C-M-a"),
+            ("C-M-S-Up", "C-M-S-Up"),
+            ("S-BTab", "S-BTab"),
+            ("C-Space", "C-Space"),
+            ("F12", "F12"),
+            ("Any", "Any"),
+            ("None", "None"),
+        ] {
+            assert_eq!(parse_tmux_key(key).as_deref(), Some(canonical), "{key}");
+        }
+        for key in [
+            "F13", "Ctrl-a", "Alt-a", "C-Ctrl-a", "M-Alt-a", "C-zz", "M-zz", "C-", "FocusIn",
+        ] {
+            assert_eq!(parse_tmux_key(key), None, "{key}");
+        }
+    }
+
+    #[test]
+    fn long_modifier_aliases_fail_before_key_state_changes() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "strict-keys"]),
+            )
+            .unwrap();
+        for (key, label) in [("C-a", "control"), ("M-a", "meta")] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("bind-key", &["-T", "strict", key, "display-message", label]),
+                )
+                .unwrap();
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "prefix2", "C-s"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", "BSpace"]),
+            )
+            .unwrap();
+
+        let tables = engine.keys.snapshot();
+        let prefix = engine.keys.prefix().to_owned();
+        let prefix2 = engine.keys.prefix2().map(str::to_owned);
+        for (invocation, expected) in [
+            (
+                command(
+                    "bind-key",
+                    &["-T", "strict", "Ctrl-a", "display-message", "replacement"],
+                ),
+                "unknown key: Ctrl-a",
+            ),
+            (
+                command("unbind-key", &["-T", "strict", "Alt-a"]),
+                "unknown key: Alt-a",
+            ),
+            (
+                command("list-keys", &["-T", "strict", "Ctrl-a"]),
+                "invalid key: Ctrl-a",
+            ),
+            (
+                command("set-option", &["-g", "prefix", "Ctrl-a"]),
+                "bad key: Ctrl-a",
+            ),
+            (
+                command("set-option", &["-g", "prefix2", "Alt-a"]),
+                "bad key: Alt-a",
+            ),
+            (
+                command("set-option", &["-s", "backspace", "Ctrl-a"]),
+                "bad key: Ctrl-a",
+            ),
+        ] {
+            assert_eq!(
+                engine.execute(&mut context, &invocation).unwrap_err(),
+                ServerError::InvalidCommand(expected.to_owned())
+            );
+        }
+
+        assert_eq!(engine.keys.snapshot(), tables);
+        assert_eq!(engine.keys.prefix(), prefix);
+        assert_eq!(engine.keys.prefix2(), prefix2.as_deref());
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "backspace"]),
+                )
+                .unwrap()
+                .output,
+            "BSpace"
+        );
     }
 
     #[test]

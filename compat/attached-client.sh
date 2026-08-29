@@ -2018,14 +2018,14 @@ probe_display_message_unattached_target() {
     fixture_failure "$side did not report exactly one display-message fallback client"
   fi
   for target_client in '' "$client_name" missing-client; do
-    command=(display-message -p -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}')
+    command=(display-message -p -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}|#{session_active}')
     if [ -n "$target_client" ]; then
-      command=(display-message -p -c "$target_client" -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}')
+      command=(display-message -p -c "$target_client" -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}|#{session_active}')
     fi
     output="$(side_command "$side" "${command[@]}")" ||
       fixture_failure "$side could not expand unattached-target client facts"
     output="${output//$'\r'/}"
-    if [ "$output" != "$client_name|$INNER_SESSION|$CHOOSER_SESSION" ]; then
+    if [ "$output" != "$client_name|$INNER_SESSION|$CHOOSER_SESSION|0" ]; then
       fixture_failure "$side selected the wrong unattached-target client facts for ${target_client:-omitted -c}; got: ${output:-<empty>}"
     fi
   done
@@ -2305,7 +2305,7 @@ probe_client_context_formats() {
   local control_output="$SCRATCH_DIR/control-context-$side.out"
   local control_error="$SCRATCH_DIR/control-context-$side.err"
   local full_format='#{client_activity}|#{client_cell_height}|#{client_cell_width}|#{client_colours}|#{client_control_mode}|#{client_created}|#{client_discarded}|#{client_flags}|#{client_height}|#{client_key_table}|#{client_last_session}|#{client_name}|#{client_pid}|#{client_prefix}|#{client_readonly}|#{client_session}|#{client_termfeatures}|#{client_termname}|#{client_termtype}|#{client_theme}|#{client_tty}|#{client_uid}|#{client_user}|#{client_utf8}|#{client_width}|#{client_written}|#{session_last_attached}'
-  local stable_format='#{client_name}|#{client_pid}|#{client_tty}|#{client_session}|#{client_width}|#{client_height}|#{client_key_table}|#{client_prefix}|#{client_readonly}|#{client_control_mode}|#{client_termname}|#{client_utf8}'
+  local stable_format='#{client_name}|#{client_pid}|#{client_tty}|#{client_session}|#{client_width}|#{client_height}|#{client_key_table}|#{client_prefix}|#{client_readonly}|#{client_control_mode}|#{client_termname}|#{client_utf8}|#{session_active}'
 
   client_tty="$(tmux_outer_command display-message -p -t "$OUTER_SESSION:$side" '#{pane_tty}')"
   row="$(side_command "$side" list-clients -t "=$INNER_SESSION" -F "$full_format")" ||
@@ -2323,8 +2323,37 @@ probe_client_context_formats() {
     fixture_failure "$side could not select explicit display-message client facts"
   stable="${stable//$'\r'/}"
   selected="${selected//$'\r'/}"
+  if [ "${stable##*|}" != 1 ]; then
+    fixture_failure "$side list-clients did not mark its attached target session active: ${stable:-<empty>}"
+  fi
   if [ "$selected" != "$stable" ]; then
     fixture_failure "$side list and explicit display-message client facts differ: $stable != $selected"
+  fi
+
+  row="$(side_command "$side" list-keys -T prefix -F '[#{client_name}|#{session_active}]' c)" ||
+    fixture_failure "$side could not expand list-keys client context"
+  row="${row//$'\r'/}"
+  if [ "$row" != "[$client_tty|1]" ]; then
+    fixture_failure "$side list-keys did not use its selected attached client: ${row:-<empty>}"
+  fi
+  row="$(side_command "$side" list-commands -F '[#{session_active}]' display-message)" ||
+    fixture_failure "$side could not expand list-commands clientless context"
+  row="${row//$'\r'/}"
+  if [ "$row" != '[]' ]; then
+    fixture_failure "$side list-commands unexpectedly used a format client: ${row:-<empty>}"
+  fi
+  row="$(side_command "$side" run-shell "printf '[#{session_active}]'")" ||
+    fixture_failure "$side could not expand run-shell target context"
+  row="${row//$'\r'/}"
+  if [ "$row" != '[1]' ]; then
+    fixture_failure "$side run-shell did not use its selected attached client: ${row:-<empty>}"
+  fi
+  row="$(side_command "$side" if-shell -F '#{session_active}' \
+    'display-message -p [1]' 'display-message -p [0]')" ||
+    fixture_failure "$side could not expand if-shell target context"
+  row="${row//$'\r'/}"
+  if [ "$row" != '[1]' ]; then
+    fixture_failure "$side if-shell did not use its selected attached client: ${row:-<empty>}"
   fi
 
   no_client="$(side_command "$side" display-message -p -t "$INNER_PANE_TARGET" \
@@ -2348,12 +2377,12 @@ probe_client_context_formats() {
     fixture_failure "$side could not clear its ordinary client context result"
 
   side_command "$side" set-option -t "=$INNER_SESSION:" status-left \
-    "CTXSTATUS:#{client_pid}:#{client_tty}" ||
+    "CTXSTATUS:#{client_pid}:#{client_tty}:#{session_active}" ||
     fixture_failure "$side could not set its status client context probe"
   side_command "$side" set-option -t "=$INNER_SESSION:" status-left-length 80 ||
     fixture_failure "$side could not widen its status client context probe"
   wait_for_marker "$side" "CTXSTATUS:"
-  wait_for_marker "$side" "$client_tty"
+  wait_for_marker "$side" "$client_tty:1"
   side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left ||
     fixture_failure "$side could not restore status-left"
   side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left-length ||
@@ -2683,6 +2712,137 @@ probe_client_environment() {
     fixture_failure "$side could not restore update-environment"
 }
 
+probe_status_job_environment() {
+  local side="$1"
+  local marker="ATTACHED_STATUS_JOB_${side}_OK"
+  local bad_marker="ATTACHED_STATUS_JOB_${side}_BAD"
+  local expected_version
+  local default_terminal
+  local command
+
+  expected_version="$(side_command "$side" display-message -p '#{version}')" ||
+    fixture_failure "$side could not read its status job version"
+  default_terminal="$(side_command "$side" show-options -gv default-terminal)" ||
+    fixture_failure "$side could not read its status job terminal"
+
+  side_command "$side" set-environment -gu ATTACHED_STATUS_LAUNCH_CANARY ||
+    fixture_failure "$side could not hide its process-only status canary"
+  side_command "$side" set-environment -g ATTACHED_STATUS_JOB_ENV "global-$side" ||
+    fixture_failure "$side could not set its global status job value"
+  side_command "$side" set-environment -t "=$INNER_SESSION" \
+    ATTACHED_STATUS_JOB_ENV "session-$side" ||
+    fixture_failure "$side could not set its session status job value"
+  side_command "$side" set-environment -g TMUX_PANE "status-global-pane-$side" ||
+    fixture_failure "$side could not set its global status pane value"
+  side_command "$side" set-environment -t "=$INNER_SESSION" \
+    TMUX_PANE "status-session-pane-$side" ||
+    fixture_failure "$side could not set its session status pane value"
+
+  command="#(IFS=,; set -- \$TMUX; test \"\$3\" = -1 && test -z \"\${ATTACHED_STATUS_LAUNCH_CANARY+x}\" && test \"\$ATTACHED_STATUS_JOB_ENV\" = global-$side && test \"\$TMUX_PANE\" = status-global-pane-$side && test \"\$TERM\" = $default_terminal && test \"\$TERM_PROGRAM\" = tmux && test \"\$TERM_PROGRAM_VERSION\" = $expected_version && test \"\$COLORTERM\" = truecolor && echo $marker || echo $bad_marker)"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-interval 1 ||
+    fixture_failure "$side could not set its status job cadence"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-left-length 80 ||
+    fixture_failure "$side could not widen its status job probe"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-right '' ||
+    fixture_failure "$side could not clear its status job right side"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-left "$command" ||
+    fixture_failure "$side could not set its status job probe"
+  wait_for_current_marker "$side" "$marker"
+
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left ||
+    fixture_failure "$side could not restore status-left after its job probe"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-right ||
+    fixture_failure "$side could not restore status-right after its job probe"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left-length ||
+    fixture_failure "$side could not restore status-left-length after its job probe"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-interval ||
+    fixture_failure "$side could not restore status-interval after its job probe"
+  side_command "$side" set-environment -gu ATTACHED_STATUS_JOB_ENV ||
+    fixture_failure "$side could not remove its global status job value"
+  side_command "$side" set-environment -u -t "=$INNER_SESSION" \
+    ATTACHED_STATUS_JOB_ENV ||
+    fixture_failure "$side could not remove its session status job value"
+  side_command "$side" set-environment -gu TMUX_PANE ||
+    fixture_failure "$side could not remove its global status pane value"
+  side_command "$side" set-environment -u -t "=$INNER_SESSION" TMUX_PANE ||
+    fixture_failure "$side could not remove its session status pane value"
+  side_command "$side" set-environment -g ATTACHED_STATUS_LAUNCH_CANARY \
+    "process-$side" ||
+    fixture_failure "$side could not restore its status launch canary"
+}
+
+probe_status_option_name_formats() {
+  local side="$1"
+  local window
+  local pane
+  local expected='OPTCHAIN:1:10:01:01'
+  local output
+
+  window="$(side_command "$side" new-window -d -P -F '#{window_id}' \
+    -t "=$INNER_SESSION:" -n option-chain)" ||
+    fixture_failure "$side could not create its option-chain window"
+  pane="$(side_command "$side" split-window -d -P -F '#{pane_id}' \
+    -t "$INNER_PANE_TARGET")" ||
+    fixture_failure "$side could not create its option-chain pane"
+  window="${window//$'\r'/}"
+  pane="${pane//$'\r'/}"
+
+  side_command "$side" set-option -g mouse off ||
+    fixture_failure "$side could not set its global session option probe"
+  side_command "$side" set-option -t "=$INNER_SESSION:" mouse on ||
+    fixture_failure "$side could not set its attached session option probe"
+  side_command "$side" set-window-option -g automatic-rename off ||
+    fixture_failure "$side could not set its global window option probe"
+  side_command "$side" set-window-option -t "$window" automatic-rename on ||
+    fixture_failure "$side could not set its target window option probe"
+  side_command "$side" set-option -gp allow-set-title on ||
+    fixture_failure "$side could not set its global pane option probe"
+  side_command "$side" set-option -p -t "$INNER_PANE_TARGET" allow-set-title off ||
+    fixture_failure "$side could not set its target pane option probe"
+
+  output="$(side_command "$side" display-message -p -t "$INNER_PANE_TARGET" \
+    'OPTCHAIN:#{mouse}:#{S:#{mouse}}:#{W:#{automatic-rename}}:#{P:#{allow-set-title}}')" ||
+    fixture_failure "$side could not expand its option-chain display format"
+  output="${output//$'\r'/}"
+  if [ "$output" != "$expected" ]; then
+    fixture_failure "$side option-chain display format was ${output:-<empty>}"
+  fi
+
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-interval 1 ||
+    fixture_failure "$side could not set its option-chain status cadence"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-left-length 80 ||
+    fixture_failure "$side could not widen its option-chain status probe"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-right '' ||
+    fixture_failure "$side could not clear its option-chain status right side"
+  side_command "$side" set-option -t "=$INNER_SESSION:" status-left \
+    'OPTCHAIN:#{mouse}:#{S:#{mouse}}:#{W:#{automatic-rename}}:#{P:#{allow-set-title}}' ||
+    fixture_failure "$side could not set its option-chain status probe"
+  wait_for_current_marker "$side" "$expected"
+
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left ||
+    fixture_failure "$side could not restore status-left after its option-chain probe"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-right ||
+    fixture_failure "$side could not restore status-right after its option-chain probe"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-left-length ||
+    fixture_failure "$side could not restore status-left-length after its option-chain probe"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" status-interval ||
+    fixture_failure "$side could not restore status-interval after its option-chain probe"
+  side_command "$side" set-option -u -t "=$INNER_SESSION:" mouse ||
+    fixture_failure "$side could not restore its attached session option probe"
+  side_command "$side" set-option -gu mouse ||
+    fixture_failure "$side could not restore its global session option probe"
+  side_command "$side" set-window-option -gu automatic-rename ||
+    fixture_failure "$side could not restore its global window option probe"
+  side_command "$side" set-option -pu -t "$INNER_PANE_TARGET" allow-set-title ||
+    fixture_failure "$side could not restore its target pane option probe"
+  side_command "$side" set-option -gpu allow-set-title ||
+    fixture_failure "$side could not restore its global pane option probe"
+  side_command "$side" kill-pane -t "$pane" ||
+    fixture_failure "$side could not remove its option-chain pane"
+  side_command "$side" kill-window -t "$window" ||
+    fixture_failure "$side could not remove its option-chain window"
+}
+
 run_requested_client_command() {
   local side="$1"
   shift
@@ -2989,15 +3149,16 @@ probe_detach_client_tty() {
   side_command "$side" detach-client -t "$client_tty" ||
     fixture_failure "$side could not detach its tty-targeted client"
   wait_for_attached_client_count "$side" 0
-  output="$(side_command "$side" display-message -p -c missing-client -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}')" ||
+  output="$(side_command "$side" display-message -p -c missing-client -t "=$CHOOSER_SESSION:" '#{client_name}|#{client_session}|#{session_name}|#{session_active}')" ||
     fixture_failure "$side could not print display-message facts without attached clients"
   output="${output//$'\r'/}"
-  if [ "$output" != "||$CHOOSER_SESSION" ]; then
+  if [ "$output" != "||$CHOOSER_SESSION|" ]; then
     fixture_failure "$side did not leave client facts empty without attached clients; got: ${output:-<empty>}"
   fi
 }
 
-ATTACHED_ENV_SELECTED=global-old \
+ATTACHED_STATUS_LAUNCH_CANARY=process-zz \
+  ATTACHED_ENV_SELECTED=global-old \
   ATTACHED_ENV_KEEP=global-old \
   ATTACHED_ENV_MISSING=global-old \
   zz_command daemon >"$DAEMON_STDOUT" 2>"$DAEMON_STDERR" &
@@ -3005,7 +3166,8 @@ ZZ_PID=$!
 wait_for_socket
 
 zz_command new-session -d -c "$COMMAND_CWD" -s "$INNER_SESSION" || fixture_failure "could not create zz session"
-ATTACHED_ENV_SELECTED=global-old \
+ATTACHED_STATUS_LAUNCH_CANARY=process-tmux \
+  ATTACHED_ENV_SELECTED=global-old \
   ATTACHED_ENV_KEEP=global-old \
   ATTACHED_ENV_MISSING=global-old \
   tmux_inner_start new-session -d -c "$COMMAND_CWD" -s "$INNER_SESSION" || fixture_failure "could not create tmux session"
@@ -3077,6 +3239,10 @@ probe_source_file_depth zz
 probe_source_file_depth tmux
 probe_client_environment zz
 probe_client_environment tmux
+probe_status_job_environment zz
+probe_status_job_environment tmux
+probe_status_option_name_formats zz
+probe_status_option_name_formats tmux
 probe_requested_client_flags zz
 probe_requested_client_flags tmux
 probe_no_detach_on_destroy zz

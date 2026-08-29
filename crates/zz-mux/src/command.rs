@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
 };
 
+use parking_lot::Mutex;
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind, ClientId,
     CommandInvocation, CommandPromptMode, CommandPromptType, CommandResolution, CommandSpec,
@@ -30,8 +31,8 @@ use crate::{
     TmuxSort, TmuxSortOrder, VisualBell, WindowSize, WindowStatusFormats, WindowStatusOption,
     canonical_command, command_spec,
     formats::{
-        CommandHooks, FormatContext, FormatType, StatusHooks, expand_format_time_with_hooks,
-        expand_format_with_hooks, format_true, parse_tmux_colour,
+        CommandHooks, FormatClient, FormatContext, FormatType, StatusHooks,
+        expand_format_time_with_hooks, expand_format_with_hooks, format_true, parse_tmux_colour,
     },
     honest_knobs::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
@@ -41,8 +42,9 @@ use crate::{
     model::{DEFAULT_WINDOW_EXTENT, fnmatch},
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
-        match_tmux_option, parse_tmux_option, tmux_option_is_hook, tmux_option_table_order,
-        tmux_options, tmux_stored_array, tmux_stored_scalar,
+        exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_option_format_is_flag,
+        tmux_option_is_hook, tmux_option_table_order, tmux_options, tmux_stored_array,
+        tmux_stored_scalar,
     },
     valid_style,
 };
@@ -54,6 +56,114 @@ use crate::tmux_options::{
 };
 #[cfg(test)]
 use zz_protocol::{COMMAND_SPECS, DAEMON_COMMAND_SPECS};
+
+pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
+    "base-index",
+    "pane-base-index",
+    "renumber-windows",
+    "default-size",
+    "window-size",
+    "aggressive-resize",
+    "history-limit",
+    "detach-on-destroy",
+    "prefix",
+    "mode-keys",
+    "key-table",
+    "prefix-timeout",
+    "repeat-time",
+    "initial-repeat-time",
+    "prompt-history-limit",
+    "history-file",
+    "word-separators",
+    "wrap-search",
+    "default-shell",
+    "default-command",
+    "default-terminal",
+    "remain-on-exit",
+    "focus-events",
+    "allow-passthrough",
+    "allow-set-title",
+    "cursor-style",
+    "cursor-colour",
+    "synchronize-panes",
+    "automatic-rename",
+    "automatic-rename-format",
+    "bell-action",
+    "visual-bell",
+    "display-time",
+    "display-panes-time",
+    "message-limit",
+    "buffer-limit",
+    "set-clipboard",
+    "copy-command",
+    "menu-border-lines",
+    "menu-border-style",
+    "menu-selected-style",
+    "menu-style",
+    "popup-border-lines",
+    "popup-border-style",
+    "popup-style",
+    "main-pane-width",
+    "main-pane-height",
+    "other-pane-width",
+    "other-pane-height",
+    "tiled-layout-max-columns",
+    "status",
+    "status-interval",
+    "status-left",
+    "status-right",
+    "status-left-length",
+    "status-right-length",
+    "status-left-style",
+    "status-right-style",
+    "status-style",
+    "status-bg",
+    "status-fg",
+    "status-format",
+    "status-justify",
+    "status-position",
+    "message-line",
+    "pane-status-style",
+    "pane-status-current-style",
+    "session-status-style",
+    "session-status-current-style",
+    "window-pane-status-format",
+    "window-pane-current-status-format",
+    "window-status-format",
+    "window-status-current-format",
+    "window-status-separator",
+    "window-status-style",
+    "window-status-current-style",
+    "window-status-last-style",
+    "window-status-bell-style",
+    "mouse",
+    "escape-time",
+    "set-titles",
+    "set-titles-string",
+    "command-alias",
+    "update-environment",
+    "exit-empty",
+    "exit-unattached",
+    "destroy-unattached",
+    "monitor-activity",
+    "monitor-bell",
+    "monitor-silence",
+    "activity-action",
+    "silence-action",
+    "visual-activity",
+    "visual-silence",
+    "window-status-activity-style",
+    "prefix2",
+    "display-panes-format",
+    "window-style",
+    "window-active-style",
+    "mode-style",
+    "pane-border-style",
+    "pane-active-border-style",
+    "copy-mode-match-style",
+    "copy-mode-current-match-style",
+    "copy-mode-mark-style",
+];
 
 const MAX_COPY_COMMAND_BYTES: usize = 8 * 1024;
 const MAX_COMMAND_PROMPT_LABEL_BYTES: usize = 1024;
@@ -468,9 +578,11 @@ pub struct ExecutionContext {
     client_environment: Option<Arc<BTreeMap<String, String>>>,
     client_attached: bool,
     client_attached_context: Option<(SessionId, WindowId, PaneId)>,
+    target_format_client_override: Option<FormatClient>,
     repeat_binding: bool,
     replay_client: Option<ClientId>,
     control_command_target: Option<(ClientId, u8)>,
+    refuse_new_session_attach: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
 }
@@ -494,9 +606,14 @@ impl fmt::Debug for ExecutionContext {
             )
             .field("client_attached", &self.client_attached)
             .field("client_attached_context", &self.client_attached_context)
+            .field(
+                "target_format_client_override",
+                &self.target_format_client_override,
+            )
             .field("repeat_binding", &self.repeat_binding)
             .field("replay_client", &self.replay_client)
             .field("control_command_target", &self.control_command_target)
+            .field("refuse_new_session_attach", &self.refuse_new_session_attach)
             .field("no_hooks", &self.no_hooks)
             .field("format_variables", &self.format_variables)
             .finish()
@@ -523,9 +640,11 @@ impl Default for ExecutionContext {
             client_environment: Some(Arc::new(BTreeMap::new())),
             client_attached: true,
             client_attached_context: None,
+            target_format_client_override: None,
             repeat_binding: false,
             replay_client: None,
             control_command_target: None,
+            refuse_new_session_attach: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
         }
@@ -579,11 +698,13 @@ impl ExecutionContext {
         self.client_environment = None;
         self.client_attached = false;
         self.client_attached_context = None;
+        self.target_format_client_override = None;
     }
 
     pub fn set_client_attached(&mut self, attached: bool) {
         self.client_attached = attached;
         self.client_attached_context = None;
+        self.target_format_client_override = None;
     }
 
     #[must_use]
@@ -601,11 +722,39 @@ impl ExecutionContext {
     pub fn set_attached_client_context(&mut self, context: Option<(SessionId, WindowId, PaneId)>) {
         self.client_attached = context.is_some();
         self.client_attached_context = context;
+        self.target_format_client_override = None;
     }
 
     pub fn copy_client_attachment(&mut self, source: &Self) {
         self.client_attached = source.client_attached;
         self.client_attached_context = source.client_attached_context;
+        self.target_format_client_override = source.target_format_client_override;
+    }
+
+    pub fn set_format_client_session(&mut self, session: Option<SessionId>) {
+        self.target_format_client_override =
+            Some(session.map_or(FormatClient::NoClient, FormatClient::Attached));
+    }
+
+    pub fn set_format_client(&mut self, format_client: FormatClient) {
+        self.target_format_client_override = Some(format_client);
+    }
+
+    #[must_use]
+    pub fn format_client(&self) -> FormatClient {
+        if self.has_no_client() {
+            FormatClient::NoClient
+        } else {
+            self.attached_client_context()
+                .and_then(|(session, _, _)| session)
+                .map_or(FormatClient::Unattached, FormatClient::Attached)
+        }
+    }
+
+    #[must_use]
+    pub fn target_format_client(&self) -> FormatClient {
+        self.target_format_client_override
+            .unwrap_or_else(|| self.format_client())
     }
 
     #[must_use]
@@ -662,6 +811,15 @@ impl ExecutionContext {
         self.control_command_target = target;
     }
 
+    #[must_use]
+    pub const fn refuses_new_session_attach(&self) -> bool {
+        self.refuse_new_session_attach
+    }
+
+    pub fn set_refuse_new_session_attach(&mut self, refuse: bool) {
+        self.refuse_new_session_attach = refuse;
+    }
+
     pub fn retarget_to_pane(&mut self, state: &MuxState, pane: PaneId) -> bool {
         let Some(target) = Self::for_pane(state, pane) else {
             return false;
@@ -716,6 +874,7 @@ pub enum MuxEffect {
         pane: PaneId,
         format: String,
         active_session: Option<SessionId>,
+        format_client: FormatClient,
     },
     PanesRemoved(Vec<PaneId>),
     PaneRelocated {
@@ -1246,6 +1405,74 @@ impl ArrayIndex {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FormatOptionIndex {
+    Whole,
+    Indexed(ArrayIndex),
+    Invalid,
+}
+
+fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
+    let (name, index) = if let Some(open) = input.find('[') {
+        let name = &input[..open];
+        let rest = &input[open + 1..];
+        let index = rest
+            .strip_suffix(']')
+            .filter(|value| !value.is_empty() && !value.contains('[') && !value.contains(']'))
+            .and_then(|value| {
+                if value.bytes().all(|byte| byte.is_ascii_digit()) {
+                    value.parse::<u32>().ok().map(ArrayIndex::Numeric)
+                } else {
+                    Some(ArrayIndex::Named(value.to_owned()))
+                }
+            })
+            .map_or(FormatOptionIndex::Invalid, FormatOptionIndex::Indexed);
+        (name, index)
+    } else {
+        (input, FormatOptionIndex::Whole)
+    };
+    let option = exact_tmux_option(name)?;
+    if !TMUX_OPTION_CONSUMERS.contains(&option.name) {
+        return None;
+    }
+    if matches!(
+        option.name,
+        "command-alias" | "status-format" | "update-environment"
+    ) {
+        return Some((option, index));
+    }
+    matches!(index, FormatOptionIndex::Whole).then_some((option, index))
+}
+
+fn format_option_map_value(
+    values: &BTreeMap<String, String>,
+    name: &str,
+    index: &FormatOptionIndex,
+) -> Option<String> {
+    match index {
+        FormatOptionIndex::Whole => values.get(name).cloned(),
+        FormatOptionIndex::Indexed(index) => Some(
+            values
+                .get(&format!("{name}[{}]", index.display()))
+                .cloned()
+                .unwrap_or_default(),
+        ),
+        FormatOptionIndex::Invalid => Some(String::new()),
+    }
+}
+
+fn parse_session_id(value: &str) -> Option<SessionId> {
+    value.strip_prefix('$')?.parse().ok().map(SessionId)
+}
+
+fn parse_window_id(value: &str) -> Option<WindowId> {
+    value.strip_prefix('@')?.parse().ok().map(WindowId)
+}
+
+fn parse_pane_id(value: &str) -> Option<PaneId> {
+    value.strip_prefix('%')?.parse().ok().map(PaneId)
+}
+
 type StringArray = BTreeMap<ArrayIndex, String>;
 type ArrayTable = BTreeMap<&'static str, StringArray>;
 type HookArray = BTreeMap<ArrayIndex, Vec<CommandInvocation>>;
@@ -1293,6 +1520,11 @@ struct EnvironmentEntry {
 }
 
 type Environment = BTreeMap<String, EnvironmentEntry>;
+
+#[derive(Clone, Debug, Default)]
+pub struct RetainedJobEnvironment {
+    inner: Arc<Mutex<Environment>>,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum RemainOnExit {
@@ -1433,7 +1665,7 @@ pub struct MuxEngine {
     window_hooks: BTreeMap<WindowId, HookTable>,
     pane_hooks: BTreeMap<PaneId, HookTable>,
     global_environment: Environment,
-    session_environments: BTreeMap<SessionId, Environment>,
+    session_environments: BTreeMap<SessionId, RetainedJobEnvironment>,
     status: StatusFormats,
     session_status_options: BTreeMap<SessionId, BTreeMap<StatusOption, String>>,
     explicit_status_options: BTreeSet<&'static str>,
@@ -1453,7 +1685,6 @@ pub struct MuxEngine {
     format_pid: u32,
     format_socket_path: String,
     format_start_time: u64,
-    format_now: u64,
     format_uid: String,
     format_user: String,
     pane_runtime_facts: BTreeMap<PaneId, PaneRuntimeFacts>,
@@ -1510,76 +1741,65 @@ pub struct CopyModeStyleValues {
     pub search_current_match: Option<String>,
 }
 
-/// Option values injected into status-row and command format expansion. The
-/// session map carries session/global-effective values; `windows` layers each
-/// window's explicit overrides on top, keyed by the `#{window_id}` string, so
-/// `#{T:window-status-format}`-class lookups resolve per loop item like the
-/// pin's `format_expand` option walk.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StatusRowVariables {
-    pub session: BTreeMap<String, String>,
+    pub base: BTreeMap<String, String>,
     pub sessions: BTreeMap<String, BTreeMap<String, String>>,
     pub windows: BTreeMap<String, BTreeMap<String, String>>,
+    pub panes: BTreeMap<String, BTreeMap<String, String>>,
+    session_active_windows: BTreeMap<String, String>,
+    window_active_panes: BTreeMap<String, String>,
+    pane_windows: BTreeMap<String, String>,
+    window_sessions: BTreeMap<String, String>,
 }
 
 impl StatusRowVariables {
     #[must_use]
-    pub fn lookup(&self, session_id: &str, window_id: &str, name: &str) -> Option<&String> {
-        self.windows
-            .get(window_id)
-            .and_then(|overrides| overrides.get(name))
+    pub fn lookup(
+        &self,
+        session_id: &str,
+        window_id: &str,
+        pane_id: &str,
+        name: &str,
+    ) -> Option<String> {
+        let (option, index) = parse_format_option(name)?;
+        let pane = self
+            .panes
+            .contains_key(pane_id)
+            .then_some(pane_id)
+            .or_else(|| self.window_active_panes.get(window_id).map(String::as_str))
             .or_else(|| {
-                self.sessions
+                self.session_active_windows
                     .get(session_id)
-                    .and_then(|overrides| overrides.get(name))
-            })
-            .or_else(|| self.session.get(name))
+                    .and_then(|window| self.window_active_panes.get(window))
+                    .map(String::as_str)
+            });
+        let window = pane
+            .and_then(|pane| self.pane_windows.get(pane).map(String::as_str))
+            .or_else(|| self.windows.contains_key(window_id).then_some(window_id))
+            .or_else(|| {
+                self.session_active_windows
+                    .get(session_id)
+                    .map(String::as_str)
+            });
+        let session = window
+            .and_then(|window| self.window_sessions.get(window).map(String::as_str))
+            .or_else(|| self.sessions.contains_key(session_id).then_some(session_id));
+        let values = match option.scope {
+            TmuxOptionScope::Server => &self.base,
+            TmuxOptionScope::Session => session
+                .and_then(|session| self.sessions.get(session))
+                .unwrap_or(&self.base),
+            TmuxOptionScope::Window => window
+                .and_then(|window| self.windows.get(window))
+                .unwrap_or(&self.base),
+            TmuxOptionScope::WindowPane => pane
+                .and_then(|pane| self.panes.get(pane))
+                .unwrap_or(&self.base),
+        };
+        format_option_map_value(values, option.name, &index)
     }
 }
-
-const ROW_GLOBAL_OPTION_NAMES: &[&str] = &[
-    "window-status-format",
-    "window-status-current-format",
-    "window-status-separator",
-    "window-status-style",
-    "window-status-current-style",
-    "window-status-last-style",
-    "window-status-bell-style",
-    "window-status-activity-style",
-    "pane-status-style",
-    "pane-status-current-style",
-    "session-status-style",
-    "session-status-current-style",
-    "window-pane-status-format",
-    "window-pane-current-status-format",
-    "window-style",
-    "window-active-style",
-    "mode-style",
-    "copy-mode-match-style",
-    "copy-mode-current-match-style",
-    "copy-mode-mark-style",
-    "pane-border-style",
-    "pane-active-border-style",
-];
-
-const ROW_SESSION_SCOPED_SCALARS: &[&str] = &["display-panes-format"];
-
-const ROW_WINDOW_SCOPED_SCALARS: &[&str] = &[
-    "pane-status-style",
-    "pane-status-current-style",
-    "session-status-style",
-    "session-status-current-style",
-    "window-pane-status-format",
-    "window-pane-current-status-format",
-    "window-style",
-    "window-active-style",
-    "mode-style",
-    "copy-mode-match-style",
-    "copy-mode-current-match-style",
-    "copy-mode-mark-style",
-    "pane-border-style",
-    "pane-active-border-style",
-];
 
 /// What an agent pane's daemon-owned adapter is started with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1728,7 +1948,6 @@ impl Default for MuxEngine {
             format_pid: 0,
             format_socket_path: String::new(),
             format_start_time: 0,
-            format_now: 0,
             format_uid: String::new(),
             format_user: String::new(),
             pane_runtime_facts: BTreeMap::new(),
@@ -1876,77 +2095,202 @@ impl MuxEngine {
     #[must_use]
     pub fn status_row_variables_for_session(
         &self,
-        session: Option<SessionId>,
+        _session: Option<SessionId>,
     ) -> StatusRowVariables {
-        let formats = self.status_formats_for_session(session);
-        let mut variables = BTreeMap::new();
-        for option in [
-            StatusOption::Enabled,
-            StatusOption::Background,
-            StatusOption::Foreground,
-            StatusOption::Interval,
-            StatusOption::Justify,
-            StatusOption::Left,
-            StatusOption::LeftLength,
-            StatusOption::LeftStyle,
-            StatusOption::Position,
-            StatusOption::Right,
-            StatusOption::RightLength,
-            StatusOption::RightStyle,
-            StatusOption::Style,
-        ] {
-            variables.insert(option.as_str().to_owned(), formats.value(option));
-        }
-        for name in ROW_GLOBAL_OPTION_NAMES {
-            if let Some(value) = self.global_tmux_option_value(name) {
-                variables.insert((*name).to_owned(), value);
-            }
-        }
-        variables.insert(
-            "display-panes-format".to_owned(),
-            self.display_panes_format_for_session(session),
+        self.format_option_snapshot()
+    }
+
+    #[must_use]
+    pub fn format_option_snapshot(&self) -> StatusRowVariables {
+        let mut base = BTreeMap::new();
+        self.extend_format_option_values(
+            &mut base,
+            TmuxOptionScope::Server,
+            TmuxOptionTarget::Server,
+        );
+        self.extend_format_option_values(
+            &mut base,
+            TmuxOptionScope::Session,
+            TmuxOptionTarget::GlobalSession,
+        );
+        self.extend_format_option_values(
+            &mut base,
+            TmuxOptionScope::Window,
+            TmuxOptionTarget::GlobalWindow,
+        );
+        self.extend_format_option_values(
+            &mut base,
+            TmuxOptionScope::WindowPane,
+            TmuxOptionTarget::GlobalWindow,
         );
         let mut sessions = BTreeMap::new();
-        for (id, scalars) in &self.stored_scalars.sessions {
-            if session.is_some_and(|session| session != *id) {
-                continue;
-            }
-            let mut overrides = BTreeMap::new();
-            for name in ROW_SESSION_SCOPED_SCALARS {
-                if let Some(value) = scalars.get(name) {
-                    overrides.insert((*name).to_owned(), value.clone());
-                }
-            }
-            if !overrides.is_empty() {
-                sessions.insert(id.to_string(), overrides);
-            }
+        let mut session_active_windows = BTreeMap::new();
+        for session in self.state.sessions.values() {
+            let mut values = BTreeMap::new();
+            self.extend_format_option_values(
+                &mut values,
+                TmuxOptionScope::Session,
+                TmuxOptionTarget::Session(session.id),
+            );
+            sessions.insert(session.id.to_string(), values);
+            session_active_windows
+                .insert(session.id.to_string(), session.active_window.to_string());
         }
         let mut windows = BTreeMap::new();
+        let mut window_active_panes = BTreeMap::new();
+        let mut window_sessions = BTreeMap::new();
+        let mut panes = BTreeMap::new();
+        let mut pane_windows = BTreeMap::new();
         for window in self.state.windows.values() {
-            if session.is_some_and(|session| window.session != session) {
-                continue;
-            }
-            let mut overrides = BTreeMap::new();
-            if let Some(status_overrides) = self.window_status_options.get(&window.id) {
-                for (option, value) in status_overrides {
-                    overrides.insert(option.as_str().to_owned(), value.clone());
-                }
-            }
-            if let Some(scalars) = self.stored_scalars.windows.get(&window.id) {
-                for name in ROW_WINDOW_SCOPED_SCALARS {
-                    if let Some(value) = scalars.get(name) {
-                        overrides.insert((*name).to_owned(), value.clone());
-                    }
-                }
-            }
-            if !overrides.is_empty() {
-                windows.insert(window.id.to_string(), overrides);
+            let mut values = BTreeMap::new();
+            self.extend_format_option_values(
+                &mut values,
+                TmuxOptionScope::Window,
+                TmuxOptionTarget::Window(window.id),
+            );
+            windows.insert(window.id.to_string(), values);
+            window_active_panes.insert(window.id.to_string(), window.active_pane.to_string());
+            window_sessions.insert(window.id.to_string(), window.session.to_string());
+            for pane in window.panes.keys() {
+                let mut values = BTreeMap::new();
+                self.extend_format_option_values(
+                    &mut values,
+                    TmuxOptionScope::WindowPane,
+                    TmuxOptionTarget::Pane(*pane),
+                );
+                panes.insert(pane.to_string(), values);
+                pane_windows.insert(pane.to_string(), window.id.to_string());
             }
         }
         StatusRowVariables {
-            session: variables,
+            base,
             sessions,
             windows,
+            panes,
+            session_active_windows,
+            window_active_panes,
+            pane_windows,
+            window_sessions,
+        }
+    }
+
+    fn extend_format_option_values(
+        &self,
+        values: &mut BTreeMap<String, String>,
+        scope: TmuxOptionScope,
+        target: TmuxOptionTarget,
+    ) {
+        for name in TMUX_OPTION_CONSUMERS {
+            let option = exact_tmux_option(name).expect("consumer option is catalogued");
+            if option.scope != scope {
+                continue;
+            }
+            if let Some(array) = self.format_option_array(target, option.name) {
+                values.insert(
+                    option.name.to_owned(),
+                    array.values().cloned().collect::<Vec<_>>().join(" "),
+                );
+                for (index, value) in array {
+                    values.insert(
+                        format!("{}[{}]", option.name, index.display()),
+                        value.clone(),
+                    );
+                }
+            } else if let Some(value) = self.format_scalar_option(target, option) {
+                values.insert(option.name.to_owned(), value);
+            }
+        }
+    }
+
+    fn format_option_array(&self, target: TmuxOptionTarget, name: &str) -> Option<&StringArray> {
+        matches!(
+            name,
+            "command-alias" | "status-format" | "update-environment"
+        )
+        .then(|| {
+            self.array_option_readback(target, name, true)
+                .map(|(array, _)| array)
+        })
+        .flatten()
+    }
+
+    fn format_scalar_option(&self, target: TmuxOptionTarget, option: TmuxOption) -> Option<String> {
+        let value = self
+            .tmux_option_readback(option, target, true)
+            .ok()
+            .flatten()
+            .map(|(value, _)| value)?;
+        Some(if tmux_option_format_is_flag(option.name) {
+            match value.as_str() {
+                "on" => "1".to_owned(),
+                "off" => "0".to_owned(),
+                _ => value,
+            }
+        } else {
+            value
+        })
+    }
+
+    pub fn format_option_value(&self, context: &StatusContext, name: &str) -> Option<String> {
+        let (option, index) = parse_format_option(name)?;
+        if matches!(index, FormatOptionIndex::Invalid) {
+            return Some(String::new());
+        }
+        let target = self.format_option_target(context, option.scope);
+        if let Some(array) = self.format_option_array(target, option.name) {
+            return match index {
+                FormatOptionIndex::Whole => {
+                    Some(array.values().cloned().collect::<Vec<_>>().join(" "))
+                }
+                FormatOptionIndex::Indexed(index) => {
+                    Some(array.get(&index).cloned().unwrap_or_default())
+                }
+                FormatOptionIndex::Invalid => unreachable!(),
+            };
+        }
+        self.format_scalar_option(target, option)
+    }
+
+    fn format_option_target(
+        &self,
+        context: &StatusContext,
+        scope: TmuxOptionScope,
+    ) -> TmuxOptionTarget {
+        let pane = parse_pane_id(&context.pane_id)
+            .filter(|pane| self.state.window_for_pane(*pane).is_some());
+        let window = pane
+            .and_then(|pane| self.state.window_for_pane(pane))
+            .or_else(|| {
+                parse_window_id(&context.window_id)
+                    .filter(|window| self.state.windows.contains_key(window))
+            });
+        let session = window
+            .and_then(|window| self.state.windows.get(&window).map(|window| window.session))
+            .or_else(|| {
+                parse_session_id(&context.session_id)
+                    .filter(|session| self.state.sessions.contains_key(session))
+            });
+        let window = window.or_else(|| {
+            session
+                .and_then(|session| self.state.sessions.get(&session))
+                .map(|session| session.active_window)
+        });
+        let pane = pane.or_else(|| {
+            window
+                .and_then(|window| self.state.windows.get(&window))
+                .map(|window| window.active_pane)
+        });
+        match scope {
+            TmuxOptionScope::Server => TmuxOptionTarget::Server,
+            TmuxOptionScope::Session => {
+                session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session)
+            }
+            TmuxOptionScope::Window => {
+                window.map_or(TmuxOptionTarget::GlobalWindow, TmuxOptionTarget::Window)
+            }
+            TmuxOptionScope::WindowPane => {
+                pane.map_or(TmuxOptionTarget::GlobalWindow, TmuxOptionTarget::Pane)
+            }
         }
     }
 
@@ -2412,11 +2756,11 @@ impl MuxEngine {
         self.format_host_short = host_short.into();
         self.format_socket_path = socket_path.into();
         self.format_start_time = start_time;
-        self.format_now = start_time;
+        self.state.set_format_now(start_time);
     }
 
     pub const fn set_format_now(&mut self, now: u64) {
-        self.format_now = now;
+        self.state.set_format_now(now);
     }
 
     #[must_use]
@@ -2437,6 +2781,19 @@ impl MuxEngine {
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_with(source, input, &mut context)
+    }
+
+    #[must_use]
+    pub fn parse_config_parse_only(
+        &self,
+        source: impl Into<String>,
+        input: &str,
+    ) -> crate::ParsedConfig {
+        let mut context = (
+            |name: &str| self.global_environment_variable(name),
+            |condition: &str| self.evaluate_config_condition(condition),
+        );
+        crate::parser::parse_config_without_assignment_overlay(source, input, &mut context)
     }
 
     pub fn prepare_callback_commands(
@@ -2507,6 +2864,7 @@ impl MuxEngine {
         format: &str,
         target: &ExecutionContext,
         active_session: Option<SessionId>,
+        format_client: FormatClient,
         hooks: &mut impl StatusHooks,
     ) -> String {
         expand_format_time_with_hooks(
@@ -2517,6 +2875,7 @@ impl MuxEngine {
                 window: target.window,
                 pane: target.pane,
                 active_session,
+                format_client,
                 format_type: FormatType::Pane,
             },
             hooks,
@@ -2528,6 +2887,7 @@ impl MuxEngine {
         format: &str,
         target: &ExecutionContext,
         active_session: Option<SessionId>,
+        format_client: FormatClient,
         hooks: &mut impl StatusHooks,
     ) -> String {
         expand_format_with_hooks(
@@ -2538,6 +2898,7 @@ impl MuxEngine {
                 window: target.window,
                 pane: target.pane,
                 active_session,
+                format_client,
                 format_type: FormatType::Pane,
             },
             hooks,
@@ -2726,7 +3087,7 @@ impl MuxEngine {
     }
 
     pub fn set_pane_runtime_facts(&mut self, pane: PaneId, facts: PaneRuntimeFacts) -> bool {
-        let mut hooks = CommandHooks::new(self.format_now);
+        let mut hooks = CommandHooks::new(self.format_now());
         self.set_pane_runtime_facts_with_hooks(pane, facts, &mut hooks)
     }
 
@@ -2763,7 +3124,7 @@ impl MuxEngine {
         status: Option<u32>,
         signal: Option<&str>,
     ) -> Result<bool, ServerError> {
-        let mut hooks = CommandHooks::new(self.format_now);
+        let mut hooks = CommandHooks::new(self.format_now());
         self.mark_pane_dead_with_hooks(pane, status, signal, &mut hooks)
     }
 
@@ -2783,10 +3144,11 @@ impl MuxEngine {
         facts.dead_signal = dead_signal;
         let state_changed = self.state.mark_pane_dead(pane, status)?;
         if state_changed {
+            let format_now = self.format_now();
             self.state
                 .pane_mut(pane)
                 .expect("dead pane exists")
-                .dead_time = (self.format_now != 0).then_some(self.format_now);
+                .dead_time = (format_now != 0).then_some(format_now);
         }
         if facts_changed && !state_changed {
             self.state.bump_generation();
@@ -2821,7 +3183,7 @@ impl MuxEngine {
     }
 
     pub(crate) const fn format_now(&self) -> u64 {
-        self.format_now
+        self.state.format_now()
     }
 
     pub(crate) fn format_uid(&self) -> &str {
@@ -3120,6 +3482,7 @@ impl MuxEngine {
                 window: Some(window),
                 pane: None,
                 active_session: Some(session),
+                format_client: FormatClient::NoClient,
                 format_type: FormatType::Window,
             },
             &mut hooks,
@@ -3171,35 +3534,41 @@ impl MuxEngine {
             return Err(ServerError::MissingTarget(session.to_string()));
         }
         let patterns = self.update_environment_names_for_session(Some(session));
-        let environment = self.session_environments.entry(session).or_default();
-        apply_client_environment_update(environment, &patterns, client_environment);
+        let retained = self.session_environments.entry(session).or_default();
+        apply_client_environment_update(&mut retained.inner.lock(), &patterns, client_environment);
         Ok(())
+    }
+
+    pub fn retain_session_job_environment(
+        &mut self,
+        session: SessionId,
+    ) -> Option<RetainedJobEnvironment> {
+        self.state.sessions.contains_key(&session).then(|| {
+            self.session_environments
+                .entry(session)
+                .or_default()
+                .clone()
+        })
+    }
+
+    pub fn job_environment_with_retained_session(
+        &self,
+        retained: Option<&RetainedJobEnvironment>,
+    ) -> Vec<(String, Option<String>)> {
+        let mut environment = BTreeMap::new();
+        extend_job_environment(&mut environment, &self.global_environment);
+        if let Some(retained) = retained {
+            extend_job_environment(&mut environment, &retained.inner.lock());
+        }
+        environment.into_iter().collect()
     }
 
     /// The environment a shell job inherits: the global overlay, then the
     /// session overlay when the job has one. Hidden entries and child-unset
     /// markers come through as `None` so the spawner removes them.
     pub fn job_environment(&self, session: Option<SessionId>) -> Vec<(String, Option<String>)> {
-        let mut environment = BTreeMap::new();
-        for (name, entry) in &self.global_environment {
-            let value = if entry.hidden {
-                None
-            } else {
-                entry.value.clone()
-            };
-            environment.insert(name.clone(), value);
-        }
-        if let Some(overlay) = session.and_then(|session| self.session_environments.get(&session)) {
-            for (name, entry) in overlay {
-                let value = if entry.hidden {
-                    None
-                } else {
-                    entry.value.clone()
-                };
-                environment.insert(name.clone(), value);
-            }
-        }
-        environment.into_iter().collect()
+        let retained = session.and_then(|session| self.session_environments.get(&session));
+        self.job_environment_with_retained_session(retained)
     }
 
     /// The effective native copy-mode key table for a pane's window.
@@ -3291,7 +3660,7 @@ impl MuxEngine {
         {
             tmux_clean_name(target, "session group")?;
         }
-        spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
+        self.prepare_new_session_cwd(&options, context, context.format_client(), hooks);
         Ok(true)
     }
 
@@ -3301,7 +3670,7 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
     ) -> Result<Execution, ServerError> {
-        let mut hooks = CommandHooks::new(self.format_now);
+        let mut hooks = CommandHooks::new(self.format_now());
         self.execute_with_format_hooks(context, command, &mut hooks)
     }
 
@@ -3310,7 +3679,7 @@ impl MuxEngine {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
     ) -> Result<Execution, ServerError> {
-        let mut hooks = CommandHooks::new(self.format_now);
+        let mut hooks = CommandHooks::new(self.format_now());
         self.execute_without_alias_expansion(context, command, &mut hooks, &mut |_| true)
     }
 
@@ -3623,6 +3992,8 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("new-session", args)?;
+        let format_client = context.format_client();
+        let active_session = context.session;
         let command = shell_command_positional(&positional);
         let detached = options.has("-d") || context.client_terminal == ClientTerminal::NoClient;
         let requested_window_name = options
@@ -3642,13 +4013,23 @@ impl MuxEngine {
                 if context.has_no_client() {
                     return Ok(Execution::default());
                 }
+                if context.refuses_new_session_attach() {
+                    return Err(ServerError::InvalidCommand(
+                        "sessions should be nested with care, unset $TMUX to force".to_owned(),
+                    ));
+                }
                 let window = session_active_window(&self.state, session)?;
                 let pane = window_active_pane(&self.state, window)?;
-                context.retarget(&ExecutionContext::new(
-                    Some(session),
-                    Some(window),
-                    Some(pane),
-                ));
+                let active_session = context.session;
+                self.retarget_session_attach(
+                    context,
+                    session,
+                    window,
+                    pane,
+                    options.value("-c"),
+                    active_session,
+                    hooks,
+                )?;
                 return Ok(Execution::effect(MuxEffect::Attach {
                     session,
                     detach_others: options.has("-D"),
@@ -3669,20 +4050,15 @@ impl MuxEngine {
         }
         let extent =
             initial_window_extent(&options, self.global_default_size(), context.client_size())?;
-        let (inherit_cwd_from, cwd) =
-            spawn_cwd_source(self, &options, context.pane, &PaneKind::Terminal, hooks);
-        let session_working_directory = cwd
-            .as_deref()
-            .map(PathBuf::from)
-            .or_else(|| {
-                context
-                    .attached_client_context()
-                    .and_then(|(session, _, _)| session)
-                    .and_then(|session| {
-                        self.state
-                            .session_working_directory(session)
-                            .map(Path::to_owned)
-                    })
+        let session_cwd = self.prepare_new_session_cwd(&options, context, format_client, hooks);
+        let inherit_cwd_from = context.pane.and_then(|pane| self.state.cwd_donor(pane));
+        let inherited_session_working_directory = context
+            .attached_client_context()
+            .and_then(|(session, _, _)| session)
+            .and_then(|session| {
+                self.state
+                    .session_working_directory(session)
+                    .map(Path::to_owned)
             })
             .or_else(|| context.client_working_directory().map(Path::to_owned));
         let environment = session_creation_environment(&options);
@@ -3690,6 +4066,16 @@ impl MuxEngine {
         let (session, window, pane) = self
             .state
             .create_session_with_extent_at(name, extent, base_index)?;
+        let cwd = options.value("-c").and_then(|cwd| {
+            let target = ExecutionContext::new(Some(session), Some(window), Some(pane));
+            let expanded =
+                self.expand_pane_format(cwd, &target, active_session, format_client, hooks);
+            (!expanded.is_empty()).then_some(expanded)
+        });
+        let session_working_directory = options
+            .value("-c")
+            .map(|_| PathBuf::from(session_cwd.as_deref().unwrap_or_default()))
+            .or(inherited_session_working_directory);
         if let Some(session_working_directory) = session_working_directory {
             self.state
                 .set_session_working_directory(session, session_working_directory)?;
@@ -3700,7 +4086,7 @@ impl MuxEngine {
             context.client_environment(),
             environment,
         );
-        let created = i64::try_from(self.format_now)
+        let created = i64::try_from(self.format_now())
             .ok()
             .filter(|created| *created != 0);
         let session_state = self
@@ -3727,6 +4113,11 @@ impl MuxEngine {
             Some(window),
             Some(pane),
         ));
+        let output_format_client = if detached {
+            format_client
+        } else {
+            FormatClient::Attached(session)
+        };
         let output = if options.has("-P") {
             expand_format_with_hooks(
                 options.value("-F").unwrap_or(DEFAULT_NEW_SESSION_FORMAT),
@@ -3736,6 +4127,7 @@ impl MuxEngine {
                     window: Some(window),
                     pane: None,
                     active_session: Some(session),
+                    format_client: output_format_client,
                     format_type: FormatType::None,
                 },
                 hooks,
@@ -3764,6 +4156,27 @@ impl MuxEngine {
         Ok(Execution { output, effects })
     }
 
+    fn prepare_new_session_cwd(
+        &self,
+        options: &Options,
+        context: &ExecutionContext,
+        format_client: FormatClient,
+        hooks: &mut impl StatusHooks,
+    ) -> Option<String> {
+        let value = options.value("-c")?;
+        let target = match format_client {
+            FormatClient::Attached(session) => self
+                .state
+                .sessions
+                .get(&session)
+                .and_then(|session| self.state.windows.get(&session.active_window))
+                .and_then(|window| ExecutionContext::for_pane(&self.state, window.active_pane))
+                .unwrap_or_default(),
+            FormatClient::NoClient | FormatClient::Unattached => ExecutionContext::default(),
+        };
+        Some(self.expand_pane_format(value, &target, context.session, format_client, hooks))
+    }
+
     fn expand_new_session_item_name(
         &self,
         context: &ExecutionContext,
@@ -3782,6 +4195,7 @@ impl MuxEngine {
                 window,
                 pane,
                 active_session: session,
+                format_client: context.format_client(),
                 format_type: FormatType::None,
             },
             hooks,
@@ -3824,6 +4238,7 @@ impl MuxEngine {
                 window: None,
                 pane: None,
                 active_session: context.session,
+                format_client: FormatClient::NoClient,
                 format_type: FormatType::Session,
             };
             if let Some(filter) = options.value("-f") {
@@ -3864,6 +4279,7 @@ impl MuxEngine {
                 window: None,
                 pane: None,
                 active_session: context.session,
+                format_client: context.target_format_client(),
                 format_type: FormatType::Pane,
             },
             hooks,
@@ -3925,6 +4341,7 @@ impl MuxEngine {
                         window: None,
                         pane: None,
                         active_session: context.session,
+                        format_client: FormatClient::NoClient,
                         format_type: FormatType::Session,
                     },
                     hooks,
@@ -3974,14 +4391,15 @@ impl MuxEngine {
         if self.state.sessions[&session].active_window != window {
             self.state.select_window(session, window)?;
         }
-        let target = ExecutionContext::new(Some(session), Some(window), Some(pane));
-        context.retarget(&target);
-        if let Some(working_directory) = options.value("-c") {
-            let working_directory =
-                self.expand_pane_format(working_directory, &target, active_session, hooks);
-            self.state
-                .set_session_working_directory(session, PathBuf::from(working_directory))?;
-        }
+        self.retarget_session_attach(
+            context,
+            session,
+            window,
+            pane,
+            options.value("-c"),
+            active_session,
+            hooks,
+        )?;
         Ok(Execution::effect(MuxEffect::Attach {
             session,
             detach_others,
@@ -3989,6 +4407,33 @@ impl MuxEngine {
             flags: options.value("-f").map(str::to_owned),
             update_environment: !options.has("-E"),
         }))
+    }
+
+    fn retarget_session_attach(
+        &mut self,
+        context: &mut ExecutionContext,
+        session: SessionId,
+        window: WindowId,
+        pane: PaneId,
+        working_directory: Option<&str>,
+        active_session: Option<SessionId>,
+        hooks: &mut impl StatusHooks,
+    ) -> Result<(), ServerError> {
+        let format_client = context.format_client();
+        let target = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        context.retarget(&target);
+        if let Some(working_directory) = working_directory {
+            let working_directory = self.expand_pane_format(
+                working_directory,
+                &target,
+                active_session,
+                format_client,
+                hooks,
+            );
+            self.state
+                .set_session_working_directory(session, PathBuf::from(working_directory))?;
+        }
+        Ok(())
     }
 
     fn detach_client(
@@ -4042,6 +4487,8 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let active_session = context.session;
+        let format_client = context.format_client();
+        let target_format_client = context.target_format_client();
         let destination = window_destination(&self.state, options.value("-t"), context)?;
         let session = destination.session;
         let empty = pane_spawn_empty(options, command.as_deref())?;
@@ -4052,6 +4499,7 @@ impl MuxEngine {
             window: None,
             pane: None,
             active_session,
+            format_client: context.format_client(),
             format_type: FormatType::Session,
         };
         let name = options
@@ -4102,7 +4550,8 @@ impl MuxEngine {
                 session_active_window(&self.state, session)?,
             )?),
         };
-        let (inherit_cwd_from, cwd) = spawn_cwd_source(self, options, origin, &kind, hooks);
+        let (inherit_cwd_from, cwd) =
+            spawn_cwd_source(self, options, origin, &kind, format_client, hooks);
         let before = options.has("-b");
         let index = if options.has("-a") || before {
             let target = match destination.index {
@@ -4186,10 +4635,18 @@ impl MuxEngine {
                     .unwrap_or(DEFAULT_PANE_CREATION_FORMAT)
                     .to_owned(),
                 active_session,
+                format_client: target_format_client,
             });
         }
-        let output =
-            self.pane_creation_output(options, session, window, pane, active_session, hooks);
+        let output = self.pane_creation_output(
+            options,
+            session,
+            window,
+            pane,
+            active_session,
+            target_format_client,
+            hooks,
+        );
         Ok(Execution { output, effects })
     }
 
@@ -4259,6 +4716,7 @@ impl MuxEngine {
                 window: Some(window),
                 pane: None,
                 active_session: context.session,
+                format_client: FormatClient::NoClient,
                 format_type: FormatType::Window,
             };
             if let Some(filter) = options.value("-f") {
@@ -4298,6 +4756,7 @@ impl MuxEngine {
                 window: Some(window),
                 pane: None,
                 active_session: context.session,
+                format_client: context.target_format_client(),
                 format_type: FormatType::Pane,
             },
             hooks,
@@ -4519,6 +4978,7 @@ impl MuxEngine {
                         window: Some(*target),
                         pane: None,
                         active_session: context.session,
+                        format_client: FormatClient::NoClient,
                         format_type: FormatType::Window,
                     },
                     hooks,
@@ -4764,8 +5224,14 @@ impl MuxEngine {
             ));
         }
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        let (inherit_cwd_from, _) =
-            spawn_cwd_source(self, &options, Some(target), &PaneKind::Terminal, hooks);
+        let (inherit_cwd_from, _) = spawn_cwd_source(
+            self,
+            &options,
+            Some(target),
+            &PaneKind::Terminal,
+            context.format_client(),
+            hooks,
+        );
         self.split_window_with_options(
             context,
             &options,
@@ -4975,6 +5441,7 @@ impl MuxEngine {
             window,
             source,
             original_context.session,
+            original_context.target_format_client(),
             hooks,
         );
         Ok(execution)
@@ -5115,6 +5582,7 @@ impl MuxEngine {
             window: target_context.window,
             pane: target_context.pane,
             active_session: context.session,
+            format_client: context.target_format_client(),
             format_type: FormatType::Pane,
         };
         let target_window = self
@@ -5301,6 +5769,8 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let active_session = context.session;
+        let format_client = context.format_client();
+        let target_format_client = context.target_format_client();
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let empty = pane_spawn_empty(options, command.as_deref())?;
         let environment = spawn_environment(options);
@@ -5311,7 +5781,8 @@ impl MuxEngine {
         };
         let placement = self.split_placement(options, size)?;
         let snapshot_kind = pane_kind_snapshot(&kind);
-        let (inherit_cwd_from, cwd) = spawn_cwd_source(self, options, Some(target), &kind, hooks);
+        let (inherit_cwd_from, cwd) =
+            spawn_cwd_source(self, options, Some(target), &kind, format_client, hooks);
         let pane = self.state.split_pane_with(target, axis, kind, placement)?;
         if empty {
             self.state.mark_pane_empty(pane)?;
@@ -5348,6 +5819,7 @@ impl MuxEngine {
                     .unwrap_or(DEFAULT_PANE_CREATION_FORMAT)
                     .to_owned(),
                 active_session,
+                format_client: target_format_client,
             });
         }
         Ok(Execution {
@@ -5357,6 +5829,7 @@ impl MuxEngine {
                 window,
                 pane,
                 active_session,
+                target_format_client,
                 hooks,
             ),
             effects,
@@ -5370,6 +5843,7 @@ impl MuxEngine {
         window: WindowId,
         pane: PaneId,
         active_session: Option<SessionId>,
+        format_client: FormatClient,
         hooks: &mut impl StatusHooks,
     ) -> String {
         if !options.has("-P") {
@@ -5383,6 +5857,7 @@ impl MuxEngine {
                 window: Some(window),
                 pane: Some(pane),
                 active_session,
+                format_client,
                 format_type: FormatType::Pane,
             },
             hooks,
@@ -5471,7 +5946,13 @@ impl MuxEngine {
         if let Some(title) = options.value("-T") {
             let target =
                 ExecutionContext::for_pane(&self.state, start).expect("resolved pane exists");
-            let title = self.expand_pane_format(title, &target, context.session, hooks);
+            let title = self.expand_pane_format(
+                title,
+                &target,
+                context.session,
+                context.target_format_client(),
+                hooks,
+            );
             self.state.update_pane_title(pane, title)?;
             return Ok(Execution::default());
         }
@@ -5671,6 +6152,7 @@ impl MuxEngine {
                     window: Some(window_id),
                     pane: Some(pane.id),
                     active_session: context.session,
+                    format_client: FormatClient::NoClient,
                     format_type: FormatType::Pane,
                 };
                 if let Some(filter) = options.value("-f") {
@@ -6110,6 +6592,7 @@ impl MuxEngine {
                         window: Some(window),
                         pane: Some(*target),
                         active_session: context.session,
+                        format_client: FormatClient::NoClient,
                         format_type: FormatType::Pane,
                     },
                     hooks,
@@ -6161,7 +6644,14 @@ impl MuxEngine {
                 self.pane_target_description(pane)?
             )));
         }
-        let (_, cwd) = spawn_cwd_source(self, &options, Some(pane), &PaneKind::Terminal, hooks);
+        let (_, cwd) = spawn_cwd_source(
+            self,
+            &options,
+            Some(pane),
+            &PaneKind::Terminal,
+            context.format_client(),
+            hooks,
+        );
         let environment = spawn_environment(&options);
         let command = shell_command_positional(&positional);
         let empty = options.has("-E");
@@ -6218,7 +6708,14 @@ impl MuxEngine {
             .copied()
             .filter(|candidate| *candidate != pane)
             .collect::<Vec<_>>();
-        let (_, cwd) = spawn_cwd_source(self, &options, Some(pane), &PaneKind::Terminal, hooks);
+        let (_, cwd) = spawn_cwd_source(
+            self,
+            &options,
+            Some(pane),
+            &PaneKind::Terminal,
+            context.format_client(),
+            hooks,
+        );
         let environment = spawn_environment(&options);
         let command = shell_command_positional(&positional);
         let empty = options.has("-E");
@@ -6285,7 +6782,13 @@ impl MuxEngine {
         let repeat = if let Some(value) = options.value("-N") {
             let target = ExecutionContext::for_pane(&self.state, pane)
                 .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-            let expanded = self.expand_pane_format(value, &target, context.session, hooks);
+            let expanded = self.expand_pane_format(
+                value,
+                &target,
+                context.session,
+                context.target_format_client(),
+                hooks,
+            );
             parse_repeat_count(&expanded)?
         } else {
             1
@@ -6641,6 +7144,7 @@ impl MuxEngine {
             window: target.window,
             pane: target.pane,
             active_session: context.session,
+            format_client: context.target_format_client(),
             format_type: FormatType::Pane,
         });
         let format = if positional.is_empty() {
@@ -6965,6 +7469,7 @@ impl MuxEngine {
                     window: context.window,
                     pane: context.pane,
                     active_session: context.session,
+                    format_client: context.target_format_client(),
                     format_type: FormatType::None,
                 },
                 &mut item_hooks,
@@ -7044,6 +7549,7 @@ impl MuxEngine {
                     window: context.window,
                     pane: context.pane,
                     active_session: context.session,
+                    format_client: FormatClient::NoClient,
                     format_type: FormatType::None,
                 },
                 &mut item_hooks,
@@ -7890,6 +8396,7 @@ impl MuxEngine {
                 window: target.window,
                 pane: target.pane,
                 active_session: context.session,
+                format_client: context.target_format_client(),
                 format_type: FormatType::Pane,
             },
             hooks,
@@ -7968,6 +8475,7 @@ impl MuxEngine {
             window: format_target.window,
             pane: format_target.pane,
             active_session: context.session,
+            format_client: context.target_format_client(),
             format_type: FormatType::Pane,
         };
         let option = expand_format_with_hooks(option, self, format_context, hooks);
@@ -8348,15 +8856,21 @@ impl MuxEngine {
                             let pane = self.state.windows.get(&window)?.active_pane;
                             ExecutionContext::for_pane(&self.state, pane)
                         })
-                        .unwrap_or_default(),
+                        .map_or_else(
+                            || (ExecutionContext::default(), FormatClient::NoClient),
+                            |target| (target, context.target_format_client()),
+                        ),
                     Some(target) => self
                         .resolve_pane(Some(target), context.window, context.pane)
                         .ok()
                         .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
-                        .unwrap_or_default(),
-                    None => context.clone(),
+                        .map_or_else(
+                            || (ExecutionContext::default(), FormatClient::NoClient),
+                            |target| (target, context.target_format_client()),
+                        ),
+                    None => (context.clone(), context.target_format_client()),
                 };
-                self.expand_pane_format(argument, &target, context.session, hooks)
+                self.expand_pane_format(argument, &target.0, context.session, target.1, hooks)
             }
             ShowOptionArgument::AlreadyExpanded => argument.clone(),
         };
@@ -8515,7 +9029,11 @@ impl MuxEngine {
             value = Some(expand_format_with_hooks(
                 raw,
                 self,
-                self.environment_format_context(target_session, context.session),
+                self.environment_format_context(
+                    target_session,
+                    context.session,
+                    context.target_format_client(),
+                ),
                 hooks,
             ));
         }
@@ -8525,33 +9043,35 @@ impl MuxEngine {
                 "can't specify a value with {flag}"
             )));
         }
-        let environment = if options.has("-g") {
-            &mut self.global_environment
+        let value = if options.has("-u") || options.has("-r") {
+            None
         } else {
-            self.session_environments
-                .entry(target_session.expect("local environment has a session"))
-                .or_default()
+            Some(
+                value
+                    .ok_or_else(|| ServerError::InvalidCommand("no value specified".to_owned()))?,
+            )
         };
-        if options.has("-u") {
-            environment.remove(name);
-        } else if options.has("-r") {
-            environment.insert(
-                name.clone(),
-                EnvironmentEntry {
-                    value: None,
-                    hidden: false,
-                },
-            );
+        let apply = |environment: &mut Environment| {
+            if options.has("-u") {
+                environment.remove(name);
+            } else {
+                environment.insert(
+                    name.clone(),
+                    EnvironmentEntry {
+                        value: value.clone(),
+                        hidden: options.has("-h") && !options.has("-r"),
+                    },
+                );
+            }
+        };
+        if options.has("-g") {
+            apply(&mut self.global_environment);
         } else {
-            let value = value
-                .ok_or_else(|| ServerError::InvalidCommand("no value specified".to_owned()))?;
-            environment.insert(
-                name.clone(),
-                EnvironmentEntry {
-                    value: Some(value),
-                    hidden: options.has("-h"),
-                },
-            );
+            let retained = self
+                .session_environments
+                .entry(target_session.expect("local environment has a session"))
+                .or_default();
+            apply(&mut retained.inner.lock());
         }
         Ok(Execution::default())
     }
@@ -8567,33 +9087,19 @@ impl MuxEngine {
                 "show-environment accepts at most one variable".to_owned(),
             ));
         }
-        let environment = if options.has("-g") {
+        if options.has("-g") {
             if let Some(target) = options.value("-t") {
                 self.state.resolve_session(Some(target), context.session)?;
             }
-            &self.global_environment
-        } else {
-            let session = self
-                .state
-                .resolve_session(options.value("-t"), context.session)?;
-            self.session_environments
-                .get(&session)
-                .unwrap_or(&EMPTY_ENVIRONMENT)
-        };
-        if let Some(name) = positional.first() {
-            let entry = environment
-                .get(name)
-                .ok_or_else(|| ServerError::InvalidCommand(format!("unknown variable: {name}")))?;
-            return Ok(Execution::output(
-                environment_line(name, entry, &options).unwrap_or_default(),
-            ));
+            return show_environment_entries(&self.global_environment, &positional, &options);
         }
-        let output = environment
-            .iter()
-            .filter_map(|(name, entry)| environment_line(name, entry, &options))
-            .collect::<Vec<_>>()
-            .join("\n");
-        Ok(Execution::output(output))
+        let session = self
+            .state
+            .resolve_session(options.value("-t"), context.session)?;
+        let Some(retained) = self.session_environments.get(&session) else {
+            return show_environment_entries(&EMPTY_ENVIRONMENT, &positional, &options);
+        };
+        show_environment_entries(&retained.inner.lock(), &positional, &options)
     }
 
     fn resolve_user_option_target(
@@ -9331,7 +9837,12 @@ impl MuxEngine {
                 },
             );
         }
-        self.session_environments.insert(session, environment);
+        *self
+            .session_environments
+            .entry(session)
+            .or_default()
+            .inner
+            .lock() = environment;
     }
 
     fn native_option_readback(&self, name: &str) -> (String, bool) {
@@ -9354,6 +9865,7 @@ impl MuxEngine {
         &self,
         session: Option<SessionId>,
         active_session: Option<SessionId>,
+        format_client: FormatClient,
     ) -> FormatContext {
         let window = session.and_then(|session| {
             self.state
@@ -9372,6 +9884,7 @@ impl MuxEngine {
             window,
             pane,
             active_session,
+            format_client,
             format_type: FormatType::Pane,
         }
     }
@@ -11130,7 +11643,13 @@ impl MuxEngine {
                 .into_iter()
                 .map(|path| MuxEffect::SourceFile {
                     path: if expand_paths {
-                        self.expand_pane_format(&path, &source_context, context.session, hooks)
+                        self.expand_pane_format(
+                            &path,
+                            &source_context,
+                            context.session,
+                            context.target_format_client(),
+                            hooks,
+                        )
                     } else {
                         path
                     },
@@ -11506,6 +12025,17 @@ fn validate_environment_name(name: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
+fn extend_job_environment(target: &mut BTreeMap<String, Option<String>>, source: &Environment) {
+    for (name, entry) in source {
+        let value = if entry.hidden {
+            None
+        } else {
+            entry.value.clone()
+        };
+        target.insert(name.clone(), value);
+    }
+}
+
 fn environment_line(name: &str, entry: &EnvironmentEntry, options: &Options) -> Option<String> {
     if options.has("-h") != entry.hidden {
         return None;
@@ -11523,6 +12053,27 @@ fn environment_line(name: &str, entry: &EnvironmentEntry, options: &Options) -> 
         ),
         None => format!("unset {name};"),
     })
+}
+
+fn show_environment_entries(
+    environment: &Environment,
+    positional: &[String],
+    options: &Options,
+) -> Result<Execution, ServerError> {
+    if let Some(name) = positional.first() {
+        let entry = environment
+            .get(name)
+            .ok_or_else(|| ServerError::InvalidCommand(format!("unknown variable: {name}")))?;
+        return Ok(Execution::output(
+            environment_line(name, entry, options).unwrap_or_default(),
+        ));
+    }
+    let output = environment
+        .iter()
+        .filter_map(|(name, entry)| environment_line(name, entry, options))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(Execution::output(output))
 }
 
 fn shell_environment_escape(value: &str) -> String {
@@ -13069,6 +13620,7 @@ fn spawn_cwd_source(
     options: &Options,
     origin: Option<PaneId>,
     kind: &PaneKind,
+    format_client: FormatClient,
     hooks: &mut impl StatusHooks,
 ) -> (Option<PaneId>, Option<String>) {
     if !matches!(kind, PaneKind::Terminal) {
@@ -13083,6 +13635,7 @@ fn spawn_cwd_source(
                 window: origin.window,
                 pane: origin.pane,
                 active_session: origin.session,
+                format_client,
                 format_type: FormatType::Pane,
             });
         let expanded = expand_format_with_hooks(value, engine, format_context, hooks);
@@ -14358,6 +14911,15 @@ mod tests {
         CommandInvocation::new(name, args.iter().copied())
     }
 
+    fn expand_option(
+        engine: &MuxEngine,
+        context: FormatContext,
+        name: &str,
+        hooks: &mut impl StatusHooks,
+    ) -> String {
+        expand_format_with_hooks(&format!("#{{{name}}}"), engine, context, hooks)
+    }
+
     #[test]
     fn static_command_chain_accepts_canonical_alias_and_unique_prefix_names() {
         let commands = [
@@ -14801,6 +15363,279 @@ mod tests {
         assert_eq!(
             engine.state.session_working_directory(overridden),
             Some(Path::new("/override"))
+        );
+    }
+
+    #[test]
+    fn new_session_cwd_expands_storage_and_spawn_against_distinct_targets() {
+        let mut engine = MuxEngine::default();
+        let (first, first_window, first_pane) = engine.state.create_session("first").unwrap();
+        let mut context = ExecutionContext::new(None, None, None);
+        context.set_attached_client_context(Some((first, first_window, first_pane)));
+        context.set_format_client(FormatClient::NoClient);
+
+        let attached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "attached", "-c", "#{session_active}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .state
+                .session_working_directory(context.session.unwrap()),
+            Some(Path::new("1"))
+        );
+        assert!(attached.effects.iter().any(|effect| {
+            matches!(effect, MuxEffect::PaneCreated { cwd: Some(cwd), .. } if cwd == "0")
+        }));
+
+        context.set_client_attached(false);
+        context.set_format_client(FormatClient::Attached(first));
+        let unattached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "unattached", "-c", "#{session_active}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .state
+                .session_working_directory(context.session.unwrap()),
+            Some(Path::new(""))
+        );
+        assert!(unattached.effects.iter().any(|effect| {
+            matches!(effect, MuxEffect::PaneCreated { cwd: Some(cwd), .. } if cwd == "0")
+        }));
+
+        context.set_no_client();
+        context.set_format_client(FormatClient::Attached(first));
+        let clientless = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "clientless", "-c", "#{session_active}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .state
+                .session_working_directory(context.session.unwrap()),
+            Some(Path::new(""))
+        );
+        assert!(
+            clientless
+                .effects
+                .iter()
+                .any(|effect| { matches!(effect, MuxEffect::PaneCreated { cwd: None, .. }) })
+        );
+    }
+
+    #[test]
+    fn new_session_attach_or_create_cwd_uses_the_target_once_and_honors_inert_guards() {
+        struct TrackingHooks {
+            calls: usize,
+        }
+
+        impl StatusHooks for TrackingHooks {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                (name == "cwd_probe").then(|| {
+                    self.calls += 1;
+                    self.calls.to_string()
+                })
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "source", "-c", "/source"]),
+            )
+            .unwrap();
+        let source = context.session.unwrap();
+        let source_pane = context.pane.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "target", "-c", "/target"]),
+            )
+            .unwrap();
+        let target = context.session.unwrap();
+        let target_pane = context.pane.unwrap();
+        assert!(engine.set_pane_runtime_facts(
+            target_pane,
+            PaneRuntimeFacts {
+                current_path: "/target-pane".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        ));
+
+        context.retarget(&ExecutionContext::for_pane(&engine.state, source_pane).unwrap());
+        let mut hooks = TrackingHooks { calls: 0 };
+        let execution = engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-session",
+                    &[
+                        "-A",
+                        "-s",
+                        "target",
+                        "-c",
+                        "/#{session_name}/#{pane_id}/#{pane_current_path}/#{cwd_probe}",
+                    ],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert_eq!(hooks.calls, 1);
+        let expected_target_cwd = format!("/target/{target_pane}//target-pane/1");
+        assert_eq!(
+            engine.state.session_working_directory(target),
+            Some(Path::new(&expected_target_cwd))
+        );
+        assert_eq!(
+            engine.state.session_working_directory(source),
+            Some(Path::new("/source"))
+        );
+        assert!(matches!(
+            execution.effects.as_slice(),
+            [MuxEffect::Attach { session, .. }, MuxEffect::SnapshotChanged]
+                if *session == target
+        ));
+
+        context.retarget(&ExecutionContext::for_pane(&engine.state, source_pane).unwrap());
+        context.set_refuse_new_session_attach(true);
+        assert_eq!(
+            engine
+                .execute_with_format_hooks(
+                    &mut context,
+                    &command(
+                        "new-session",
+                        &["-A", "-s", "target", "-c", "/blocked/#{cwd_probe}"],
+                    ),
+                    &mut hooks,
+                )
+                .unwrap_err(),
+            ServerError::InvalidCommand(
+                "sessions should be nested with care, unset $TMUX to force".to_owned()
+            )
+        );
+        assert_eq!(hooks.calls, 1);
+        assert_eq!(context.session, Some(source));
+        assert_eq!(
+            engine.state.session_working_directory(target),
+            Some(Path::new(&expected_target_cwd))
+        );
+
+        context.set_refuse_new_session_attach(false);
+        context.set_no_client();
+        let inert = engine
+            .execute_with_format_hooks(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-A", "-s", "target", "-c", "/clientless/#{cwd_probe}"],
+                ),
+                &mut hooks,
+            )
+            .unwrap();
+        assert!(inert.effects.is_empty());
+        assert_eq!(hooks.calls, 1);
+        assert_eq!(context.session, Some(source));
+    }
+
+    #[test]
+    fn new_session_empty_cwd_is_session_state_but_not_a_pane_spawn_override() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "source", "-c", "/source"]),
+            )
+            .unwrap();
+        let source = context.session.unwrap();
+        let source_pane = context.pane.unwrap();
+
+        let mut fresh_context = ExecutionContext::for_pane(&engine.state, source_pane).unwrap();
+        let fresh = engine
+            .execute(
+                &mut fresh_context,
+                &command(
+                    "new-session",
+                    &["-d", "-s", "fresh-empty", "-c", "#{missing}"],
+                ),
+            )
+            .unwrap();
+        let fresh_session = fresh_context.session.unwrap();
+        assert_eq!(
+            engine.state.session_working_directory(fresh_session),
+            Some(Path::new(""))
+        );
+        assert!(matches!(
+            fresh.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                inherit_cwd_from: Some(donor),
+                cwd: None,
+                ..
+            }) if *donor == source_pane
+        ));
+
+        let mut miss_context = ExecutionContext::for_pane(&engine.state, source_pane).unwrap();
+        let miss = engine
+            .execute(
+                &mut miss_context,
+                &command(
+                    "new-session",
+                    &["-A", "-d", "-s", "miss-empty", "-c", "#{missing}"],
+                ),
+            )
+            .unwrap();
+        let miss_session = miss_context.session.unwrap();
+        assert_eq!(
+            engine.state.session_working_directory(miss_session),
+            Some(Path::new(""))
+        );
+        assert!(matches!(
+            miss.effects.first(),
+            Some(MuxEffect::PaneCreated {
+                inherit_cwd_from: Some(donor),
+                cwd: None,
+                ..
+            }) if *donor == source_pane
+        ));
+
+        let mut omitted_context = ExecutionContext::for_pane(&engine.state, source_pane).unwrap();
+        engine
+            .execute(
+                &mut omitted_context,
+                &command("new-session", &["-d", "-s", "omitted"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .state
+                .session_working_directory(omitted_context.session.unwrap()),
+            engine.state.session_working_directory(source)
         );
     }
 
@@ -15542,6 +16377,70 @@ mod tests {
     }
 
     #[test]
+    fn new_session_print_format_uses_post_attach_client_state_only_when_attaching() {
+        let mut engine = MuxEngine::default();
+        let (first, first_window, first_pane) = engine.state.create_session("first").unwrap();
+        let mut context = ExecutionContext::new(Some(first), Some(first_window), Some(first_pane));
+        context.set_attached_client_context(Some((first, first_window, first_pane)));
+        context.set_format_client(FormatClient::Attached(first));
+
+        let attached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-P", "-F", "#{session_active}", "-s", "attached"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(attached.output, "1");
+
+        context.retarget(&ExecutionContext::new(
+            Some(first),
+            Some(first_window),
+            Some(first_pane),
+        ));
+        context.set_attached_client_context(Some((first, first_window, first_pane)));
+        context.set_format_client(FormatClient::Attached(first));
+        let detached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-P", "-F", "#{session_active}", "-s", "detached"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(detached.output, "0");
+
+        context.set_client_attached(false);
+        context.set_format_client(FormatClient::Unattached);
+        let unattached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-P", "-F", "#{session_active}", "-s", "unattached"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(unattached.output, "0");
+
+        context.set_no_client();
+        context.set_format_client(FormatClient::NoClient);
+        let clientless = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-session",
+                    &["-d", "-P", "-F", "#{session_active}", "-s", "clientless"],
+                ),
+            )
+            .unwrap();
+        assert!(clientless.output.is_empty());
+    }
+
+    #[test]
     fn most_recent_context_drives_originless_new_session_cwd() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -15590,10 +16489,16 @@ mod tests {
             execution.effects.first(),
             Some(MuxEffect::PaneCreated {
                 inherit_cwd_from: Some(source),
-                cwd: Some(cwd),
+                cwd: None,
                 ..
-            }) if *source == second_pane && cwd == "/private/tmp"
+            }) if *source == second_pane
         ));
+        assert_eq!(
+            engine
+                .state
+                .session_working_directory(command_context.session.unwrap()),
+            Some(Path::new("/private/tmp"))
+        );
     }
 
     #[test]
@@ -16279,12 +17184,13 @@ mod tests {
             )
             .expect("client-backed session");
         let session = context.session.unwrap();
-        let environment = &engine.session_environments[&session];
+        let environment = engine.session_environments[&session].inner.lock();
         assert_eq!(environment["APP_ONE"].value.as_deref(), Some("one"));
         assert_eq!(environment["APP_TWO"].value.as_deref(), Some(""));
         assert_eq!(environment["EXACT"].value, None);
         assert!(!environment.contains_key("APP_DAEMON"));
         assert!(!environment.contains_key("UNSELECTED"));
+        drop(environment);
 
         let mut no_client = ExecutionContext::default();
         no_client.set_no_client();
@@ -16296,7 +17202,10 @@ mod tests {
             )
             .expect("clientless session");
         assert!(
-            engine.session_environments[&no_client.session.unwrap()].is_empty(),
+            engine.session_environments[&no_client.session.unwrap()]
+                .inner
+                .lock()
+                .is_empty(),
             "no client source differs from an empty client environment"
         );
     }
@@ -16353,7 +17262,7 @@ mod tests {
         engine
             .update_session_environment_from_client(session, &client_environment)
             .unwrap();
-        let environment = &engine.session_environments[&session];
+        let environment = engine.session_environments[&session].inner.lock();
         assert_eq!(environment["EXACT"].value.as_deref(), Some("new"));
         assert_eq!(environment["WILD_ONE"].value.as_deref(), Some("one"));
         assert_eq!(environment["WILD_TWO"].value.as_deref(), Some("two"));
@@ -16367,11 +17276,12 @@ mod tests {
         assert_eq!(environment["HIDDEN"].value.as_deref(), Some("visible"));
         assert!(!environment["HIDDEN"].hidden);
         assert!(!environment.contains_key("GLOBAL_ONLY"));
+        drop(environment);
 
         engine
             .update_session_environment_from_client(session, &BTreeMap::new())
             .unwrap();
-        let environment = &engine.session_environments[&session];
+        let environment = engine.session_environments[&session].inner.lock();
         assert_eq!(environment["EXACT"].value, None);
         assert_eq!(environment["WILD_*"].value, None);
         assert_eq!(environment["WILD_ONE"].value.as_deref(), Some("one"));
@@ -16380,6 +17290,7 @@ mod tests {
         assert_eq!(environment["HIDDEN"].value, None);
         assert!(!environment["HIDDEN"].hidden);
         assert!(environment["MISSING"].hidden);
+        drop(environment);
 
         assert!(matches!(
             engine.update_session_environment_from_client(SessionId(u64::MAX), &BTreeMap::new()),
@@ -16475,6 +17386,126 @@ mod tests {
             )
             .unwrap();
         assert!(format_without_print.output.is_empty());
+    }
+
+    #[test]
+    fn pane_creation_defers_the_exact_format_client_state() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        context.set_attached_client_context(Some((session, window, pane)));
+        context.set_format_client(FormatClient::Attached(session));
+
+        let attached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-window",
+                    &["-d", "-P", "-F", "#{session_active}", "-n", "attached"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(attached.output, "1\n");
+        assert!(attached.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                MuxEffect::PaneFormatOutput {
+                    active_session: Some(active),
+                    format_client: FormatClient::Attached(client),
+                    ..
+                } if *active == session && *client == session
+            )
+        }));
+
+        context.set_client_attached(false);
+        context.set_format_client(FormatClient::Unattached);
+        let unattached = engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-d", "-P", "-F", "#{session_active}"]),
+            )
+            .unwrap();
+        assert_eq!(unattached.output, "0\n");
+        assert!(unattached.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                MuxEffect::PaneFormatOutput {
+                    format_client: FormatClient::Unattached,
+                    ..
+                }
+            )
+        }));
+
+        context.set_no_client();
+        context.set_format_client(FormatClient::NoClient);
+        let clientless = engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-d", "-P", "-F", "#{session_active}"]),
+            )
+            .unwrap();
+        assert_eq!(clientless.output, "\n");
+        assert!(clientless.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                MuxEffect::PaneFormatOutput {
+                    format_client: FormatClient::NoClient,
+                    ..
+                }
+            )
+        }));
+    }
+
+    #[test]
+    fn new_window_keeps_invoking_and_target_format_clients_distinct() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        context.set_client_attached(false);
+        context.set_format_client(FormatClient::Attached(session));
+
+        let created = engine
+            .execute(
+                &mut context,
+                &command(
+                    "new-window",
+                    &[
+                        "-d",
+                        "-n",
+                        "#{session_active}",
+                        "-c",
+                        "#{session_active}",
+                        "-P",
+                        "-F",
+                        "#{session_active}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(created.output, "1\n");
+        let created_pane = created
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated {
+                    pane,
+                    cwd: Some(cwd),
+                    ..
+                } if cwd == "0" => Some(*pane),
+                _ => None,
+            })
+            .expect("created pane with invoking-client cwd");
+        let created_window = engine.state.window_for_pane(created_pane).unwrap();
+        assert_eq!(engine.state.windows[&created_window].name, "0");
+        assert!(created.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                MuxEffect::PaneFormatOutput {
+                    format_client: FormatClient::Attached(client),
+                    ..
+                } if *client == session
+            )
+        }));
     }
 
     #[test]
@@ -17654,6 +18685,26 @@ mod tests {
             engine
                 .execute(
                     &mut context,
+                    &command(
+                        "list-sessions",
+                        &[
+                            "-O",
+                            "name",
+                            "-f",
+                            "#{==:#{session_active},}",
+                            "-F",
+                            "#{session_name}=[#{session_active}]",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "A=[]\nB=[]\nw=[]"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
                     &command("display-message", &["-p", "#{S:#{session_name} }"]),
                 )
                 .unwrap()
@@ -17910,6 +18961,26 @@ mod tests {
                 .output,
             "3:z"
         );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-windows",
+                        &[
+                            "-O",
+                            "name",
+                            "-f",
+                            "#{==:#{session_active},}",
+                            "-F",
+                            "#{window_name}=[#{session_active}]",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "a=[]\nbase=[]\nz=[]"
+        );
 
         let first = context.pane.unwrap();
         engine.state.update_pane_title(first, "z").unwrap();
@@ -17969,6 +19040,26 @@ mod tests {
                 .output,
             "a\nz"
         );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-panes",
+                        &[
+                            "-O",
+                            "title",
+                            "-f",
+                            "#{==:#{session_active},}",
+                            "-F",
+                            "#{pane_title}=[#{session_active}]",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "a=[]\nz=[]"
+        );
         assert!(matches!(
             engine.execute(
                 &mut context,
@@ -18010,7 +19101,13 @@ mod tests {
                 &mut context,
                 &command(
                     "kill-session",
-                    &["-a", "-t", "keep", "-f", "#{==:#{session_name},drop}"],
+                    &[
+                        "-a",
+                        "-t",
+                        "keep",
+                        "-f",
+                        "#{&&:#{==:#{session_active},},#{==:#{session_name},drop}}",
+                    ],
                 ),
             )
             .unwrap();
@@ -18048,7 +19145,13 @@ mod tests {
                 &mut context,
                 &command(
                     "kill-window",
-                    &["-a", "-t", "keep:0", "-f", "#{==:#{window_name},drop}"],
+                    &[
+                        "-a",
+                        "-t",
+                        "keep:0",
+                        "-f",
+                        "#{&&:#{==:#{session_active},},#{==:#{window_name},drop}}",
+                    ],
                 ),
             )
             .unwrap();
@@ -18077,7 +19180,13 @@ mod tests {
                 &mut context,
                 &command(
                     "kill-pane",
-                    &["-a", "-t", "keep:stay.0", "-f", "#{==:#{pane_index},1}"],
+                    &[
+                        "-a",
+                        "-t",
+                        "keep:stay.0",
+                        "-f",
+                        "#{&&:#{==:#{session_active},},#{==:#{pane_index},1}}",
+                    ],
                 ),
             )
             .unwrap();
@@ -18855,6 +19964,166 @@ mod tests {
                         "display-message",
                         &["-p", "-t", &second_pane.to_string(), "#{session_active}"],
                     ),
+                )
+                .unwrap()
+                .output,
+            "0"
+        );
+    }
+
+    #[test]
+    fn window_activity_uses_injected_creation_seconds_per_target() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+
+        engine.set_format_now(1_700_000_001);
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let session = context.session.unwrap();
+        let first_window = context.window.unwrap();
+        let first_pane = context.pane.unwrap();
+        assert_eq!(
+            engine.state.windows[&first_window].activity_time,
+            Some(1_700_000_001)
+        );
+
+        engine.set_format_now(1_700_000_002);
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-n", "second"]),
+            )
+            .unwrap();
+        let second_window = engine.state.sessions[&session]
+            .windows
+            .iter()
+            .copied()
+            .find(|window| *window != first_window)
+            .unwrap();
+        let second_pane = engine.state.windows[&second_window].active_pane;
+        assert_eq!(
+            engine.state.windows[&second_window].activity_time,
+            Some(1_700_000_002)
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "-t", &first_pane.to_string(), "#{window_activity}",],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "1700000001"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "-t", &second_pane.to_string(), "#{window_activity}",],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "1700000002"
+        );
+
+        engine.set_format_now(1_700_000_003);
+        let split = engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-d", "-t", &first_pane.to_string()]),
+            )
+            .unwrap();
+        let split_pane = split
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.state.windows[&first_window].activity_time,
+            Some(1_700_000_001)
+        );
+
+        engine.set_format_now(1_700_000_004);
+        engine
+            .execute(
+                &mut context,
+                &command("break-pane", &["-d", "-s", &split_pane.to_string()]),
+            )
+            .unwrap();
+        let broken_window = engine.state.window_for_pane(split_pane).unwrap();
+        assert_eq!(
+            engine.state.windows[&broken_window].activity_time,
+            Some(1_700_000_004)
+        );
+        assert_eq!(
+            engine.state.windows[&first_window].activity_time,
+            Some(1_700_000_001)
+        );
+        assert_eq!(
+            engine.state.windows[&second_window].activity_time,
+            Some(1_700_000_002)
+        );
+    }
+
+    #[test]
+    fn display_message_session_active_tracks_the_format_client() {
+        let mut engine = MuxEngine::default();
+        let (first, first_window, first_pane) = engine.state.create_session("first").unwrap();
+        let (second, _, second_pane) = engine.state.create_session("second").unwrap();
+        let active =
+            |engine: &mut MuxEngine, context: &mut ExecutionContext, pane: PaneId| -> String {
+                engine
+                    .execute(
+                        context,
+                        &command(
+                            "display-message",
+                            &["-p", "-t", &pane.to_string(), "#{session_active}"],
+                        ),
+                    )
+                    .unwrap()
+                    .output
+            };
+
+        let mut attached = ExecutionContext::new(Some(first), Some(first_window), Some(first_pane));
+        attached.set_attached_client_context(Some((first, first_window, first_pane)));
+        assert_eq!(active(&mut engine, &mut attached, first_pane), "1");
+        assert_eq!(active(&mut engine, &mut attached, second_pane), "0");
+
+        let mut unattached = attached.clone();
+        unattached.set_client_attached(false);
+        assert_eq!(active(&mut engine, &mut unattached, first_pane), "0");
+        assert_eq!(active(&mut engine, &mut unattached, second_pane), "0");
+
+        let mut no_client = attached.clone();
+        no_client.set_no_client();
+        assert_eq!(active(&mut engine, &mut no_client, first_pane), "");
+        assert_eq!(active(&mut engine, &mut no_client, second_pane), "");
+
+        let saved = attached.clone();
+        attached.set_format_client_session(Some(second));
+        assert_eq!(active(&mut engine, &mut attached, first_pane), "0");
+        assert_eq!(active(&mut engine, &mut attached, second_pane), "1");
+        attached.set_format_client_session(None);
+        assert_eq!(active(&mut engine, &mut attached, first_pane), "");
+        attached.copy_client_attachment(&saved);
+        assert_eq!(active(&mut engine, &mut attached, first_pane), "1");
+
+        let mut empty = MuxEngine::default();
+        assert_eq!(
+            empty
+                .execute(
+                    &mut ExecutionContext::default(),
+                    &command("display-message", &["-p", "#{session_active}"]),
                 )
                 .unwrap()
                 .output,
@@ -22885,6 +24154,46 @@ mod tests {
     }
 
     #[test]
+    fn list_keys_uses_the_selected_target_format_client() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        context.set_client_attached(false);
+        context.set_format_client(FormatClient::Attached(session));
+
+        let attached = engine
+            .execute(
+                &mut context,
+                &command("list-keys", &["-T", "prefix", "-F", "#{session_active}"]),
+            )
+            .unwrap();
+        assert!(attached.output.lines().all(|line| line == "1"));
+        assert!(!attached.output.is_empty());
+
+        context.set_format_client(FormatClient::Unattached);
+        let unattached = engine
+            .execute(
+                &mut context,
+                &command("list-keys", &["-T", "prefix", "-F", "#{session_active}"]),
+            )
+            .unwrap();
+        assert!(unattached.output.lines().all(|line| line == "0"));
+        assert!(!unattached.output.is_empty());
+
+        context.set_format_client(FormatClient::NoClient);
+        assert!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("list-keys", &["-T", "prefix", "-F", "#{session_active}"],),
+                )
+                .unwrap()
+                .output
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn list_keys_sorts_key_and_order_and_only_reverses_an_explicit_order() {
         let mut engine = MuxEngine {
             keys: KeyTables::empty(),
@@ -24197,6 +25506,182 @@ mod tests {
             format!("{first}:terminal")
         );
         assert_eq!(context.pane, Some(second));
+    }
+
+    #[test]
+    fn target_format_consumers_keep_target_and_format_client_distinct() {
+        let mut engine = MuxEngine::default();
+        let (first, first_window, first_pane) = engine.state.create_session("first").unwrap();
+        let (second, _, second_pane) = engine.state.create_session("second").unwrap();
+        let mut context = ExecutionContext::new(Some(first), Some(first_window), Some(first_pane));
+        context.set_attached_client_context(Some((first, first_window, first_pane)));
+        context.set_format_client(FormatClient::Attached(first));
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "select-pane",
+                    &["-t", &second_pane.to_string(), "-T", "#{session_active}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.state.pane(second_pane).unwrap().title, "0");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "select-pane",
+                    &["-t", &first_pane.to_string(), "-T", "#{session_active}"],
+                ),
+            )
+            .unwrap();
+        assert_eq!(engine.state.pane(first_pane).unwrap().title, "1");
+
+        let active_repeat = engine
+            .execute(
+                &mut context,
+                &command(
+                    "send-keys",
+                    &[
+                        "-t",
+                        &first_pane.to_string(),
+                        "-N",
+                        "#{?session_active,2,3}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(
+            active_repeat
+                .effects
+                .iter()
+                .any(|effect| { matches!(effect, MuxEffect::CopyModeRepeat { count: 2, .. }) })
+        );
+        let inactive_repeat = engine
+            .execute(
+                &mut context,
+                &command(
+                    "send-keys",
+                    &[
+                        "-t",
+                        &second_pane.to_string(),
+                        "-N",
+                        "#{?session_active,2,3}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(
+            inactive_repeat
+                .effects
+                .iter()
+                .any(|effect| { matches!(effect, MuxEffect::CopyModeRepeat { count: 3, .. }) })
+        );
+
+        for (name, value) in [("@active", "yes"), ("@inactive", "no")] {
+            engine
+                .execute(&mut context, &command("set-option", &["-g", name, value]))
+                .unwrap();
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "show-options",
+                        &[
+                            "-g",
+                            "-v",
+                            "-t",
+                            &first_pane.to_string(),
+                            "@#{?session_active,active,inactive}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "yes"
+        );
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "show-options",
+                        &[
+                            "-g",
+                            "-v",
+                            "-t",
+                            &second_pane.to_string(),
+                            "@#{?session_active,active,inactive}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "no"
+        );
+
+        for (target, expected) in [(first_pane, "source-1"), (second_pane, "source-0")] {
+            let sourced = engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "source-file",
+                        &["-F", "-t", &target.to_string(), "source-#{session_active}"],
+                    ),
+                )
+                .unwrap();
+            assert!(matches!(
+                sourced.effects.as_slice(),
+                [MuxEffect::SourceFile { path, .. }] if path == expected
+            ));
+        }
+
+        context.set_client_attached(false);
+        context.set_format_client(FormatClient::Unattached);
+        let unattached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "source-file",
+                    &[
+                        "-F",
+                        "-t",
+                        &first_pane.to_string(),
+                        "source-#{session_active}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            unattached.effects.as_slice(),
+            [MuxEffect::SourceFile { path, .. }] if path == "source-0"
+        ));
+
+        context.set_no_client();
+        context.set_format_client(FormatClient::NoClient);
+        let clientless = engine
+            .execute(
+                &mut context,
+                &command(
+                    "source-file",
+                    &[
+                        "-F",
+                        "-t",
+                        &first_pane.to_string(),
+                        "source-#{session_active}",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            clientless.effects.as_slice(),
+            [MuxEffect::SourceFile { path, .. }] if path == "source-"
+        ));
+
+        assert_ne!(first, second);
     }
 
     #[test]
@@ -29322,6 +30807,491 @@ mod tests {
     }
 
     #[test]
+    fn every_consumer_option_resolves_as_a_format() {
+        let engine = MuxEngine::default();
+        let context = StatusContext::default();
+        let snapshot = engine.format_option_snapshot();
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 105);
+        for name in TMUX_OPTION_CONSUMERS {
+            let direct = engine
+                .format_option_value(&context, name)
+                .unwrap_or_else(|| panic!("missing direct option format: {name}"));
+            assert_eq!(
+                snapshot.lookup("", "", "", name),
+                Some(direct.clone()),
+                "snapshot option format: {name}"
+            );
+            let mut hooks = CommandHooks::new(0);
+            assert_eq!(
+                expand_option(&engine, FormatContext::default(), name, &mut hooks),
+                direct,
+                "ordinary option format: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn option_formats_are_exact_alias_aware_and_precede_hook_values() {
+        struct Marker;
+
+        impl StatusHooks for Marker {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str) -> String {
+                String::new()
+            }
+
+            fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
+                Some(format!("hook:{name}"))
+            }
+        }
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "cursor-colour", "red"]),
+            )
+            .unwrap();
+        let mut hooks = Marker;
+        assert_eq!(
+            expand_option(&engine, FormatContext::default(), "base-index", &mut hooks),
+            "0"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext::default(),
+                "cursor-color",
+                &mut hooks
+            ),
+            "red"
+        );
+        assert_eq!(
+            expand_option(&engine, FormatContext::default(), "base-ind", &mut hooks),
+            "hook:base-ind"
+        );
+        assert_eq!(
+            expand_option(&engine, FormatContext::default(), "pane-colors", &mut hooks),
+            "hook:pane-colors"
+        );
+    }
+
+    #[test]
+    fn option_formats_render_flags_as_numbers_and_other_types_raw() {
+        let engine = MuxEngine::default();
+        let context = StatusContext::default();
+        for (name, expected) in [
+            ("renumber-windows", "0"),
+            ("aggressive-resize", "0"),
+            ("wrap-search", "1"),
+            ("focus-events", "0"),
+            ("allow-set-title", "1"),
+            ("synchronize-panes", "0"),
+            ("automatic-rename", "1"),
+            ("mouse", "1"),
+            ("set-titles", "0"),
+            ("exit-empty", "1"),
+            ("exit-unattached", "0"),
+            ("monitor-activity", "0"),
+            ("monitor-bell", "1"),
+        ] {
+            assert_eq!(
+                engine.format_option_value(&context, name).as_deref(),
+                Some(expected),
+                "{name}"
+            );
+        }
+        for (name, expected) in [
+            ("detach-on-destroy", "on"),
+            ("allow-passthrough", "off"),
+            ("visual-bell", "off"),
+            ("status", "on"),
+            ("prefix", "C-b"),
+            ("cursor-style", "default"),
+        ] {
+            assert_eq!(
+                engine.format_option_value(&context, name).as_deref(),
+                Some(expected),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn option_format_arrays_join_index_normalize_and_shadow_whole() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        for args in [
+            &["-s", "command-alias", "zero,one"][..],
+            &["-s", "command-alias[10]", "ten"],
+            &["-s", "command-alias[2]", "two"],
+            &["-s", "command-alias[beta]", "B"],
+            &["-s", "command-alias[alpha]", "A"],
+            &["-g", "status-format", "g0,g1"],
+            &["status-format[000]", "local0"],
+            &["-g", "update-environment", "ZZ_B ZZ_A"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", args))
+                .unwrap();
+        }
+        let values = engine.format_status_context(Some(session), Some(window), Some(pane));
+        assert_eq!(
+            engine
+                .format_option_value(&values, "command-alias")
+                .as_deref(),
+            Some("zero one two ten A B")
+        );
+        assert_eq!(
+            engine
+                .format_option_value(&values, "command-alias[000]")
+                .as_deref(),
+            Some("zero")
+        );
+        assert_eq!(
+            engine
+                .format_option_value(&values, "update-environment")
+                .as_deref(),
+            Some("ZZ_B ZZ_A")
+        );
+        assert_eq!(
+            engine
+                .format_option_value(&values, "status-format")
+                .as_deref(),
+            Some("local0")
+        );
+        assert_eq!(
+            engine
+                .format_option_value(&values, "status-format[000]")
+                .as_deref(),
+            Some("local0")
+        );
+        for name in [
+            "status-format[1]",
+            "status-format[]",
+            "status-format[4294967296]",
+            "status-format[0]tail",
+            "status-format[",
+        ] {
+            assert_eq!(
+                engine.format_option_value(&values, name).as_deref(),
+                Some(""),
+                "{name}"
+            );
+        }
+        let global = StatusContext::default();
+        assert_eq!(
+            engine
+                .format_option_value(&global, "status-format")
+                .as_deref(),
+            Some("g0 g1")
+        );
+        let snapshot = engine.format_option_snapshot();
+        assert_eq!(
+            snapshot.lookup(
+                &session.to_string(),
+                &window.to_string(),
+                &pane.to_string(),
+                "status-format[1]",
+            ),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn option_format_targets_follow_scope_active_children_and_attachment() {
+        let mut engine = MuxEngine::default();
+        let (alpha, first_window, first_pane) = engine.state.create_session("alpha").unwrap();
+        let second_pane = engine
+            .state
+            .split_pane(first_pane, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        let (second_window, _) = engine
+            .state
+            .create_window_at(
+                alpha,
+                None,
+                Some("second".to_owned()),
+                PaneKind::Terminal,
+                false,
+            )
+            .unwrap();
+        let (beta, beta_window, beta_pane) = engine.state.create_session("beta").unwrap();
+        let mut alpha_context =
+            ExecutionContext::new(Some(alpha), Some(first_window), Some(second_pane));
+        let mut beta_context =
+            ExecutionContext::new(Some(beta), Some(beta_window), Some(beta_pane));
+        for args in [
+            &["-s", "escape-time", "77"][..],
+            &["-g", "status-left", "GLOBAL"],
+            &["status-left", "ALPHA"],
+            &["-g", "window-status-format", "GLOBAL-WINDOW"],
+            &["window-status-format", "FIRST-WINDOW"],
+            &["-g", "cursor-colour", "red"],
+            &["cursor-colour", "blue"],
+        ] {
+            engine
+                .execute(&mut alpha_context, &command("set-option", args))
+                .unwrap();
+        }
+        engine
+            .execute(
+                &mut beta_context,
+                &command("set-option", &["status-left", "BETA"]),
+            )
+            .unwrap();
+        let mut first_pane_context =
+            ExecutionContext::new(Some(alpha), Some(first_window), Some(first_pane));
+        engine
+            .execute(
+                &mut first_pane_context,
+                &command("set-option", &["-p", "cursor-colour", "green"]),
+            )
+            .unwrap();
+        let mut hooks = CommandHooks::new(0);
+        let pane_target = FormatContext {
+            session: None,
+            window: None,
+            pane: Some(first_pane),
+            active_session: Some(alpha),
+            format_client: FormatClient::NoClient,
+            format_type: FormatType::Pane,
+        };
+        assert_eq!(
+            expand_option(&engine, pane_target, "cursor-colour", &mut hooks),
+            "green"
+        );
+        let window_target = FormatContext {
+            pane: None,
+            window: Some(first_window),
+            ..pane_target
+        };
+        assert_eq!(
+            expand_option(&engine, window_target, "cursor-colour", &mut hooks),
+            "blue"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext {
+                    session: Some(alpha),
+                    window: None,
+                    pane: None,
+                    ..pane_target
+                },
+                "cursor-colour",
+                &mut hooks,
+            ),
+            "blue"
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext {
+                    session: None,
+                    window: None,
+                    pane: None,
+                    format_client: FormatClient::Attached(alpha),
+                    ..pane_target
+                },
+                "cursor-colour",
+                &mut hooks,
+            ),
+            "blue"
+        );
+        assert_eq!(
+            expand_option(&engine, pane_target, "status-left", &mut hooks),
+            "ALPHA"
+        );
+        assert_eq!(
+            expand_option(&engine, pane_target, "window-status-format", &mut hooks),
+            "FIRST-WINDOW"
+        );
+        assert_eq!(
+            expand_option(&engine, pane_target, "escape-time", &mut hooks),
+            "77"
+        );
+        let mut display_context =
+            ExecutionContext::new(Some(alpha), Some(first_window), Some(second_pane));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut display_context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-t",
+                            &first_pane.to_string(),
+                            "#{cursor-colour}|#{status-left}|#{window-status-format}|#{escape-time}",
+                        ],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "green|ALPHA|FIRST-WINDOW|77"
+        );
+        let snapshot = engine.format_option_snapshot();
+        assert_eq!(
+            snapshot.lookup(
+                &alpha.to_string(),
+                &first_window.to_string(),
+                "",
+                "cursor-colour",
+            ),
+            Some("blue".to_owned())
+        );
+        assert_eq!(
+            snapshot.lookup(&alpha.to_string(), "", "", "cursor-colour"),
+            Some("blue".to_owned())
+        );
+        assert_eq!(
+            snapshot.lookup("", "", &first_pane.to_string(), "cursor-colour"),
+            Some("green".to_owned())
+        );
+        assert_eq!(
+            expand_option(
+                &engine,
+                FormatContext {
+                    session: None,
+                    window: None,
+                    pane: None,
+                    active_session: None,
+                    format_client: FormatClient::NoClient,
+                    format_type: FormatType::None,
+                },
+                "cursor-colour",
+                &mut hooks,
+            ),
+            "red"
+        );
+        assert!(engine.state.windows.contains_key(&second_window));
+    }
+
+    #[test]
+    fn option_formats_stay_raw_until_expand_or_time_expand() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut command_context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        engine
+            .execute(
+                &mut command_context,
+                &command("set-option", &["-g", "status-left", "#{session_name}"]),
+            )
+            .unwrap();
+        let context = FormatContext {
+            session: Some(session),
+            window: Some(window),
+            pane: Some(pane),
+            active_session: Some(session),
+            format_client: FormatClient::Attached(session),
+            format_type: FormatType::Pane,
+        };
+        let mut hooks = CommandHooks::new(0);
+        assert_eq!(
+            expand_format_with_hooks(
+                "#{status-left}|#{E:status-left}|#{T:status-left}",
+                &engine,
+                context,
+                &mut hooks,
+            ),
+            "#{session_name}|work|work"
+        );
+    }
+
+    #[test]
+    fn option_formats_retarget_for_session_window_and_pane_loops() {
+        let mut engine = MuxEngine::default();
+        let (alpha, first_window, first_pane) = engine.state.create_session("alpha").unwrap();
+        let second_pane = engine
+            .state
+            .split_pane(first_pane, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        let (second_window, second_window_pane) = engine
+            .state
+            .create_window_at(
+                alpha,
+                None,
+                Some("second".to_owned()),
+                PaneKind::Terminal,
+                false,
+            )
+            .unwrap();
+        let (beta, beta_window, beta_pane) = engine.state.create_session("beta").unwrap();
+        for (mut context, args) in [
+            (
+                ExecutionContext::new(Some(alpha), Some(first_window), Some(second_pane)),
+                vec!["status-left", "A"],
+            ),
+            (
+                ExecutionContext::new(Some(beta), Some(beta_window), Some(beta_pane)),
+                vec!["status-left", "B"],
+            ),
+            (
+                ExecutionContext::new(Some(alpha), Some(first_window), Some(second_pane)),
+                vec!["window-status-format", "W0"],
+            ),
+            (
+                ExecutionContext::new(Some(alpha), Some(second_window), Some(second_window_pane)),
+                vec!["window-status-format", "W1"],
+            ),
+            (
+                ExecutionContext::new(Some(alpha), Some(first_window), Some(first_pane)),
+                vec!["-p", "cursor-colour", "red"],
+            ),
+            (
+                ExecutionContext::new(Some(alpha), Some(first_window), Some(second_pane)),
+                vec!["-p", "cursor-colour", "blue"],
+            ),
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", &args))
+                .unwrap();
+        }
+        let context = FormatContext {
+            session: Some(alpha),
+            window: Some(first_window),
+            pane: Some(second_pane),
+            active_session: Some(alpha),
+            format_client: FormatClient::Attached(alpha),
+            format_type: FormatType::Pane,
+        };
+        let mut hooks = CommandHooks::new(0);
+        assert_eq!(
+            expand_format_with_hooks(
+                "#{S:#{session_name}=#{status-left},[#{session_name}=#{status-left}]} ",
+                &engine,
+                context,
+                &mut hooks,
+            ),
+            "[alpha=A]beta=B "
+        );
+        assert_eq!(
+            expand_format_with_hooks(
+                "#{W:#{window_name}=#{window-status-format},[#{window_name}=#{window-status-format}]} ",
+                &engine,
+                context,
+                &mut hooks,
+            ),
+            "[0=W0]second=W1 "
+        );
+        assert_eq!(
+            expand_format_with_hooks(
+                "#{P:#{pane_index}=#{cursor-colour},[#{pane_index}=#{cursor-colour}]} ",
+                &engine,
+                context,
+                &mut hooks,
+            ),
+            "0=red[1=blue] "
+        );
+    }
+
+    #[test]
     fn status_row_variables_carry_session_effective_option_values() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -29338,43 +31308,37 @@ mod tests {
 
         let global = engine.status_row_variables_for_session(None);
         assert_eq!(
-            global.session.get("status-left").map(String::as_str),
+            global.base.get("status-left").map(String::as_str),
             Some(crate::tmux_options::STATUS_LEFT_DEFAULT)
         );
         assert_eq!(
-            global.session.get("status-justify").map(String::as_str),
+            global.base.get("status-justify").map(String::as_str),
             Some("left")
         );
         assert_eq!(
-            global
-                .session
-                .get("window-status-format")
-                .map(String::as_str),
+            global.base.get("window-status-format").map(String::as_str),
             Some(crate::DEFAULT_WINDOW_STATUS_FORMAT)
         );
         assert_eq!(
             global
-                .session
+                .base
                 .get("pane-status-current-style")
                 .map(String::as_str),
             Some("underscore")
         );
         assert_eq!(
-            global.session.get("mode-style").map(String::as_str),
+            global.base.get("mode-style").map(String::as_str),
             Some("noattr,bg=themeyellow,fg=themeblack")
         );
         assert_eq!(
-            global
-                .session
-                .get("display-panes-format")
-                .map(String::as_str),
+            global.base.get("display-panes-format").map(String::as_str),
             Some("#[align=right]#{pane_width}x#{pane_height}")
         );
 
         let scoped = engine.status_row_variables_for_session(Some(session));
         assert_eq!(
-            scoped.session.get("status-left").map(String::as_str),
-            Some("LOCAL ")
+            scoped.lookup(&session.to_string(), "", "", "status-left"),
+            Some("LOCAL ".to_owned())
         );
     }
 
@@ -29405,21 +31369,20 @@ mod tests {
         let variables = engine.status_row_variables_for_session(Some(session));
         assert_eq!(
             variables
-                .session
+                .base
                 .get("window-status-current-format")
                 .map(String::as_str),
             Some(crate::DEFAULT_WINDOW_STATUS_FORMAT),
             "the session layer keeps the global value for windows without overrides"
         );
         assert_eq!(
-            variables
-                .lookup(
-                    &session.to_string(),
-                    &window.to_string(),
-                    "window-status-current-format",
-                )
-                .map(String::as_str),
-            Some("OVERRIDE"),
+            variables.lookup(
+                &session.to_string(),
+                &window.to_string(),
+                "",
+                "window-status-current-format",
+            ),
+            Some("OVERRIDE".to_owned()),
             "the row-loop surface resolves the loop window's override: both surfaces agree"
         );
         engine
@@ -29430,10 +31393,8 @@ mod tests {
             .unwrap();
         let variables = engine.status_row_variables_for_session(Some(session));
         assert_eq!(
-            variables
-                .lookup(&session.to_string(), &window.to_string(), "mode-style")
-                .map(String::as_str),
-            Some("bg=red"),
+            variables.lookup(&session.to_string(), &window.to_string(), "", "mode-style"),
+            Some("bg=red".to_owned()),
             "window-scoped stored scalars layer per window too"
         );
     }
@@ -30589,6 +32550,117 @@ mod tests {
             ),
             Err(ServerError::InvalidCommand(message)) if message == "unknown variable: MISSING"
         ));
+    }
+
+    #[test]
+    fn retained_job_environment_tracks_the_original_session_through_destruction() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "keep"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "target"]),
+            )
+            .unwrap();
+        let original = context.session.unwrap();
+
+        for args in [
+            &["-g", "GLOBAL", "scheduled-global"] as &[&str],
+            &["-t", "=target", "SESSION", "scheduled-session"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-environment", args))
+                .unwrap();
+        }
+        let retained = engine
+            .retain_session_job_environment(original)
+            .expect("live session environment");
+
+        for args in [
+            &["-g", "GLOBAL", "launch-global"] as &[&str],
+            &["-t", "=target", "SESSION", "before-kill"],
+            &["-ht", "=target", "HIDDEN", "secret"],
+            &["-rt", "=target", "UNSET"],
+        ] {
+            engine
+                .execute(&mut context, &command("set-environment", args))
+                .unwrap();
+        }
+        engine
+            .execute(&mut context, &command("kill-session", &["-t", "=target"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "target"]),
+            )
+            .unwrap();
+        let replacement = context.session.unwrap();
+        assert_ne!(replacement, original);
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-environment",
+                    &["-t", "=target", "SESSION", "replacement"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-environment", &["-g", "GLOBAL", "latest-global"]),
+            )
+            .unwrap();
+
+        let environment = engine
+            .job_environment_with_retained_session(Some(&retained))
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(environment["GLOBAL"].as_deref(), Some("latest-global"));
+        assert_eq!(environment["SESSION"].as_deref(), Some("before-kill"));
+        assert_eq!(environment["HIDDEN"], None);
+        assert_eq!(environment["UNSET"], None);
+        assert!(engine.retain_session_job_environment(original).is_none());
+        assert_eq!(
+            engine
+                .job_environment(Some(replacement))
+                .into_iter()
+                .collect::<BTreeMap<_, _>>()["SESSION"]
+                .as_deref(),
+            Some("replacement")
+        );
+    }
+
+    #[test]
+    fn retained_empty_job_environment_observes_later_session_writes() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("empty").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        assert!(!engine.session_environments.contains_key(&session));
+
+        let retained = engine
+            .retain_session_job_environment(session)
+            .expect("live session environment");
+        assert!(engine.session_environments.contains_key(&session));
+        engine
+            .execute(
+                &mut context,
+                &command("set-environment", &["LATER", "visible"]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            engine
+                .job_environment_with_retained_session(Some(&retained))
+                .into_iter()
+                .collect::<BTreeMap<_, _>>()["LATER"]
+                .as_deref(),
+            Some("visible")
+        );
     }
 
     #[test]
@@ -35217,6 +37289,30 @@ mod tests {
                 .unwrap(),
             Execution::default()
         );
+    }
+
+    #[test]
+    fn list_commands_formats_without_a_client() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        context.set_attached_client_context(Some((session, window, pane)));
+        context.set_format_client(FormatClient::Attached(session));
+
+        let listed = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-commands",
+                    &[
+                        "-F",
+                        "x#{session_active}x|#{S:normal,active}",
+                        "new-session",
+                    ],
+                ),
+            )
+            .unwrap();
+        assert_eq!(listed.output, "xx|normal");
     }
 
     #[test]

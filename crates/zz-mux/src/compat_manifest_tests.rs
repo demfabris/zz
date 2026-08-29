@@ -13,7 +13,7 @@ use zz_protocol::{
 };
 
 use crate::{
-    BEHAVES, COMMAND_SPECS,
+    BEHAVES, COMMAND_SPECS, TMUX_OPTION_CONSUMERS,
     command::{
         accepted_native_literal_format_context_scopes, format_key_command,
         missing_derived_format_context_families, missing_literal_format_context_scopes,
@@ -728,16 +728,58 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
     assert_eq!(upstream_modifiers.len(), 36);
     assert_eq!(upstream_modifiers.len(), oracle.format_modifiers.len());
     let implemented_modifiers = format_modifier_names().collect::<BTreeSet<_>>();
-    assert_eq!(implemented_modifiers.len(), 30);
+    assert_eq!(implemented_modifiers.len(), 31);
     let missing_modifiers = upstream_modifiers
         .difference(&implemented_modifiers)
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(
-        missing_modifiers,
-        BTreeSet::from(["I", "L", "O", "R", "V", "w"])
-    );
+    assert_eq!(missing_modifiers, BTreeSet::from(["I", "L", "O", "V", "w"]));
     assert!(implemented_modifiers.is_subset(&upstream_modifiers));
+
+    let missing_modifier_items = BTreeMap::from([
+        (
+            "I",
+            (
+                "semantic:format-modifier-client-interrogation",
+                "formats.modifier-fidelity",
+            ),
+        ),
+        (
+            "L",
+            (
+                "semantic:format-modifier-client-loop",
+                "formats.modifier-fidelity",
+            ),
+        ),
+        (
+            "O",
+            (
+                "semantic:format-modifier-option-loop",
+                "formats.modifier-fidelity",
+            ),
+        ),
+        (
+            "V",
+            (
+                "semantic:format-modifier-environment-loop",
+                "formats.modifier-fidelity",
+            ),
+        ),
+        (
+            "w",
+            (
+                "semantic:format-modifier-width",
+                "formats.modifier-fidelity",
+            ),
+        ),
+    ]);
+    assert_eq!(
+        missing_modifier_items
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        missing_modifiers
+    );
 
     assert!(
         items.keys().all(|item| !item.starts_with("context-format:")
@@ -764,12 +806,6 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             "open",
         ),
         (
-            "semantic:format-modifier-fidelity",
-            "formats.modifier-fidelity",
-            "adopt",
-            "open",
-        ),
-        (
             "semantic:native-format-context-producers",
             "formats.native-typed-context-producers",
             "native",
@@ -787,6 +823,18 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             "wrong manifest decision or status for {owner}"
         );
     }
+    for (item, owner) in missing_modifier_items.values() {
+        assert_eq!(
+            items.get(*item).map(String::as_str),
+            Some(*owner),
+            "wrong manifest owner for {item}"
+        );
+        assert_eq!(
+            groups.get(*owner).copied(),
+            Some(("adopt", "open")),
+            "wrong manifest decision or status for {owner}"
+        );
+    }
     let closed = manifest
         .closed
         .iter()
@@ -797,9 +845,14 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         "format vocabulary registration tracker must be closed"
     );
     assert!(
+        closed.contains("formats.repeat-modifier"),
+        "implemented repeat modifier tracker must be closed"
+    );
+    assert!(
         [
             "semantic:tracker-format-modifier-vocabulary",
             "semantic:tracker-open-context-format-vocabulary",
+            "semantic:format-modifier-repeat",
         ]
         .iter()
         .all(|item| !items.contains_key(*item)),
@@ -1071,6 +1124,94 @@ fn positional_minimum_runtime_inventory_matches_the_pin() {
 }
 
 #[test]
+fn tmux_option_consumer_partition_matches_pinned_inventory() {
+    let (oracle, items) = inventory();
+    let manifest: Manifest = read_json(&root().join("compat/tmux-gaps.json"));
+    let oracle_options = oracle
+        .options
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let catalog = crate::tmux_options::tmux_options()
+        .filter(|option| !crate::tmux_options::tmux_option_is_hook(option.name))
+        .map(|option| option.name)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(oracle.options.len(), 180, "pinned option count changed");
+    assert_eq!(
+        oracle_options.len(),
+        180,
+        "pinned options contain duplicates"
+    );
+    assert_eq!(catalog.len(), 180, "live option catalog count changed");
+    assert_eq!(
+        catalog, oracle_options,
+        "live option catalog differs from the pin"
+    );
+
+    let consumers = TMUX_OPTION_CONSUMERS
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 105);
+    assert_eq!(
+        consumers.len(),
+        105,
+        "option consumer roster contains duplicates"
+    );
+    assert!(
+        consumers.is_subset(&catalog),
+        "option consumer roster contains names outside the catalog"
+    );
+    let mut scope_counts = [0; 4];
+    for name in TMUX_OPTION_CONSUMERS {
+        let option = crate::tmux_options::exact_tmux_option(name)
+            .unwrap_or_else(|| panic!("consumer option is not exact: {name}"));
+        let index = match option.scope {
+            crate::tmux_options::TmuxOptionScope::Server => 0,
+            crate::tmux_options::TmuxOptionScope::Session => 1,
+            crate::tmux_options::TmuxOptionScope::Window => 2,
+            crate::tmux_options::TmuxOptionScope::WindowPane => 3,
+        };
+        scope_counts[index] += 1;
+    }
+    assert_eq!(scope_counts, [13, 42, 40, 10]);
+
+    let tracked = items
+        .keys()
+        .filter_map(|item| item.strip_prefix("option:"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(tracked.len(), 75, "active option gap count changed");
+    assert!(
+        consumers.is_disjoint(&tracked),
+        "consumed and tracked option names overlap"
+    );
+    assert_eq!(
+        consumers.union(&tracked).copied().collect::<BTreeSet<_>>(),
+        catalog,
+        "consumed and tracked option names do not partition the catalog"
+    );
+
+    assert!(
+        !items.contains_key("semantic:tracker-option-consumer-registration"),
+        "closed option consumer registration remains tracked"
+    );
+    assert!(
+        manifest
+            .gaps
+            .iter()
+            .all(|gap| gap.id != "tracker.semantic-coverage"),
+        "closed option consumer registration group remains active"
+    );
+    assert!(
+        manifest
+            .closed
+            .iter()
+            .any(|gap| gap.id == "tracker.semantic-coverage"),
+        "option consumer registration group is not closed"
+    );
+}
+
+#[test]
 fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let (oracle, items) = inventory();
     let behaves = BEHAVES.iter().copied().collect::<BTreeSet<_>>();
@@ -1108,8 +1249,8 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
     let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
     assert_eq!(formats.len(), 198, "pinned global format count changed");
-    assert_eq!(constant_formats.len(), 73, "tracked format count changed");
-    assert_eq!(direct_formats.len(), 93, "direct format count changed");
+    assert_eq!(constant_formats.len(), 71, "tracked format count changed");
+    assert_eq!(direct_formats.len(), 95, "direct format count changed");
     assert_eq!(
         delegated_formats.len(),
         32,
@@ -1133,7 +1274,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         nonconstant_formats.len(),
-        125,
+        127,
         "nonconstant format registration count changed"
     );
     let tracked_formats = items

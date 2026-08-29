@@ -1,0 +1,4 @@
+corpus: none
+stage: fixtures/config-alias-parse-unit.sh ~/config-alias-parse-unit.sh
+run-shell 'sh ~/config-alias-parse-unit.sh'
+out: show-environment -g CONFIG_ALIAS_PARSE_UNIT

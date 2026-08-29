@@ -358,6 +358,82 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn cold_autospawn_uses_the_launching_client_cwd_for_startup_sources() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        let caller_cwd = source_directory(&fixture, "startup client cwd [literal]*? with spaces");
+        let caller_entry_directory = caller_cwd.join("a");
+        std::fs::create_dir(&caller_entry_directory).expect("caller entry directory");
+        std::fs::write(
+            caller_cwd.join("startup-top.conf"),
+            b"set-option -g @startup_client_cwd_top caller-root\n",
+        )
+        .expect("caller top-level startup source");
+        std::fs::write(
+            caller_entry_directory.join("entry.conf"),
+            b"set-option -g @startup_client_cwd_entry caller-entry\nsource-file startup-leaf.conf\n",
+        )
+        .expect("caller nested startup entry");
+        std::fs::write(
+            caller_cwd.join("startup-leaf.conf"),
+            b"set-option -g @startup_client_cwd_leaf caller-root\n",
+        )
+        .expect("caller-root nested startup source");
+        std::fs::write(
+            caller_entry_directory.join("startup-leaf.conf"),
+            b"set-option -g @startup_client_cwd_leaf containing-file-decoy\n",
+        )
+        .expect("containing-file startup decoy");
+
+        let config_directory = fixture.config.parent().expect("fixture config directory");
+        let config_entry_directory = config_directory.join("a");
+        std::fs::create_dir(&config_entry_directory).expect("config entry directory");
+        std::fs::write(
+            config_directory.join("startup-top.conf"),
+            b"set-option -g @startup_client_cwd_top config-decoy\n",
+        )
+        .expect("config top-level startup decoy");
+        std::fs::write(
+            config_entry_directory.join("entry.conf"),
+            b"set-option -g @startup_client_cwd_entry config-decoy\n",
+        )
+        .expect("config nested startup decoy");
+        std::fs::write(
+            &fixture.config,
+            b"source-file startup-top.conf\nsource-file a/entry.conf\n",
+        )
+        .expect("startup source config");
+
+        let started = fixture
+            .command()
+            .current_dir(&caller_cwd)
+            .args(["new-session", "-d", "-s", "startup-client-cwd"])
+            .output()
+            .expect("cold autospawn from startup client cwd");
+        assert_eq!(
+            started.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&started.stderr)
+        );
+        assert!(started.stdout.is_empty());
+        assert!(started.stderr.is_empty());
+
+        for (option, expected) in [
+            ("@startup_client_cwd_top", b"caller-root\n" as &[u8]),
+            ("@startup_client_cwd_entry", b"caller-entry\n"),
+            ("@startup_client_cwd_leaf", b"caller-root\n"),
+        ] {
+            let shown = fixture.run(&["show-options", "-gqv", option]);
+            assert_eq!(shown.status.code(), Some(0), "{option}");
+            assert_eq!(shown.stdout, expected, "{option}");
+            assert!(shown.stderr.is_empty(), "{option}");
+        }
+    }
+
+    #[test]
     fn startup_config_shares_a_fifty_source_command_budget() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
@@ -415,7 +491,7 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn event_and_command_hooks_create_sessions_without_a_client_terminal() {
+    fn event_hooks_are_clientless_and_command_hooks_retain_the_command_client() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
             return;
@@ -424,7 +500,7 @@ mod daemon_autostart {
             &fixture.config,
             b"set-hook -g session-created 'new-session -s fromevent'\nset-hook -g after-new-session 'new-session -s fromcommand'\n",
         )
-        .expect("write clientless hook config");
+        .expect("write hook client config");
 
         let created = fixture.run(&["new-session", "-d", "-s", "base"]);
         assert_eq!(created.status.code(), Some(0));
@@ -433,7 +509,7 @@ mod daemon_autostart {
 
         let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
         assert_eq!(listed.status.code(), Some(0));
-        assert_eq!(listed.stdout, b"base\nfromcommand\nfromevent\n");
+        assert_eq!(listed.stdout, b"base\nfromevent\n");
         assert!(listed.stderr.is_empty());
     }
 
@@ -734,8 +810,6 @@ mod daemon_autostart {
             nested.stdout,
             format!(
                 "{leaf}:1: unknown command: wibble\n\
-                 {leaf}:2: unknown command: wibble\n\
-                 {leaf}:3: unknown command: blorp\n\
                  {second}:1: unknown command: flurb\n"
             )
             .into_bytes()
@@ -1096,7 +1170,6 @@ mod daemon_autostart {
                  {nested_unknown}:2: source-file {unknown_command}\n\
                  {nested_unknown}:3: display-message -p ROOT_AFTER\n\
                  ROOT_BEFORE\n\
-                 {unknown_command}:1: wibble\n\
                  {unknown_command}:1: unknown command: wibble\n\
                  ROOT_AFTER\n"
             )
@@ -1549,7 +1622,7 @@ mod daemon_autostart {
             .output()
             .expect("show direct reload replay marker");
         assert_eq!(replay_started.status.code(), Some(0));
-        assert_eq!(replay_started.stdout, b"yes\n");
+        assert!(replay_started.stdout.is_empty());
         assert!(replay_started.stderr.is_empty());
         let nested_base = fixture
             .command()
@@ -1560,7 +1633,7 @@ mod daemon_autostart {
             .output()
             .expect("show direct reload nested base");
         assert_eq!(nested_base.status.code(), Some(0));
-        assert_eq!(nested_base.stdout, b"caller-root\n");
+        assert!(nested_base.stdout.is_empty());
         assert!(nested_base.stderr.is_empty());
         let stale = fixture
             .command()
@@ -1587,9 +1660,9 @@ mod daemon_autostart {
             ])
             .output()
             .expect("query reloaded key");
-        assert_eq!(loaded.status.code(), Some(0));
-        assert_eq!(loaded.stdout, b"reload-loaded:z\n");
-        assert!(loaded.stderr.is_empty());
+        assert_eq!(loaded.status.code(), Some(1));
+        assert!(loaded.stdout.is_empty());
+        assert_eq!(loaded.stderr, b"table reload-loaded doesn't exist\n");
     }
 
     #[test]
@@ -4642,10 +4715,9 @@ mod daemon_autostart {
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 3);
+            assert_eq!(stream.blocks.len(), 2);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
-            assert_block(&stream.blocks[2], 3, 1, &["after-config-error"], false);
             let diagnostic = format!(
                 "%config-error {}:1: unknown command: wibble",
                 source.display()
@@ -4660,7 +4732,7 @@ mod daemon_autostart {
         }
 
         #[test]
-        fn control_sourced_name_failures_and_loud_gaps_use_config_errors() {
+        fn control_first_sourced_construction_failure_uses_config_error() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
                 return;
@@ -4687,42 +4759,13 @@ mod daemon_autostart {
             assert_eq!(output.status.code(), Some(0));
             assert!(output.stderr.is_empty());
             let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.blocks.len(), 7);
+            assert_eq!(stream.blocks.len(), 2);
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
-            assert_block(&stream.blocks[2], 3, 1, &[], false);
-            assert_block(&stream.blocks[3], 4, 1, &[], false);
-            assert_block(
-                &stream.blocks[4],
-                5,
-                1,
-                &[&format!(
-                    "{}:7: command set-environment: too few arguments (need at least 1)",
-                    source.display()
-                )],
-                true,
-            );
-            assert_block(&stream.blocks[5], 6, 1, &[], false);
-            assert_block(&stream.blocks[6], 7, 1, &["after-classification"], false);
-            let diagnostics = [
-                format!(
-                    "%config-error {}:3: unknown command: source",
-                    source.display()
-                ),
-                format!(
-                    "%config-error {}:4: unknown command: wibble",
-                    source.display()
-                ),
-                format!(
-                    "%config-error {}:5: ambiguous command: kill-s, could be: kill-server, kill-session",
-                    source.display()
-                ),
-                format!(
-                    "%config-error {}:6: unknown command: badalias",
-                    source.display()
-                ),
-                "%config-error skipped 1 unsupported tmux command: new-pane".to_owned(),
-            ];
+            let diagnostics = [format!(
+                "%config-error {}:4: unknown command: wibble",
+                source.display()
+            )];
             for diagnostic in &diagnostics {
                 assert!(stream.outside.contains(diagnostic), "{diagnostic}");
             }

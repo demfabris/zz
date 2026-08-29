@@ -758,114 +758,6 @@ const ALIASES: &[(&str, &str)] = &[
     ("pane-colors", "pane-colours"),
 ];
 
-pub const BEHAVES: &[&str] = &[
-    "base-index",
-    "pane-base-index",
-    "renumber-windows",
-    "default-size",
-    "window-size",
-    "aggressive-resize",
-    "history-limit",
-    "detach-on-destroy",
-    "prefix",
-    "mode-keys",
-    "key-table",
-    "prefix-timeout",
-    "repeat-time",
-    "initial-repeat-time",
-    "prompt-history-limit",
-    "history-file",
-    "word-separators",
-    "wrap-search",
-    "default-shell",
-    "default-command",
-    "default-terminal",
-    "remain-on-exit",
-    "focus-events",
-    "allow-passthrough",
-    "allow-set-title",
-    "cursor-style",
-    "cursor-colour",
-    "synchronize-panes",
-    "automatic-rename",
-    "automatic-rename-format",
-    "bell-action",
-    "visual-bell",
-    "display-time",
-    "display-panes-time",
-    "message-limit",
-    "buffer-limit",
-    "set-clipboard",
-    "copy-command",
-    "menu-border-lines",
-    "menu-border-style",
-    "menu-selected-style",
-    "menu-style",
-    "popup-border-lines",
-    "popup-border-style",
-    "popup-style",
-    "main-pane-width",
-    "main-pane-height",
-    "other-pane-width",
-    "other-pane-height",
-    "tiled-layout-max-columns",
-    "status",
-    "status-interval",
-    "status-left",
-    "status-right",
-    "status-left-length",
-    "status-right-length",
-    "status-left-style",
-    "status-right-style",
-    "status-style",
-    "status-bg",
-    "status-fg",
-    "status-format",
-    "status-justify",
-    "status-position",
-    "message-line",
-    "pane-status-style",
-    "pane-status-current-style",
-    "session-status-style",
-    "session-status-current-style",
-    "window-pane-status-format",
-    "window-pane-current-status-format",
-    "window-status-format",
-    "window-status-current-format",
-    "window-status-separator",
-    "window-status-style",
-    "window-status-current-style",
-    "window-status-last-style",
-    "window-status-bell-style",
-    "mouse",
-    "escape-time",
-    "set-titles",
-    "set-titles-string",
-    "command-alias",
-    "update-environment",
-    "exit-empty",
-    "exit-unattached",
-    "destroy-unattached",
-    "monitor-activity",
-    "monitor-bell",
-    "monitor-silence",
-    "activity-action",
-    "silence-action",
-    "visual-activity",
-    "visual-silence",
-    "window-status-activity-style",
-    "prefix2",
-    "display-panes-format",
-    "window-style",
-    "window-active-style",
-    "mode-style",
-    "pane-border-style",
-    "pane-active-border-style",
-    "copy-mode-match-style",
-    "copy-mode-current-match-style",
-    "copy-mode-mark-style",
-];
-
 const OPTION_TABLE_ORDER: &[&str] = &[
     "backspace",
     "buffer-limit",
@@ -1226,10 +1118,7 @@ pub(crate) fn parse_tmux_option(input: &str) -> Result<ParsedTmuxOption<'_>, ()>
 }
 
 pub(crate) fn match_tmux_option(input: &str) -> Result<Option<TmuxOption>, ()> {
-    let input = ALIASES
-        .iter()
-        .find_map(|(alias, name)| (*alias == input).then_some(*name))
-        .unwrap_or(input);
+    let input = exact_tmux_option_name(input);
     if let Some(exact) = tmux_options().find(|option| option.name == input) {
         return Ok(Some(exact));
     }
@@ -1241,6 +1130,37 @@ pub(crate) fn match_tmux_option(input: &str) -> Result<Option<TmuxOption>, ()> {
         return Err(());
     }
     Ok(Some(first))
+}
+
+pub(crate) fn exact_tmux_option(input: &str) -> Option<TmuxOption> {
+    let name = exact_tmux_option_name(input);
+    tmux_options().find(|option| option.name == name)
+}
+
+fn exact_tmux_option_name(input: &str) -> &str {
+    ALIASES
+        .iter()
+        .find_map(|(alias, name)| (*alias == input).then_some(*name))
+        .unwrap_or(input)
+}
+
+pub(crate) fn tmux_option_format_is_flag(name: &str) -> bool {
+    matches!(
+        name,
+        "aggressive-resize"
+            | "allow-set-title"
+            | "automatic-rename"
+            | "exit-empty"
+            | "exit-unattached"
+            | "focus-events"
+            | "monitor-activity"
+            | "monitor-bell"
+            | "mouse"
+            | "renumber-windows"
+            | "set-titles"
+            | "synchronize-panes"
+            | "wrap-search"
+    )
 }
 
 #[cfg(test)]
@@ -1364,16 +1284,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             (180..248).collect::<Vec<_>>()
         );
-    }
-
-    #[test]
-    fn behaving_option_roster_is_complete_unique_and_catalogued() {
-        assert_eq!(BEHAVES.len(), 105);
-        assert_eq!(BEHAVES.iter().copied().collect::<BTreeSet<_>>().len(), 105);
-        let catalog = tmux_options()
-            .map(|option| option.name)
-            .collect::<BTreeSet<_>>();
-        assert!(BEHAVES.iter().all(|name| catalog.contains(name)));
     }
 
     #[test]

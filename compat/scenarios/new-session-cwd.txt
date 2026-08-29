@@ -1,0 +1,10 @@
+new-session -d -s cwd-target -n target-window -c /
+select-pane -t =cwd-target:0.0 -T target-pane
+new-session -d -s cwd-source -n source-window -c /tmp
+select-pane -t =cwd-source:0.0 -T source-pane
+new-session -A -s cwd-target -c '/tmp/##{session_name}-#{window_name}-#{pane_title}'
+out: list-sessions -O name -f #{m:cwd-*,#{session_name}} -F [#{session_name}]|[#{session_path}]
+new-session -d -s cwd-fresh-empty -c ''
+out: display-message -p -t =cwd-fresh-empty:0 [#{session_path}]
+new-session -Ad -s cwd-miss-empty -c ''
+out: display-message -p -t =cwd-miss-empty:0 [#{session_path}]

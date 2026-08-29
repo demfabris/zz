@@ -1,0 +1,60 @@
+new-session -d -s other -n other
+new-window -d -t w: -n two
+split-window -d -t w:0
+set-option -s exit-empty off
+set-option -g status-left GLOBAL
+set-option -t w status-left SESSION_W
+set-environment -g status-left WRONG
+set-window-option -g automatic-rename off
+set-window-option -t w:1 automatic-rename on
+set-option -gp allow-set-title on
+set-option -p -t w:0.1 allow-set-title off
+out: display-message -p -t w:0.0 #{exit-empty}|#{status-left}|#{automatic-rename}|#{allow-set-title}|[#{exit-empt}]
+out: display-message -p -t w:0.1 #{exit-empty}|#{status-left}|#{automatic-rename}|#{allow-set-title}|[#{exit-empt}]
+out: display-message -p -t w:1.0 #{exit-empty}|#{status-left}|#{automatic-rename}|#{allow-set-title}|[#{exit-empt}]
+out: display-message -p -t other:0.0 #{exit-empty}|#{status-left}|#{automatic-rename}|#{allow-set-title}|[#{exit-empt}]
+set-option -s exit-empty on
+out: display-message -p -t w:0.0 #{exit-empty}
+set-option -s exit-empty off
+set-option -g status-right '#{session_name}'
+out: display-message -p -t other:0.0 [#{status-right}]|[#{E:status-right}]
+run-shell -t w:1.0 "tmux set-option -g @shell-local '#{automatic-rename}'"
+out: show-options -gqv @shell-local
+run-shell -t =missing "tmux set-option -g @shell-missing '#{automatic-rename}'"
+out: show-options -gqv @shell-missing
+run-shell -C -t w:1.0 "set-option -g @direct-local '#{automatic-rename}'"
+out: show-options -gqv @direct-local
+run-shell -C -t =missing "set-option -g @direct-missing '#{automatic-rename}'"
+out: show-options -gqv @direct-missing
+run-shell -C -t =missing "set-option @direct-context '#{automatic-rename}'"
+out: show-options -qv -t w @direct-context
+out: show-options -gqv @direct-context
+if-shell -F -t w:1.0 '#{automatic-rename}' 'set-option -g @if-local LOCAL' 'set-option -g @if-local WRONG'
+out: show-options -gqv @if-local
+if-shell -F -t =missing '#{automatic-rename}' 'set-option -g @if-missing WRONG' 'set-option -g @if-missing GLOBAL'
+out: show-options -gqv @if-missing
+if-shell -F -t =missing '#{automatic-rename}' 'set-option @if-context WRONG' 'set-option @if-context GLOBAL_VALUE'
+out: show-options -qv -t w @if-context
+out: show-options -gqv @if-context
+set-option -su 'command-alias[0]'
+set-option -su 'command-alias[1]'
+set-option -su 'command-alias[2]'
+set-option -su 'command-alias[3]'
+set-option -su 'command-alias[4]'
+set-option -su 'command-alias[5]'
+set-option -s 'command-alias[9]' NINE
+set-option -s 'command-alias[4]' FOUR
+set-option -s 'command-alias[named]' NAMED
+set-option -g 'status-format[7]' GLOBAL_STATUS
+set-option -t w 'status-format[9]' NINE
+set-option -t w 'status-format[4]' FOUR
+set-option -t w 'status-format[named]' NAMED
+set-option -g 'update-environment[7]' GLOBAL_ENV
+set-option -t w 'update-environment[9]' NINE
+set-option -t w 'update-environment[4]' FOUR
+set-option -t w 'update-environment[named]' NAMED
+out: display-message -p -t w:0.0 #{command-alias}|#{command-alias[4]}|#{command-alias[9]}|#{command-alias[named]}|[#{command-alias[missing]}]
+out: display-message -p -t w:0.0 #{status-format}|#{status-format[4]}|#{status-format[9]}|#{status-format[named]}|[#{status-format[7]}]|[#{status-format[missing]}]
+out: display-message -p -t other:0.0 [#{status-format[7]}]|[#{status-format[missing]}]
+out: display-message -p -t w:0.0 #{update-environment}|#{update-environment[4]}|#{update-environment[9]}|#{update-environment[named]}|[#{update-environment[7]}]|[#{update-environment[missing]}]
+out: display-message -p -t other:0.0 [#{update-environment[7]}]|[#{update-environment[missing]}]

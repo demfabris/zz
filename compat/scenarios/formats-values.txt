@@ -13,6 +13,33 @@ new-window -d -t w -c /tmp -n cw
 fmt: #{W:#{window_name}=#{pane_current_path};,}
 new-session -d -s path-tmp -c /tmp
 new-session -d -s path-parent -c /tmp/..
+fmt: session-active-default=[#{session_active}]
 out: display-message -p -t =path-tmp:0 #{session_name}:#{session_path}
 out: display-message -p -t =path-parent:0 #{session_name}:#{session_path}
+out: display-message -p -t =path-tmp:0 session-active-target=[#{session_active}]
+out: list-commands -F #{command_list_name}=[#{session_active}]:#{S:normal,active} display-message
+out: list-keys -1 -T prefix -F #{key_string}=[#{session_active}] c
 out: list-sessions -O name -f #{m:path-*,#{session_name}} -F #{session_name}:#{session_path}
+out: list-sessions -O name -f #{==:#{session_active},} -F #{session_name}=[#{session_active}]
+out: list-sessions -O name -f #{session_active} -F #{session_name}
+out: list-windows -t =path-tmp -O index -f #{==:#{session_active},} -F #{window_index}=[#{session_active}]
+out: list-windows -t =path-tmp -O index -f #{session_active} -F #{window_index}
+out: list-panes -t =path-tmp:0 -O index -f #{==:#{session_active},} -F #{pane_index}=[#{session_active}]
+out: list-panes -t =path-tmp:0 -O index -f #{session_active} -F #{pane_index}
+new-window -d -t w: -n activity-quiet -- sleep 300
+out: display-message -p -t w:activity-quiet activity-created=#{?window_activity,set,unset}
+out: set-window-option -F -t w:activity-quiet @activity-captured #{window_activity}
+run-shell "sleep 1.1"
+select-window -t w:activity-quiet
+out: display-message -p -t w:activity-quiet selected=#{!=:#{window_activity},#{@activity-captured}}
+out: set-window-option -F -t w:activity-quiet @activity-captured #{window_activity}
+run-shell "sleep 1.1"
+select-window -t w:activity-quiet
+split-window -d -t w:activity-quiet cat
+select-pane -t w:activity-quiet.1
+select-layout -t w:activity-quiet even-horizontal
+out: display-message -p -t w:activity-quiet structural-noop=#{==:#{window_activity},#{@activity-captured}}
+run-shell "sleep 1.1"
+send-keys -t w:activity-quiet.1 -l ping
+run-shell "sleep 0.2"
+out: display-message -p -t w:activity-quiet output=#{!=:#{window_activity},#{@activity-captured}}

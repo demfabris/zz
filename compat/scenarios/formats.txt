@@ -10,3 +10,7 @@ fmt: #{m:*/main,#{window_name}}|#{m/ri:MAIN,#{window_name}}
 fmt: #{E:window_name}|#{T;=/12/...:window_name}
 fmt: before#{not_a_tmux_variable}after|before#{z:window_name}after
 fmt: #{=/4/...:window_name}|#{=-4:window_name}
+fmt: #{R:x,3}|#{R:#{session_name},2}|#{R:a#,,2}|#{R:x,#{e|+|:1,2}}
+fmt: [#{R:x,0}][#{R:x,-1}][#{R:x,10001}][#{R:x,bad}][#{R:x,2 }]
+fmt: #{n:#{R:x,300}}|#{n;R:x,3}|#{R;=/2:x,3}
+fmt: before#{R:x}after

@@ -1,17 +1,45 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **PAUSED BY USER AFTER DELIVERED SLICE 10V**
+> Campaign state: **AUTHORIZED 2026-08-29 CHECKPOINT FORMED THROUGH SLICE 10AG; KILL-SERVER RESPONSE ORDER NEXT**
 >
-> Tracker resolution progress: **64.4% (125 of 194 known groups)**
+> Tracker resolution progress: **68.0% (138 of 203 known groups)**
 >
-> Audited committed base: **2026-08-28** at `009c1a79f549b4590500a8830df99425d9c3e723`
+> Audited committed base: **2026-08-29** at `bbea66a347b19ff40e3b4f14699793bd0017f00b`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
 without reconstructing the history from chat.
 
-Fabrico paused the campaign after slice 10v. Do not rerank the registry, freeze another slice, or
-start successor work until he asks to resume.
+Fabrico resumed the campaign after slice 10v. Slice 10w closes the `R` repeat format modifier
+already consumed by zz's default second and third status rows. Slice 10x closes the two retained-cwd
+edges for `new-session -A -c` and fresh explicit-empty `new-session -c ''`. Slice 10y closes the
+config and source replay alias snapshot. Slice 10z constructs each config or source file before any
+of its commands run. The same rerank also closed `hooks.queue`: pinned tmux registers
+`after-queue`, but ordinary queues never produce it automatically. Slice 10aa closes
+`format:session_active` with explicit no-client, unattached-client, and attached-session states
+while preserving separate raw invoking and selected target format clients. Slice 10ab closes
+`format:window_activity` with a Unix-second timestamp distinct from zz's logical window-order
+counter. Slice 10ac closes clean command and status job environments for shell-form `run-shell`,
+shell-form `if-shell`, and status `#()`. Slice 10ad moves the unchanged 105-name option-consumer
+roster beside command behavior and guards its exact partition against all 180 pinned options and
+75 live option gaps. Slice 10ae closes complete option-name format coverage across mux and daemon
+format producers. Slice
+10af closes positive-delay shell-form `run-shell` environment timing. Scheduling
+retains command, target, expanded argument, and cwd context; child launch reads current global,
+original-session, terminal, and startup state. Focused daemon coverage proves foreground timing,
+and the three-step background differential now completes twelve checks per engine with no differing
+channel. Slice 10ag closes startup initial-client cwd. A cold auto-spawned daemon receives the
+launcher's bounded UTF-8 cwd through a private argument, uses it only for startup config replay,
+then clears it before ordinary client commands. The isolated startup-client-cwd differential passes
+exactly on both engines. The full eight-case startup diagnostic reaches a separate Control
+exit difference: zz may drain queued shell-prompt `%output` after the flags-0 guard, while pinned
+tmux discards it before `%exit`. A rerank then exposed a higher-priority shutdown race: `kill-server`
+can close a client mailbox before its successful response is admitted. That response-order item is
+the only `next` group; pane-output discard is frozen as slice 10ai. The persisted accepted slice
+10ag artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two approved
+GEO rows, every other channel clean, and SHA-256
+`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Slices 10w through 10ag
+form the authorized 2026-08-29 checkpoint.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -37,17 +65,17 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Audited committed base | `009c1a79f549b4590500a8830df99425d9c3e723` |
-| Delivery | Local `main` contains the delivered 10v milestone; `origin/main` remains at `7cad19e` until an explicit push |
+| Audited committed base | `bbea66a347b19ff40e3b4f14699793bd0017f00b` |
+| Delivery | Local and remote `main` contain the delivered 10v milestone; slices 10w through 10ag plus the hook reclassification form the authorized 2026-08-29 checkpoint |
 | Dedicated campaign worktree | Removed after delivery on 2026-08-28 |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10v is delivered and closed; Fabrico paused the campaign before any rerank or next-slice selection |
-| Live registry | 91 active groups, 595 active items, 103 closed records |
-| Active status | 49 open, 20 blocked, 22 accepted |
+| Campaign point | Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`; slice 10ah is frozen under `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`, followed by 10ai under `control-mode.exit-pane-output` |
+| Live registry | 87 active groups, 594 active items, 116 closed records |
+| Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The delivered 10v milestone descends from the committed freeze above. Resolve the commit
+The delivered 10v milestone is the committed base above. Resolve the commit
 containing the latest tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -60,7 +88,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(103 + 22) / (103 + 91) = 125 / 194 = 64.4%
+(116 + 22) / (116 + 87) = 138 / 203 = 68.0%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -152,33 +180,74 @@ Work one bounded milestone at a time:
    current task authorizes commits.
 9. Never push unless Fabrico explicitly asks.
 
-Fabrico's explicit post-10v pause suspends the earlier standing authority to continue into another
-slice. Milestone commits and pushes still require the authority stated in the current task.
+The 2026-08-29 request resumed the campaign through slices 10w, 10x, 10y, 10z, 10aa, 10ab, 10ac,
+10ad, 10ae, 10af, and 10ag, and closed the false `after-queue` producer gap. Slice 10af closes
+positive-delay `run-shell` environment timing. Slice 10ag closes cold startup initial-client cwd.
+Slices 10w through 10ag form the authorized 2026-08-29 checkpoint.
 
-## Accepted evidence retained through 10v
+## Persisted acceptance evidence for 10ag
 
-Slice 10t adds five focused steps to the existing `formats-values` scenario and refreshes the full
-differential-plus-attached checkpoint:
+Slice 10z adds the two-step `smoke/config-chain-parse-abort` scenario. Slice 10aa extends
+`formats-values` from 26 to 28 steps. Slice 10ab extends that row to 45 steps. Slice 10ac adds the
+three-step `smoke/jobs-command-environment` scenario. Slice 10ad adds no differential work. Slice
+10ae adds the 60-step `option-name-formats` scenario. Slices 10af and 10ag keep the scenario and step
+counts unchanged while refreshing the full differential and attached checkpoint:
 
 | Evidence | Result |
 | --- | --- |
-| Differential scenarios | 98 |
-| Differential steps | 1,522 |
+| Differential scenarios | 103 |
+| Differential steps | 1,630 |
 | Ordinary rows | All clean |
 | Registered differences | One GEO cell in each of two named known rows; every other channel clean |
 | Attached-client fixture | `PASS` |
-| Summary SHA-256 | `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432` |
+| Summary SHA-256 | `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313` |
 | Stored-artifact check | `compat/run.sh --check-summary` passes |
 
-`compat/run.sh --strict-geometry --attached-client` completed on the final 10t code and fixture
-tree. All 98 scenarios and 1,522 steps ran, the two registered geometry rows matched their exact
+`compat/run.sh --attached-client` completed on the final 10ag code and fixture
+tree. All 103 scenarios and 1,630 steps ran, the two registered geometry rows matched their exact
 tuples, the attached-client fixture passed, and the stored summary check confirmed the digest
 above. The fixture retains the 10q mixed-client destruction case:
 the flagged client survives on the newest remaining session, while its unflagged peer exits, on zz
 and pinned tmux alike. The complete fixture also passed independently under `LC_ALL=C`, retaining
 the repaired 10p full-frame and focus proof. Slice 10q adds no differential scenario or step and
-does not change the digest. Focused package tests, affected clippy, formatting, tracker and OKF
-validation, shell syntax, and diff checks also passed.
+does not change the digest. Slice 10ag validation passes the complete zz package at 653 unit tests
+plus 113 CLI binary tests, and the serialized daemon package at 736 unit tests plus two active agent
+integrations; one long soak remains ignored. The all-feature workspace run excluding the daemon,
+full workspace clippy, and `cargo fmt --check` pass. The artifact and digest above describe the
+authorized 2026-08-29 checkpoint through slice 10ag.
+Slice 10ad changes no runtime path, protocol, snapshot, scenario, step, attached fixture, or digest.
+Its compatibility gate passes 445 mux tests plus the three required daemon inventory tests. The
+complete workspace tests and clippy, formatting, tracker, summary, and diff checks also pass.
+
+Slice 10ae adds the focused 60-step `option-name-formats` differential. It reports zero topology,
+geometry, format, output, or warning differences. The attached-client fixture passes its live
+status option probe. Focused mux and daemon tests cover all 105 names, all four option scopes,
+arrays, target selection, missing targets, loops, direct daemon producers, and detached status
+refresh. `just compat-check` passes 452 mux tests plus the three required daemon inventory tests.
+The slice changes no protocol, wire snapshot, or native GUI styling. The accepted 103-scenario,
+1,630-step artifact includes the focused 10ae row and carries the digest above.
+
+Slice 10af keeps `smoke/jobs-command-environment` at three harness steps and expands its background
+fixture from eight to twelve checks per engine. It covers a live target, a destroyed target followed
+by same-name recreation, a missing target followed by creation, and a timer that crosses startup
+completion. Those cases prove frozen formats, numeric arguments, target identity, and cwd together
+with launch-time global state, original-session state, `default-terminal`, and the startup TERM
+gate. The focused row reports zero topology, geometry, format, output, or warning differences.
+Daemon coverage proves the foreground path by waiting for `active_shell_jobs` before it mutates the
+environment, then checking the delayed child. Mux coverage proves that retained session handles
+follow the original session after destruction and observe later writes when the session started
+without an overlay. Focused validation, `cargo build -p zz`, strict workspace clippy, formatting,
+and `just compat-check` pass. The full 103-scenario, 1,630-step differential and attached-client run
+also pass on the final 10af runtime. The two registered GEO rows retain their exact tuples, every
+other channel is clean, and the summary keeps the digest above.
+
+The ten new `new-session-cwd` steps prove that an existing `new-session -A -c` target receives one
+format expansion in its resolved session, window, pane, and invoking-client context. An escaped
+hash remains literal, and the source session keeps its cwd. Fresh creation and an `-A` miss retain
+an empty session path when the command supplies `-c ''`. Focused mux and daemon tests add
+clientless inert behavior, permitted Control attach, a nonnested headless terminal-open failure
+that retains the cwd mutation, and nested Interactive, Control, and `-A -d` refusals before
+expansion, retargeting, or mutation. The slice changes no protocol or snapshot.
 
 The five new differential steps create two detached sessions with `/tmp` and lexical `/tmp/..`,
 then prove two targeted displays and one deterministic filtered list return the selected session's
@@ -223,7 +292,7 @@ uninterrupted 712-test daemon-package process.
 
 ## Shipped history
 
-The 103 entries under the generated report's
+The 115 entries under the generated report's
 [`Closed history`](knowledge/tmux/gaps.md#closed-history) section are the complete item-level record.
 The table below is the milestone rollup an agent needs for orientation.
 
@@ -269,7 +338,20 @@ The table below is the milestone rollup an agent needs for orientation.
 | 10s | Nonconstant global-format behavior partition under `tracker.nonconstant-format-behavior` | `8e0ef67` |
 | 10t | Target-session path format under `formats.session-path` | `0da518e` |
 | 10u | Warm command-group argument preflight under `mux.command-group-argument-parse-abort` | `a91128c` |
-| 10v | Source-owned format producer and modifier registration under `tracker.format-vocabulary-registration` | Delivered 2026-08-28; resolve the milestone commit with `git log` |
+| 10v | Source-owned format producer and modifier registration under `tracker.format-vocabulary-registration` | `bbea66a` |
+| Registry correction | Already-shipped whole-file parser abort recorded under `config.parser-abort` | Included in authorized 2026-08-29 checkpoint |
+| 10w | `R` repeat format modifier under `formats.repeat-modifier` | Included in authorized 2026-08-29 checkpoint |
+| 10x | Existing-attach and explicit-empty cwd behavior under `sessions.new-session-attach-cwd` | Included in authorized 2026-08-29 checkpoint |
+| 10y | Config and source replay alias snapshot under `aliases.config-parse-unit` | Included in authorized 2026-08-29 checkpoint |
+| 10z | Config and source file-unit construction under `mux.chain-parse-abort` | Included in authorized 2026-08-29 checkpoint |
+| Registry correction | Explicit-only `after-queue` recorded under `hooks.queue` | Included in authorized 2026-08-29 checkpoint |
+| 10aa | Three-state session-active client context under `formats.session-runtime` | Included in authorized 2026-08-29 checkpoint |
+| 10ab | Window activity timestamp under `formats.window-activity-time` | Included in authorized 2026-08-29 checkpoint |
+| 10ac | Clean command and status job environment under `jobs.command-status-environment` | Included in authorized 2026-08-29 checkpoint |
+| 10ad | Option-consumer source registration under `tracker.semantic-coverage` | Included in authorized 2026-08-29 checkpoint; runtime-neutral |
+| 10ae | Complete option-name format coverage under `options.option-name-format-coverage` | Included in authorized 2026-08-29 checkpoint |
+| 10af | Positive-delay run-shell environment timing under `jobs.run-shell-positive-delay-environment` | Included in authorized 2026-08-29 checkpoint |
+| 10ag | Startup initial-client cwd under `source-file.startup-client-cwd` | Included in authorized 2026-08-29 checkpoint; isolated differential exact |
 
 `10j/10k` is one deliberate milestone because both commands use the same callback implementation
 and attached proof. Slice 10l records source ownership without changing runtime behavior. The count
@@ -444,8 +526,9 @@ source provenance, non-UTF-8 path policy, format vocabulary, or other format val
 Review also exposed two separate cwd-mutation mismatches. Pinned `new-session -A -c` delegates an
 existing target to attach handling and replaces that session's cwd, while an explicitly empty `-c`
 on fresh creation remains an empty session cwd. zz returns from its existing-session branch before
-applying `-c` and collapses an empty fresh value to omitted. The new
-`sessions.new-session-attach-cwd` group owns both silent mismatches; 10t changes neither.
+applying `-c` and collapses an empty fresh value to omitted. At the 10t checkpoint,
+`sessions.new-session-attach-cwd` owned both silent mismatches; 10t changed
+neither. Slice 10x closes both paths below.
 
 ## Completed slice: 10u warm command-group argument preflight
 
@@ -518,33 +601,370 @@ families split into 8 implemented families and 2 active gaps. The parser owns 30
 daemon-owned literal pairs and the run-shell positional family against their production consumers.
 The mux gate rejects duplicate, stale, missing, or unclassified registrations.
 
-Runtime work remains under three successor groups. `formats.context-producer-fidelity` (`adopt`,
-open) owns the 41 missing literal pairs plus `current_file` and `next_@*` or `prev_@*` user-option
-families. `formats.modifier-fidelity` (`adopt`, open) owns the six missing tokens. The accepted
-native partition stays under `formats.native-typed-context-producers` (`native`, accepted).
+The post-10v rerank split `R` into `formats.repeat-modifier`, which slice 10w later closed. The
+remaining `w`, `I`, `L`, `O`, and `V` tokens stay under `formats.modifier-fidelity`.
+`formats.context-producer-fidelity` owns the 41 missing literal pairs plus `current_file` and
+`next_@*` or `prev_@*` user-option families. The accepted native partition stays under
+`formats.native-typed-context-producers`.
 
 This registration changes no format value, protocol, snapshot, scenario, or accepted artifact. It
 does not register option consumers or touch cwd, `session_active`, config replay, or startup
 provenance. The accepted checkpoint remains 98 scenarios, 1,522 steps, attached-client `PASS`, and
 SHA-256 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 
-Fabrico paused the campaign after 10v. No post-10v rerank ran, and no next slice is selected.
+## Registry correction before 10w
 
-## Unranked candidate queue after 10v
+The rerank found that `semantic:config-parse-abort` described behavior already implemented and
+tested. The parser clears the file's command list on its first diagnostic, stops scanning, keeps
+only assignments reduced before that error, and suppresses later diagnostics. The item moved from
+`config.parser-edge-cases` into closed history as `config.parser-abort`. The remaining group covers
+post-closing-quote tilde expansion plus passwd-backed bare and named-user lookup. This is a ledger
+correction with no runtime or accepted-artifact change.
 
-The table preserves the pre-pause forecast. It does not select a next slice. Run a full live rerank
-only after Fabrico resumes the campaign.
+## Completed slice: 10w repeat format modifier
 
-| Order | Forecast owner | Boundary |
-| --- | --- | --- |
-| 1 | Source-classified format owners | Rerank `formats.modifier-fidelity` and `formats.context-producer-fidelity` before choosing an implementation |
-| 2 | `sessions.new-session-attach-cwd` | Align existing `-A -c` and explicit-empty cwd without leaking through post-execution nested refusal |
-| 3 | `aliases.config-parse-unit` | Freeze one alias snapshot while constructing a config or source replay unit |
-| 4 | `config.parser-edge-cases/semantic:config-parse-abort` | Preserve pinned whole-file abort behavior before a later config statement mutates state |
-| 5 | `mux.chain-parse-abort/semantic:config-source-group-parse-abort` | Construct and validate the parser-owned replay group before effects |
-| 6 | `semantic:tracker-option-consumer-registration` | Replace the manually asserted option-consumer roster with source ownership |
-| 7 | `formats.session-runtime/format:session_active` | Model no client, unattached client, and attached session across every format producer |
-| 8 | `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd` | Carry launching cwd through the private cold-bootstrap provenance seam |
+Slice 10w closed `formats.repeat-modifier/semantic:format-modifier-repeat`:
+
+- `R` splits its body at the first top-level comma, then recursively expands the repeated value and
+  count;
+- counts from 1 through 10,000 repeat the value, while a missing separator, invalid count, zero,
+  negative count, or oversized count follows the pinned empty or failure result;
+- nested modifiers, an escaped comma, and post-repeat transformations preserve pinned evaluation
+  order;
+- zz's shipped `P:` and `S:` status rows use the modifier to indent by the byte length reported by
+  `n` for the session name without exposing literal `R` syntax;
+- `R` moved into the implemented modifier roster, taking it from 30 of 36 to 31 of 36, while exact
+  items for `w`, `I`, `L`, `O`, and `V` remain active;
+- nested repeat amplification over 40,960,000 intermediate bytes fails before allocation, replacing
+  the pin's time budget with a deterministic safety bound.
+
+The slice excludes display-cell width, client interrogation, client loops, option loops,
+environment loops, format-context producers, protocol changes, and daemon state modeling.
+Focused mux tests, a direct status-row proof, and the clean 16-step pinned `formats` differential
+cover the contract. The full 98-scenario, 1,526-step strict run and attached-client fixture pass
+with summary SHA-256 `f2aa32e0935e8a839c0abcd43da85e0f474d6c191421776847f7a464cc7257ff`.
+
+## Completed slice: 10x new-session cwd edges
+
+Slice 10x closed `sessions.new-session-attach-cwd` and its two items,
+`semantic:new-session-attach-existing-cwd` and `semantic:new-session-explicit-empty-cwd`:
+
+- an existing `new-session -A` target now uses the same retarget and cwd path as
+  `attach-session`;
+- `-c` expands once after the engine resolves the target session, window, and pane, while the
+  invoking client supplies its client context;
+- the engine stores the target cwd before a nonnested terminal-open preflight, so a headless
+  failure retains the mutation;
+- clientless calls stay inert, and a permitted Control client attaches and updates the target;
+- nested Interactive, Control, and `-A -d` calls refuse before window or pane selection, format
+  expansion, retargeting, or mutation;
+- fresh creation and an `-A` miss retain an empty session cwd when `-c` expands to empty, while the
+  initial pane still uses the existing donor or caller fallback;
+- omitted `-c` keeps its prior inheritance behavior.
+
+The ten-step `new-session-cwd` scenario covers one-pass target-context expansion, escaped hashes,
+source-session isolation, fresh explicit-empty creation, and an explicit-empty `-A` miss. Focused
+mux and daemon tests cover the remaining client and failure-order branches. The full 99-scenario,
+1,536-step strict run and attached-client fixture pass with summary SHA-256
+`ed1422d318298b2fee9c31c160393cc2709b9d9137705e96c2632cc700cdcd01`.
+
+## Completed slice: 10y config replay alias snapshot
+
+Slice 10y closed `aliases.config-parse-unit`:
+
+- config construction stores each original invocation beside its alias-expanded command or
+  preparation error before replay begins;
+- the daemon parses one file, applies that file's environment assignments, and prepares every
+  command under one engine lock, so a replayed alias mutation cannot change a later same-line or
+  later-line invocation from that file;
+- startup roots finish construction before startup replay, and one top-level `source-file`
+  invocation constructs all matched files before replaying the batch;
+- a nested source receives a fresh snapshot when its parent source command runs, so the child sees
+  alias changes replayed before that nested invocation;
+- stored preparation errors stay deferred to their original replay positions and retain their
+  source and physical-group metadata;
+- Control warning-versus-guard classification is frozen with the stored error, preventing an
+  earlier replayed alias mutation from changing how the later diagnostic is published;
+- `source-file -n` keeps its existing no-effect behavior, including suppression of stored alias
+  preparation errors.
+
+Four focused daemon tests cover startup roots, same-file mutation, file environment timing,
+multi-file batches, nested refresh, parse-only behavior, deferred errors, and Control diagnostic
+classification. The two-step `smoke/config-alias-parse-unit` differential matches the pin in every
+comparison channel. The full 100-scenario, 1,538-step strict run and attached-client fixture pass
+with summary SHA-256
+`8d53288c8050e5c8cf7f19e6c81687f91544877d32ea4de9f7d40ea2934736b7`.
+
+The slice changes no protocol. At the 10y checkpoint it did not close empty or multi-command alias
+bodies, generic alias recursion, or eager name, flag, arity, callback, and nested-child
+construction. Slice 10z below closes that last construction boundary, including validation under
+`source-file -n`.
+
+## Completed slice: 10z config and source construction
+
+Slice 10z closed `mux.chain-parse-abort`:
+
+- each config file now parses, applies permitted bare environment assignments, expands aliases,
+  and validates every command group before any command from that file runs;
+- the first construction failure preserves earlier bare assignments and discards every command
+  effect from that file;
+- `source-file -n` performs the same validation against the environment from before that file and
+  applies neither assignments nor commands;
+- startup roots and files matched by one source invocation remain independent construction units,
+  processed in path order before replay, so one invalid file loses only its own commands and later
+  files continue;
+- a nested child gets a fresh construction snapshot; failure drops that child while the parent
+  continues with later physical groups;
+- runtime target and effect errors keep sequential behavior and prune only their physical group;
+- Control emits one located `%config-error` without a failed-command guard, and delays construction
+  warnings until the complete sibling batch has replayed;
+- verbose output retains completed physical groups and successful alias-subparse traces before the
+  first failure, including parse-only input.
+
+Parser, command, and daemon regressions cover assignment timing, alias snapshots, parse-only input,
+startup roots, sibling files, nested children, Control ordering, verbose traces, and the runtime
+contrast. The two-step `smoke/config-chain-parse-abort` differential matches the pin in every
+comparison channel. The full 101-scenario, 1,540-step strict run and attached fixture pass with
+summary SHA-256
+`afd1fdf9a79e06f449e8c43abd63b14a2a4968338110223750d4171889c34aaf`.
+
+The slice changes no protocol. Recognized unsupported `choose-client` and `switch-mode` typed
+positions, multi-command aliases, non-UTF-8 config bytes, and source stdin retain their existing
+owners.
+
+The same evidence pass closed `hooks.queue`. Pinned tmux stores `after-queue` but has no automatic
+queue-completion producer. Ordinary single-command and multi-command queues leave it untouched;
+`set-hook -R after-queue` runs the stored hook once. The daemon inventory now divides all 68 pinned
+names into 64 automatic producers, explicit-only `after-queue`, and three active pane-event gaps.
+The existing three-step `smoke/args-parse-set-hook` differential proves those rules without a
+runtime or protocol change.
+
+## Completed slice: 10aa session-active client context
+
+Slice 10aa closes `formats.session-runtime/format:session_active`. The format table now has 94
+direct mux values, 32 daemon-delegated values, and 72 active constant-backed gaps across the 198
+pinned names.
+
+`FormatClient` represents the three pinned states as `NoClient`, `Unattached`, and
+`Attached(SessionId)`. `ExecutionContext::format_client()` derives the raw invoking client from its
+terminal and attachment state. `ExecutionContext::target_format_client()` overlays the current or
+explicitly selected target client when a producer expands against that client. The daemon resolves
+that target before mux execution without replacing the raw client, because one command can use the
+invoker for a name or cwd expansion and the selected client for `session_active`.
+
+Clientless list and filter rows, chooser rows, and `list-commands` keep `NoClient`. Target-aware
+command formats, deferred pane output, shell callbacks, buffer paths, capture boundaries, popup and
+menu text, `list-keys`, status rows, Control subscriptions, and display-panes labels receive the
+selected client state. `MuxEffect::PaneFormatOutput` carries that exact state through terminal
+identity waits. Fresh `new-session -c` expands its stored session cwd and initial pane cwd as two
+independent uses of the original format. A non-detached `new-session -P` expands after attachment;
+detached creation retains the invoker's raw state.
+
+Focused mux and daemon tests cover the reachable empty, false, and true branches. The final facts
+audit proves that `client_*` values and `session_active` use the same selected client across unit,
+source-file, `run-shell`, `if-shell`, per-client snapshot, and attached-client fixture paths. The
+28-step `formats-values` row passes, and the complete 101-scenario, 1,550-step checkpoint passes
+with attached-client `PASS` and SHA-256
+`bc0f6ad0fb52d35b6e2e20869d896174ac06b6cb12243e03bcf13e7536134119`. The implementation changes
+no protocol or snapshot field.
+
+## Completed slice: 10ab window activity timestamp
+
+Slice 10ab closes `formats.window-activity-time/format:window_activity`. Each window now stores an
+optional Unix-second `activity_time` beside the existing logical `Window.activity` counter. Window
+creation, parsed nonempty pane output, and the pinned current-window transition paths refresh both
+values from the injected engine clock. Same-window selection, pane selection, pane creation,
+splits, and layout-only changes without output leave the timestamp alone. Move and swap retain
+their pinned transition details.
+
+The independent audit found one direct daemon path that changed a current window without first
+refreshing the injected clock. `switch-client` now updates the engine clock before its selection.
+The direct Time backing expands empty without a window and preserves the stored seconds through
+plain, boolean, comparison, list-row, and time-modified forms. The 198-name partition now contains
+95 direct mux values, 32 daemon-delegated values, and 71 active gaps. The implementation changes no
+protocol or snapshot field.
+
+The 45-step `formats-values` row proves deterministic creation values, target isolation, actual
+selection changes, same-window and output-free no-op paths, and parsed nonempty output. The complete
+101-scenario, 1,567-step checkpoint passes with attached-client `PASS` and SHA-256
+`309aed0df108abd93e50f2073af7df5991d266c25e55dd266f0c8fc7f412ad72`.
+
+## Completed slice: 10ac command and status job environment
+
+Slice 10ac closes
+`jobs.command-status-environment/semantic:shell-job-clean-environment`. Shell-form `run-shell` and
+shell-form `if-shell` start children from an empty process environment, apply the modeled global
+overlay, then apply the selected session overlay when a session exists. Status `#()` starts from
+the same clean base and applies the global overlay only. An explicit missing `-t` target leaves a
+command job sessionless, so it receives only the global overlay.
+
+Hidden entries and unset markers do not enter the child. A visible modeled `TMUX_PANE` value
+survives, but zz does not invent or delete one. After startup, all three paths set `TERM` from
+`default-terminal`, `TERM_PROGRAM=tmux`, `TERM_PROGRAM_VERSION=3.8-zz`, and
+`COLORTERM=truecolor`. Startup command jobs preserve the modeled TERM family instead of adding
+post-startup values. `TMUX` uses `socket,pid,session` for session jobs and `socket,pid,-1` for
+sessionless and status jobs. The private tmux executable remains first on PATH using the modeled
+PATH value, and stale private startup variables are removed before the current invocation adds its
+own values.
+
+The three-step `smoke/jobs-command-environment` row runs eight internal assertions for inherited
+canary removal, overlay order, hidden and unset handling, target loss, terminal identity, modeled
+`TMUX_PANE`, and cold versus completed startup. The attached fixture proves the global-only status
+path. The complete 102-scenario, 1,570-step checkpoint passes with attached-client `PASS`, exactly
+the two registered GEO rows, and SHA-256
+`542f7187cb0600c1e28df592c0497aaa90aa8c71c9f07ae3bf76030e54964016`.
+
+Delayed `run-shell` environment timing, `copy-pipe` job environments, popup job environments, and
+status `#()` cwd remain active. Pinned status jobs use the attached session cwd; zz still uses
+`pane_current_path`. Command-form `run-shell -C` and format-condition `if-shell -F` do not spawn
+shell jobs and remain outside this environment closure.
+
+## Completed slice: 10ad option-consumer source registration
+
+Slice 10ad closes
+`tracker.semantic-coverage/semantic:tracker-option-consumer-registration`. The unchanged 105-name
+option behavior roster now lives in `command::TMUX_OPTION_CONSUMERS` beside mux command and
+accessor behavior instead of beside the 180 storage definitions in `tmux_options`. The public
+`BEHAVES` alias remains available.
+
+The required exact manifest test proves that the pin and live catalog contain the same 180 unique
+option names. It also proves that 105 unique catalogued names belong to the consumer roster, 75
+names retain active `option:` gaps, the two sets do not overlap, and their union exhausts the
+catalog. The test requires the active discovery item and group to be absent and the closed record
+to exist. `copy-mode-mark-style` belongs to the roster only because status option-variable
+expansion consumes it; this closure makes no visual mark-rendering claim.
+
+The slice changes no runtime behavior, oracle, protocol, snapshot, scenario, attached proof, or
+accepted artifact. `just compat-check` passes 445 mux tests plus the three required daemon
+inventory tests. The full workspace tests and clippy, formatting, tracker, summary, and diff checks
+pass. The registry now has 85 active groups, 592 active items, and 113 closed records: 43 open, 20
+blocked, and 22 accepted, resolving 135 of 198 groups (68.2%).
+
+## Completed slice: 10ae option-name format coverage
+
+Slice 10ae closes
+`options.option-name-format-coverage/semantic:option-name-format-coverage`. The format expander now
+checks the exact 105-name option roster before format-table names, command-item facts, and
+environment values. Exact option names and legacy aliases resolve; command prefixes do not.
+
+The roster contains 13 server, 42 session, 40 window, and 10 pane consumers. Server, session,
+window, and pane lookups use the selected target and pinned inheritance chain. Active child state,
+attached-client fallback, explicit missing targets, and `S`, `W`, and `P` loop retargeting use the
+same resolver. Flags render as `0` or `1`; other types keep their tmux spelling.
+
+`command-alias`, `status-format`, and `update-environment` support whole-array and indexed lookup.
+Whole arrays emit numeric entries before named entries. Numeric indices normalize leading zeroes;
+malformed, missing, and overflowing indices expand empty. A local array shadows the inherited array
+as one unit. Live mux formats read current option state. Every direct daemon format producer calls
+the same live resolver. Detached status builds one all-scope option snapshot per refresh batch and
+shares it across the client rows in that batch.
+
+Missing-target shell-form `run-shell` and `if-shell` read global option values for `-C` insertion
+and `-F` branch selection. Their inserted command or selected branch keeps the caller execution
+context. The focused 60-step `option-name-formats` row has zero differential channels, and the
+attached status probe passes. Exhaustive mux and daemon tests cover the roster, scope counts,
+arrays, targets, loops, producer inventory, and detached refresh sharing. The implementation changes
+no protocol, wire snapshot, or native GUI styling.
+
+## Completed slice: 10af positive-delay run-shell environment timing
+
+Slice 10af closes
+`jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
+The scope covers shell-form `run-shell` with an explicit numeric `-d` greater than zero in
+foreground and background forms. The scheduler retains command text, target identity and numeric
+session id, expanded text and numeric arguments, and the cwd string. When the timer expires, the
+child reads current global state, the original session environment, `default-terminal`, and the
+startup TERM gate, then checks whether the retained cwd still exists.
+
+A live original session contributes writes made after scheduling. Destroying that session does not
+discard its retained environment, and a new session with the same name cannot replace it. A target
+missing at scheduling remains global-only with a `TMUX` suffix of `-1` if a matching session appears
+before launch. Session handles also cover sessions that had no overlay when the job started, so a
+later session write reaches the delayed child.
+
+The foreground daemon regression waits until `active_shell_jobs` reports the scheduled job, mutates
+the modeled state, and checks the delayed child after completion. A second daemon regression covers
+destroyed and recreated targets plus missing and later-created targets. The mux regressions prove
+retained original-session identity and writes into an initially empty overlay. The background
+three-step differential completes twelve checks per engine across live, destroyed and recreated,
+missing and later-created, and startup-crossing cases. It reports no differing channel. The slice
+changes no wire protocol or snapshot field.
+
+`run-shell -C`, `if-shell`, absent `-d`, `-d 0`, immediate background ordering, cwd producer
+selection, `copy-pipe`, and popup jobs retain their separate owners. The full 103-scenario,
+1,630-step corpus and attached-client fixture pass on the final 10af runtime. The two registered GEO
+rows remain bounded, every other channel is clean, and the summary digest remains
+`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`.
+
+## Completed slice: 10ag startup initial-client cwd
+
+Slice 10ag closes
+`source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`. The launcher
+captures an absolute UTF-8 cwd only when it can represent it within the existing 16 KiB bound and
+passes it through private `--bootstrap-client-cwd` only when auto-spawning a daemon. A direct daemon
+launch has no bootstrap cwd. Startup replay temporarily installs the value, prefers it over session,
+registered reentry-client, command-context, HOME, and root fallbacks, then clears it at the replay
+boundary on success or error.
+
+Relative top-level and nested startup sources use the same initial base. A path containing spaces
+and glob metacharacters stays literal. After startup, a runtime `source-file` uses the registered
+client's current cwd, proving the bootstrap value has expired. Focused launcher, CLI, and daemon
+regressions cover capture bounds, priority, nesting, literal paths, expiration, and cleanup. The
+isolated startup-client-cwd differential passes exactly on both engines. No public protocol
+field or version changes.
+
+The full eight-case startup diagnostic now gets past the cwd assertions and exposes a separate
+Control exit mismatch. After a cold `-C new-session`, zz can render three to five queued shell-prompt
+`%output %0` rows after the flags-0 `%end` and before `%exit`; ten equivalent pinned-tmux probes
+rendered none. `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` owns
+that behavior. Event-hook cwd, sourced Control-hook cwd, non-UTF-8 path transport, and top-level
+config discovery retain their existing owners.
+
+## Candidate queue after 10ag
+
+The pre-10x forecast treated `semantic:format-modifier-width` as a small isolated change. The
+pinned implementation requires more than a call to zz's current `unicode-width` dependency.
+`format_width` parses leading hashes and `#[...]` style spans, returns zero for malformed style
+markup, skips control bytes, and reads widths produced by the live `codepoint-widths[]` overrides
+and tmux's 162-entry default cache. The pinned harness build passes `--disable-utf8proc`, so its
+fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounded `w` slice must pin
+the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
+runtime behavior. The tracker now rates the group later and hard.
+
+The live registry now has 87 active groups, 594 active items, and 116 closed records: 45 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 138 of 203 groups (68.0%).
+Priority has one `next`, 64 `later`, and 22 `none` groups.
+
+Slice 10ah is frozen under
+`control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.
+`kill-server` currently requests shutdown before its client handler admits `CommandResponse`, so
+the daemon can publish `ServerStopping` and close the mailbox first. A successful Control command
+must receive its empty flags-1 `%end`, then exactly one `%exit`, with rc 0 and no unexpected-exit
+text. A successful Command client must also receive its response before connection and socket
+teardown. A synchronization-controlled daemon test must force the old ordering, while stalled,
+disconnected, and genuine-loss paths stay bounded and retain their correct failure results.
+
+Slice 10ai is frozen under
+`control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard`. On EOF or a blank
+Return, it must discard pending and later `%output` and `%extended-output` pane bytes while retaining
+pane output already written before the return. Config diagnostics, command output, guards,
+pause/continue notifications, retained return status, and exactly one final `%exit` keep their
+pinned order. The cold startup probe must emit diagnostics, one flags-0 success guard, no pane-output
+frame, and `%exit`; a long-lived Control client must still receive ordinary pane output before exit.
+Hard-disconnect queue cancellation, detach targeting, async command output, no-output, pause, wait,
+and transport pressure stay outside 10ai.
+
+The rerank places kill-server response order first because a successful administrative command can
+currently lose its response on both Control and ordinary Command paths, and a deterministic daemon
+test can close the race without waiting on shell timing. Exit pane-output discard remains the next
+independently closable Control slice and is frozen as 10ai. `jobs.shell-job-cwd` follows as a
+separate process-launch producer fix. Immediate background `run-shell` ordering stays later and hard
+because it must prove absent-delay and `-d 0` queue order without timer races.
+
+`jobs.run-shell-immediate-background-environment` no longer depends on 10af, but it remains later
+and hard. It owns absent-delay and `-d 0` foreground blocking plus same-group background ordering
+without timing races. `jobs.shell-job-cwd` owns command and status cwd. `jobs.environment` owns
+`copy-pipe` and popup jobs.
 
 The active groups marked `next` in the generated report are not themselves execution order.
 `keys.copy-mode-binding-fidelity` still depends on `copy-mode.command-fidelity`; forecast labels are
@@ -554,12 +974,18 @@ Before selecting every later milestone, explicitly recheck attach-dependent and 
 including buffer file context, source-file client cwd variants, detach execution, parent-HUP exit,
 `display-popup.behavior-fidelity`, menu fidelity, and `active-pane`.
 
-The rerank also corrected four high-confidence registry premises. Floating `break-pane -W` geometry
+The rerank also corrected several high-confidence registry premises. Floating `break-pane -W` geometry
 now depends on `pane.floating-model`; marked display-message target aliases depend on
 `pane.selection-state`; option-name format coverage follows source-owned option-consumer
 registration; and startup client cwd is a daemon bootstrap-provenance gap rather than an ordinary
 protocol/source-target repair. `formats.window-runtime` and `terminal.key-control` remain discovery
 containers that must split by producer before implementation.
+
+Two source-file premises changed after direct pin checks. Bare tilde expansion reads a nonempty
+server-global `HOME`, falls back to the current user's passwd entry when that value is empty or
+unset, resolves named users through `getpwnam`, and reports a located syntax error only when the
+required account lookup fails. A tilde after either closing quote also expands. The sourced-hook
+cwd mismatch applies to Control replay only; Command replay already retains the caller cwd.
 
 ## Validation and closure gates
 

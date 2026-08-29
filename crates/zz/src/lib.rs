@@ -65,8 +65,9 @@ use zz_daemon::{DaemonError, InteractiveClient};
 use zz_mux::MuxEngine;
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
-    CommandInvocation, MAX_AGENT_SEND_BYTES, PROTOCOL_VERSION, PreparedCommand,
-    PreparedCommandResult, ServerError, ServerHello, canonical_command, catalog_command_spec,
+    CommandInvocation, MAX_AGENT_SEND_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION,
+    PreparedCommand, PreparedCommandResult, ServerError, ServerHello, canonical_command,
+    catalog_command_spec,
 };
 use zz_terminal::TerminalColorScheme;
 #[cfg(not(target_os = "ios"))]
@@ -109,12 +110,74 @@ const APP_STARTUP_DIRECTORY_ENV: &str = "ZZ_APP_STARTUP_DIRECTORY";
 #[cfg(not(target_os = "ios"))]
 const DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT: &str = "--bootstrap-server-id";
 #[cfg(not(target_os = "ios"))]
+const DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT: &str = "--bootstrap-client-cwd";
+#[cfg(not(target_os = "ios"))]
 static DAEMON_SPAWN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(not(target_os = "ios"))]
 enum Startup {
     Application(PathBuf),
     Exit(ExitCode),
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DaemonBootstrapArguments {
+    server_id: Option<u64>,
+    client_working_directory: Option<PathBuf>,
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(Debug, PartialEq, Eq)]
+enum DaemonBootstrapArgumentError {
+    ServerId,
+    ClientWorkingDirectory,
+}
+
+#[cfg(not(target_os = "ios"))]
+impl DaemonBootstrapArgumentError {
+    fn message(&self) -> &'static str {
+        match self {
+            Self::ServerId => "invalid bootstrap server id",
+            Self::ClientWorkingDirectory => "invalid bootstrap client cwd",
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn validated_bootstrap_client_working_directory(path: PathBuf) -> Option<PathBuf> {
+    let value = path.to_str()?;
+    (path.is_absolute() && value.len() <= MAX_CLIENT_WORKING_DIRECTORY_BYTES).then_some(path)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn parse_daemon_bootstrap_arguments(
+    arguments: &[String],
+) -> Result<DaemonBootstrapArguments, DaemonBootstrapArgumentError> {
+    if arguments.is_empty() {
+        return Ok(DaemonBootstrapArguments::default());
+    }
+    let [server_flag, server_id, remaining @ ..] = arguments else {
+        return Err(DaemonBootstrapArgumentError::ServerId);
+    };
+    if server_flag != DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT {
+        return Err(DaemonBootstrapArgumentError::ServerId);
+    }
+    let server_id = server_id
+        .parse::<u64>()
+        .map_err(|_| DaemonBootstrapArgumentError::ServerId)?;
+    let client_working_directory = match remaining {
+        [] => None,
+        [cwd_flag, cwd] if cwd_flag == DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT => Some(
+            validated_bootstrap_client_working_directory(PathBuf::from(cwd))
+                .ok_or(DaemonBootstrapArgumentError::ClientWorkingDirectory)?,
+        ),
+        _ => return Err(DaemonBootstrapArgumentError::ClientWorkingDirectory),
+    };
+    Ok(DaemonBootstrapArguments {
+        server_id: Some(server_id),
+        client_working_directory,
+    })
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -764,25 +827,20 @@ fn run_command_mode(
     }
 
     if command == "daemon" {
-        let bootstrap_server_id = match invocation.args.as_slice() {
-            [flag, server_id] if flag == DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT => {
-                if let Ok(server_id) = server_id.parse::<u64>() {
-                    Some(server_id)
-                } else {
-                    eprintln!("zz daemon: invalid bootstrap server id");
-                    return Some(ExitCode::FAILURE);
-                }
-            }
-            [flag, ..] if flag == DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT => {
-                eprintln!("zz daemon: invalid bootstrap server id");
+        let bootstrap = match parse_daemon_bootstrap_arguments(&invocation.args) {
+            Ok(bootstrap) => bootstrap,
+            Err(error) => {
+                eprintln!("zz daemon: {}", error.message());
                 return Some(ExitCode::FAILURE);
             }
-            _ => None,
         };
         let mut daemon =
             Daemon::new(socket_path).with_mux_config_files(mux_config_files.iter().cloned());
-        if let Some(server_id) = bootstrap_server_id {
+        if let Some(server_id) = bootstrap.server_id {
             daemon = daemon.with_server_id(server_id);
+        }
+        if let Some(client_working_directory) = bootstrap.client_working_directory {
+            daemon = daemon.with_initial_client_working_directory(client_working_directory);
         }
         return Some(match daemon.run_foreground() {
             Ok(()) | Err(DaemonError::AlreadyRunning(_)) => ExitCode::SUCCESS,
@@ -1824,8 +1882,16 @@ fn spawn_daemon(
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+        .stderr(Stdio::null());
+    if let Some(client_working_directory) = std::env::current_dir()
+        .ok()
+        .and_then(validated_bootstrap_client_working_directory)
+    {
+        command
+            .arg(DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT)
+            .arg(client_working_directory);
+    }
+    command.spawn()?;
     log::debug!(
         target: "zz::diagnostics::process",
         "spawned daemon path={} child_verbose_flag_applied={}",
@@ -2446,20 +2512,146 @@ mod tests {
     use zz_terminal::TerminalColorScheme;
 
     use super::{
-        ApplicationArgumentError, CommandOutcome, NativeAttachArgumentError, TMUX_USAGE,
-        TMUX_VERSION_OUTPUT, application_arguments, application_working_directory,
-        attach_prefix_uses_tui, command_chain_uses_tui, command_error_message, command_reads_stdin,
-        daemon_is_missing, daemon_transport_failure, execute_command_chain,
-        implicit_tmux_endpoint_conflict, native_attach_command, new_session_uses_tui,
+        ApplicationArgumentError, CommandOutcome, DaemonBootstrapArgumentError,
+        DaemonBootstrapArguments, NativeAttachArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT,
+        application_arguments, application_working_directory, attach_prefix_uses_tui,
+        command_chain_uses_tui, command_error_message, command_reads_stdin, daemon_is_missing,
+        daemon_transport_failure, execute_command_chain, implicit_tmux_endpoint_conflict,
+        native_attach_command, new_session_uses_tui, parse_daemon_bootstrap_arguments,
         parse_native_attach_arguments, prepared_attach_uses_tui, prepared_command_chain_uses_tui,
         prepared_command_reads_stdin, prepared_kill_server_recovery, prepared_native_attach,
         protocol_version_output, run_command_mode, split_command_chain, terminal_color_scheme,
-        tmux_command_starts_server,
+        tmux_command_starts_server, validated_bootstrap_client_working_directory,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
     use zz_daemon::DaemonError;
     use zz_protocol::{CommandInvocation, PreparedCommand, PreparedCommandResult, ServerError};
+
+    #[test]
+    fn daemon_bootstrap_arguments_accept_only_the_ordered_private_grammar() {
+        let path = std::env::temp_dir().join("client cwd [literal]*? with spaces");
+        let path_string = path.to_str().expect("UTF-8 temporary path").to_owned();
+
+        assert_eq!(
+            parse_daemon_bootstrap_arguments(&[]).unwrap(),
+            DaemonBootstrapArguments::default()
+        );
+        assert_eq!(
+            parse_daemon_bootstrap_arguments(&[
+                "--bootstrap-server-id".to_owned(),
+                "42".to_owned(),
+            ])
+            .unwrap(),
+            DaemonBootstrapArguments {
+                server_id: Some(42),
+                client_working_directory: None,
+            }
+        );
+        assert_eq!(
+            parse_daemon_bootstrap_arguments(&[
+                "--bootstrap-server-id".to_owned(),
+                "42".to_owned(),
+                "--bootstrap-client-cwd".to_owned(),
+                path_string.clone(),
+            ])
+            .unwrap(),
+            DaemonBootstrapArguments {
+                server_id: Some(42),
+                client_working_directory: Some(path),
+            }
+        );
+
+        for arguments in [
+            vec!["extra".to_owned()],
+            vec!["--bootstrap-server-id".to_owned()],
+            vec!["--bootstrap-server-id".to_owned(), "nope".to_owned()],
+            vec!["--bootstrap-client-cwd".to_owned(), path_string.clone()],
+        ] {
+            assert_eq!(
+                parse_daemon_bootstrap_arguments(&arguments),
+                Err(DaemonBootstrapArgumentError::ServerId),
+                "{arguments:?}"
+            );
+        }
+        for arguments in [
+            vec![
+                "--bootstrap-server-id".to_owned(),
+                "42".to_owned(),
+                "--bootstrap-client-cwd".to_owned(),
+            ],
+            vec![
+                "--bootstrap-server-id".to_owned(),
+                "42".to_owned(),
+                "--other".to_owned(),
+                path_string.clone(),
+            ],
+            vec![
+                "--bootstrap-server-id".to_owned(),
+                "42".to_owned(),
+                "--bootstrap-client-cwd".to_owned(),
+                "relative".to_owned(),
+            ],
+            vec![
+                "--bootstrap-server-id".to_owned(),
+                "42".to_owned(),
+                "--bootstrap-client-cwd".to_owned(),
+                path_string.clone(),
+                "extra".to_owned(),
+            ],
+        ] {
+            assert_eq!(
+                parse_daemon_bootstrap_arguments(&arguments),
+                Err(DaemonBootstrapArgumentError::ClientWorkingDirectory),
+                "{arguments:?}"
+            );
+        }
+        assert_eq!(
+            DaemonBootstrapArgumentError::ServerId.message(),
+            "invalid bootstrap server id"
+        );
+        assert_eq!(
+            DaemonBootstrapArgumentError::ClientWorkingDirectory.message(),
+            "invalid bootstrap client cwd"
+        );
+    }
+
+    #[test]
+    fn daemon_bootstrap_client_cwd_filter_accepts_only_bounded_absolute_utf8() {
+        #[cfg(unix)]
+        let prefix = "/";
+        #[cfg(windows)]
+        let prefix = "C:\\";
+        let path_with_length = |length: usize| {
+            PathBuf::from(format!(
+                "{prefix}{}",
+                "x".repeat(length.saturating_sub(prefix.len()))
+            ))
+        };
+        let boundary = path_with_length(zz_protocol::MAX_CLIENT_WORKING_DIRECTORY_BYTES);
+        assert_eq!(
+            validated_bootstrap_client_working_directory(boundary.clone()),
+            Some(boundary)
+        );
+        assert!(
+            validated_bootstrap_client_working_directory(path_with_length(
+                zz_protocol::MAX_CLIENT_WORKING_DIRECTORY_BYTES + 1
+            ))
+            .is_none()
+        );
+        assert!(
+            validated_bootstrap_client_working_directory(PathBuf::from("relative/path")).is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn daemon_bootstrap_client_cwd_filter_rejects_non_utf8() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
+
+        let path = PathBuf::from(OsString::from_vec(b"/tmp/client-\xff".to_vec()));
+        assert!(validated_bootstrap_client_working_directory(path).is_none());
+    }
 
     #[test]
     fn app_is_an_exact_native_gui_verb_even_inside_tmux() {

@@ -243,6 +243,17 @@ timed message, produced since Wave D3 by the `zz-client-message` deadline dispat
 Surfaces must match the identity before dropping anything, so a retired message's clear can
 never take down the message that replaced it.
 
+The wire already carries enough identity for the slice 10ai Control-exit fix. On EOF or a blank
+Return, the front-end must stop rendering pending and later `PaneOutput` and `PaneOutputAged` bytes
+while it drains guards, diagnostics, command output, flow notifications, retained status, and one
+final exit. The active `control-mode.exit-pane-output` item requires no protocol field or version.
+
+The active `control-mode.kill-server-response-order` item also uses existing messages. A successful
+`kill-server` response must enter the Command or Control mailbox before shutdown publishes
+`ServerStopping` and closes the connection. Control then closes the flags-1 command guard with
+`%end` before exactly one `%exit`; ordinary Command clients receive their success response before
+socket teardown. Slice 10ah changes admission and drain order, not the wire format.
+
 v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
 It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command
 guard per command that survived name resolution. v77 renames the same tag in place to
@@ -295,8 +306,9 @@ flags-0 sources share this event path. The daemon reads every matched file befor
 raw read diagnostics precede the first replayed child while the single completion follows all
 descendants. Non-UTF-8 content remains under `config.non-utf8-file-bytes`: the pin's measured
 lone-`0xff` case also consumes an extra invisible empty-command item that zz does not model. Source
-stdin transport, parser abort semantics, sourced-hook cwd, and deferred event hooks retain their
-separate gaps. Config command-name and lexer diagnostics remain generic Warning events on the
+stdin transport, Control sourced-hook cwd, and deferred event hooks retain their separate gaps.
+Slice 10z closes config file-unit construction in daemon-local state without a protocol field.
+Config command-name and lexer diagnostics remain generic Warning events on the
 `%config-error` classification path.
 
 `zz-client::ClientCore` accepts and ignores `ControlCommandGuard` and `ControlSourceFile`;
@@ -309,8 +321,10 @@ failures, synchronous inserted runtime errors, hook sticky failures, and typed p
 read errors set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not.
 Return and detach precedence remain unchanged.
 
-Deferred event hooks clear the Control target and remain separate. Sourced-hook cwd, event-hook cwd,
-and missing hook producers stay under their named gaps.
+Deferred event hooks clear the Control target and remain separate. Command replay retains the
+caller cwd for sourced hooks; Control hook framing clears the replay client, so sourced-hook cwd is
+a Control-only gap. Event-hook cwd and the three missing pane-event producers stay under their
+named gaps. Pinned `after-queue` is explicit-only and needs no automatic producer.
 
 Command and Interactive replay transcripts closed without another wire field. Each source invocation
 appends its complete verbose batch, replay output, and buffered command-name or parser diagnostics in
@@ -621,12 +635,15 @@ now validate on both encode and decode.
   For a registered client, the daemon snapshots that selected base and carries it through nested
   replay, including when runtime `source-file` loads the active default `zz/mux.conf` as an ordinary
   matched path. A direct `reload-config` carries the same base through its separate native reset
-  path. Startup and other sentinel-client reloads keep their clientless base. The later
+  path. Other sentinel-client reloads keep their clientless base. Slice 10ag closes cold startup
+  selection without a wire field: only the launcher that auto-spawns a daemon passes a bounded
+  UTF-8 cwd through private `--bootstrap-client-cwd`; startup temporarily prefers it through nested
+  replay, then clears it before registered runtime source commands. The later
   `clients.attach-session-cwd` slice added an internal per-session cwd and made attached source
-  selection prefer it without changing the wire. Deferred event hooks and clientless startup
-  replay remain under `source-file.event-hook-client-cwd` and
-  `source-file.startup-client-cwd`. Hooks raised by sourced ordinary commands remain under
-  `source-file.sourced-hook-client-cwd` because those commands still use the sentinel replay client.
+  selection prefer it without changing the wire. Deferred event hooks remain under
+  `source-file.event-hook-client-cwd`. Command replay carries the caller cwd for sourced hooks.
+  `source-file.sourced-hook-client-cwd` now covers Control hook framing, which clears the replay
+  client before the hook runs.
   This replay change uses daemon-local state and does not add a protocol field.
   The same unshipped version appends `ChooseTreeState.filter_no_matches` and
   `ChooseBufferState.filter_no_matches` as canonical bool tails. Full chooser events carry the

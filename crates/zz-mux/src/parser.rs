@@ -59,6 +59,7 @@ struct ConfigBuilder<'a, C> {
     source: String,
     parsed: ParsedConfig,
     overlay: BTreeMap<String, String>,
+    assignment_overlay: bool,
     conditionals: Vec<ConditionalScope>,
     context: &'a mut C,
     aborted: bool,
@@ -350,7 +351,9 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         if !self.active() {
             return;
         }
-        self.overlay.insert(name.clone(), value.clone());
+        if self.assignment_overlay {
+            self.overlay.insert(name.clone(), value.clone());
+        }
         self.parsed.environment.push(ConfigEnvironmentAssignment {
             name,
             value,
@@ -477,11 +480,29 @@ pub(crate) fn parse_config_with<C: ConfigContext>(
     input: &str,
     context: &mut C,
 ) -> ParsedConfig {
+    parse_config_with_assignment_overlay(source, input, context, true)
+}
+
+pub(crate) fn parse_config_without_assignment_overlay<C: ConfigContext>(
+    source: impl Into<String>,
+    input: &str,
+    context: &mut C,
+) -> ParsedConfig {
+    parse_config_with_assignment_overlay(source, input, context, false)
+}
+
+fn parse_config_with_assignment_overlay<C: ConfigContext>(
+    source: impl Into<String>,
+    input: &str,
+    context: &mut C,
+    assignment_overlay: bool,
+) -> ParsedConfig {
     let source = source.into();
     let mut builder = ConfigBuilder {
         source,
         parsed: ParsedConfig::default(),
         overlay: BTreeMap::new(),
+        assignment_overlay,
         conditionals: Vec::new(),
         context,
         aborted: false,
@@ -1382,6 +1403,28 @@ set @single '\141\a\b\e\f\s\v\r\n\t\u03bb\U0001F980'"#,
         assert_eq!(multiple.environment[0].value, "one");
         assert_eq!(multiple.diagnostics.len(), 1);
         assert_eq!(multiple.diagnostics[0].message, "syntax error");
+    }
+
+    #[test]
+    fn assignment_overlay_can_be_disabled_without_dropping_records() {
+        let mut context = (
+            |name: &str| (name == "VALUE").then(|| "before".to_owned()),
+            |_: &str| false,
+        );
+        let parsed = parse_config_without_assignment_overlay(
+            "test.conf",
+            "VALUE=after\n%hidden SECRET=$VALUE\ndisplay-message -p $VALUE-$SECRET\n",
+            &mut context,
+        );
+
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.environment.len(), 2);
+        assert_eq!(parsed.environment[0].name, "VALUE");
+        assert_eq!(parsed.environment[0].value, "after");
+        assert_eq!(parsed.environment[1].name, "SECRET");
+        assert_eq!(parsed.environment[1].value, "before");
+        assert!(parsed.environment[1].hidden);
+        assert_eq!(parsed.commands[0].args, ["-p", "before-"]);
     }
 
     #[test]

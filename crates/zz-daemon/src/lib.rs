@@ -1,7 +1,7 @@
 //! Persistent mux daemon, local IPC transport, and command client.
 
 #[cfg(feature = "daemon")]
-use std::process::Command;
+use std::{ffi::OsStr, process::Command};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -111,16 +111,64 @@ fn configure_tmux_shim(
     process: &mut Command,
     tmux_shim: Option<&Path>,
     zz_executable: Option<&Path>,
+    path: Option<&OsStr>,
 ) {
     let (Some(tmux_shim), Some(zz_executable)) = (tmux_shim, zz_executable) else {
         return;
     };
-    let inherited = std::env::var_os("PATH").unwrap_or_default();
-    let paths = std::iter::once(tmux_shim.to_path_buf()).chain(std::env::split_paths(&inherited));
+    let paths = std::iter::once(tmux_shim.to_path_buf())
+        .chain(path.into_iter().flat_map(std::env::split_paths));
     if let Ok(path) = std::env::join_paths(paths) {
         process.env("PATH", path);
     }
     process.env(TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE, zz_executable);
+}
+
+#[cfg(feature = "daemon")]
+fn configure_shell_job_environment(
+    process: &mut Command,
+    environment: &[(String, Option<String>)],
+    default_terminal: &str,
+    startup: bool,
+    tmux: &str,
+    zz_socket: &OsStr,
+    tmux_shim: Option<&Path>,
+    zz_executable: Option<&Path>,
+) {
+    let path = environment
+        .iter()
+        .rev()
+        .find_map(|(name, value)| (name == "PATH").then_some(value.as_deref()))
+        .flatten();
+    process.env_clear();
+    for (name, value) in environment {
+        if matches!(
+            name.as_str(),
+            STARTUP_REENTRY_ENVIRONMENT_VARIABLE | TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE
+        ) {
+            continue;
+        }
+        match value {
+            Some(value) => {
+                process.env(name, value);
+            }
+            None => {
+                process.env_remove(name);
+            }
+        }
+    }
+    if !startup {
+        let version = zz_protocol::CommandSpec::TMUX_VERSION_OUTPUT
+            .strip_prefix("tmux ")
+            .expect("tmux version output prefix");
+        process
+            .env("TERM", default_terminal)
+            .env("TERM_PROGRAM", "tmux")
+            .env("TERM_PROGRAM_VERSION", version)
+            .env("COLORTERM", "truecolor");
+    }
+    process.env("TMUX", tmux).env("ZZ_SOCKET", zz_socket);
+    configure_tmux_shim(process, tmux_shim, zz_executable, path.map(OsStr::new));
 }
 
 /// Classify a failed local handshake as a stale daemon when the wire error or guarded identity

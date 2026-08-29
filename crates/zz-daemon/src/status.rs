@@ -24,7 +24,7 @@ use zz_protocol::{
 };
 use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
 
-use crate::{configure_tmux_shim, shell_process};
+use crate::{configure_shell_job_environment, shell_process};
 
 const SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 const SHELL_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -45,10 +45,13 @@ pub(crate) struct StatusRequest {
     pub(crate) client: ClientId,
     pub(crate) formats: StatusFormats,
     pub(crate) row_formats: BTreeMap<u32, String>,
-    pub(crate) variables: StatusRowVariables,
+    pub(crate) option_snapshot: Arc<StatusRowVariables>,
     pub(crate) message_line: u8,
     pub(crate) customized: bool,
     pub(crate) title_format: Option<String>,
+    pub(crate) environment: Vec<(String, Option<String>)>,
+    pub(crate) default_terminal: String,
+    pub(crate) startup: bool,
     pub(crate) context: StatusContext,
     pub(crate) facts: FormatHookFacts,
 }
@@ -170,7 +173,17 @@ pub(crate) fn status_context(
     attached: Option<SessionId>,
     focused_window: Option<WindowId>,
 ) -> StatusContext {
-    let mut context = engine.format_status_context(attached, focused_window, None);
+    let mut context = attached.map_or_else(
+        || engine.format_status_context(None, focused_window, None),
+        |client_session| {
+            engine.format_status_context_for_client(
+                Some(client_session),
+                focused_window,
+                None,
+                client_session,
+            )
+        },
+    );
     if context.host.is_empty() {
         let (host, host_short) = host_names();
         context.host.clone_from(host);
@@ -192,7 +205,6 @@ pub(crate) fn status_context(
     if context.pane_active.is_some() {
         context.pane_active = Some(true);
     }
-    context.session_active = Some(true);
     context.session_attached = session.viewers.len();
     context.session_many_attached = session.viewers.len() > 1;
     context.session_attached_list = session
@@ -248,11 +260,14 @@ fn render(
             let mut hooks = DaemonFormatHooks::status(
                 &request.facts,
                 &request.context,
-                None,
+                Some(&request.option_snapshot),
                 cache,
                 touched,
                 refresh,
                 now,
+                &request.environment,
+                &request.default_terminal,
+                request.startup,
                 tmux_shim,
                 zz_executable,
             );
@@ -278,11 +293,14 @@ fn render(
         let mut hooks = DaemonFormatHooks::status(
             &request.facts,
             &request.context,
-            None,
+            Some(&request.option_snapshot),
             cache,
             touched,
             refresh,
             now,
+            &request.environment,
+            &request.default_terminal,
+            request.startup,
             tmux_shim,
             zz_executable,
         );
@@ -294,11 +312,14 @@ fn render(
     let mut hooks = DaemonFormatHooks::status(
         &request.facts,
         &request.context,
-        Some(&request.variables),
+        Some(&request.option_snapshot),
         cache,
         touched,
         refresh,
         now,
+        &request.environment,
+        &request.default_terminal,
+        request.startup,
         tmux_shim,
         zz_executable,
     );
@@ -503,14 +524,18 @@ fn status_style_end(value: &str, start: usize) -> Option<usize> {
 
 pub(crate) struct DaemonFormatHooks<'a> {
     facts: &'a FormatHookFacts,
+    option_engine: Option<&'a MuxEngine>,
     status_context: Option<&'a StatusContext>,
     variables: Option<&'a BTreeMap<String, String>>,
     command_item: Option<&'a str>,
-    options: Option<&'a StatusRowVariables>,
+    option_snapshot: Option<&'a StatusRowVariables>,
     cache: Option<&'a mut BTreeMap<String, String>>,
     touched: Option<&'a mut BTreeSet<String>>,
     refresh: bool,
     now: chrono::DateTime<Local>,
+    environment: Option<&'a [(String, Option<String>)]>,
+    default_terminal: Option<&'a str>,
+    startup: bool,
     tmux_shim: Option<&'a std::path::Path>,
     zz_executable: Option<&'a std::path::Path>,
 }
@@ -526,14 +551,18 @@ impl<'a> DaemonFormatHooks<'a> {
     ) -> Self {
         Self {
             facts,
+            option_engine: None,
             status_context: None,
             variables,
             command_item: None,
-            options: None,
+            option_snapshot: None,
             cache: None,
             touched: None,
             refresh: false,
             now: Local::now(),
+            environment: None,
+            default_terminal: None,
+            startup: false,
             tmux_shim: None,
             zz_executable: None,
         }
@@ -546,8 +575,8 @@ impl<'a> DaemonFormatHooks<'a> {
         Self::command_with_optional_variables(facts, Some(variables))
     }
 
-    pub(crate) fn with_status_options(mut self, options: &'a StatusRowVariables) -> Self {
-        self.options = Some(options);
+    pub(crate) fn with_option_engine(mut self, engine: &'a MuxEngine) -> Self {
+        self.option_engine = Some(engine);
         self
     }
 
@@ -559,24 +588,31 @@ impl<'a> DaemonFormatHooks<'a> {
     fn status(
         facts: &'a FormatHookFacts,
         context: &'a StatusContext,
-        options: Option<&'a StatusRowVariables>,
+        option_snapshot: Option<&'a StatusRowVariables>,
         cache: &'a mut BTreeMap<String, String>,
         touched: &'a mut BTreeSet<String>,
         refresh: bool,
         now: chrono::DateTime<Local>,
+        environment: &'a [(String, Option<String>)],
+        default_terminal: &'a str,
+        startup: bool,
         tmux_shim: Option<&'a std::path::Path>,
         zz_executable: Option<&'a std::path::Path>,
     ) -> Self {
         Self {
             facts,
+            option_engine: None,
             status_context: Some(context),
             variables: None,
             command_item: None,
-            options,
+            option_snapshot,
             cache: Some(cache),
             touched: Some(touched),
             refresh,
             now,
+            environment: Some(environment),
+            default_terminal: Some(default_terminal),
+            startup,
             tmux_shim,
             zz_executable,
         }
@@ -646,6 +682,9 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         let output = run_shell(
             command,
             self.status_context,
+            self.environment.unwrap_or_default(),
+            self.default_terminal.unwrap_or("tmux-256color"),
+            self.startup,
             self.tmux_shim,
             self.zz_executable,
         );
@@ -654,17 +693,27 @@ impl StatusHooks for DaemonFormatHooks<'_> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        if let Some(value) = self
+            .option_engine
+            .and_then(|engine| engine.format_option_value(context, name))
+        {
+            return Some(value);
+        }
+        if let Some(value) = self.option_snapshot.and_then(|options| {
+            options.lookup(
+                &context.session_id,
+                &context.window_id,
+                &context.pane_id,
+                name,
+            )
+        }) {
+            return Some(value);
+        }
         if let Some(value) = self.variables.and_then(|variables| variables.get(name)) {
             return Some(value.clone());
         }
         if name == "command" {
             return self.command_item.map(str::to_owned);
-        }
-        if let Some(value) = self
-            .options
-            .and_then(|options| options.lookup(&context.session_id, &context.window_id, name))
-        {
-            return Some(value.clone());
         }
         if name.starts_with('@') {
             return self
@@ -923,28 +972,34 @@ fn search_viewport(
 fn run_shell(
     command: &str,
     context: Option<&StatusContext>,
+    environment: &[(String, Option<String>)],
+    default_terminal: &str,
+    startup: bool,
     tmux_shim: Option<&std::path::Path>,
     zz_executable: Option<&std::path::Path>,
 ) -> String {
+    let Some(context) = context else {
+        return String::new();
+    };
     let mut process = shell_process(command);
-    if let Some(context) = context {
-        let requested_cwd = std::path::Path::new(&context.pane_current_path);
-        let cwd = if requested_cwd.is_dir() {
-            requested_cwd.to_path_buf()
-        } else {
-            std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
-        };
-        process
-            .current_dir(&cwd)
-            .env("PWD", cwd.as_os_str())
-            .env(
-                "TMUX",
-                format!("{},{},-1", context.socket_path, std::process::id()),
-            )
-            .env("ZZ_SOCKET", &context.socket_path)
-            .env_remove("TMUX_PANE");
-    }
-    configure_tmux_shim(&mut process, tmux_shim, zz_executable);
+    let requested_cwd = std::path::Path::new(&context.pane_current_path);
+    let cwd = if requested_cwd.is_dir() {
+        requested_cwd.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
+    };
+    let tmux = format!("{},{},-1", context.socket_path, std::process::id());
+    configure_shell_job_environment(
+        &mut process,
+        environment,
+        default_terminal,
+        startup,
+        &tmux,
+        std::ffi::OsStr::new(&context.socket_path),
+        tmux_shim,
+        zz_executable,
+    );
+    process.current_dir(&cwd).env("PWD", cwd.as_os_str());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -1040,10 +1095,13 @@ mod tests {
                 ..StatusFormats::default()
             },
             row_formats: BTreeMap::new(),
-            variables: StatusRowVariables::default(),
+            option_snapshot: Arc::new(StatusRowVariables::default()),
             message_line: 0,
             customized: false,
             title_format: None,
+            environment: Vec::new(),
+            default_terminal: "tmux-256color".to_owned(),
+            startup: false,
             context: StatusContext {
                 session_name: "work".to_owned(),
                 ..StatusContext::default()
@@ -1062,11 +1120,14 @@ mod tests {
             client: ClientId(client),
             formats: engine.status_formats_for_session(session),
             row_formats: engine.status_format_array_for_session(session),
-            variables: engine.status_row_variables_for_session(session),
+            option_snapshot: Arc::new(engine.format_option_snapshot()),
             message_line: engine.message_line_for_session(session),
             customized: engine.status_customized_for_session(session),
             title_format: (session.is_some() && engine.set_titles_for_session(session))
                 .then(|| engine.set_titles_string_for_session(session)),
+            environment: engine.job_environment(None),
+            default_terminal: engine.default_terminal_for_spawn().to_owned(),
+            startup: false,
             context: status_context(&snapshot, engine, session, None),
             facts: FormatHookFacts::default(),
         }
@@ -1108,6 +1169,117 @@ mod tests {
                 "daemon format hook does not consume {name}"
             );
         }
+    }
+
+    #[test]
+    fn status_context_uses_the_attached_format_client() {
+        let mut engine = MuxEngine::default();
+        let mut execution = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut execution,
+            &["new-session", "-s", "status-active"],
+        );
+        let session = execution.session.expect("session id");
+        let snapshot = engine.state.snapshot();
+
+        let attached = status_context(&snapshot, &engine, Some(session), None);
+        assert_eq!(attached.session_active, Some(true));
+
+        let detached = status_context(&snapshot, &engine, None, None);
+        assert_eq!(detached.session_active, None);
+    }
+
+    #[test]
+    fn status_option_snapshot_retargets_every_loop_after_the_engine_is_released() {
+        let mut engine = MuxEngine::default();
+        let (attached, first_window, first_pane) = engine.state.create_session("attached").unwrap();
+        let second_pane = engine
+            .state
+            .split_pane(first_pane, Axis::Horizontal, PaneKind::Terminal)
+            .unwrap();
+        let (second_window, _) = engine
+            .state
+            .create_window_at(
+                attached,
+                None,
+                Some("second".to_owned()),
+                PaneKind::Terminal,
+                false,
+            )
+            .unwrap();
+        let (other, _, _) = engine.state.create_session("other").unwrap();
+        let mut context =
+            zz_mux::ExecutionContext::new(Some(attached), Some(first_window), Some(first_pane));
+        let second_window = second_window.to_string();
+        let first_pane = first_pane.to_string();
+
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-g", "mouse", "off"],
+        );
+        execute(&mut engine, &mut context, &["set-option", "mouse", "on"]);
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-window-option", "-g", "automatic-rename", "off"],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &[
+                "set-window-option",
+                "-t",
+                &second_window,
+                "automatic-rename",
+                "on",
+            ],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &["set-option", "-gp", "allow-set-title", "on"],
+        );
+        execute(
+            &mut engine,
+            &mut context,
+            &[
+                "set-option",
+                "-p",
+                "-t",
+                &first_pane,
+                "allow-set-title",
+                "off",
+            ],
+        );
+
+        let mut request = engine_request(1, &engine, Some(attached));
+        request.formats.left =
+            "OPTCHAIN:#{mouse}:#{S:#{mouse}}:#{W:#{automatic-rename}}:#{P:#{allow-set-title}}"
+                .to_owned();
+        request.formats.left_length = u16::MAX;
+        assert!(
+            request
+                .option_snapshot
+                .sessions
+                .contains_key(&other.to_string())
+        );
+        assert!(request.option_snapshot.windows.contains_key(&second_window));
+        assert!(
+            request
+                .option_snapshot
+                .panes
+                .contains_key(&second_pane.to_string())
+        );
+        drop(engine);
+
+        let status = StatusRenderer::default().render_initial(&request);
+        assert!(
+            status.left.contains("OPTCHAIN:1:10:01:01"),
+            "{}",
+            status.left
+        );
     }
 
     #[test]
@@ -1256,8 +1428,10 @@ mod tests {
             StatusRenderer::default().render_initial(&engine_request(1, &engine, Some(session)));
         assert_eq!(five.rows.len(), 5);
         assert!(five.rows[0].contains("[work]"));
-        assert!(!five.rows[1].is_empty());
-        assert!(!five.rows[2].is_empty());
+        assert!(five.rows[1].starts_with("#[align=left]    P: "));
+        assert!(five.rows[2].starts_with("#[align=left]    S: "));
+        assert!(!five.rows[1].contains("#{R:"));
+        assert!(!five.rows[2].contains("#{R:"));
         assert_eq!(five.rows[3], "");
         assert_eq!(five.rows[4], "");
         assert_eq!(five.message_line, 4);
@@ -1683,6 +1857,101 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn status_commands_use_global_only_clean_environment_and_the_startup_gate() {
+        let mut engine = MuxEngine::default();
+        engine.seed_global_environment([
+            ("STATUS_SCOPE", "global"),
+            ("TMUX_PANE", "status-global-pane"),
+            ("TERM", "startup-term"),
+            ("TERM_PROGRAM", "startup-program"),
+            ("TERM_PROGRAM_VERSION", "startup-version"),
+            ("COLORTERM", "startup-colorterm"),
+            (crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, "stale-reentry"),
+            (
+                crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE,
+                "stale-executable",
+            ),
+        ]);
+        let mut execution = zz_mux::ExecutionContext::default();
+        execute(
+            &mut engine,
+            &mut execution,
+            &["new-session", "-d", "-s", "status-environment"],
+        );
+        let session = execution.session.expect("status session");
+        for args in [
+            vec!["set-environment", "-g", "-h", "STATUS_HIDDEN", "hidden"],
+            vec!["set-environment", "-g", "-r", "STATUS_UNSET"],
+            vec![
+                "set-environment",
+                "-t",
+                "status-environment",
+                "STATUS_SCOPE",
+                "session",
+            ],
+            vec![
+                "set-environment",
+                "-t",
+                "status-environment",
+                "TMUX_PANE",
+                "session-pane",
+            ],
+            vec!["set-option", "-g", "default-terminal", "status-terminal"],
+        ] {
+            execute(&mut engine, &mut execution, &args);
+        }
+        let command = "#(printf '%%s|%%s|%%s|%%s|%%s|%%s|%%s|%%s|%%s|%%s|%%s|%%s' \"$STATUS_SCOPE\" \"${STATUS_HIDDEN-unset}\" \"${STATUS_UNSET-unset}\" \"${HOME-unset}\" \"${TERM-unset}\" \"${TERM_PROGRAM-unset}\" \"${TERM_PROGRAM_VERSION-unset}\" \"${COLORTERM-unset}\" \"$TMUX\" \"$TMUX_PANE\" \"${ZZ_STARTUP_REENTRY-unset}\" \"${ZZ_TMUX_EXECUTABLE-unset}\")";
+        let socket = "/tmp/zz-status-clean-environment.sock";
+        let expected_tmux = format!("{socket},{},-1", std::process::id());
+
+        let mut post_startup = engine_request(1, &engine, Some(session));
+        post_startup.formats = StatusFormats {
+            enabled: true,
+            left: command.to_owned(),
+            style: String::new(),
+            left_style: String::new(),
+            right_style: String::new(),
+            foreground: "default".to_owned(),
+            background: "default".to_owned(),
+            left_length: u16::MAX,
+            right_length: u16::MAX,
+            ..StatusFormats::default()
+        };
+        post_startup.context.socket_path = socket.to_owned();
+        let status = StatusRenderer::default().render_initial(&post_startup);
+        assert_eq!(
+            status.left,
+            format!(
+                "global|unset|unset|unset|status-terminal|tmux|3.8-zz|truecolor|{expected_tmux}|status-global-pane|unset|unset"
+            )
+        );
+
+        let mut startup = engine_request(1, &engine, Some(session));
+        startup.formats = StatusFormats {
+            enabled: true,
+            left: command.to_owned(),
+            style: String::new(),
+            left_style: String::new(),
+            right_style: String::new(),
+            foreground: "default".to_owned(),
+            background: "default".to_owned(),
+            left_length: u16::MAX,
+            right_length: u16::MAX,
+            ..StatusFormats::default()
+        };
+        startup.context.socket_path = socket.to_owned();
+        startup.startup = true;
+        let status = StatusRenderer::default().render_initial(&startup);
+        assert_eq!(
+            status.left,
+            format!(
+                "global|unset|unset|unset|startup-term|startup-program|startup-version|startup-colorterm|{expected_tmux}|status-global-pane|unset|unset"
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn status_commands_resolve_literal_tmux_through_the_private_zz_shim() {
         use std::os::unix::fs::PermissionsExt as _;
 
@@ -1758,7 +2027,10 @@ mod tests {
         let command = "ping -n 31 127.0.0.1";
 
         let started = Instant::now();
-        assert_eq!(run_shell(command, None, None, None), "");
+        assert_eq!(
+            run_shell(command, None, &[], "tmux-256color", false, None, None),
+            ""
+        );
         assert!(
             started.elapsed() < SHELL_TIMEOUT * 3,
             "the timeout, not the command, bounds the render"

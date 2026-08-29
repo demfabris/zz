@@ -1,0 +1,4 @@
+corpus: none
+stage: fixtures/config-chain-parse-abort.sh ~/config-chain-parse-abort.sh
+run-shell 'sh ~/config-chain-parse-abort.sh'
+out: show-environment -g CONFIG_CHAIN_PARSE_ABORT

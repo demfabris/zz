@@ -214,8 +214,13 @@ pub(crate) fn elapsed_us(started: Option<Instant>) -> u128 {
 
 #[cfg(not(target_os = "ios"))]
 pub(crate) fn application_args() -> Vec<String> {
+    application_args_from(std::env::args_os().skip(1))
+}
+
+#[cfg(not(target_os = "ios"))]
+fn application_args_from(arguments: impl IntoIterator<Item = OsString>) -> Vec<String> {
     let mut output = Vec::new();
-    let mut arguments = std::env::args_os().skip(1);
+    let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         if argument == OsStr::new("--verbose") {
             continue;
@@ -228,6 +233,13 @@ pub(crate) fn application_args() -> Vec<String> {
             .to_string_lossy()
             .starts_with(&format!("{INTERNAL_LOG_ARGUMENT}="))
         {
+            continue;
+        }
+        if argument == OsStr::new(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT) {
+            output.push(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT.to_owned());
+            if let Some(value) = arguments.next() {
+                output.push(value.into_string().unwrap_or_default());
+            }
             continue;
         }
         output.push(argument.to_string_lossy().into_owned());
@@ -1027,6 +1039,21 @@ mod tests {
         assert_eq!(
             process_role(&arguments(&["zz", "--socket", "/tmp/zz.sock", "daemon"])),
             "daemon"
+        );
+    }
+
+    #[cfg(all(unix, not(target_os = "ios")))]
+    #[test]
+    fn non_utf8_bootstrap_client_cwd_is_not_lossily_substituted() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        assert_eq!(
+            application_args_from([
+                OsString::from("daemon"),
+                OsString::from(crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT),
+                OsString::from_vec(b"/tmp/client-\xff".to_vec()),
+            ]),
+            ["daemon", crate::DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT, ""]
         );
     }
 

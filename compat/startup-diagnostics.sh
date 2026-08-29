@@ -125,7 +125,7 @@ CURRENT_CASE="setup"
 CAPTURE_RC=0
 SIDE_TARGET=""
 CASES_RUN=0
-EXPECTED_CASES=7
+EXPECTED_CASES=8
 
 mkdir -p "$ZZ_HOME" "$ZZ_CONFIG_HOME" "$TMUX_HOME" "$TMUX_CONFIG_HOME" \
   "$OUTER_HOME" "$OUTER_CONFIG_HOME" "$OUTPUT_DIR" "$FIXTURE_DIR"
@@ -189,6 +189,24 @@ capture_side() {
   shift 4
 
   if run_side "$side" "$target" "$@" </dev/null >"$stdout" 2>"$stderr"; then
+    CAPTURE_RC=0
+  else
+    CAPTURE_RC=$?
+  fi
+}
+
+capture_side_from_cwd() {
+  local cwd="$1"
+  local side="$2"
+  local target="$3"
+  local stdout="$4"
+  local stderr="$5"
+  shift 5
+
+  if (
+    cd -- "$cwd"
+    run_side "$side" "$target" "$@" </dev/null
+  ) >"$stdout" 2>"$stderr"; then
     CAPTURE_RC=0
   else
     CAPTURE_RC=$?
@@ -678,6 +696,112 @@ case_restart_redelivery() {
   pass_case
 }
 
+case_startup_client_cwd() {
+  local directory="$FIXTURE_DIR/startup-client-cwd"
+  local startup_cwd="$directory/initial cwd [literal] * ?"
+  local startup_glob_decoy="$directory/initial cwd l decoy x"
+  local config_directory="$directory/top-level-config"
+  local root="$config_directory/root.conf"
+  local runtime_cwd="$directory/runtime cwd [literal] * ?"
+  local runtime_glob_decoy="$directory/runtime cwd l decoy x"
+  local direct_expected="$OUTPUT_DIR/startup-client-cwd.direct.expected"
+  local nested_expected="$OUTPUT_DIR/startup-client-cwd.nested.expected"
+  local runtime_expected="$OUTPUT_DIR/startup-client-cwd.runtime.expected"
+  local side
+  local target
+  local stdout
+  local stderr
+
+  CURRENT_CASE="startup client cwd priority"
+  mkdir -p "$startup_cwd/direct" "$startup_glob_decoy/direct" \
+    "$config_directory/direct" "$runtime_cwd" "$runtime_glob_decoy"
+  printf '%s\n' "source-file 'direct/entry.conf'" >"$root"
+  printf '%s\n' \
+    'set-environment -g STARTUP_CWD_DIRECT initial-client' \
+    "source-file 'nested.conf'" >"$startup_cwd/direct/entry.conf"
+  printf '%s\n' \
+    'set-environment -g STARTUP_CWD_NESTED initial-client' \
+    >"$startup_cwd/nested.conf"
+  printf '%s\n' \
+    'set-environment -g STARTUP_CWD_DIRECT top-config-decoy' \
+    'set-environment -g STARTUP_CWD_NESTED top-config-decoy' \
+    >"$config_directory/direct/entry.conf"
+  printf '%s\n' \
+    'set-environment -g STARTUP_CWD_NESTED containing-directory-decoy' \
+    >"$startup_cwd/direct/nested.conf"
+  printf '%s\n' \
+    'set-environment -g STARTUP_CWD_DIRECT glob-decoy' \
+    'set-environment -g STARTUP_CWD_NESTED glob-decoy' \
+    >"$startup_glob_decoy/direct/entry.conf"
+  printf '%s\n' \
+    'set-environment -g RUNTIME_CWD_SOURCE stale-startup' \
+    >"$startup_cwd/runtime.conf"
+  printf '%s\n' \
+    'set-environment -g RUNTIME_CWD_SOURCE current-client' \
+    >"$runtime_cwd/runtime.conf"
+  printf '%s\n' \
+    'set-environment -g RUNTIME_CWD_SOURCE glob-decoy' \
+    >"$runtime_glob_decoy/runtime.conf"
+  printf '%s\n' 'STARTUP_CWD_DIRECT=initial-client' >"$direct_expected"
+  printf '%s\n' 'STARTUP_CWD_NESTED=initial-client' >"$nested_expected"
+  printf '%s\n' 'RUNTIME_CWD_SOURCE=current-client' >"$runtime_expected"
+
+  for side in zz tmux; do
+    prepare_target "$side" startup-cwd
+    target="$SIDE_TARGET"
+    stdout="$OUTPUT_DIR/startup-client-cwd.$side.start.stdout"
+    stderr="$OUTPUT_DIR/startup-client-cwd.$side.start.stderr"
+    capture_side_from_cwd "$startup_cwd" "$side" "$target" "$stdout" "$stderr" \
+      -f "$root" new-session -d -s startup-cwd
+    assert_rc "$side" 0
+    assert_empty "$side" stdout "$stdout"
+    assert_empty "$side" stderr "$stderr"
+
+    stdout="$OUTPUT_DIR/startup-client-cwd.$side.direct.stdout"
+    stderr="$OUTPUT_DIR/startup-client-cwd.$side.direct.stderr"
+    capture_side "$side" "$target" "$stdout" "$stderr" \
+      show-environment -g STARTUP_CWD_DIRECT
+    assert_rc "$side" 0
+    assert_empty "$side" stderr "$stderr"
+    assert_files_equal "$side startup direct cwd" "$direct_expected" "$stdout"
+
+    stdout="$OUTPUT_DIR/startup-client-cwd.$side.nested.stdout"
+    stderr="$OUTPUT_DIR/startup-client-cwd.$side.nested.stderr"
+    capture_side "$side" "$target" "$stdout" "$stderr" \
+      show-environment -g STARTUP_CWD_NESTED
+    assert_rc "$side" 0
+    assert_empty "$side" stderr "$stderr"
+    assert_files_equal "$side startup nested cwd" "$nested_expected" "$stdout"
+
+    stdout="$OUTPUT_DIR/startup-client-cwd.$side.runtime-source.stdout"
+    stderr="$OUTPUT_DIR/startup-client-cwd.$side.runtime-source.stderr"
+    capture_side_from_cwd "$runtime_cwd" "$side" "$target" "$stdout" "$stderr" \
+      source-file runtime.conf
+    assert_rc "$side" 0
+    assert_empty "$side" stdout "$stdout"
+    assert_empty "$side" stderr "$stderr"
+
+    stdout="$OUTPUT_DIR/startup-client-cwd.$side.runtime.stdout"
+    stderr="$OUTPUT_DIR/startup-client-cwd.$side.runtime.stderr"
+    capture_side "$side" "$target" "$stdout" "$stderr" \
+      show-environment -g RUNTIME_CWD_SOURCE
+    assert_rc "$side" 0
+    assert_empty "$side" stderr "$stderr"
+    assert_files_equal "$side runtime cwd" "$runtime_expected" "$stdout"
+    stop_side "$side" "$target"
+  done
+  assert_files_equal "startup direct cwd differential" \
+    "$OUTPUT_DIR/startup-client-cwd.zz.direct.stdout" \
+    "$OUTPUT_DIR/startup-client-cwd.tmux.direct.stdout"
+  assert_files_equal "startup nested cwd differential" \
+    "$OUTPUT_DIR/startup-client-cwd.zz.nested.stdout" \
+    "$OUTPUT_DIR/startup-client-cwd.tmux.nested.stdout"
+  assert_files_equal "runtime cwd differential" \
+    "$OUTPUT_DIR/startup-client-cwd.zz.runtime.stdout" \
+    "$OUTPUT_DIR/startup-client-cwd.tmux.runtime.stdout"
+  pass_case
+}
+
 write_interactive_runner() {
   local side="$1"
   local target="$2"
@@ -848,6 +972,7 @@ case_list_output_discarded
 case_failure_root_ordering
 case_multiline_cause
 case_restart_redelivery
+case_startup_client_cwd
 case_interactive_delivery
 
 CURRENT_CASE="completion"

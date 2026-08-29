@@ -5,7 +5,7 @@ description: A single-pass tmux-style tokenizer plus the daemon replay layer tha
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 last_updated_by: Codex
 ---
 
@@ -81,11 +81,13 @@ clears the mutable `ExecutionContext` cwd, but the next nested source continues 
 client's stable base. Runtime `source-file` treats the active default `zz/mux.conf` as an ordinary
 matched path and forwards that same base into nested replay. A direct `reload-config` from a
 registered client snapshots and forwards the base through its separate native reset path. Startup
-replay and sentinel-client reloads pass no source base, so startup remains under
-`source-file.startup-client-cwd`. Deferred event hooks still use the sentinel client under
-`source-file.event-hook-client-cwd`. A hook raised by an ordinary sourced command also starts from
-the sentinel replay client, outside this recursion base; `source-file.sourced-hook-client-cwd`
-tracks that path.
+replay now receives the cold launcher's bounded UTF-8 cwd through a private daemon argument. It
+temporarily prefers that base through nested replay, then clears it before ordinary runtime source
+selection. Direct daemon launches and sentinel-client reloads retain no bootstrap base. Deferred
+event hooks still use the sentinel client under
+`source-file.event-hook-client-cwd`. Command replay retains the caller cwd for hooks raised by
+sourced commands. Control hook framing clears the replay client before the hook runs;
+`source-file.sourced-hook-client-cwd` tracks that Control-only path.
 For an attached client, the daemon now prefers the invoking client's retained session cwd over the
 process cwd in its hello. `attach-session -c` selects a compound target's window and pane, then
 mutates that session cwd after pane-context format expansion. `source-file -t` remains only the
@@ -160,7 +162,7 @@ before later root commands run. zz currently rejects that byte during
 `read_to_string`, emits `stream did not contain valid UTF-8`, and returns status 1.
 `config.non-utf8-file-bytes` owns the byte-input matrix and fix.
 The `source-file -` completion number agrees, but caller stdin transport remains open under
-`protocol.binary-streams`. Parser abort, sourced-hook cwd, deferred event-hook cwd and routing, and
+`protocol.binary-streams`. Control sourced-hook cwd, deferred event-hook cwd and routing, and
 hard-disconnect queue cancellation also remain under their named gaps.
 No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
 summaries and lexer-owned diagnostics remain generic Warning events
@@ -192,8 +194,18 @@ slots, quiet misses do, and one command with many paths consumes one slot. Invoc
 retain `<file>:<line>: too many nested files` in the startup report while later ordinary commands
 continue. Runtime sequential sources stay unbounded.
 
-The v80 startup path first reads and parses every root, then replays those parsed roots in declared
-order. Root read or parse causes therefore precede replay causes, while nested replay remains
+Slice 10ag closes the startup base-selection path. Only a cold launcher that auto-spawns the daemon
+passes private `--bootstrap-client-cwd`; the value must be absolute, valid UTF-8, and no larger than
+16 KiB. Startup config gives it first priority, carries it through nested relative sources and
+literal metacharacter paths, and clears it at the replay boundary on success or error. A direct
+daemon start has no value, and later runtime sources use the registered client's current cwd. The
+isolated startup-client-cwd differential passes exactly on both engines without changing the public
+wire protocol. The full eight-case startup diagnostic reaches the separately registered
+`control-mode.exit-pane-output` difference during Control exit.
+
+The startup path reads and constructs every root as an independent file unit, then replays valid
+roots in declared order. Root read, parse, or construction causes therefore precede replay causes,
+while nested replay remains
 depth-first at its parent command. The report retains normalized explicit-root read failures,
 non-`NotFound` default-root failures, parser and unknown-command diagnostics, unsupported and runtime
 replay failures, nested-source failures, and successful `display-message -p` output. Startup
@@ -218,29 +230,40 @@ Parser and hook-source read placement plus completion numbering now use the v78 
 Hard-disconnect queue cancellation remains under its active Control group. Successful stdout before and after a failure remains in the
 invocation transcript; the original stderr and status 1 remain separate. Clientless startup delivery
 stays separate.
-`source-file -n` runs the same lexer and condition evaluation, retains syntax diagnostics and
-optional verbose output, and applies neither parser environment assignments nor parsed commands.
-One invocation parses all of its top-level matches before replay. A bare assignment applies during
-that parse, affects conditionals in later files, and persists. A parsed `set-environment` command
-runs during replay, so it cannot change a later file's branch after that file has parsed, though the
-environment change persists after replay. Under `-n`, a bare assignment does not affect a later file
-and neither kind of assignment persists.
-This is no-effect source parsing, not full tmux parse validation: tmux validates command names and
-arguments while building its command list, while zz performs those checks during replay. Shared flag
-and arity diagnostics match at dispatch. Once option grammar succeeds, replay validates positional
-bounds before rejecting a recognized parked capability, so the pin's arity diagnostic wins in that
-combined case. `config.parser-edge-cases` and `mux.chain-parse-abort`
-retain the parse-unit boundary.
-The protocol-v84 callback closures do not claim tmux's eager nested-command construction. Pinned
-tmux recursively builds `{ ... }` bodies before it applies the outer callback, including under
-`source-file -n`. zz records lexical block positions during config parsing and applies callback and
-child-command validation only during replay. Consequently, `source-file -n` still does not reject
-an otherwise invalid typed `run-shell`, set-option value, or `bind-key` child in zz, and an invalid
-nested body can take diagnostic precedence on the pin. Alias definitions earlier in the same source are also
-unavailable during the pin's whole-file construction. The outer-user-alias plus nested-user-alias
-case retains tmux's `NOALIAS` parse state, which protocol v84 does not carry. `config.parser-edge-cases`,
-`mux.chain-parse-abort`, `aliases.config-parse-unit`, and the existing alias owners retain those
-boundaries.
+`source-file -n` runs the same lexer, condition evaluation, alias expansion, and static command
+construction, retains syntax diagnostics and optional verbose output, and applies neither parser
+environment assignments nor parsed commands. Each file expands against the environment from before
+that file. One invocation constructs all top-level matches as independent file units before replay.
+Without `-n`, a bare assignment applies during construction, affects conditionals in later files,
+and persists even if a later command in its file fails construction. A parsed `set-environment`
+command runs during replay, so it cannot change a later file's branch after construction. Under
+`-n`, a bare assignment does not affect a later file and neither kind of assignment persists.
+
+Slice 10y adds one alias snapshot per parsed file. After parsing and any permitted file environment
+assignments, the daemon prepares every alias expansion or stored preparation error under one engine
+lock before replay. Startup roots and top-level matched source batches finish construction before
+their batch replay. A nested source obtains a fresh snapshot when its parent source command runs.
+An earlier replayed alias mutation therefore cannot change a later same-line or later-line
+invocation from that parsed file.
+
+Slice 10z closes the file-unit construction boundary under `mux.chain-parse-abort`. After parsing
+and permitted bare assignments, the daemon expands aliases and validates every command group before
+any command from that file runs. The first construction failure preserves earlier bare assignments
+and drops every command effect from the file. `source-file -n` performs the same validation against
+the pre-file environment and commits neither assignments nor commands.
+
+Startup roots and files matched by one source invocation remain independent file units constructed
+in path order before replay. A failed unit loses its own commands while later siblings continue. A
+nested child receives a fresh construction snapshot; its failure drops the child without stopping
+the parent's later physical groups. Runtime target and effect errors retain sequential behavior and
+prune their physical group. Control emits one located `%config-error` without a failed-command guard
+and defers sibling construction warnings until the batch finishes replay.
+
+Verbose output includes completed physical groups and successful alias-subparse traces before the
+first failure, including parse-only files. A failing expanded alias emits no successful alias trace.
+Parser, mux, and daemon regressions plus the two-step `smoke/config-chain-parse-abort` differential
+cover these rules. Recognized unsupported `choose-client` and `switch-mode` typed positions,
+multi-command alias bodies, non-UTF-8 config bytes, and source stdin retain their existing owners.
 `-t` resolves one pane target before path expansion and replay. A missing target follows tmux's
 `CMD_FIND_CANFAIL` path: the file still loads with an empty target context, while the invoking client
 cwd remains the source base. `-F` reads the resolved target context. `-v` emits canonical parsed
@@ -268,8 +291,11 @@ nested source paths keep their existing behavior.
 `source-file` does not expand tildes again during path resolution.
 Leading tildes that the config lexer expands already arrive as absolute paths; a quoted literal
 tilde or a tilde passed through direct argv remains relative and follows the command's normal base
-selection. One parser edge remains tracked separately: tmux expands a tilde immediately after a
-closing quote, while zz leaves it literal.
+selection. Parser edges remain tracked separately. Pinned tmux expands a tilde immediately after a
+closing single or double quote. Bare tilde lookup prefers a nonempty server-global `HOME`, then
+falls back through the current user's passwd entry when that value is empty or unset. Named users
+resolve through `getpwnam`, and a required lookup failure produces a located syntax error. zz leaves
+post-closing-quote and named-user forms literal and reads process `HOME` without passwd fallback.
 
 # Syntax and tokenization rules
 
@@ -364,11 +390,9 @@ constructed canonical text before opening, while a quoted template remains raw. 
 substitutes the exact buffer name or tree target and reparses the text against the current alias
 table in the invoking client's live context. The chooser closes before execution. Empty and stale
 buffers run no custom action, and attached parse or command errors begin with an uppercase
-character. All 12 implemented callback commands now apply their pinned rules. These rules do not
-yet make source-file parse and
-construction atomic for the whole file, provide aliases
-defined earlier in the same source during construction, place multiline inner-source diagnostics,
-or close the broader replay-channel difference.
+character. All 12 implemented callback commands now apply their pinned rules. Slice 10y supplies
+the file-level alias snapshot, and slice 10z constructs the whole file before effects. Multiline
+inner-source diagnostic placement and the broader replay-channel difference retain their owners.
 
 # Schema
 
@@ -388,7 +412,7 @@ diagnostic — no cascade).
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `commands` | `Vec<CommandInvocation>` | Parsed commands in order, each with an attached `SourceSpan` and any lexical command-block positions. Command and argument validation still occurs during replay rather than as one eager whole-file unit. |
+| `commands` | `Vec<CommandInvocation>` | Parsed commands in order, each with an attached `SourceSpan` and any lexical command-block positions. The daemon validates and constructs the complete file before replay. |
 | `environment` | `Vec<ConfigEnvironmentAssignment>` | Ordered `NAME=value` assignments (`name`, `value`, `hidden`) reduced during parse; the daemon applies them to the global environment before the file's commands run. |
 | `diagnostics` | `Vec<ConfigDiagnostic>` | Lexer-level errors (`source`, `line`, `column`, `message`). |
 

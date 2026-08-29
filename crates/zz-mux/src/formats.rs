@@ -10,6 +10,8 @@ pub use zz_protocol::{TmuxColour, parse_tmux_colour};
 use crate::{MuxEngine, PaneKind, WindowSize, layout::CellLayout};
 
 const FORMAT_LOOP_LIMIT: usize = 100;
+const FORMAT_MAX_REPEAT: usize = 10_000;
+const FORMAT_MAX_REPEAT_BYTES: usize = MAX_STATUS_TEXT_BYTES * FORMAT_MAX_REPEAT;
 const FORMAT_MAX_WIDTH: isize = 10_000;
 const LOOP_CONTEXT_FORMATS: &[&str] = &["loop_index", "loop_last_flag"];
 const WINDOW_LOOP_CONTEXT_FORMATS: &[&str] = &["window_after_active", "window_before_active"];
@@ -70,6 +72,31 @@ pub(crate) enum FormatType {
     Session,
     Window,
     Pane,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FormatClient {
+    #[default]
+    NoClient,
+    Unattached,
+    Attached(SessionId),
+}
+
+impl FormatClient {
+    fn attached_session(self) -> Option<SessionId> {
+        match self {
+            Self::Attached(session) => Some(session),
+            Self::NoClient | Self::Unattached => None,
+        }
+    }
+
+    fn session_active(self, session: SessionId) -> Option<bool> {
+        match self {
+            Self::NoClient => None,
+            Self::Unattached => Some(false),
+            Self::Attached(client_session) => Some(client_session == session),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -141,6 +168,7 @@ pub struct StatusContext {
     pub window_active_clients_list: String,
     pub window_active_sessions: usize,
     pub window_active_sessions_list: String,
+    pub window_activity: Option<i64>,
     pub window_activity_alert: bool,
     pub window_bell: bool,
     pub window_end: Option<bool>,
@@ -188,6 +216,7 @@ pub(crate) struct FormatContext {
     pub(crate) window: Option<WindowId>,
     pub(crate) pane: Option<PaneId>,
     pub(crate) active_session: Option<SessionId>,
+    pub(crate) format_client: FormatClient,
     pub(crate) format_type: FormatType,
 }
 
@@ -198,6 +227,7 @@ impl Default for FormatContext {
             window: None,
             pane: None,
             active_session: None,
+            format_client: FormatClient::NoClient,
             format_type: FormatType::None,
         }
     }
@@ -276,6 +306,7 @@ enum FormatBacking {
     SessionAttachedList,
     SessionBell,
     SessionActivity,
+    SessionActive,
     SessionCreated,
     SessionFormat,
     SessionId,
@@ -294,6 +325,7 @@ enum FormatBacking {
     WindowActiveClientsList,
     WindowActiveSessions,
     WindowActiveSessionsList,
+    WindowActivity,
     WindowActivityFlag,
     WindowBell,
     WindowEnd,
@@ -475,7 +507,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("scroll_region_lower", Terminal, Zero),
     variable!("scroll_region_upper", Terminal, Zero),
     variable!("server_sessions", Server, ServerSessions),
-    variable!("session_active", Session, Empty),
+    variable!("session_active", Session, SessionActive),
     variable!("session_activity", Session, Time, SessionActivity),
     variable!("session_activity_flag", Session, WindowActivityFlag),
     variable!("session_alert", Session, SessionAlert),
@@ -522,7 +554,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
         Window,
         WindowActiveSessionsList
     ),
-    variable!("window_activity", Window, Time, Empty),
+    variable!("window_activity", Window, Time, WindowActivity),
     variable!("window_activity_flag", Window, WindowActivityFlag),
     variable!("window_bell_flag", Window, WindowBell),
     variable!("window_bigger", Window, Empty),
@@ -665,6 +697,7 @@ impl StatusContext {
             }
             FormatBacking::SessionBell => Cow::Borrowed(bool_string(self.session_bell)),
             FormatBacking::SessionActivity => optional_display(self.session_activity),
+            FormatBacking::SessionActive => optional_bool(self.session_active),
             FormatBacking::SessionCreated => optional_display(self.session_created),
             FormatBacking::SessionFormat => {
                 Cow::Borrowed(bool_string(format_type == FormatType::Session))
@@ -695,6 +728,7 @@ impl StatusContext {
             FormatBacking::WindowActiveSessionsList => {
                 Cow::Borrowed(self.window_active_sessions_list.as_str())
             }
+            FormatBacking::WindowActivity => optional_display(self.window_activity),
             FormatBacking::WindowActivityFlag => {
                 Cow::Borrowed(bool_string(self.window_activity_alert))
             }
@@ -830,8 +864,9 @@ impl FormatContext {
                 .and_then(|window| state.windows.get(&window))
                 .map(|window| window.active_pane)
         });
-        let mut values = engine.build_status_context(session, window, pane, self.active_session);
-        values.format_universe = engine.build_format_universe(self.active_session);
+        let mut values = engine.build_status_context(session, window, pane, self.format_client);
+        values.format_universe =
+            engine.build_format_universe(self.active_session, self.format_client);
         ResolvedFormatContext {
             values,
             has_session: session.is_some(),
@@ -855,6 +890,48 @@ impl MuxEngine {
             window,
             pane,
             active_session: session,
+            format_client: FormatClient::NoClient,
+            format_type: FormatType::None,
+        }
+        .resolve(self)
+        .values
+    }
+
+    #[must_use]
+    pub fn format_status_context_for_client(
+        &self,
+        session: Option<SessionId>,
+        window: Option<WindowId>,
+        pane: Option<PaneId>,
+        client_session: SessionId,
+    ) -> StatusContext {
+        FormatContext {
+            session,
+            window,
+            pane,
+            active_session: Some(client_session),
+            format_client: FormatClient::Attached(client_session),
+            format_type: FormatType::None,
+        }
+        .resolve(self)
+        .values
+    }
+
+    #[must_use]
+    pub fn format_status_context_with_format_client(
+        &self,
+        session: Option<SessionId>,
+        window: Option<WindowId>,
+        pane: Option<PaneId>,
+        active_session: Option<SessionId>,
+        format_client: FormatClient,
+    ) -> StatusContext {
+        FormatContext {
+            session,
+            window,
+            pane,
+            active_session,
+            format_client,
             format_type: FormatType::None,
         }
         .resolve(self)
@@ -866,7 +943,7 @@ impl MuxEngine {
         session_id: Option<SessionId>,
         window_id: Option<WindowId>,
         pane_id: Option<PaneId>,
-        active_session: Option<SessionId>,
+        format_client: FormatClient,
     ) -> StatusContext {
         let mut context = StatusContext {
             host: self.format_host().to_owned(),
@@ -903,7 +980,7 @@ impl MuxEngine {
         context.session_created = session.created;
         context.session_sort_activity = session.sort_activity;
         context.session_windows = session.windows.len();
-        context.session_active = active_session.map(|active| active == session.id);
+        context.session_active = format_client.session_active(session.id);
         context.active_window_index = self
             .state
             .windows
@@ -996,6 +1073,7 @@ impl MuxEngine {
             |pane| CellLayout::new(pane, width, height).dump(),
         );
         context.window_bell = window.panes.values().any(|pane| pane.bell);
+        context.window_activity = window.activity_time;
         context.window_activity_alert = window.activity_flag;
         context.window_silence_alert = window.silence_flag;
         context.window_last = Some(session.last_window() == Some(window.id));
@@ -1108,7 +1186,12 @@ impl MuxEngine {
         context
     }
 
-    fn build_format_universe(&self, active_session: Option<SessionId>) -> Arc<FormatUniverse> {
+    fn build_format_universe(
+        &self,
+        _active_session: Option<SessionId>,
+        format_client: FormatClient,
+    ) -> Arc<FormatUniverse> {
+        let active_session = format_client.attached_session();
         let mut universe = FormatUniverse::default();
         for session in self.state.sessions.values() {
             let active_window = self.state.windows.get(&session.active_window);
@@ -1116,7 +1199,7 @@ impl MuxEngine {
                 Some(session.id),
                 active_window.map(|window| window.id),
                 active_window.map(|window| window.active_pane),
-                active_session,
+                format_client,
             );
             universe.sessions.push(FormatLoopItem {
                 active: active_session == Some(session.id),
@@ -1133,7 +1216,7 @@ impl MuxEngine {
                     Some(session.id),
                     Some(window.id),
                     Some(window.active_pane),
-                    active_session,
+                    format_client,
                 );
                 windows.push(FormatLoopItem {
                     active: window.id == session.active_window,
@@ -1149,7 +1232,7 @@ impl MuxEngine {
                             Some(session.id),
                             Some(window.id),
                             Some(pane.id),
-                            active_session,
+                            format_client,
                         ),
                     })
                     .collect::<Vec<_>>();
@@ -1340,13 +1423,80 @@ fn expand_format_inner(
     hooks: &mut impl StatusHooks,
     time: bool,
 ) -> String {
+    let option_fallback =
+        (context.session.is_none() && context.window.is_none() && context.pane.is_none())
+            .then(|| context.format_client.attached_session())
+            .flatten()
+            .and_then(|session| {
+                let window = engine.state.sessions.get(&session)?.active_window;
+                let pane = engine.state.windows.get(&window)?.active_pane;
+                Some(engine.build_status_context(
+                    Some(session),
+                    Some(window),
+                    Some(pane),
+                    context.format_client,
+                ))
+            });
     let context = context.resolve(engine);
+    let mut hooks = OptionFormatHooks {
+        engine,
+        inner: hooks,
+        fallback: option_fallback.as_ref(),
+    };
     let mut expander = Expander {
         context: &context,
-        hooks,
+        hooks: &mut hooks,
         time,
     };
     truncate_output(expander.expand(format, 0))
+}
+
+struct OptionFormatHooks<'a, H> {
+    engine: &'a MuxEngine,
+    inner: &'a mut H,
+    fallback: Option<&'a StatusContext>,
+}
+
+impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
+    fn strftime(&mut self, literal: &str) -> String {
+        self.inner.strftime(literal)
+    }
+
+    fn shell(&mut self, command: &str) -> String {
+        self.inner.shell(command)
+    }
+
+    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        let option_context = if context.session_id.is_empty()
+            && context.window_id.is_empty()
+            && context.pane_id.is_empty()
+        {
+            self.fallback.unwrap_or(context)
+        } else {
+            context
+        };
+        self.engine
+            .format_option_value(option_context, name)
+            .or_else(|| self.inner.variable(name, context))
+    }
+
+    fn window_activity(&mut self, window: WindowId) -> u64 {
+        self.inner.window_activity(window)
+    }
+
+    fn pane_activity(&mut self, pane: PaneId) -> u64 {
+        self.inner.pane_activity(pane)
+    }
+
+    fn pane_search(
+        &mut self,
+        pane: Option<PaneId>,
+        pattern: &str,
+        regex: bool,
+        ignore_case: bool,
+    ) -> usize {
+        self.inner.pane_search(pane, pattern, regex, ignore_case)
+    }
 }
 
 struct Expander<'a, V: FormatVariables + ?Sized, H: StatusHooks> {
@@ -1520,6 +1670,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             self.expand_name_exists(copy, depth, false)?
         } else if let Some(search_flags) = flags.content_search {
             self.expand_content_search(copy, depth, search_flags)
+        } else if flags.repeat {
+            self.expand_repeat(copy, depth)?
         } else if flags.not {
             bool_string(!format_true(&self.expand(copy, depth))).to_owned()
         } else if flags.not_not {
@@ -1721,6 +1873,34 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         self.hooks
             .pane_search(pane, &pattern, flags.contains('r'), flags.contains('i'))
             .to_string()
+    }
+
+    fn expand_repeat(&mut self, copy: &str, depth: usize) -> Result<String, ()> {
+        let (value, count) = split_once_top(copy, ',');
+        let count = count.ok_or(())?;
+        let value = self.expand(value, depth);
+        let count = self
+            .expand(count, depth)
+            .trim_start()
+            .parse::<usize>()
+            .ok()
+            .filter(|count| (1..=FORMAT_MAX_REPEAT).contains(count));
+        let Some(count) = count else {
+            return Ok(String::new());
+        };
+        let Some(bytes) = value
+            .len()
+            .checked_mul(count)
+            .filter(|bytes| *bytes <= FORMAT_MAX_REPEAT_BYTES)
+        else {
+            return Err(());
+        };
+        let mut repeated = String::new();
+        repeated.try_reserve_exact(bytes).map_err(|_| ())?;
+        for _ in 0..count {
+            repeated.push_str(&value);
+        }
+        Ok(repeated)
     }
 
     fn expand_expression(&mut self, copy: &str, depth: usize, modifier: &Modifier) -> String {
@@ -2046,6 +2226,7 @@ enum ModifierKind {
     Windows,
     Panes,
     ContentSearch,
+    Repeat,
 }
 
 #[derive(Clone, Copy)]
@@ -2065,7 +2246,7 @@ impl FormatModifierSpec {
     }
 }
 
-const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 30] = [
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 31] = [
     FormatModifierSpec::new("||", ModifierKind::Or, false),
     FormatModifierSpec::new("&&", ModifierKind::And, false),
     FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
@@ -2096,6 +2277,7 @@ const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 30] = [
     FormatModifierSpec::new("W", ModifierKind::Windows, true),
     FormatModifierSpec::new("P", ModifierKind::Panes, true),
     FormatModifierSpec::new("C", ModifierKind::ContentSearch, true),
+    FormatModifierSpec::new("R", ModifierKind::Repeat, true),
 ];
 
 #[cfg(test)]
@@ -2209,6 +2391,7 @@ struct ModifierFlags<'a> {
     loop_sort: Option<LoopSort>,
     loop_reversed: bool,
     content_search: Option<&'a str>,
+    repeat: bool,
     time: TimeFlags<'a>,
     quote_shell: bool,
     quote_single: bool,
@@ -2361,6 +2544,7 @@ impl<'a> ModifierFlags<'a> {
                 ModifierKind::ContentSearch => {
                     flags.content_search = Some(modifier.args.first().map_or("", String::as_str));
                 }
+                ModifierKind::Repeat => flags.repeat = true,
             }
         }
         flags
@@ -3425,6 +3609,7 @@ mod tests {
             window_active_clients_list: "client".to_owned(),
             window_active_sessions: 1,
             window_active_sessions_list: "work".to_owned(),
+            window_activity: Some(1_700_000_000),
             window_end: Some(false),
             window_height: Some(50),
             window_id: "@5".to_owned(),
@@ -3456,6 +3641,7 @@ mod tests {
                 window: None,
                 pane: None,
                 active_session: None,
+                format_client: FormatClient::NoClient,
                 format_type: FormatType::Session,
             },
         )
@@ -3546,7 +3732,6 @@ mod tests {
             "mouse_x",
             "mouse_y",
             "pane_pipe_pid",
-            "session_active",
             "session_group_attached",
             "session_group_many_attached",
             "session_group_size",
@@ -3559,6 +3744,149 @@ mod tests {
     }
 
     #[test]
+    fn session_active_expands_null_false_and_true_as_a_boolean() {
+        for (value, expected) in [
+            (None, "|no|0"),
+            (Some(false), "0|no|0"),
+            (Some(true), "1|yes|1"),
+        ] {
+            let mut context = context();
+            context.session_active = value;
+            assert_eq!(
+                expand_format_values(
+                    "#{session_active}|#{?session_active,yes,no}|#{!!:#{session_active}}",
+                    &context,
+                    &mut Stub,
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn session_active_uses_a_distinct_tri_state_format_client() {
+        let mut engine = MuxEngine::default();
+        let (first, first_window, first_pane) = engine.state.create_session("first").unwrap();
+        let (second, second_window, second_pane) = engine.state.create_session("second").unwrap();
+        let expand_for = |session, window, pane, format_client| {
+            expand_format(
+                "#{session_active}",
+                &engine,
+                FormatContext {
+                    session,
+                    window,
+                    pane,
+                    active_session: Some(first),
+                    format_client,
+                    format_type: FormatType::Session,
+                },
+            )
+        };
+
+        for format_client in [
+            FormatClient::NoClient,
+            FormatClient::Unattached,
+            FormatClient::Attached(first),
+            FormatClient::Attached(second),
+        ] {
+            assert_eq!(expand_for(None, None, None, format_client), "");
+        }
+        assert_eq!(
+            expand_for(
+                Some(first),
+                Some(first_window),
+                Some(first_pane),
+                FormatClient::NoClient,
+            ),
+            ""
+        );
+        assert_eq!(
+            expand_for(
+                Some(first),
+                Some(first_window),
+                Some(first_pane),
+                FormatClient::Unattached,
+            ),
+            "0"
+        );
+        assert_eq!(
+            expand_for(
+                Some(first),
+                Some(first_window),
+                Some(first_pane),
+                FormatClient::Attached(first),
+            ),
+            "1"
+        );
+        assert_eq!(
+            expand_for(
+                Some(first),
+                Some(first_window),
+                Some(first_pane),
+                FormatClient::Attached(second),
+            ),
+            "0"
+        );
+        assert_eq!(
+            expand_for(
+                Some(second),
+                Some(second_window),
+                Some(second_pane),
+                FormatClient::Attached(second),
+            ),
+            "1"
+        );
+
+        assert_eq!(
+            engine
+                .format_status_context(Some(first), Some(first_window), Some(first_pane))
+                .session_active,
+            None
+        );
+        assert_eq!(
+            engine
+                .format_status_context_for_client(
+                    Some(first),
+                    Some(first_window),
+                    Some(first_pane),
+                    first,
+                )
+                .session_active,
+            Some(true)
+        );
+        assert_eq!(
+            engine
+                .format_status_context_for_client(
+                    Some(second),
+                    Some(second_window),
+                    Some(second_pane),
+                    first,
+                )
+                .session_active,
+            Some(false)
+        );
+        for (format_client, expected) in [
+            (FormatClient::NoClient, None),
+            (FormatClient::Unattached, Some(false)),
+            (FormatClient::Attached(first), Some(true)),
+            (FormatClient::Attached(second), Some(false)),
+        ] {
+            assert_eq!(
+                engine
+                    .format_status_context_with_format_client(
+                        Some(first),
+                        Some(first_window),
+                        Some(first_pane),
+                        Some(second),
+                        format_client,
+                    )
+                    .session_active,
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn session_activity_expands_as_seconds_and_time() {
         assert_eq!(expand("#{session_activity}"), "1700000000");
         assert_eq!(
@@ -3567,6 +3895,35 @@ mod tests {
         );
         assert!(
             expand_format_values("#{t:session_activity}", &context(), &mut Stub).ends_with(" 2023")
+        );
+    }
+
+    #[test]
+    fn window_activity_keeps_plain_boolean_equality_and_time_views_consistent() {
+        assert_eq!(
+            expand_format_values(
+                "#{window_activity}|#{?window_activity,yes,no}|#{==:#{window_activity},1700000000}|#{t/f/%Y:window_activity}",
+                &context(),
+                &mut Stub,
+            ),
+            "1700000000|yes|1|2023"
+        );
+
+        let mut context = context();
+        context.window_activity = None;
+        assert_eq!(
+            expand_format_values(
+                "#{window_activity}|#{?window_activity,yes,no}|#{==:#{window_activity},}",
+                &context,
+                &mut Stub,
+            ),
+            "|no|1"
+        );
+        assert_eq!(
+            StatusContext::default()
+                .variable("window_activity")
+                .as_deref(),
+            Some("")
         );
     }
 
@@ -3666,6 +4023,7 @@ mod tests {
             window: Some(first_window),
             pane: Some(second_pane),
             active_session: Some(session),
+            format_client: FormatClient::Attached(session),
             format_type: FormatType::Pane,
         }
         .resolve(&engine);
@@ -3706,6 +4064,7 @@ mod tests {
             window: Some(first_window),
             pane: Some(second_pane),
             active_session: Some(session),
+            format_client: FormatClient::Attached(session),
             format_type: FormatType::Pane,
         }
         .resolve(&engine);
@@ -3903,6 +4262,32 @@ mod tests {
     }
 
     #[test]
+    fn repeat_modifier_expands_operands_and_runs_before_post_transforms() {
+        assert_eq!(expand("#{R:x,3}"), "xxx");
+        assert_eq!(expand("#{R:#{session_name},2}"), "workwork");
+        assert_eq!(expand("#{R:a#,,2}"), "a,a,");
+        assert_eq!(expand("#{R:x,#{e|+|:1,2}}"), "xxx");
+        assert_eq!(expand("#{R:x,+2}|#{R:x, 2}"), "xx|xx");
+        assert_eq!(expand("#{n:#{R:x,10000}}"), "10000");
+        assert_eq!(expand("#{n;R:x,3}|#{R;=/2:x,3}"), "3|xx");
+    }
+
+    #[test]
+    fn repeat_modifier_rejects_missing_or_out_of_range_counts() {
+        for format in [
+            "#{R:x,0}",
+            "#{R:x,-1}",
+            "#{R:x,10001}",
+            "#{R:x,bad}",
+            "#{R:x,2 }",
+        ] {
+            assert_eq!(expand(format), "", "format: {format}");
+        }
+        assert_eq!(expand("before#{R:x}after"), "before");
+        assert_eq!(expand("before#{R:#{R:x,5000},10000}after"), "before");
+    }
+
+    #[test]
     fn name_checks_and_nested_scope_loops_use_the_engine_universe() {
         let mut engine = MuxEngine::default();
         let (zeta, first_window, first_pane) = engine.state.create_session("zeta").unwrap();
@@ -3921,6 +4306,7 @@ mod tests {
             window: Some(first_window),
             pane: Some(second_pane),
             active_session: Some(zeta),
+            format_client: FormatClient::Attached(zeta),
             format_type: FormatType::Pane,
         };
 
@@ -3939,6 +4325,39 @@ mod tests {
         assert_eq!(
             expand_format("#{S:#{session_name},[#{session_name}]} ", &engine, context),
             "[zeta]alpha "
+        );
+        assert_eq!(
+            expand_format(
+                "#{S:#{session_name}=#{session_active},[#{session_name}=#{session_active}]} ",
+                &engine,
+                FormatContext {
+                    format_client: FormatClient::Attached(alpha),
+                    ..context
+                },
+            ),
+            "zeta=0[alpha=1] "
+        );
+        assert_eq!(
+            expand_format(
+                "#{S:#{session_name}=#{session_active},[#{session_name}=#{session_active}]} ",
+                &engine,
+                FormatContext {
+                    format_client: FormatClient::NoClient,
+                    ..context
+                },
+            ),
+            "zeta=alpha= "
+        );
+        assert_eq!(
+            expand_format(
+                "#{S:#{session_name}=#{session_active},[#{session_name}=#{session_active}]} ",
+                &engine,
+                FormatContext {
+                    format_client: FormatClient::Unattached,
+                    ..context
+                },
+            ),
+            "zeta=0alpha=0 "
         );
         assert_eq!(
             expand_format("#{W:#{window_name},[#{window_name}]}", &engine, context),

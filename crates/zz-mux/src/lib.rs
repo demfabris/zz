@@ -16,14 +16,15 @@ mod sort;
 mod status;
 mod tmux_options;
 
+pub use command::TMUX_OPTION_CONSUMERS as BEHAVES;
 pub use command::{
     AgentOptions, CommandAliasBodyError, CommandAliasResolution, CommandPromptTemplate,
     CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachRequest, DetachScope, Execution,
     ExecutionContext, FormatFacts, MAX_WORD_SEPARATORS_BYTES, MenuOptions, MuxEffect, MuxEngine,
-    PaneBorderStyleValues, PaneRuntimeFacts, PopupOptions, StatusRowVariables,
-    TerminalWorkerOptions, WindowStyleValues, copy_mode_action_is_read_only_safe, format_command,
-    hook_format_variables, if_shell_truthy, send_keys_is_read_only_safe,
-    validate_static_command_chain,
+    PaneBorderStyleValues, PaneRuntimeFacts, PopupOptions, RetainedJobEnvironment,
+    StatusRowVariables, TMUX_OPTION_CONSUMERS, TerminalWorkerOptions, WindowStyleValues,
+    copy_mode_action_is_read_only_safe, format_command, hook_format_variables, if_shell_truthy,
+    send_keys_is_read_only_safe, validate_static_command_chain,
 };
 #[doc(hidden)]
 pub use command::{
@@ -32,8 +33,8 @@ pub use command::{
     mux_literal_format_context_scopes,
 };
 pub use formats::{
-    TmuxColour, delegated_format_variable_names, display_width, format_true, indexed_colour_rgb,
-    parse_tmux_colour,
+    FormatClient, TmuxColour, delegated_format_variable_names, display_width, format_true,
+    indexed_colour_rgb, parse_tmux_colour,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};
@@ -49,7 +50,6 @@ pub use status::{
     StatusJustify, StatusOption, StatusPosition, WindowStatusFormats, WindowStatusOption,
     expand_format_values, expand_status,
 };
-pub use tmux_options::BEHAVES;
 pub use zz_protocol::{Binding, KeyDecision, KeyEngine, KeyTables, canonical_key};
 pub use zz_protocol::{
     COMMAND_SPECS, CommandOptionSpec, CommandSpec, CommandValueKind, canonical_command,

@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/jobs-command-environment.sh ~/jobs-command-environment.sh
+out: set-environment -gu JOBS_COMMAND_ENVIRONMENT
+run-shell 'sh ~/jobs-command-environment.sh'
+out: show-environment -g JOBS_COMMAND_ENVIRONMENT

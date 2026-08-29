@@ -19,8 +19,8 @@
 | errors | 2 | yes | 0 | yes | yes | yes |
 | exec-family | 30 | yes | 0 | yes | yes | yes |
 | format-flags | 8 | yes | 0 | yes | yes | yes |
-| formats-values | 18 | yes | 0 | yes | yes | yes |
-| formats | 12 | yes | 0 | yes | yes | yes |
+| formats-values | 45 | yes | 0 | yes | yes | yes |
+| formats | 16 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-defaults | 18 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-errors | 17 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-layout | 9 | yes | 0 | yes | yes | yes |
@@ -37,7 +37,9 @@
 | mru-activity | 11 | yes | 0 | yes | yes | yes |
 | native-prefix-isolation | 29 | yes | 0 | yes | yes | yes |
 | nested-splits | 4 | yes | 0 | yes | yes | yes |
+| new-session-cwd | 10 | yes | 0 | yes | yes | yes |
 | new-session-environment | 18 | yes | 0 | yes | yes | yes |
+| option-name-formats | 60 | yes | 0 | yes | yes | yes |
 | options-readback | 15 | yes | 0 | yes | yes | yes |
 | pane-dead-time | 6 | yes | 0 | yes | yes | yes |
 | pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
@@ -80,12 +82,15 @@
 | smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
+| smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
+| smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-grammar | 15 | yes | 0 | yes | yes | yes |
 | smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
 | smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |
 | smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
 | smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
+| smoke/jobs-command-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
 | smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |
 | smoke/own-conf | 6 | yes | 0 | yes | yes | yes |

@@ -292,6 +292,30 @@ if [ "$(main_client list-keys -T prefix -F '#{key_string}=#{key_command}' F10)" 
 fi
 
 check_count=$((check_count + 1))
+after_queue_marker="$work/after-queue.marker"
+: >"$after_queue_marker"
+main_client set-hook -g after-queue \
+    "run-shell 'printf x >> \"$after_queue_marker\"'"
+main_client display-message -p queue-one \; \
+    display-message -p queue-two >/dev/null
+if [ -s "$after_queue_marker" ]; then
+    fail_check after-queue-ordinary
+fi
+main_client set-hook -gR after-queue >/dev/null
+if [ "$(wc -c <"$after_queue_marker")" -ne 1 ]; then
+    fail_check after-queue-manual-first
+fi
+main_client display-message -p ordinary-after >/dev/null
+if [ "$(wc -c <"$after_queue_marker")" -ne 1 ]; then
+    fail_check after-queue-ordinary-after
+fi
+main_client set-hook -gR after-queue >/dev/null
+if [ "$(wc -c <"$after_queue_marker")" -ne 2 ]; then
+    fail_check after-queue-manual-second
+fi
+main_client set-hook -gu after-queue
+
+check_count=$((check_count + 1))
 main_client set-environment -gu SET_HOOK_CONTROL_FORBIDDEN
 control_reject_raw="$work/control-reject.raw"
 control_reject_error="$work/control-reject.err"
@@ -317,12 +341,12 @@ if [ "$control_accept_status" -ne 0 ] || [ -s "$control_reject_error" ] ||
 fi
 expect_absent_environment control-typed-effect SET_HOOK_CONTROL_FORBIDDEN
 
-if [ "$check_count" -ne 24 ]; then
+if [ "$check_count" -ne 25 ]; then
     fail_check "check-count-$check_count"
 fi
 
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g ARGS_PARSE_SET_HOOK clean:24
+    main_client set-environment -g ARGS_PARSE_SET_HOOK clean:25
 else
     failure_labels="$(paste -sd, "$work/failures")"
     failure_side="${ZZ_SMOKE_CANARY:-missing-canary}"

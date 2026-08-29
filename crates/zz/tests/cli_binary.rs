@@ -284,6 +284,9 @@ mod daemon_autostart {
         assert_eq!(first.status.code(), Some(0));
         let killed = fixture.run(&["kill-server"]);
         assert_eq!(killed.status.code(), Some(0));
+        assert!(killed.stdout.is_empty());
+        assert!(killed.stderr.is_empty());
+        fixture.assert_stopped();
         let second = fixture.run(&["new-session", "-d", "-s", "b"]);
         assert_eq!(
             second.status.code(),
@@ -6223,6 +6226,20 @@ mod daemon_autostart {
             assert_block(&stream.blocks[0], 1, 0, &[], false);
             assert_block(&stream.blocks[1], 2, 1, &[], false);
             assert_attached_startup(&stream.outside, "stopping");
+            assert_eq!(
+                stream
+                    .outside
+                    .iter()
+                    .filter(|line| line.as_str() == "%exit")
+                    .count(),
+                1
+            );
+            assert!(
+                !stream
+                    .outside
+                    .iter()
+                    .any(|line| line.contains("server exited unexpectedly"))
+            );
         }
 
         #[test]

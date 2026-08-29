@@ -1,0 +1,40 @@
+bind-key -T zzstrict F1 display-message baseline
+bind-key -T zzstrict F01 display-message forbidden-leading-zero
+bind-key -T zzstrict F0012 display-message forbidden-leading-zeros
+bind-key -T zzstrict F+1 display-message forbidden-sign
+bind-key -T zzstrict Ctrl-a display-message forbidden-control-alias
+bind-key -T zzstrict Alt-a display-message forbidden-meta-alias
+out: list-keys -T zzstrict -F #{key_string}|#{key_command}
+bind-key -T zzstrict ^A display-message caret
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} C-a
+bind-key -T zzstrict btab display-message back-tab
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} BTab
+bind-key -T zzstrict kpenter display-message keypad
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} KPEnter
+bind-key -T zzstrict 'User+1junk' display-message user-plus-suffix
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} User1
+unbind-key -T zzstrict User1
+bind-key -T zzstrict 'User 1' display-message user-whitespace
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} User1
+bind-key -T zzstrict User4294967296 display-message user-wrap
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} User0
+bind-key -T zzstrict 0x41junk display-message hex-suffix
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} 0x41junk
+bind-key -T zzstrict 0x1g display-message hex-partial
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} 0x1
+bind-key -T zzstrict 0x100000041 display-message hex-wrap
+out: list-keys -T zzstrict -F #{key_string}|#{key_command} 0x100000041
+bind-key -T zzstrict User1001 display-message forbidden-user-bound
+bind-key -T zzstrict User18446744073709551616 display-message forbidden-user-overflow
+bind-key -T zzstrict 0X41 display-message forbidden-hex-case
+bind-key -T zzstrict 0x10000000000000000 display-message forbidden-hex-overflow
+set-option -g prefix C-b
+set-option -g prefix F01
+out: show-options -gv prefix
+set-option -g prefix Ctrl-a
+out: show-options -gv prefix
+set-option -g prefix 'User+1junk'
+out: show-options -gv prefix
+set-option -g prefix 0x41junk
+out: show-options -gv prefix
+set-option -g prefix C-b

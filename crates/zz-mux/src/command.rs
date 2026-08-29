@@ -12844,7 +12844,7 @@ fn parse_tmux_key(value: &str) -> Option<String> {
         return Some("Any".to_owned());
     }
     if let Some(hex) = value.strip_prefix("0x") {
-        let code = u32::from_str_radix(hex, 16).ok()?;
+        let code = parse_scanf_unsigned_prefix(hex, 16)?;
         if code < 32 {
             const CONTROL_KEYS: [&str; 32] = [
                 "[NUL]", "[SOH]", "[STX]", "[ETX]", "[EOT]", "[ENQ]", "[ASC]", "[BEL]", "[BS]",
@@ -12900,8 +12900,10 @@ fn parse_tmux_key(value: &str) -> Option<String> {
             .first()
             .is_some_and(|first| first.eq_ignore_ascii_case(&b'F'))
     }) {
-        let number = number.parse::<u8>().ok()?;
-        if !(1..=12).contains(&number) {
+        if !matches!(
+            number,
+            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "11" | "12"
+        ) {
             return None;
         }
         format!("F{number}")
@@ -13009,15 +13011,45 @@ fn canonical_named_key(value: &str) -> Option<&'static str> {
 
 fn parse_user_key(value: &str) -> Option<String> {
     let tail = value.strip_prefix("User")?;
-    let digits = tail
-        .bytes()
-        .take_while(u8::is_ascii_digit)
-        .collect::<Vec<_>>();
-    if digits.is_empty() {
-        return None;
-    }
-    let number = std::str::from_utf8(&digits).ok()?.parse::<u16>().ok()?;
+    let number = parse_scanf_unsigned_prefix(tail, 10)?;
     (number <= 1000).then(|| format!("User{number}"))
+}
+
+fn parse_scanf_unsigned_prefix(value: &str, radix: u32) -> Option<u32> {
+    let whitespace = value.bytes().take_while(u8::is_ascii_whitespace).count();
+    let mut value = value.get(whitespace..)?;
+    let negative = if let Some(tail) = value.strip_prefix('-') {
+        value = tail;
+        true
+    } else {
+        if let Some(tail) = value.strip_prefix('+') {
+            value = tail;
+        }
+        false
+    };
+    if radix == 16
+        && let Some(tail) = value
+            .strip_prefix("0x")
+            .or_else(|| value.strip_prefix("0X"))
+        && tail.as_bytes().first().is_some_and(u8::is_ascii_hexdigit)
+    {
+        value = tail;
+    }
+    let digits = value
+        .bytes()
+        .take_while(|byte| match radix {
+            10 => byte.is_ascii_digit(),
+            16 => byte.is_ascii_hexdigit(),
+            _ => false,
+        })
+        .count();
+    let magnitude = u64::from_str_radix(value.get(..digits)?, radix).ok()?;
+    let number = if negative {
+        0_u64.wrapping_sub(magnitude)
+    } else {
+        magnitude
+    };
+    Some(number as u32)
 }
 
 fn parse_mouse_key(value: &str) -> Option<String> {
@@ -33674,7 +33706,14 @@ mod tests {
             ("^A", "C-a"),
             ("c-b", "C-b"),
             ("0x41", "A"),
+            ("0x41junk", "A"),
+            ("0x1g", "[SOH]"),
+            ("0x100000041", "A"),
             ("User0", "User0"),
+            ("User+1", "User1"),
+            ("User 1", "User1"),
+            ("User4294967296", "User0"),
+            ("User-4294967295", "User1"),
         ] {
             engine
                 .execute(
@@ -33732,7 +33771,64 @@ mod tests {
     }
 
     #[test]
-    fn long_modifier_aliases_fail_before_key_state_changes() {
+    fn tmux_key_parser_matches_pinned_scanf_prefixes_and_bounds() {
+        for (key, canonical) in [
+            ("F1", "F1"),
+            ("f12", "F12"),
+            ("User0001", "User1"),
+            ("User+1junk", "User1"),
+            ("User 1", "User1"),
+            ("User\t1", "User1"),
+            ("User-0", "User0"),
+            ("User1000", "User1000"),
+            ("User4294967296", "User0"),
+            ("User4294968296", "User1000"),
+            ("User-4294967295", "User1"),
+            ("User-18446744073709551615", "User1"),
+            ("0x041", "A"),
+            ("0x+41", "A"),
+            ("0x41junk", "A"),
+            ("0x1g", "[SOH]"),
+            ("0x 41", "A"),
+            ("0x\t41", "A"),
+            ("0x0x41", "A"),
+            ("0x0x", "[NUL]"),
+            ("0x-ffffffff", "[SOH]"),
+            ("0x100000041", "A"),
+            ("0xffffffff00000000", "[NUL]"),
+        ] {
+            assert_eq!(parse_tmux_key(key).as_deref(), Some(canonical), "{key}");
+        }
+        for key in [
+            "F01",
+            "F0012",
+            "F+1",
+            "F-1",
+            "F0",
+            "F13",
+            "F1junk",
+            "user1",
+            "USER1",
+            "User",
+            "User+",
+            "User-1",
+            "User1001",
+            "User18446744073709551616",
+            "User-18446744073709551616",
+            "0X41",
+            "0x",
+            "0xg1",
+            "0x-1",
+            "0xd800",
+            "0x110000",
+            "0x10000000000000000",
+        ] {
+            assert_eq!(parse_tmux_key(key), None, "{key}");
+        }
+    }
+
+    #[test]
+    fn invalid_tmux_key_spellings_fail_before_key_state_changes() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -33774,24 +33870,38 @@ mod tests {
                 "unknown key: Ctrl-a",
             ),
             (
+                command(
+                    "bind-key",
+                    &["-T", "strict", "F01", "display-message", "replacement"],
+                ),
+                "unknown key: F01",
+            ),
+            (
+                command(
+                    "bind-key",
+                    &["-T", "strict", "User1001", "display-message", "replacement"],
+                ),
+                "unknown key: User1001",
+            ),
+            (
                 command("unbind-key", &["-T", "strict", "Alt-a"]),
                 "unknown key: Alt-a",
             ),
             (
-                command("list-keys", &["-T", "strict", "Ctrl-a"]),
-                "invalid key: Ctrl-a",
+                command("list-keys", &["-T", "strict", "F0012"]),
+                "invalid key: F0012",
             ),
             (
-                command("set-option", &["-g", "prefix", "Ctrl-a"]),
-                "bad key: Ctrl-a",
+                command("set-option", &["-g", "prefix", "F+1"]),
+                "bad key: F+1",
             ),
             (
-                command("set-option", &["-g", "prefix2", "Alt-a"]),
-                "bad key: Alt-a",
+                command("set-option", &["-g", "prefix2", "User-1"]),
+                "bad key: User-1",
             ),
             (
-                command("set-option", &["-s", "backspace", "Ctrl-a"]),
-                "bad key: Ctrl-a",
+                command("set-option", &["-s", "backspace", "0X41"]),
+                "bad key: 0X41",
             ),
         ] {
             assert_eq!(
@@ -33839,7 +33949,11 @@ mod tests {
             ("c-b", "C-b"),
             ("pageup", "PPage"),
             ("0x41", "A"),
+            ("0x41junk", "A"),
+            ("0x1g", "[SOH]"),
             ("User0", "User0"),
+            ("User+1", "User1"),
+            ("User4294967296", "User0"),
             ("none", "None"),
         ] {
             engine

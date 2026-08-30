@@ -4934,6 +4934,14 @@ impl Shared {
                         result: PreparedCommandResult::Error(error),
                     };
                 }
+                if MuxEngine::is_command_alias_group(&invocation) {
+                    return PreparedCommand {
+                        invocation,
+                        canonical_name: None,
+                        alias_matched,
+                        result: PreparedCommandResult::Ready,
+                    };
+                }
                 match resolution {
                     CommandResolution::Canonical(name) | CommandResolution::Unimplemented(name) => {
                         PreparedCommand {
@@ -5027,6 +5035,9 @@ impl Shared {
         mux_source: MuxOptionSource,
         client_terminal: ClientTerminal,
     ) -> Result<Execution, DaemonError> {
+        if MuxEngine::is_command_alias_group(command) {
+            return self.execute_command_alias_group(client, kind, context, command, mux_source);
+        }
         let no_hooks = context.no_hooks;
         let original_context = context.clone();
         let name = canonical_command(&command.name).to_owned();
@@ -5374,6 +5385,7 @@ impl Shared {
                         &command,
                         target,
                         true,
+                        MuxOptionSource::RuntimeCommand,
                     ),
                     None => self.execute_with_mux_source_routed(
                         client,
@@ -9057,6 +9069,36 @@ impl Shared {
         )
     }
 
+    fn execute_command_alias_group(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+    ) -> Result<Execution, DaemonError> {
+        let commands = MuxEngine::command_alias_group_commands(command)?.ok_or_else(|| {
+            ServerError::CommandParse(format!("unknown command: {}", command.name))
+        })?;
+        let body = commands
+            .iter()
+            .map(format_command)
+            .collect::<Vec<_>>()
+            .join(" ; ");
+        let source = InsertedCommandSource::Block(body);
+        let control_target = context.control_command_target();
+        let result = self.execute_inserted_commands_with_control_target_and_mux_source(
+            client,
+            kind,
+            context,
+            &source,
+            "<command-alias>",
+            control_target,
+            mux_source,
+        )?;
+        inserted_execution(client, kind, result)
+    }
+
     fn execute_inserted_commands(
         self: &Arc<Self>,
         client: ClientId,
@@ -9078,6 +9120,27 @@ impl Shared {
         source: &InsertedCommandSource,
         label: &str,
         control_target: Option<(ClientId, u8)>,
+    ) -> Result<InsertedCommandResult, DaemonError> {
+        self.execute_inserted_commands_with_control_target_and_mux_source(
+            client,
+            kind,
+            context,
+            source,
+            label,
+            control_target,
+            MuxOptionSource::RuntimeCommand,
+        )
+    }
+
+    fn execute_inserted_commands_with_control_target_and_mux_source(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source: &InsertedCommandSource,
+        label: &str,
+        control_target: Option<(ClientId, u8)>,
+        mux_source: MuxOptionSource,
     ) -> Result<InsertedCommandResult, DaemonError> {
         let (input, prepared) = match source {
             InsertedCommandSource::String(input) => (input, false),
@@ -9117,15 +9180,11 @@ impl Shared {
             }
             let execution = match control_target {
                 Some(target) => self.execute_control_command_with_guard(
-                    client, kind, context, &command, target, prepared,
+                    client, kind, context, &command, target, prepared, mux_source,
                 ),
-                None if prepared => self.execute_with_mux_source_routed(
-                    client,
-                    kind,
-                    context,
-                    &command,
-                    MuxOptionSource::RuntimeCommand,
-                ),
+                None if prepared => {
+                    self.execute_with_mux_source_routed(client, kind, context, &command, mux_source)
+                }
                 None => self.execute(client, kind, context, &command),
             };
             if let Some((guard_client, flags)) = control_target {
@@ -9213,6 +9272,7 @@ impl Shared {
         command: &CommandInvocation,
         target: (ClientId, u8),
         prepared: bool,
+        mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
         let capture = self.begin_control_command_event_capture(target.0);
         let routed = if prepared {
@@ -9225,13 +9285,9 @@ impl Shared {
             .as_ref()
             .is_ok_and(|command| canonical_command(&command.name) == "source-file");
         let execution = match routed {
-            Ok(command) => self.execute_with_mux_source_routed(
-                client,
-                kind,
-                context,
-                &command,
-                MuxOptionSource::RuntimeCommand,
-            ),
+            Ok(command) => {
+                self.execute_with_mux_source_routed(client, kind, context, &command, mux_source)
+            }
             Err(error) => Err(error.into()),
         };
         let captured_events = capture.finish();
@@ -26342,6 +26398,11 @@ const READ_ONLY_SAFE_COMMANDS: &[&str] = &[
 ];
 
 fn command_is_read_only_safe(command: &CommandInvocation) -> bool {
+    if MuxEngine::is_command_alias_group(command) {
+        return MuxEngine::command_alias_group_commands(command).is_ok_and(|commands| {
+            commands.is_some_and(|commands| commands.iter().all(command_is_read_only_safe))
+        });
+    }
     let name = canonical_command(&command.name);
     if name == "send-keys" {
         return send_keys_is_read_only_safe(&command.args).unwrap_or(true);
@@ -41785,7 +41846,10 @@ mod tests {
         .expect("name error source");
         let shared = Arc::new(Shared::new(76));
         let mut context = ExecutionContext::default();
-        for (index, alias) in ["source=", "badalias="].into_iter().enumerate() {
+        for (index, alias) in ["source=display-message \\", "badalias=display-message \\"]
+            .into_iter()
+            .enumerate()
+        {
             shared
                 .execute(
                     ClientId(u64::MAX),
@@ -41872,7 +41936,10 @@ mod tests {
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut context,
-                &CommandInvocation::new("set-option", ["-s", "command-alias[90]", "badname="]),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[90]", "badname=display-message \\"],
+                ),
             )
             .expect("seed frozen Control alias");
         let mailbox = OutboundMailbox::new();
@@ -68984,7 +69051,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .unwrap();
-        for (index, value) in [("41", "bad=list-sessions ; kill-server"), ("42", "empty=")] {
+        for (index, value) in [
+            ("41", "multi=display-message -p first ; display-message -p"),
+            ("42", "empty="),
+        ] {
             shared
                 .execute(
                     client,
@@ -69026,8 +69096,8 @@ bind - split-window -v -c "#{pane_current_path}"
             CommandInvocation::new("new-pane", [] as [&str; 0]),
             CommandInvocation::new("bogus", [] as [&str; 0]),
             CommandInvocation::new("kill-s", [] as [&str; 0]),
-            CommandInvocation::new("bad", [] as [&str; 0]),
-            CommandInvocation::new("empty", [] as [&str; 0]),
+            CommandInvocation::new("multi", ["last"]),
+            CommandInvocation::new("empty", ["discarded"]),
         ]);
         assert_eq!(classified[0].invocation.name, "display-message");
         assert_eq!(classified[0].invocation.args, ["-p", "old", "tail"]);
@@ -69050,11 +69120,31 @@ bind - split-window -v -c "#{pane_current_path}"
         for command in &classified[5..] {
             assert!(command.alias_matched);
             assert_eq!(command.canonical_name, None);
-            assert!(matches!(
-                command.result,
-                PreparedCommandResult::Error(ref error) if error.is_command_parse()
-            ));
+            assert!(MuxEngine::is_command_alias_group(&command.invocation));
+            assert_eq!(command.result, PreparedCommandResult::Ready);
         }
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                client,
+                ClientKind::Command,
+                &mut context,
+                40,
+                &classified[5].invocation,
+                true,
+            ),
+            CommandResponse::Success { output, exit_code: 0, .. } if output == "first\nlast"
+        ));
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                client,
+                ClientKind::Command,
+                &mut context,
+                41,
+                &classified[6].invocation,
+                true,
+            ),
+            CommandResponse::Success { output, exit_code: 0, .. } if output.is_empty()
+        ));
         let typed_option = shared.prepare_command_list(vec![
             CommandInvocation::new(
                 "bind",
@@ -69612,10 +69702,174 @@ bind - split-window -v -c "#{pane_current_path}"
             client_attached_session(&shared.inner.lock(), client),
             Some(a)
         );
+
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[41]",
+                        "mixed=list-clients ; kill-session -t B",
+                    ],
+                ),
+            )
+            .expect("mixed alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new("mixed", [] as [&str; 0])])
+            .remove(0);
+        assert!(MuxEngine::is_command_alias_group(&prepared.invocation));
+        let response = shared.execute_command_request_with_prepared(
+            client,
+            ClientKind::Control,
+            &mut context,
+            8,
+            &prepared.invocation,
+            true,
+        );
+        assert!(matches!(
+            response,
+            CommandResponse::Error {
+                error: ServerError::InvalidCommand(message),
+                ..
+            } if message == "client is read-only"
+        ));
+        assert!(shared.inner.lock().engine.state.sessions.contains_key(&b));
     }
 
     #[test]
-    fn unsupported_alias_shadows_fail_direct_commands_while_bindings_stay_frozen() {
+    fn control_alias_groups_emit_only_child_guards_and_stop_after_failure() {
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "work");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::default();
+        for (index, value) in [
+            ("42", "multi=display-message -p first ; display-message -p"),
+            ("43", "empty="),
+            (
+                "44",
+                "failing=display-message -p before ; has-session -t missing ; display-message -p after",
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("alias write");
+        }
+
+        let prepare = |name: &str, args: Vec<&str>| {
+            let command = shared
+                .prepare_command_list(vec![CommandInvocation::new(name, args)])
+                .remove(0);
+            assert_eq!(command.result, PreparedCommandResult::Ready);
+            assert!(MuxEngine::is_command_alias_group(&command.invocation));
+            command.invocation
+        };
+        let multi = prepare("multi", vec!["last"]);
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                control,
+                ClientKind::Control,
+                &mut context,
+                42,
+                &multi,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, output, .. } if output.is_empty()
+        ));
+        let guards = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlCommandGuard {
+                            output,
+                            error,
+                            flags,
+                            ..
+                        },
+                    ..
+                }) => Some((output, error, flags)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            guards,
+            [
+                (
+                    "first".to_owned(),
+                    false,
+                    CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+                ),
+                (
+                    "last".to_owned(),
+                    false,
+                    CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+                ),
+            ]
+        );
+
+        let empty = prepare("empty", vec!["discarded"]);
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                control,
+                ClientKind::Control,
+                &mut context,
+                43,
+                &empty,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, output, .. } if output.is_empty()
+        ));
+        assert!(take_reliable_messages(&mailbox).is_empty());
+
+        let failing = prepare("failing", Vec::new());
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                control,
+                ClientKind::Control,
+                &mut context,
+                44,
+                &failing,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 1, output, .. } if output.is_empty()
+        ));
+        let guards = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandGuard { output, error, .. },
+                    ..
+                }) => Some((output, error)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(guards.len(), 2);
+        assert_eq!(guards[0], ("before".to_owned(), false));
+        assert!(guards[1].1);
+        assert!(!guards.iter().any(|(output, _)| output == "after"));
+    }
+
+    #[test]
+    fn unparsable_alias_shadows_fail_direct_commands_while_bindings_stay_frozen() {
         let shared = Arc::new(Shared::new(1));
         let (session, _, pane) = switch_test_session(&shared, "work");
         let (victim, _, _) = switch_test_session(&shared, "victim");
@@ -69641,9 +69895,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("set-option", ["-s", "command-alias[40]", "kill-session="]),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[40]", "kill-session=display-message \\"],
+                ),
             )
-            .expect("empty destructive shadow");
+            .expect("unparsable destructive shadow");
 
         assert!(matches!(
             shared.execute_command_request(
@@ -69709,9 +69966,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &mut ExecutionContext::default(),
-                &CommandInvocation::new("set-option", ["-s", "command-alias[41]", "kill-server="]),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[41]", "kill-server=display-message \\"],
+                ),
             )
-            .expect("empty server shadow");
+            .expect("unparsable server shadow");
         assert!(matches!(
             shared.execute(
                 ClientId(u64::MAX),

@@ -1566,10 +1566,10 @@ const NATIVE_OPTIONS: &[&str] = &[
     "agent-auto-approve",
 ];
 
+const COMMAND_ALIAS_GROUP_NAME: &str = "__zz-command-alias-group";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandAliasBodyError {
-    Empty,
-    Multiple,
     Unparsable,
 }
 
@@ -3710,16 +3710,32 @@ impl MuxEngine {
             return CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Unparsable);
         }
         let mut commands = parsed.commands;
-        if commands.is_empty() {
-            return CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Empty);
+        if let Some(last) = commands.last_mut() {
+            last.append_args(command.clone());
         }
-        if commands.len() != 1 {
-            return CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Multiple);
+        for expanded in &mut commands {
+            expanded.source.clone_from(&command.source);
         }
-        let mut expanded = commands.remove(0);
-        expanded.append_args(command.clone());
+        if commands.len() == 1 {
+            return CommandAliasResolution::Expanded(commands.remove(0));
+        }
+        let body = format_callback_commands(&commands);
+        let mut expanded =
+            CommandInvocation::new(COMMAND_ALIAS_GROUP_NAME, [format!("{{ {body} }}")])
+                .with_command_blocks([0]);
         expanded.source.clone_from(&command.source);
         CommandAliasResolution::Expanded(expanded)
+    }
+
+    #[must_use]
+    pub fn is_command_alias_group(command: &CommandInvocation) -> bool {
+        command_alias_group_body(command).is_some()
+    }
+
+    pub fn command_alias_group_commands(
+        command: &CommandInvocation,
+    ) -> Result<Option<Vec<CommandInvocation>>, ServerError> {
+        parse_command_alias_group(command)
     }
 
     pub fn execute_with_shell_validator(
@@ -3753,6 +3769,26 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
         default_shell_is_valid: &mut impl FnMut(&str) -> bool,
     ) -> Result<Execution, ServerError> {
+        if let Some(commands) = parse_command_alias_group(command)? {
+            validate_static_command_chain(&commands)?;
+            let mut combined = Execution::default();
+            for command in commands {
+                let execution = self.execute_without_alias_expansion(
+                    context,
+                    &command,
+                    hooks,
+                    default_shell_is_valid,
+                )?;
+                if !execution.output.is_empty() {
+                    if !combined.output.is_empty() && !combined.output.ends_with('\n') {
+                        combined.output.push('\n');
+                    }
+                    combined.output.push_str(&execution.output);
+                }
+                combined.effects.extend(execution.effects);
+            }
+            return Ok(combined);
+        }
         let generation = self.state.generation();
         let name = canonical_command(&command.name);
         let mut item_hooks = CommandItemHooks {
@@ -14343,6 +14379,12 @@ fn prepare_expanded_callback_invocation(
     owner: &str,
     aliases_available: bool,
 ) -> Result<(), ServerError> {
+    if let Some(body) = command_alias_group_body(command) {
+        let commands =
+            prepare_callback_commands_with_aliases(engine, body, true, owner, false, false)?;
+        command.args[0] = format!("{{ {} }}", format_callback_commands(&commands));
+        return validate_static_command_chain(&commands);
+    }
     for index in 0..command.args.len() {
         if !command.argument_is_command_block(index) {
             continue;
@@ -14581,6 +14623,9 @@ pub fn validate_static_command_chain(commands: &[CommandInvocation]) -> Result<(
 }
 
 fn validate_static_command(command: &CommandInvocation) -> Result<(), ServerError> {
+    if let Some(commands) = parse_command_alias_group(command)? {
+        return validate_static_command_chain(&commands);
+    }
     let (name, spec) = match resolve_command(&command.name) {
         CommandResolution::Canonical(name) => (name, catalog_command_spec(name)),
         CommandResolution::Unimplemented(name) => (name, unimplemented_tmux_command_spec(name)),
@@ -14679,9 +14724,33 @@ pub(crate) fn format_key_command(binding: &Binding) -> String {
     binding
         .commands
         .iter()
-        .map(tmux_command_print)
+        .flat_map(|command| match parse_command_alias_group(command) {
+            Ok(Some(commands)) => commands.iter().map(tmux_command_print).collect::<Vec<_>>(),
+            _ => vec![tmux_command_print(command)],
+        })
         .collect::<Vec<_>>()
         .join(" \\; ")
+}
+
+fn command_alias_group_body(command: &CommandInvocation) -> Option<&str> {
+    (command.name == COMMAND_ALIAS_GROUP_NAME
+        && command.args.len() == 1
+        && command.argument_is_command_block(0))
+    .then(|| crate::parser::command_block_body(&command.args[0]).map(str::trim))
+    .flatten()
+}
+
+fn parse_command_alias_group(
+    command: &CommandInvocation,
+) -> Result<Option<Vec<CommandInvocation>>, ServerError> {
+    let Some(body) = command_alias_group_body(command) else {
+        return Ok(None);
+    };
+    let parsed = crate::parser::parse_config_without_variable_expansion("<command-alias>", body);
+    if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
+        return Err(ServerError::CommandParse(diagnostic.message));
+    }
+    Ok(Some(parsed.commands))
 }
 
 /// Render a stored command the way the pin's `cmd_print` does (`arguments.c`
@@ -14689,6 +14758,9 @@ pub(crate) fn format_key_command(binding: &Binding) -> String {
 /// flag order, valued flags in flag order with `args_escape`d values, then the
 /// positionals.
 fn tmux_command_print(command: &CommandInvocation) -> String {
+    if let Some(body) = command_alias_group_body(command) {
+        return body.to_owned();
+    }
     let name = canonical_command(&command.name);
     let spec = catalog_command_spec(name);
     let Some(spec) = spec else {
@@ -32940,31 +33012,44 @@ mod tests {
             "reached"
         );
 
-        for (index, value, name) in [
-            ("14", "multi=list-sessions ; list-windows", "multi"),
-            ("15", "empty=", "empty"),
-        ] {
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[14]",
+                        "multi=display-message -p first ; display-message -p",
+                    ],
+                ),
+            )
+            .expect("multi-command alias write");
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("multi", &["last"]))
+                .expect("multi-command alias")
+                .output,
+            "first\nlast"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "command-alias[15]", "empty="]),
+            )
+            .expect("empty alias write");
+        let generation = engine.state.generation();
+        assert_eq!(
             engine
                 .execute(
                     &mut context,
-                    &command(
-                        "set-option",
-                        &["-s", &format!("command-alias[{index}]"), value],
-                    ),
+                    &command("empty", &["display-message", "-p", "wrong"]),
                 )
-                .expect("alias write");
-            let error = engine
-                .execute(&mut context, &command(name, &[]))
-                .expect_err("only single-command alias bodies expand");
-            assert!(
-                matches!(
-                    &error,
-                    ServerError::CommandParse(message)
-                        if message == &format!("unknown command: {name}")
-                ),
-                "{error:?}"
-            );
-        }
+                .expect("empty alias"),
+            Execution::default()
+        );
+        assert_eq!(engine.state.generation(), generation);
     }
 
     #[test]
@@ -33009,9 +33094,9 @@ mod tests {
             .output;
 
         for (index, value) in [
-            ("20", "kill-server="),
-            ("21", "list-windows=list-sessions ; kill-server"),
-            ("22", "lsw=list-sessions ; kill-server"),
+            ("20", "kill-server=display-message \\"),
+            ("21", "list-windows=display-message \\"),
+            ("22", "lsw=display-message \\"),
             ("23", "kill-session=display-message \\"),
         ] {
             engine
@@ -33025,28 +33110,16 @@ mod tests {
                 .expect("alias write");
         }
 
-        for (name, args, reason) in [
-            (
-                "kill-server",
-                Vec::<&str>::new(),
-                CommandAliasBodyError::Empty,
-            ),
-            (
-                "list-windows",
-                Vec::<&str>::new(),
-                CommandAliasBodyError::Multiple,
-            ),
-            ("lsw", Vec::<&str>::new(), CommandAliasBodyError::Multiple),
-            (
-                "kill-session",
-                vec!["-t", "=victim"],
-                CommandAliasBodyError::Unparsable,
-            ),
+        for (name, args) in [
+            ("kill-server", Vec::<&str>::new()),
+            ("list-windows", Vec::<&str>::new()),
+            ("lsw", Vec::<&str>::new()),
+            ("kill-session", vec!["-t", "=victim"]),
         ] {
             let invocation = command(name, &args);
             assert_eq!(
                 engine.resolve_command_alias(&invocation),
-                CommandAliasResolution::MatchedUnsupported(reason)
+                CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Unparsable)
             );
             let generation = engine.state.generation();
             assert_eq!(
@@ -33126,34 +33199,16 @@ mod tests {
                 &mut context,
                 &command(
                     "set-option",
-                    &[
-                        "-s",
-                        "command-alias[30]",
-                        "multiple=list-sessions ; list-windows",
-                    ],
-                ),
-            )
-            .expect("multiple alias");
-        engine
-            .execute(
-                &mut context,
-                &command(
-                    "set-option",
-                    &["-s", "command-alias[31]", "unparsed=display-message \\"],
+                    &["-s", "command-alias[30]", "unparsed=display-message \\"],
                 ),
             )
             .expect("unparsable alias");
 
-        for (name, reason) in [
-            ("multiple", CommandAliasBodyError::Multiple),
-            ("unparsed", CommandAliasBodyError::Unparsable),
-        ] {
-            let invocation = command(name, &[]);
-            assert_eq!(
-                engine.resolve_command_alias(&invocation),
-                CommandAliasResolution::MatchedUnsupported(reason)
-            );
-        }
+        let invocation = command("unparsed", &[]);
+        assert_eq!(
+            engine.resolve_command_alias(&invocation),
+            CommandAliasResolution::MatchedUnsupported(CommandAliasBodyError::Unparsable)
+        );
 
         for invocation in [
             command("bogus-command", &[]),
@@ -33164,7 +33219,6 @@ mod tests {
             command("find-window", &[]),
             command("set-browser-profile", &[]),
             command("reload-config", &["extra"]),
-            command("multiple", &[]),
             command("unparsed", &[]),
         ] {
             let error = engine
@@ -33211,6 +33265,22 @@ mod tests {
         engine
             .execute(
                 &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[11]",
+                        "multi=display-message -p first ; display-message -p",
+                    ],
+                ),
+            )
+            .expect("multi-command alias write");
+        engine
+            .execute(&mut context, &command("bind-key", &["F4", "multi", "last"]))
+            .expect("multi-command alias validates at bind time");
+        engine
+            .execute(
+                &mut context,
                 &command("bind-key", &["F5", "split-pane", "-h"]),
             )
             .expect("default alias validates at bind time");
@@ -33229,9 +33299,15 @@ mod tests {
                 .unwrap()
                 .output
                 .lines()
-                .filter(|line| line.starts_with("F5=") || line.starts_with("F6="))
+                .filter(|line| {
+                    line.starts_with("F4=") || line.starts_with("F5=") || line.starts_with("F6=")
+                })
                 .collect::<Vec<_>>(),
-            vec!["F5=split-window -h", "F6=display-message -p hello"]
+            vec![
+                "F4=display-message -p first \\; display-message -p last",
+                "F5=split-window -h",
+                "F6=display-message -p hello",
+            ]
         );
         engine
             .execute(&mut context, &command("unbind-key", &["F6"]))

@@ -519,11 +519,23 @@ fn execute_command<W: Write>(
     mut deferred_return: Option<PendingReturn>,
 ) -> io::Result<CommandResult> {
     let detach_command = canonical_name == Some("detach-client");
-    let frame = output.begin(flags)?;
+    let alias_group = zz_mux::MuxEngine::is_command_alias_group(&command);
+    let command_guard_frames = output.command_guard_frames;
+    let frame = if alias_group {
+        None
+    } else {
+        Some(output.begin(flags)?)
+    };
     let request_id = match client.execute_prepared(command) {
         Ok(request_id) => request_id,
         Err(error) => {
-            output.error(&frame, &error.to_string())?;
+            render_command_failure(
+                output,
+                frame.as_ref(),
+                flags,
+                command_guard_frames,
+                &error.to_string(),
+            )?;
             return Ok(CommandResult {
                 exit_code: 1,
                 exit: ExitSignal::Unexpected,
@@ -538,7 +550,7 @@ fn execute_command<W: Write>(
                 ProtocolMessage::CommandResponse(response)
                     if response_request_id(&response) == request_id =>
                 {
-                    let abort_line = response_aborts_line(&response);
+                    let abort_line = command_response_aborts_line(alias_group, &response);
                     if response_sets_return_code(canonical_name, &response) {
                         state.return_code = 1;
                     }
@@ -547,7 +559,13 @@ fn execute_command<W: Write>(
                         &mut deferred_return,
                         state,
                     );
-                    let exit_code = output.response(&frame, response)?;
+                    let exit_code = render_command_response(
+                        output,
+                        frame.as_ref(),
+                        flags,
+                        command_guard_frames,
+                        response,
+                    )?;
                     return Ok(CommandResult {
                         exit_code,
                         exit,
@@ -557,7 +575,13 @@ fn execute_command<W: Write>(
                 message => {
                     let signal = handle_protocol(message, state, output)?;
                     if signal == ExitSignal::TooFarBehind {
-                        output.error(&frame, "too far behind")?;
+                        render_command_failure(
+                            output,
+                            frame.as_ref(),
+                            flags,
+                            command_guard_frames,
+                            "too far behind",
+                        )?;
                         return Ok(CommandResult {
                             exit_code: 1,
                             exit: signal,
@@ -589,7 +613,13 @@ fn execute_command<W: Write>(
                 }
             }
             MainEvent::Disconnected => {
-                output.error(&frame, "server exited unexpectedly")?;
+                render_command_failure(
+                    output,
+                    frame.as_ref(),
+                    flags,
+                    command_guard_frames,
+                    "server exited unexpectedly",
+                )?;
                 return Ok(CommandResult {
                     exit_code: 1,
                     exit: if exit.is_some() {
@@ -1007,6 +1037,10 @@ fn response_aborts_line(response: &CommandResponse) -> bool {
     matches!(response, CommandResponse::Error { .. })
 }
 
+fn command_response_aborts_line(alias_group: bool, response: &CommandResponse) -> bool {
+    response_aborts_line(response) || (alias_group && response_exit_code(response) != 0)
+}
+
 fn response_sets_return_code(canonical_name: Option<&str>, response: &CommandResponse) -> bool {
     match response {
         CommandResponse::Error { error, .. } => !error.is_command_parse(),
@@ -1022,6 +1056,51 @@ fn response_request_id(response: &CommandResponse) -> u64 {
             *request_id
         }
     }
+}
+
+fn response_exit_code(response: &CommandResponse) -> u8 {
+    match response {
+        CommandResponse::Success { exit_code, .. } => *exit_code,
+        CommandResponse::Error { .. } => 1,
+    }
+}
+
+fn render_command_response<W: Write>(
+    output: &mut ControlWriter<W>,
+    frame: Option<&Frame>,
+    flags: u8,
+    command_guard_frames: u64,
+    response: CommandResponse,
+) -> io::Result<u8> {
+    if let Some(frame) = frame {
+        return output.response(frame, response);
+    }
+    let exit_code = response_exit_code(&response);
+    if matches!(response, CommandResponse::Error { .. })
+        && output.command_guard_frames == command_guard_frames
+    {
+        let frame = output.begin(flags)?;
+        output.response(&frame, response)
+    } else {
+        Ok(exit_code)
+    }
+}
+
+fn render_command_failure<W: Write>(
+    output: &mut ControlWriter<W>,
+    frame: Option<&Frame>,
+    flags: u8,
+    command_guard_frames: u64,
+    error: &str,
+) -> io::Result<()> {
+    if let Some(frame) = frame {
+        return output.error(frame, error);
+    }
+    if output.command_guard_frames == command_guard_frames {
+        let frame = output.begin(flags)?;
+        output.error(&frame, error)?;
+    }
+    Ok(())
 }
 
 fn completed_exit_code(command_exit_code: u8, state: &ControlState) -> u8 {
@@ -1306,6 +1385,7 @@ struct ControlWriter<W: Write> {
     output: W,
     double: bool,
     next_number: u64,
+    command_guard_frames: u64,
     block_open: bool,
     deferred: VecDeque<DeferredOutput>,
     pane_output_enabled: bool,
@@ -1318,6 +1398,7 @@ impl<W: Write> ControlWriter<W> {
             output,
             double,
             next_number: 1,
+            command_guard_frames: 0,
             block_open: false,
             deferred: VecDeque::new(),
             pane_output_enabled: true,
@@ -1455,7 +1536,9 @@ impl<W: Write> ControlWriter<W> {
         let frame = self.allocate_frame(time, flags);
         self.write_frame_begin(&frame)?;
         self.payload(output)?;
-        self.write_frame_end(&frame, error)
+        self.write_frame_end(&frame, error)?;
+        self.command_guard_frames = self.command_guard_frames.saturating_add(1);
+        Ok(())
     }
 
     fn control_source_file(&mut self, event: ControlSourceFileEvent) -> io::Result<()> {
@@ -1943,6 +2026,104 @@ mod tests {
     }
 
     #[test]
+    fn opaque_commands_render_children_and_only_fallback_before_them() {
+        let mut empty = ControlWriter::new(Vec::new(), false);
+        let empty_guard_frames = empty.command_guard_frames;
+        assert_eq!(
+            render_command_response(
+                &mut empty,
+                None,
+                1,
+                empty_guard_frames,
+                CommandResponse::Success {
+                    request_id: 1,
+                    output: "outer output".to_owned(),
+                    exit_code: 0,
+                    stderr: String::new(),
+                },
+            )
+            .unwrap(),
+            0
+        );
+        assert!(empty.output.is_empty());
+
+        let mut children = ControlWriter::new(Vec::new(), false);
+        let child_guard_frames = children.command_guard_frames;
+        children
+            .control_command_guard_at(17, "first", false, 0)
+            .unwrap();
+        children
+            .control_command_guard_at(18, "second", false, 1)
+            .unwrap();
+        let child_output = children.output.clone();
+        assert_eq!(
+            render_command_response(
+                &mut children,
+                None,
+                1,
+                child_guard_frames,
+                CommandResponse::Error {
+                    request_id: 2,
+                    error: ServerError::InvalidCommand("outer failure".to_owned()),
+                    output: "outer output".to_owned(),
+                },
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(children.output, child_output);
+
+        let mut response_failure = ControlWriter::new(Vec::new(), false);
+        let response_guard_frames = response_failure.command_guard_frames;
+        assert_eq!(
+            render_command_response(
+                &mut response_failure,
+                None,
+                1,
+                response_guard_frames,
+                CommandResponse::Error {
+                    request_id: 3,
+                    error: ServerError::InvalidCommand("outer failure".to_owned()),
+                    output: String::new(),
+                },
+            )
+            .unwrap(),
+            1
+        );
+        let lines = std::str::from_utf8(&response_failure.output)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>();
+        assert_eq!(lines[1], "outer failure");
+        assert!(lines[0].ends_with(" 1 1"));
+        assert_eq!(
+            lines[0].strip_prefix("%begin "),
+            lines[2].strip_prefix("%error ")
+        );
+
+        let mut submission_failure = ControlWriter::new(Vec::new(), false);
+        let submission_guard_frames = submission_failure.command_guard_frames;
+        render_command_failure(
+            &mut submission_failure,
+            None,
+            0,
+            submission_guard_frames,
+            "request failed",
+        )
+        .unwrap();
+        let lines = std::str::from_utf8(&submission_failure.output)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>();
+        assert_eq!(lines[1], "request failed");
+        assert!(lines[0].ends_with(" 1 0"));
+        assert_eq!(
+            lines[0].strip_prefix("%begin "),
+            lines[2].strip_prefix("%error ")
+        );
+    }
+
+    #[test]
     fn standalone_diagnostics_only_set_source_read_return_codes() {
         let source_read = "stream did not contain valid UTF-8: /tmp/invalid-source.conf";
         for kind in [
@@ -2215,6 +2396,8 @@ mod tests {
         };
         assert!(!response_sets_return_code(Some("run-shell"), &nonzero));
         assert!(response_sets_return_code(Some("source-file"), &nonzero));
+        assert!(!command_response_aborts_line(false, &nonzero));
+        assert!(command_response_aborts_line(true, &nonzero));
         assert_eq!(completed_exit_code(3, &ControlState::default()), 3);
     }
 

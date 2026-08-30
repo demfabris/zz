@@ -1,0 +1,7 @@
+shim:
+run-shell "python3 -c '__import__(\"subprocess\").run([\"tmux\",\"set-option\",\"-s\",\"command-alias[90]\",\"zzaliasmulti=display-message -p first\"+chr(10)+\"display-message -p\"],check=True)'"
+out: zzaliasmulti tail
+bind-key -T zzalias F1 zzaliasmulti bound
+keys: zzalias F1
+set-option -s command-alias[91] zzaliasempty=
+out: zzaliasempty discarded

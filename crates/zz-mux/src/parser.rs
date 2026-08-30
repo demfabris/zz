@@ -546,7 +546,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
     let mut characters = input.chars().peekable();
     let mut reprocess: Option<char> = None;
     let mut tilde: Option<Tilde> = None;
-    let mut last_quote: Option<Quote> = None;
+    let mut last_state: Option<Quote> = None;
     loop {
         if builder.aborted() {
             break;
@@ -570,8 +570,10 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     state.line,
                     state.column,
                 );
-                last_quote = Some(state.quote);
+                last_state = Some(state.quote);
                 reprocess = Some(character);
+            } else if state.name.len().saturating_add(character.len_utf8()) > 1022 {
+                builder.diagnostic(state.line, state.column, "user name is too long");
             } else {
                 state.name.push(character);
             }
@@ -579,7 +581,6 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
         }
         if let Some(state) = block.as_mut() {
             word.push(character);
-            last_quote = Some(Quote::None);
             if character == '\n' {
                 line = line.saturating_add(1);
                 column = 0;
@@ -593,6 +594,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     &mut words,
                     &mut command_block_words,
                 );
+                last_state = None;
             }
             continue;
         }
@@ -614,7 +616,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                 column = 0;
                 command_line = line;
                 command_column = 1;
-                last_quote = None;
+                last_state = None;
             }
             continue;
         }
@@ -627,20 +629,21 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
             }
             word_started = true;
             match parse_escape(&mut characters, &mut line, &mut column) {
-                Ok(Some(value)) => word.push(value),
+                Ok(Some(value)) => {
+                    word.push(value);
+                    last_state = Some(quote);
+                }
                 Ok(None) => {}
                 Err(message) => {
                     builder.diagnostic(escape_line, escape_column, message);
                 }
             }
-            last_quote = Some(quote);
             continue;
         }
         if character == '\\' && quote == Quote::Single && characters.peek() == Some(&'\n') {
             take_character(&mut characters, &mut column);
             line = line.saturating_add(1);
             column = 0;
-            last_quote = Some(quote);
             continue;
         }
         if character == '$' && quote != Quote::Single && builder.expand_variables() {
@@ -655,10 +658,10 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     builder.diagnostic(line, column, message);
                 }
             }
-            last_quote = Some(quote);
+            last_state = Some(quote);
             continue;
         }
-        if character == '~' && quote != Quote::Single && last_quote != Some(quote) {
+        if character == '~' && quote != Quote::Single && last_state != Some(quote) {
             if !word_started && words.is_empty() {
                 command_line = line;
                 command_column = column;
@@ -677,7 +680,6 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
             Quote::Double if character == '"' => quote = Quote::None,
             Quote::Single | Quote::Double => {
                 word.push(character);
-                last_quote = Some(quote);
                 if character == '\n' {
                     line = line.saturating_add(1);
                     column = 0;
@@ -687,6 +689,8 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         &mut word,
                         &mut column,
                     );
+                } else {
+                    last_state = Some(quote);
                 }
             }
             Quote::None => match character {
@@ -758,7 +762,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     }
                     command_line = line;
                     command_column = column.saturating_add(1);
-                    last_quote = None;
+                    last_state = None;
                 }
                 value if value.is_whitespace() => {
                     builder.finish_word(
@@ -771,7 +775,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         &mut command_block_words,
                         &mut eager_assignment,
                     );
-                    last_quote = None;
+                    last_state = None;
                 }
                 value => {
                     if words.is_empty() && !word_started {
@@ -780,7 +784,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     }
                     word_started = true;
                     word.push(value);
-                    last_quote = Some(quote);
+                    last_state = Some(quote);
                 }
             },
         }
@@ -1183,6 +1187,78 @@ mod tests {
         assert_eq!(command.args[10], "prefix~/not-expanded");
         assert_eq!(command.args[11], "prefix~/not-expanded");
         assert_eq!(command.args[12], "/users/alice/bin");
+    }
+
+    #[test]
+    fn tracks_tilde_state_across_invisible_parser_transitions() {
+        let mut context = HomeContext {
+            home: Some("/server/home".to_owned()),
+            current_user_home: Some("/passwd/home".to_owned()),
+            ..HomeContext::default()
+        };
+        let parsed = parse_config_with(
+            "<test>",
+            concat!(
+                "display-message -p \\\n",
+                "~/unquoted\n",
+                "display-message -p \"\\\n",
+                "~/opening\"\n",
+                "display-message -p \"\"\\\n",
+                "~/empty-closing\n",
+                "display-message -p \"\n",
+                "~/raw\"\n",
+                "display-message -p \"\n",
+                "  # stripped\n",
+                "  ~/comment\"\n",
+                "if-shell true {}~\n",
+                "display-message -p prefix\\\n",
+                "~/literal\n",
+                "display-message -p $EMPTY~/literal \"$EMPTY~/quoted\"\n",
+            ),
+            &mut context,
+        );
+
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands.len(), 8);
+        assert_eq!(parsed.commands[0].args, ["-p", "/server/home/unquoted"]);
+        assert_eq!(parsed.commands[1].args, ["-p", "/server/home/opening"]);
+        assert_eq!(
+            parsed.commands[2].args,
+            ["-p", "/server/home/empty-closing"]
+        );
+        assert_eq!(parsed.commands[3].args, ["-p", "\n/server/home/raw"]);
+        assert_eq!(parsed.commands[4].args, ["-p", "\n\n/server/home/comment"]);
+        assert_eq!(parsed.commands[5].args, ["true", "{}", "/server/home"]);
+        assert!(parsed.commands[5].argument_is_command_block(1));
+        assert_eq!(parsed.commands[6].args, ["-p", "prefix~/literal"]);
+        assert_eq!(parsed.commands[7].args, ["-p", "~/literal", "~/quoted"]);
+    }
+
+    #[test]
+    fn limits_tilde_usernames_to_1022_bytes() {
+        let accepted_name = "x".repeat(1022);
+        let mut context = HomeContext {
+            home: Some("/server/home".to_owned()),
+            current_user_home: Some("/passwd/home".to_owned()),
+            named_user_homes: BTreeMap::from([(accepted_name.clone(), "/users/long".to_owned())]),
+        };
+        let accepted = parse_config_with(
+            "<test>",
+            &format!("display-message -p ~{accepted_name}/ok"),
+            &mut context,
+        );
+        assert!(accepted.diagnostics.is_empty());
+        assert_eq!(accepted.commands[0].args, ["-p", "/users/long/ok"]);
+
+        let rejected_name = "x".repeat(1023);
+        let rejected = parse_config_with(
+            "<test>",
+            &format!("display-message -p ~{rejected_name}/bad"),
+            &mut context,
+        );
+        assert!(rejected.commands.is_empty());
+        assert_eq!(rejected.diagnostics.len(), 1);
+        assert_eq!(rejected.diagnostics[0].message, "user name is too long");
     }
 
     #[test]

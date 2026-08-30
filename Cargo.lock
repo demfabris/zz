@@ -10789,6 +10789,7 @@ version = "0.3.2"
 dependencies = [
  "chrono",
  "glob",
+ "nix 0.29.0",
  "parking_lot",
  "regex",
  "serde",

@@ -38,9 +38,9 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-29
 
-Slices 10w through 10ah form the authorized 2026-08-29 checkpoint. The tracker has 86 active groups,
-593 classified active items, and 117 closed groups: 44 open, 20 blocked, and 22 accepted. Accepted
-active groups plus closed history resolve 139 of 203 known groups (68.5%). The persisted accepted
+Slices 10w through 10ah plus the Config front form the local 2026-08-29 checkpoint. The tracker has
+87 active groups, 592 classified active items, and 118 closed groups: 45 open, 20 blocked, and 22
+accepted. Accepted active groups plus closed history resolve 140 of 205 known groups (68.3%). The persisted accepted
 slice 10ag artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two
 approved GEO rows, every other channel clean, and SHA-256
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Slice 10af closes
@@ -52,6 +52,10 @@ one soak ignored. The full workspace excluding the daemon, full workspace clippy
 `cargo fmt --check` pass. Slice 10ah closes
 `control-mode.kill-server-response-order`; slice 10ai is now the sole `next` group under
 `control-mode.exit-pane-output`.
+The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
+matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
+named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
+and non-UTF-8 passwd home paths remain in separate active groups.
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -149,9 +153,10 @@ before a registry rerank or next-slice selection.
 The 2026-08-29 rerank corrected the stale parser-abort ledger item: zz already clears a config
 file's commands, stops at the first parser diagnostic, retains only assignments reduced before the
 error, and suppresses later diagnostics. That behavior is now closed under `config.parser-abort`.
-`config.parser-edge-cases` retains post-closing-quote expansion plus bare and named-user lookup:
-pinned tmux prefers nonempty server-global `HOME`, then passwd for the current user, and resolves
-named users through `getpwnam`.
+The later `config.parser-edge-cases` closure matches post-closing-quote expansion, the pin's hidden
+token-state transitions, nonempty daemon `HOME`, passwd fallback, named users, failed lookup, and
+the 1,022-byte username limit. Direct Control environment provenance and non-UTF-8 passwd home paths
+remain under their explicit groups.
 
 Slice 10w closes `formats.repeat-modifier` locally. `R` splits at the first top-level comma,
 recursively expands its value and count, accepts counts from 1 through 10,000, and matches the pin's
@@ -333,9 +338,9 @@ then drops it. Deterministic tests cover the old race, late Control and Command 
 disconnected writers, replacement binding during cleanup, and immediate fresh-daemon startup.
 Pane-output discard follows as slice 10ai.
 
-The registry now has 86 active groups and 593 active items, with 117 closed records: 44 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 139 of 203 groups (68.5%).
-Slices 10w through 10ah form the authorized 2026-08-29 checkpoint. The persisted accepted slice 10ag
+The registry now has 87 active groups and 592 active items, with 118 closed records: 45 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 140 of 205 groups (68.3%).
+Slices 10w through 10ah plus the Config front form the local 2026-08-29 checkpoint. The persisted accepted slice 10ag
 artifact covers 103 scenarios and 1,630 steps with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Full zz and serialized

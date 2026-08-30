@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10AH CLOSED LOCALLY; THREE-FRONT TRIAL ACTIVE**
+> Campaign state: **SLICE 10AH AND CONFIG FRONT CLOSED LOCALLY; THREE-FRONT TRIAL ACTIVE**
 >
-> Tracker resolution progress: **68.5% (139 of 203 known groups)**
+> Tracker resolution progress: **68.3% (140 of 205 known groups)**
 >
-> Integrated campaign base: **2026-08-29** at `01d540758909ab33eb22bdb074f5bf3db18d755f`
+> Integrated campaign base: **2026-08-29** at `4800255d7f7b8bf69acfec14b78e68b7440627f1`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -68,14 +68,14 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Integrated campaign base | `01d540758909ab33eb22bdb074f5bf3db18d755f` |
-| Delivery | Local `main` contains the trial workflow plus slice 10ah; remote `main` remains through slice 10ag |
+| Integrated campaign base | `4800255d7f7b8bf69acfec14b78e68b7440627f1` |
+| Delivery | Local `main` contains the trial workflow, slice 10ah, and the Config front; remote `main` remains through slice 10ag |
 | Campaign worktrees | Three short-lived trial worktrees branch from the integrated base; the table below owns their paths and file zones |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10ah is closed; config parser edges are accepted for the next integration, strict key grammar remains under final review, and 10ai is the sole `next` group |
-| Live registry | 86 active groups, 593 active items, 117 closed records |
-| Active status | 44 open, 20 blocked, 22 accepted |
+| Campaign point | Slice 10ah and the Config front are closed; strict key grammar remains under final review, and 10ai is the sole `next` group |
+| Live registry | 87 active groups, 592 active items, 118 closed records |
+| Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
 Commit `562b950c` is the campaign code base for this trial. Resolve the commit containing the latest
@@ -91,7 +91,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(117 + 22) / (117 + 86) = 139 / 203 = 68.5%
+(118 + 22) / (118 + 87) = 140 / 205 = 68.3%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -934,9 +934,9 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 86 active groups, 593 active items, and 117 closed records: 44 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 139 of 203 groups (68.5%).
-Priority has one `next`, 63 `later`, and 22 `none` groups.
+The live registry now has 87 active groups, 592 active items, and 118 closed records: 45 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 140 of 205 groups (68.3%).
+Priority has one `next`, 64 `later`, and 22 `none` groups.
 
 Slice 10ah closes
 `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.
@@ -956,6 +956,14 @@ pinned order. The cold startup probe must emit diagnostics, one flags-0 success 
 frame, and `%exit`; a long-lived Control client must still receive ordinary pane output before exit.
 Hard-disconnect queue cancellation, detach targeting, async command output, no-output, pause, wait,
 and transport pressure stay outside 10ai.
+
+The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. Tilde expansion
+now follows the pin through closing quotes, continuations, quoted newlines, stripped comments,
+typed blocks, empty variable expansion, daemon `HOME`, passwd fallback, named users, failed lookup,
+and the 1,022-byte username limit. The 17-step differential runs 26 internal checks with no
+differing channel. Direct Control environment provenance and non-UTF-8 passwd home paths remain
+honestly split under `control-mode.local-parser-environment` and
+`config.tilde-home-path-encoding`.
 
 The rerank places kill-server response order first because a successful administrative command can
 currently lose its response on both Control and ordinary Command paths, and a deterministic daemon
@@ -998,8 +1006,8 @@ prerequisite. A source audit found three bounded chunks with separate production
 | Front | Worktree and branch | Tracker contract | Exclusive production and test zone |
 | --- | --- | --- | --- |
 | Control response | `$HOME/dev/zz-tmux-control`, `codex/tmux-control-10ah` | Slice 10ah: `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` | `crates/zz-daemon/src/daemon.rs`, `crates/zz/src/control_mode.rs`, and Control sections of `crates/zz/tests/cli_binary.rs` |
-| Config parser | `$HOME/dev/zz-tmux-config`, `codex/tmux-config-edges` | `config.parser-edge-cases` and its three tilde-expansion items | `crates/zz-mux/src/parser.rs` plus the config-grammar scenario and fixture |
-| Key grammar | `$HOME/dev/zz-tmux-keys`, `codex/tmux-key-validation` | `keys.strict-validation` | `crates/zz-protocol/src/key.rs` plus a dedicated key-validation scenario and fixture |
+| Config parser | `$HOME/dev/zz-tmux-config`, `codex/tmux-config-edges` | `config.parser-edge-cases` and its three tilde-expansion items | `crates/zz-mux/src/parser.rs`, `crates/zz-mux/Cargo.toml`, `Cargo.lock`, plus the config-grammar scenario and fixture |
+| Key grammar | `$HOME/dev/zz-tmux-keys`, `codex/tmux-key-validation` | `keys.strict-validation` | `crates/zz-mux/src/command.rs` plus a dedicated key-validation scenario and fixture |
 
 The Control response front enters integration first because 10ah is the sole `next` group. The
 other two fronts may finish candidate commits while 10ah runs. The coordinator reranks before each

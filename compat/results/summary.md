@@ -84,7 +84,7 @@
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
 | smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |
-| smoke/config-grammar | 15 | yes | 0 | yes | yes | yes |
+| smoke/config-grammar | 17 | yes | 0 | yes | yes | yes |
 | smoke/continuum-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/control-alias-prepare | 3 | yes | 0 | yes | yes | yes |
 | smoke/daemon-invalid-flags | 3 | yes | 0 | yes | yes | yes |

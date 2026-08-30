@@ -255,6 +255,11 @@ flags-1 command guard with `%end` before exactly one `%exit`; ordinary Command c
 success response before socket teardown. The listener remains held through the bounded drain, so
 the change needs no protocol field or version.
 
+Direct Control config construction still runs before daemon execution. Source, startup, alias, and
+callback parsing therefore see daemon-global `HOME`, while a direct Control line sees the client's
+local parser context. `control-mode.local-parser-environment` owns moving that lookup to daemon
+state without adding visible guards or changing command numbering.
+
 v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
 It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command
 guard per command that survived name resolution. v77 renames the same tag in place to

@@ -493,32 +493,33 @@
       "reason": "Pinned tmux treats a measured config containing only byte 0xff as successful input with no visible error and one extra hidden empty-command item beyond the ordinary source completion, while zz reads config through read_to_string and rejects it before parsing. The parser needs an explicit byte-input contract rather than a broader claim based on one platform-dependent byte case."
     },
     {
-      "id": "config.parser-edge-cases",
-      "title": "Close config parser edge cases",
+      "id": "config.tilde-home-path-encoding",
+      "title": "Preserve non-UTF-8 passwd home paths",
       "decision": "adopt",
       "status": "open",
       "priority": "later",
-      "ease": "medium",
+      "ease": "hard",
       "impact": [
         "scripts"
       ],
       "owner": "mux",
       "items": [
-        "semantic:config-tilde-after-closing-quote-expansion",
-        "semantic:config-tilde-home-passwd-resolution",
-        "semantic:config-tilde-user-expansion"
+        "semantic:config-tilde-home-non-utf8"
       ],
       "evidence": [
         "resource:crates/zz-mux/src/parser.rs",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/references/tmux-upstream.md",
         "resource:knowledge/tmux/conf-parser.md",
-        "resource:knowledge/tmux/divergences.md",
-        "scenario:compat/scenarios/smoke/config-grammar.txt"
+        "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "Parser probes match the pin for tilde expansion immediately after closing either single or double quotes; nonempty server-global HOME precedence; empty or unset HOME fallback through the current user's passwd entry; named-user lookup through passwd; and a located syntax error only when the required account lookup fails. Parse-only source-file performs the same validation without effects."
+        "On Unix, bare-tilde fallback and named-user expansion preserve passwd home-directory bytes that are not valid UTF-8 through config parsing and source-path execution, without replacement text or a false syntax error. Representable paths retain their current behavior."
       ],
-      "depends_on": [],
-      "reason": "zz already matches unquoted word-start and opening-double-quote tilde expansion. It leaves post-closing-quote and named-user forms literal and reads process HOME directly. Pinned tmux reads server-global HOME, falls back to the current user's passwd entry for bare tilde, resolves named users through passwd, and rejects only failed lookups."
+      "depends_on": [
+        "config.non-utf8-file-bytes"
+      ],
+      "reason": "The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, while the pin carries the returned bytes. This needs the future byte-input parser contract rather than substitution."
     },
     {
       "id": "control-mode.diagnostic-typing",
@@ -605,6 +606,34 @@
       ],
       "depends_on": [],
       "reason": "On EOF or a blank line, pinned tmux marks the client exiting, removes queued pane-byte blocks, rejects later pane bytes, and drains only the remaining control stream before exit. zz sends Detach and renders queued PaneOutput events during the exit drain, allowing a newly created shell prompt to appear between the command guard and %exit."
+    },
+    {
+      "id": "control-mode.local-parser-environment",
+      "title": "Parse Control tilde with daemon environment",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "client",
+      "items": [
+        "semantic:control-mode-tilde-server-environment"
+      ],
+      "evidence": [
+        "resource:crates/zz/src/control_mode.rs",
+        "resource:crates/zz-mux/src/parser.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/protocol/wire-protocol.md",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Direct Control input expands bare tilde from the daemon's nonempty server-global HOME, falls back through the daemon host's current passwd entry when HOME is empty or unset, and performs named-user lookup in the same host context, without adding visible guards or changing command numbering."
+      ],
+      "depends_on": [],
+      "reason": "Startup, runtime source, aliases, and callbacks parse through the daemon MuxEngine and see server globals. Direct Control input still parses locally with a context-free environment, so a server-global HOME that differs from the Control process is ignored before the request reaches the daemon."
     },
     {
       "id": "copy-mode.action-fidelity",
@@ -3214,6 +3243,21 @@
       "resolution": "The post-10v rerank corrected a stale registry premise. Since the 2026-08-19 parser work, the first lexer or parser diagnostic clears every command from the file, stops the scan, preserves only environment assignments reduced before the error, and suppresses later diagnostics. Focused tests cover invalid variables, octal escapes, and multiple leading assignments. This correction changes no runtime behavior or accepted artifact. aliases.config-parse-unit later closed the parse-time alias snapshot; eager command construction remains under mux.chain-parse-abort."
     },
     {
+      "id": "config.parser-edge-cases",
+      "title": "Close config parser edge cases",
+      "closed_on": "2026-08-29",
+      "evidence": [
+        "resource:crates/zz-mux/src/parser.rs",
+        "file:compat/scenarios/smoke/fixtures/config-tilde-grammar.sh",
+        "scenario:compat/scenarios/smoke/config-grammar.txt",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Config tilde expansion now follows the pin's parser-state transitions at a word start, inside an opening double quote, and immediately after an empty or nonempty closing quote. Invisible line continuations preserve the prior token state; raw quoted newlines and stripped quoted comments do not advance it; a completed typed command block resets it; and an empty variable expansion still blocks a following tilde. Bare tilde prefers a nonempty parser-context HOME, then falls back through the current passwd entry; named forms use passwd lookup. Failed lookup produces one located syntax error, and usernames longer than 1,022 bytes produce the pin's exact diagnostic. Startup, runtime source, alias, callback, and parse-only engine paths share this behavior. Unit coverage and a 17-step differential exercise 26 positive, negative, fallback, and diagnostic checks with no differing channel. Direct Control environment provenance and non-UTF-8 passwd home paths remain in explicit active groups."
+    },
+    {
       "id": "config.replayed-command-errors",
       "title": "Report replayed command failures",
       "closed_on": "2026-08-25",
@@ -4123,7 +4167,7 @@
         "resource:knowledge/tmux/conf-parser.md",
         "resource:knowledge/tmux/divergences.md"
       ],
-      "resolution": "source-file now accepts -n, -t, and -v through one mux effect and replay-loader options path. -n parses the whole invocation, retains lexer diagnostics and optional verbose lines, and applies neither parser environment assignments nor commands. It does not claim whole-file command-name and argument prevalidation; config.parser-edge-cases and mux.chain-parse-abort retain that atomicity gap. Later shared flag and arity closures match exact diagnostics when each replayed command reaches dispatch. -t resolves a pane target once, preserves the invoking client cwd, supplies that context to -F and replayed commands, and follows CMD_FIND_CANFAIL by loading with an empty target context when lookup fails. -v formats canonical command groups with source and physical line in declared-path and glob order, inherits through nested sources, and stays suppressed for Control clients. The later config.replayed-command-output closure proves that Command and Interactive clients receive one complete verbose batch before that invocation's replay and buffered command-name or parser diagnostics. Source no-match, glob, and actual OS or path read failures retain their existing error channels. It also proves that -n applies no bare assignments across files and produces no replay output. The attached proof first covered transcript presentation and dismissal; the later clients.tui-command-output-navigation closure added interaction inside the TUI output view. The strict source-file-format differential runs 40 steps with no differences, including parse-only state, target and target-based -F context, a missing target, verbose output, and multi-file order. The source-file-control smoke proves that Control executes an explicit -v source without leaking verbose lines. Runtime error delivery closed separately under config.replayed-command-errors. At this checkpoint, config alias snapshots, native default-config multi-file ordering, nested Control queueing, sourced-hook cwd, and stdin remained in their explicit groups. The later source-file.default-config-multi-file-order closure removed the default-config residue."
+      "resolution": "source-file now accepts -n, -t, and -v through one mux effect and replay-loader options path. -n parses the whole invocation, retains lexer diagnostics and optional verbose lines, and applies neither parser environment assignments nor commands. At that checkpoint it did not claim whole-file command-name and argument prevalidation. The later config.parser-abort and mux.chain-parse-abort closures added that atomicity. Later shared flag and arity closures match exact diagnostics when each replayed command reaches dispatch. -t resolves a pane target once, preserves the invoking client cwd, supplies that context to -F and replayed commands, and follows CMD_FIND_CANFAIL by loading with an empty target context when lookup fails. -v formats normalized command groups with source and physical line in declared-path and glob order, inherits through nested sources, and stays suppressed for Control clients. The later config.replayed-command-output closure proves that Command and Interactive clients receive one complete verbose batch before that invocation's replay and buffered command-name or parser diagnostics. Source no-match, glob, and actual OS or path read failures retain their existing error channels. It also proves that -n applies no bare assignments across files and produces no replay output. The attached proof first covered transcript presentation and dismissal; the later clients.tui-command-output-navigation closure added interaction inside the TUI output view. The strict source-file-format differential runs 40 steps with no differences, including parse-only state, target and target-based -F context, a missing target, verbose output, and multi-file order. The source-file-control probe proves that Control executes an explicit -v source without leaking verbose lines. Runtime error delivery closed separately under config.replayed-command-errors. At this checkpoint, config alias snapshots, native default-config multi-file ordering, nested Control queueing, sourced-hook cwd, and stdin remained in their explicit groups. The later source-file.default-config-multi-file-order closure removed the default-config residue."
     },
     {
       "id": "source-file.glob-semantics",
@@ -4198,7 +4242,7 @@
         "scenario:compat/scenarios/smoke/source-file-depth.txt",
         "scenario:compat/scenarios/smoke/source-file-control.txt"
       ],
-      "resolution": "Counting the initial source-file as invocation 1, 50 concurrent source invocations now run and invocation 51 is refused before any of its paths are matched or loaded. Command clients get `too many nested files` on stderr and exit 1, Protocol v76 Control clients get the same lowercase text inside the refused command's own flags-1 `%begin`/`%error` guard while the outer line continues, and attached clients get the pin's capitalized `Too many nested files` status message. `-q` does not suppress it, one diagnostic is emitted per refused command rather than per path, and the containing file keeps running its later lines. The later source-file.nested-control-queue closure proved cross-depth ordering. A malformed invocation at the refused depth is diagnosed as malformed rather than as depth on both sides, because the pin rejects it while parsing the containing file and never consults its depth guard. Later shared arity and flag closures matched that malformed text as well. The pin's abandonment of the rest of the containing file stays with config.parser-edge-cases. Same-line removal closed separately under config.same-line-error-group, and cumulative startup accounting closed separately under source-file.startup-depth-accounting."
+      "resolution": "Counting the initial source-file as invocation 1, 50 concurrent source invocations now run and invocation 51 is refused before any of its paths are matched or loaded. Command clients get `too many nested files` on stderr and exit 1, Protocol v76 Control clients get the same lowercase text inside the refused command's own flags-1 `%begin`/`%error` guard while the outer line continues, and attached clients get the pin's capitalized `Too many nested files` status message. `-q` does not suppress it, one diagnostic is emitted per refused command rather than per path, and the containing file keeps running its later lines. The later source-file.nested-control-queue closure proved cross-depth ordering. A malformed invocation at the refused depth is diagnosed as malformed rather than as depth on both sides, because the pin rejects it while parsing the containing file and never consults its depth guard. Later shared arity and flag closures matched that malformed text as well. The later config.parser-abort and mux.chain-parse-abort closures prove that a parser or construction failure drops every command from that file. Same-line removal closed separately under config.same-line-error-group, and cumulative startup accounting closed separately under source-file.startup-depth-accounting."
     },
     {
       "id": "source-file.reload-config-client-cwd",

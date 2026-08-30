@@ -181,14 +181,14 @@ command's own flags-1 `%begin`/`%error` guard. The closed nested queue proof cov
 placement without widening the depth slice. Same-line replay grouping now matches the pin: the refused
 source's later `;` siblings are dropped, the next physical line runs, and a matched parent source
 still runs its own same-line sibling. Matched child runtime, parser, and OS or path read failures do
-not prune that parent group; zz retains those child failures in `ConfigLoadReport`. Whole-file abort
-and the remaining source-read semantics stay under their existing gaps. A malformed
+not prune that parent group; zz retains those child failures in `ConfigLoadReport`. Whole-file
+parser and construction abort behavior is closed under `config.parser-abort` and
+`mux.chain-parse-abort`; the remaining source-read semantics stay under their existing gaps. A malformed
 invocation at the refused depth is diagnosed as malformed rather than as depth on both sides,
 because the pin rejects it while parsing the containing file and never consults its depth guard, and
 zz runs its depth guard after the command's own flag and positional validation for the same reason.
 Precedence, the stdout stream, the rc-1 exit, and the malformed text now agree through the shared
-arity and flag parsers. The pin's abandonment of the rest of the containing file remains tracked
-under `config.parser-edge-cases`. Startup configuration now uses
+arity and flag parsers. Startup configuration now uses
 one cumulative 50-command source budget across every top-level config. Top-level roots do not consume
 slots, quiet misses do, and one command with many paths consumes one slot. Invocation 51 and later
 retain `<file>:<line>: too many nested files` in the startup report while later ordinary commands
@@ -291,11 +291,15 @@ nested source paths keep their existing behavior.
 `source-file` does not expand tildes again during path resolution.
 Leading tildes that the config lexer expands already arrive as absolute paths; a quoted literal
 tilde or a tilde passed through direct argv remains relative and follows the command's normal base
-selection. Parser edges remain tracked separately. Pinned tmux expands a tilde immediately after a
-closing single or double quote. Bare tilde lookup prefers a nonempty server-global `HOME`, then
-falls back through the current user's passwd entry when that value is empty or unset. Named users
-resolve through `getpwnam`, and a required lookup failure produces a located syntax error. zz leaves
-post-closing-quote and named-user forms literal and reads process `HOME` without passwd fallback.
+selection. The lexer now matches tilde expansion immediately after a closing single or double quote,
+including empty quotes, while preserving the pin's state through continuations, raw quoted newlines,
+stripped quoted comments, empty variable expansion, and typed command blocks. Bare tilde lookup
+prefers a nonempty parser-context `HOME`, then falls back through the current user's passwd entry.
+Named users resolve through passwd lookup, failed lookup produces a located syntax error, and the
+username ceiling is 1,022 bytes. Startup, source, alias, callback, and parse-only engine paths see the
+daemon environment. Direct Control input still parses before daemon execution and remains under
+`control-mode.local-parser-environment`; non-UTF-8 passwd paths remain under
+`config.tilde-home-path-encoding`.
 
 # Syntax and tokenization rules
 

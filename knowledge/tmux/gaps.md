@@ -17,11 +17,11 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **84**. Classified items: **586**.
+Tracked gap groups: **87**. Classified items: **586**.
 
-- Status: open: 42, blocked: 20, accepted: 22.
-- Decision: adopt: 47, native: 16, park: 15, never: 6.
-- Priority: later: 62, none: 22.
+- Status: open: 45, blocked: 20, accepted: 22.
+- Decision: adopt: 50, native: 16, park: 15, never: 6.
+- Priority: later: 65, none: 22.
 - Closed history entries: 123.
 - Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 71, hook: 3, key: 110, binding: 51, native-key: 58, semantic: 108, presentation: 8, protocol: 2.
 
@@ -66,7 +66,8 @@ structure as proof.
 | `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
 | `pane.spawn-flags` | Complete split-window placement flags | adopt | open | medium | mux | scripts, daily | none |
 | `rendering.geometry-residue` | Close bounded geometry reporting gaps | adopt | open | medium | client | scripts, gui | none |
-| `terminal.key-control` | Complete terminal key control flags | adopt | open | medium | terminal | scripts, daily | none |
+| `terminal.key-client-selection` | Select the send-keys target client | adopt | open | medium | daemon | scripts, daily | none |
+| `terminal.key-reset` | Reset terminal input and palette state | adopt | open | medium | terminal | scripts, daily | none |
 | `terminal.resize-pane-trim` | Add terminal history trim action | adopt | blocked | medium | terminal | daily, scripts | none |
 | `aliases.remote-client-preflight` | Prepare remote CLI aliases without starting SSH | adopt | open | hard | client | remote, scripts | none |
 | `buffers.client-file-context` | Route buffer files through client path context | adopt | open | hard | protocol | scripts, remote | none |
@@ -102,11 +103,13 @@ structure as proof.
 | `mouse.bound-context` | Carry bound mouse event context | park | blocked | hard | protocol | daily, scripts, gui | none |
 | `options.remain-on-exit-format` | Render remain-on-exit-format in retained panes | adopt | blocked | hard | terminal | daily, scripts | none |
 | `options.terminal-behavior` | Consume terminal behavior options | adopt | open | hard | terminal | daily, remote, scripts | none |
+| `pane.command-completion` | Complete two-phase pane command completion | adopt | open | hard | daemon | scripts, daily | none |
 | `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | park | blocked | hard | client | daily | clients.interactive-refresh |
 | `source-file.event-hook-client-cwd` | Select the current client cwd for event-hook sources | adopt | open | hard | daemon | scripts | none |
 | `source-file.sourced-hook-client-cwd` | Keep the invoking Control client for sourced hooks | adopt | open | hard | daemon | scripts | none |
+| `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
 | `capture.rich-transports` | Add rich capture transports | park | blocked | hardest | terminal | scripts | protocol.binary-streams |
 | `formats.terminal-runtime` | Expose terminal runtime formats | park | blocked | hardest | terminal | scripts | none |
 | `options.lock-program` | Defer tmux lock process execution | park | blocked | hardest | client | remote, admin | clients.interactive-refresh |
@@ -1401,6 +1404,29 @@ Pinned -W enters the floating-pane path, where -x, -y, -X, and -Y size and place
 - Acceptance:
   - `Differential geometry tests cover target window creation, name, size, and placement coordinates.`
 
+### `pane.command-completion`: Complete two-phase pane command completion
+
+Pinned tmux closes the successful Control guard immediately, parks later queue items on the pane wait item, then propagates exit or signal status and wakes the queue before retention or removal. -W stays loudly unsupported until this foundation integrates across protocol-message, control-client, daemon-core, mux-command, and protocol-catalog.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `hard`
+- Owner: `daemon`
+- User impact: scripts, daily
+- Items: `flag:split-window:-W`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-protocol/src/message.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz/src/control_mode.rs`
+  - `resource:knowledge/tmux/divergences.md`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
+- Acceptance:
+  - `A bounded two-phase command lifecycle closes a successful Control guard as soon as split-window -W creates its pane, then parks later items from that command queue until the pane exits.`
+  - `Pane exit or signal resumes the parked queue before remain-on-exit retention or pane removal and propagates the exact exit status or 128 plus signal status to the originating unattached client.`
+
 ### `pane.floating-model`: Defer tmux floating panes
 
 tmux floating panes are mux objects; zz native floating surfaces are presentation objects.
@@ -1444,7 +1470,7 @@ Most forms extend the existing spawn effect, but some may expose floating or mar
 - Priority and ease: `later` / `medium`
 - Owner: `mux`
 - User impact: scripts, daily
-- Items: `flag:split-window:-R`, `flag:split-window:-S`, `flag:split-window:-T`, `flag:split-window:-W`, `flag:split-window:-k`, `flag:split-window:-m`, `flag:split-window:-s`
+- Items: `flag:split-window:-R`, `flag:split-window:-S`, `flag:split-window:-T`, `flag:split-window:-k`, `flag:split-window:-m`, `flag:split-window:-s`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
@@ -1624,22 +1650,65 @@ Command replay now retains replay_client and matches the caller cwd. Control hoo
 - Acceptance:
   - `A hook raised by a Control-sourced command inherits the outer queue client's selected cwd, so a relative source inside that hook loads the client-root file instead of the containing-file or daemon-home decoy without changing its flags-0 framing.`
 
-### `terminal.key-control`: Complete terminal key control flags
+### `terminal.key-client-selection`: Select the send-keys target client
 
-This is a discovery container that must split before scheduling: -K needs the invoking queue key event, -R resets terminal parser and palette state, -c targets a client, high hex needs byte semantics, and no-key counts need pane-owned cross-client mode state.
+Pinned tmux resolves -c through its target-client selector and supplies that client to read-only checks and key delivery. Implementers need protocol-catalog and daemon-core client selection; catalog acceptance alone would leave the behavior inert.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `medium`
+- Owner: `daemon`
+- User impact: scripts, daily
+- Items: `flag:send-keys:-c`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:knowledge/tmux/divergences.md`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
+- Acceptance:
+  - `Attached-client tests prove send-keys -c resolves the pin's target client and supplies that client to direct pane input and -X mode commands across attached and Control callers.`
+
+### `terminal.key-control`: Complete send-keys injection and mode behavior
+
+Pinned tmux routes -K through the selected client's key handler and reuses the invoking queue key when no positional key is supplied. Implementers need protocol-catalog, protocol-key, mux-command, and daemon-core for this path and the retained high-byte, count, and copy-mode items; terminal.key-client-selection owns -c and terminal.key-reset owns -R.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `hard`
+- Owner: `daemon`
+- User impact: scripts, daily
+- Items: `flag:send-keys:-K`, `semantic:send-keys-copy-command-shape`, `semantic:send-keys-empty-copy-count`, `semantic:send-keys-high-hex`, `semantic:send-keys-no-key-count`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-protocol/src/key.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:knowledge/tmux/divergences.md`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
+- Acceptance:
+  - `Terminal and attached-client tests cover client key-table injection, raw high bytes, counts, and copy commands; -K without positional keys replays the invoking queue key, and both a bare no-key -N count and `send-keys -N <n> -X` with no action live on the pane mode and survive the pin's cross-client invocation rules.`
+
+### `terminal.key-reset`: Reset terminal input and palette state
+
+Pinned tmux clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, and still delivers any supplied keys. Implementers need protocol-catalog, daemon-core, and terminal-engine reset behavior.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
 - Owner: `terminal`
 - User impact: scripts, daily
-- Items: `flag:send-keys:-K`, `flag:send-keys:-R`, `flag:send-keys:-c`, `semantic:send-keys-copy-command-shape`, `semantic:send-keys-empty-copy-count`, `semantic:send-keys-high-hex`, `semantic:send-keys-no-key-count`
+- Items: `flag:send-keys:-R`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-terminal/src/session.rs`
   - `resource:knowledge/tmux/divergences.md`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
 - Acceptance:
-  - `Terminal and attached-client tests cover reset, clear, key-table injection, high bytes, counts, and copy commands; both a bare no-key -N count and `send-keys -N <n> -X` with no action live on the pane mode and survive the pin's cross-client invocation rules.`
+  - `Terminal tests prove send-keys -R clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, then preserves any requested key delivery.`
 
 ### `terminal.resize-pane-trim`: Add terminal history trim action
 

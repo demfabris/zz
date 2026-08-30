@@ -2270,6 +2270,37 @@
       "reason": "Pinned -W enters the floating-pane path, where -x, -y, -X, and -Y size and place the floating pane. These flags do not describe ordinary tiled destination-window geometry and cannot ship before pane.floating-model."
     },
     {
+      "id": "pane.command-completion",
+      "title": "Complete two-phase pane command completion",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "scripts",
+        "daily"
+      ],
+      "owner": "daemon",
+      "items": [
+        "flag:split-window:-W"
+      ],
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/control_mode.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
+      ],
+      "acceptance": [
+        "A bounded two-phase command lifecycle closes a successful Control guard as soon as split-window -W creates its pane, then parks later items from that command queue until the pane exits.",
+        "Pane exit or signal resumes the parked queue before remain-on-exit retention or pane removal and propagates the exact exit status or 128 plus signal status to the originating unattached client."
+      ],
+      "depends_on": [],
+      "reason": "Pinned tmux closes the successful Control guard immediately, parks later queue items on the pane wait item, then propagates exit or signal status and wakes the queue before retention or removal. -W stays loudly unsupported until this foundation integrates across protocol-message, control-client, daemon-core, mux-command, and protocol-catalog."
+    },
+    {
       "id": "pane.floating-model",
       "title": "Defer tmux floating panes",
       "decision": "park",
@@ -2357,7 +2388,6 @@
         "flag:split-window:-R",
         "flag:split-window:-S",
         "flag:split-window:-T",
-        "flag:split-window:-W",
         "flag:split-window:-k",
         "flag:split-window:-m",
         "flag:split-window:-s"
@@ -2666,8 +2696,68 @@
       "reason": "Command replay now retains replay_client and matches the caller cwd. Control hook framing still clears replay_client before the hook runs, so a relative source inside that hook falls back to daemon HOME while pinned tmux retains the outer queue client."
     },
     {
+      "id": "terminal.key-client-selection",
+      "title": "Select the send-keys target client",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "scripts",
+        "daily"
+      ],
+      "owner": "daemon",
+      "items": [
+        "flag:send-keys:-c"
+      ],
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
+      ],
+      "acceptance": [
+        "Attached-client tests prove send-keys -c resolves the pin's target client and supplies that client to direct pane input and -X mode commands across attached and Control callers."
+      ],
+      "depends_on": [],
+      "reason": "Pinned tmux resolves -c through its target-client selector and supplies that client to read-only checks and key delivery. Implementers need protocol-catalog and daemon-core client selection; catalog acceptance alone would leave the behavior inert."
+    },
+    {
       "id": "terminal.key-control",
-      "title": "Complete terminal key control flags",
+      "title": "Complete send-keys injection and mode behavior",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "scripts",
+        "daily"
+      ],
+      "owner": "daemon",
+      "items": [
+        "flag:send-keys:-K",
+        "semantic:send-keys-copy-command-shape",
+        "semantic:send-keys-empty-copy-count",
+        "semantic:send-keys-high-hex",
+        "semantic:send-keys-no-key-count"
+      ],
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/key.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
+      ],
+      "acceptance": [
+        "Terminal and attached-client tests cover client key-table injection, raw high bytes, counts, and copy commands; -K without positional keys replays the invoking queue key, and both a bare no-key -N count and `send-keys -N <n> -X` with no action live on the pane mode and survive the pin's cross-client invocation rules."
+      ],
+      "depends_on": [],
+      "reason": "Pinned tmux routes -K through the selected client's key handler and reuses the invoking queue key when no positional key is supplied. Implementers need protocol-catalog, protocol-key, mux-command, and daemon-core for this path and the retained high-byte, count, and copy-mode items; terminal.key-client-selection owns -c and terminal.key-reset owns -R."
+    },
+    {
+      "id": "terminal.key-reset",
+      "title": "Reset terminal input and palette state",
       "decision": "adopt",
       "status": "open",
       "priority": "later",
@@ -2678,23 +2768,20 @@
       ],
       "owner": "terminal",
       "items": [
-        "flag:send-keys:-K",
-        "flag:send-keys:-R",
-        "flag:send-keys:-c",
-        "semantic:send-keys-copy-command-shape",
-        "semantic:send-keys-empty-copy-count",
-        "semantic:send-keys-high-hex",
-        "semantic:send-keys-no-key-count"
+        "flag:send-keys:-R"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:third_party/tmux-reference/UPSTREAM.md"
       ],
       "acceptance": [
-        "Terminal and attached-client tests cover reset, clear, key-table injection, high bytes, counts, and copy commands; both a bare no-key -N count and `send-keys -N <n> -X` with no action live on the pane mode and survive the pin's cross-client invocation rules."
+        "Terminal tests prove send-keys -R clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, then preserves any requested key delivery."
       ],
       "depends_on": [],
-      "reason": "This is a discovery container that must split before scheduling: -K needs the invoking queue key event, -R resets terminal parser and palette state, -c targets a client, high hex needs byte semantics, and no-key counts need pane-owned cross-client mode state."
+      "reason": "Pinned tmux clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, and still delivers any supplied keys. Implementers need protocol-catalog, daemon-core, and terminal-engine reset behavior."
     },
     {
       "id": "terminal.resize-pane-trim",

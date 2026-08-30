@@ -4,7 +4,7 @@ title: Running tmux compatibility cohorts
 description: A bounded, parallel workflow for closing the practical alias tmux=zz gap without letting new oracle findings extend one campaign forever.
 tags: [tmux, compatibility, campaign, workflow, agents]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 last_updated_by: Codex
 ---
 
@@ -735,6 +735,24 @@ workspace tests, and clippy. The full corpus also uses the fixed `/tmp/zz-c1-his
 After the trial, record merge conflicts, cross-front file requests, test interference, review
 repairs, abandoned work, and closures delivered to the campaign branch. Keep this model only if it
 raises completed, reviewed work without weakening the proof or making integration the bottleneck.
+
+## Campaign reporting
+
+Freeze each wave's group IDs before implementation. Report the wave and live registry with these
+fields:
+
+| Signal | Rule |
+| --- | --- |
+| Fixed cohort completion | Closed frozen chunks divided by frozen chunks |
+| Discoveries | Residual groups registered while closing the cohort |
+| Unresolved movement | Open plus blocked groups before and after the cohort |
+| Practical exit gate | Current gate result and accepted differential evidence |
+| Ledger settlement | Closed history plus accepted active groups divided by all known groups |
+
+Use fixed cohort completion, discoveries, unresolved movement, and the practical exit gate as the
+campaign headline. Keep ledger settlement as a secondary registry diagnostic because each group has
+equal weight and new discoveries increase its denominator. Recompute every field from the live
+registry and accepted artifacts when the coordinator closes a wave.
 
 # Validation ladder
 

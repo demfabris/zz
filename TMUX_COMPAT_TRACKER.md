@@ -1,8 +1,12 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **THREE-FRONT TRIAL VALIDATED; SLICE 10AI NEXT**
+> Campaign delivery: **THREE-FRONT TRIAL 3/3 CLOSED; 3 RESIDUAL GROUPS REGISTERED**
 >
-> Tracker resolution progress: **68.4% (141 of 206 known groups)**
+> Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED); SLICE 10AI NEXT**
+>
+> Ledger settlement: **68.4% (141 of 206 known groups); SECONDARY DIAGNOSTIC**
+>
+> Exit evidence: **104 SCENARIOS, 1,672 STEPS, ATTACHED-CLIENT PASS**
 >
 > Integrated campaign base: **2026-08-29** at `fde87af317c4317e9b5176f7e79d4e8765e397cd`
 
@@ -73,7 +77,8 @@ percentage is a ledger health metric, not a compatibility claim.
 | Campaign worktrees | Three retained trial worktrees branch from the original trial base; the table below records their paths and file zones |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | The three-front trial is positive and complete; 10ai is the sole `next` group |
+| Last fixed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
+| Campaign point | The practical exit gate remains open; 10ai is the sole `next` group |
 | Live registry | 87 active groups, 590 active items, 119 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
@@ -85,9 +90,29 @@ resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
 before acting because other agents may share it.
 
-### Progress calculation
+### Campaign dashboard
 
-Progress counts a group as resolved when it is either in closed history or has an accepted
+Report campaign movement with a fixed cohort and the live ledger side by side. The fixed cohort
+shows delivery against the scope frozen before a parallel wave. The live ledger records new work
+found during that wave.
+
+| Signal | Current value |
+| --- | --- |
+| Fixed cohort completion | Three-front trial: 3 of 3 frozen chunks closed |
+| New residual groups | 3: two from Config, one from Key |
+| Unresolved movement | 65 before the trial, 65 after the trial |
+| Live unresolved | 45 open + 20 blocked = 65 |
+| Practical exit gate | Open; slice 10ai is the sole `next` group |
+| Accepted differential | 104 scenarios, 1,672 steps, attached-client `PASS`, 2 registered GEO rows |
+| Ledger settlement | 141 of 206 known groups = 68.4% |
+
+Use the first six rows as the campaign headline. Keep ledger settlement as a secondary diagnostic.
+After each frozen wave, record its closed chunk count, discoveries, unresolved delta, practical
+exit-gate evidence, and the recomputed live ledger.
+
+### Ledger settlement calculation
+
+Ledger settlement counts a group as resolved when it is either in closed history or has an accepted
 `native` or `never` disposition. Open and blocked groups remain unresolved.
 
 ```text
@@ -103,8 +128,8 @@ python3 -c 'import json; d=json.load(open("compat/tmux-gaps.json")); done=len(d[
 
 Each group has equal weight even though effort and item count differ. Closed records do not retain
 their former item lists, so schema 3 cannot support an honest historical item-weighted percentage.
-New discoveries can lower this number. Passing the practical exit gate matters more than raising
-it.
+New discoveries can lower this number. The practical exit gate and fixed-cohort delivery carry the
+campaign decision.
 
 ## Source-of-truth order
 

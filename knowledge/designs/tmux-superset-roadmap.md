@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; three-front trial validated; Control output discard follows
+status: In Progress; three-front trial closed 3 of 3; Control output discard follows
 tags:
 - tmux
 - compatibility
@@ -11,7 +11,7 @@ tags:
 - fleet
 - native-superset
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 last_updated_by: Codex
 ---
 
@@ -39,9 +39,10 @@ records the source-anchored baseline used to build this plan.
 # Current checkpoint, 2026-08-29
 
 Slices 10w through 10ah plus the Config and Key fronts form the local 2026-08-29 checkpoint. The
-tracker has 87 active groups, 590 classified active items, and 119 closed groups: 45 open, 20
-blocked, and 22 accepted. Accepted active groups plus closed history resolve 141 of 206 known groups
-(68.4%). The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client
+three-front trial closed all 3 frozen chunks and registered 3 residual groups. Unresolved work
+stayed at 65: 45 open and 20 blocked. The tracker has 87 active groups, 590 classified
+active items, 119 closed groups, and 22 accepted active groups. Its secondary ledger settlement is
+141 of 206 known groups (68.4%). The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client
 `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
 `8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.

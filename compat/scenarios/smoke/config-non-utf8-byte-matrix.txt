@@ -1,0 +1,113 @@
+corpus: none
+stage: config-non-utf8-byte-matrix.txt ~/config-non-utf8-byte-matrix.txt
+# PY: import os
+# PY: import pathlib
+# PY: import subprocess
+# PY: home = pathlib.Path(os.environ["HOME"])
+# PY: client_env = os.environ.copy()
+# PY: for key in ["TMUX", "TMUX_PANE", "ZZ_SOCKET", "ZZ_SESSION", "ZZ_PANE"]:
+# PY:     client_env.pop(key, None)
+# PY: is_zz = bool(os.environ.get("ZZ_SMOKE_ZZ_BIN"))
+# PY: if is_zz:
+# PY:     client = [os.environ["ZZ_SMOKE_ZZ_BIN"], "--socket", os.environ["ZZ_SMOKE_ZZ_SOCKET"]]
+# PY: else:
+# PY:     client = [os.environ["ZZ_SMOKE_TMUX_BIN"], "-L", os.environ["ZZ_SMOKE_TMUX_LABEL"]]
+# PY: def source(name, data):
+# PY:     path = home / ("config-non-utf8-" + name + ".conf")
+# PY:     path.write_bytes(data)
+# PY:     return subprocess.run(client + ["source-file", "-v", str(path)], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY: ok = True
+# PY: failures = []
+# PY: def check(name, passed):
+# PY:     if not passed:
+# PY:         failures.append(name)
+# PY:     return passed
+# PY: if not is_zz:
+# PY:     mode_path = home / "config-non-utf8-mode-ff.conf"
+# PY:     mode_path.write_bytes(b"\xffset-environment -g CONFIG_NON_UTF8_MODE set\n")
+# PY:     result = subprocess.run(client + ["source-file", "-v", str(mode_path)], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:     runtime_marker = subprocess.run(client + ["show-environment", "-g", "CONFIG_NON_UTF8_MODE"], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:     startup_label = "config-non-utf8-mode-" + str(os.getpid())
+# PY:     startup_client = [client[0], "-L", startup_label, "-f", str(mode_path)]
+# PY:     startup = subprocess.run(startup_client + ["new-session", "-d"], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:     startup_marker = subprocess.run(startup_client + ["show-environment", "-g", "CONFIG_NON_UTF8_MODE"], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:     subprocess.run(startup_client + ["kill-server"], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:     ok = ok and result.returncode == 0 and b"set-environment -g CONFIG_NON_UTF8_MODE set\n" in result.stdout and result.stderr == b""
+# PY:     ok = ok and runtime_marker.returncode == 0 and runtime_marker.stdout == b"CONFIG_NON_UTF8_MODE=set\n" and runtime_marker.stderr == b""
+# PY:     ok = ok and startup.returncode == 0 and startup.stdout == b"" and startup.stderr == b""
+# PY:     ok = ok and startup_marker.returncode == 1 and startup_marker.stdout == b"" and startup_marker.stderr == b"unknown variable: CONFIG_NON_UTF8_MODE\n"
+# PY:     result = source("isolated-ff", b"\xff")
+# PY:     ok = ok and result.returncode == 0 and result.stdout == b"" and result.stderr == b""
+# PY:     result = source("embedded-ff", b"display-message -p before\xffafter\n")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b"too many arguments (need at most 1)\n") and result.stderr == b""
+# PY:     result = source("trailing-ff", b"display-message -p before\xff\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"before\n") and result.stderr == b""
+# PY:     result = source("boundary-ff", b"display-message -p before \xffdisplay-message -p after\n")
+# PY:     ok = ok and result.returncode == 0 and b"display-message -p before ; display-message -p after\n" in result.stdout and result.stdout.endswith(b"before\nafter\n") and result.stderr == b""
+# PY:     result = source("second-boundary-ff", b"\xffdisplay-message -p first\n\xffdisplay-message -p second\ndisplay-message -p third\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"first\n") and b"display-message -p second" not in result.stdout and b"display-message -p third" not in result.stdout and result.stderr == b""
+# PY:     result = source("isolated-80", b"display-message -p before\x80after\n")
+# PY:     ok = ok and result.returncode == 0 and b"before\\200after" in result.stdout and result.stdout.endswith(b"before\x80after\n") and result.stderr == b""
+# PY:     result = source("valid-c2-80", b"display-message -p before\xc2\x80after\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"before\xc2\x80after\n") and result.stderr == b""
+# PY:     result = source("malformed-c3-28", b"display-message -p before\xc3(after\n")
+# PY:     ok = ok and result.returncode == 0 and b"before\\303(after" in result.stdout and result.stdout.endswith(b"before\xc3(after\n") and result.stderr == b""
+# PY:     result = source("comment-ff", b"# ignored\xffdisplay-message -p escaped\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"escaped\n") and result.stderr == b""
+# PY:     result = source("escaped-ff", b"display-message -p before\\\xffafter\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"before\x07fter\n") and result.stderr == b""
+# PY:     result = source("even-backslash-ff", b"display-message -p before\\\\\xffafter\n")
+# PY:     ok = ok and result.returncode == 0 and b"display-message -p before\\\\after\n" in result.stdout and result.stdout.endswith(b"before\\after\n") and result.stderr == b""
+# PY:     result = source("cr-lookahead-ff", b"display-message -p before\r\xffafter\n")
+# PY:     ok = ok and result.returncode == 0 and b"display-message -p before\\rafter\n" in result.stdout and result.stdout.endswith(b"before\rafter\n") and result.stderr == b""
+# PY:     result = source("cr-even-backslash-ff", b"display-message -p before\r\\\\\xffafter\n")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":1: syntax error\n") and result.stderr == b""
+# PY:     result = source("unicode-eof", b"display-message -p \\u12\xff34\n")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":1: syntax error\n") and b"invalid \\u argument" not in result.stdout and result.stderr == b""
+# PY:     result = source("second-eof-incomplete", b"\xffdisplay-message -p after")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":1: syntax error\n") and result.stderr == b""
+# PY:     result = source("block-trailing-backslash", b"bind x { display-message -p tail \\")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":1: syntax error\n") and result.stderr == b""
+# PY:     result = source("quoted-comment-eof", b"display-message -p \"a\n#comment")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"display-message -p a\\n\na\n\n") and result.stderr == b""
+# PY:     result = source("embedded-nul", b"display-message -p before\x00after\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"display-message -p before\nbefore\n") and b"after" not in result.stdout and result.stderr == b""
+# PY:     result = source("escaped-nul", b"display-message -p before\\000after\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"display-message -p before\nbefore\n") and b"after" not in result.stdout and result.stderr == b""
+# PY:     result = source("block-nul-open", b"if-shell -F 1 { display-message -p before\x00{after }\n")
+# PY:     ok = ok and result.returncode == 0 and b"if-shell -F 1 { display-message -p before }\n" in result.stdout and result.stdout.endswith(b"before\n") and b"after" not in result.stdout and result.stderr == b""
+# PY:     result = source("crlf", b"display-message -p value\r\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith(b"value\n") and b"value\r" not in result.stdout and result.stderr == b""
+# PY:     result = source("unicode-pua", b"display-message -p " + b"\\" + b"U000F0080" + b"\\" + b"U000F0100\n")
+# PY:     ok = ok and result.returncode == 0 and result.stdout.endswith("\U000f0080\U000f0100\n".encode()) and result.stderr == b""
+# PY:     result = source("percent-crlf", b"%if 0\r\ndisplay-message -p wrong\r\n%else\r\ndisplay-message -p kept\r\n%endif\r\n")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":3: syntax error\n") and result.stderr == b""
+# PY:     result = source("block-hard-eof", b"display-message -p before\nif-shell true { display-message -p one \xffdisplay-message -p two \xffdisplay-message -p three\n }\ndisplay-message -p after\n")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":2: syntax error\n") and result.stderr == b""
+# PY:     result = source("block-quote-ff", b"bind-key x { send-keys 'before\xffafter' }\n")
+# PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":2: syntax error\n") and result.stderr == b""
+# PY: result = source("block-attached-open", b"if-shell -F 1 { display-message -p a{b}c }\n")
+# PY: if is_zz:
+# PY:     ok = check("block-attached-open", result.returncode == 1 and b"too many arguments" in result.stdout + result.stderr) and ok
+# PY: else:
+# PY:     ok = check("block-attached-open", result.returncode == 1 and result.stdout.endswith(b":1: syntax error\n") and result.stderr == b"") and ok
+# PY: result = source("block-literal-open", b"if-shell -F 1 { display-message -p before{after }\n")
+# PY: ok = check("block-literal-open", result.returncode == 0 and result.stdout.endswith(b"before{after\n") and result.stderr == b"") and ok
+# PY: result = source("block-adjacent", b"if-shell -F 1 { if-shell -F 1 {}{} }\n")
+# PY: ok = check("block-adjacent", result.returncode == 0 and result.stderr == b"") and ok
+# PY: result = source("block-continued-adjacent", b"if-shell -F 1 { if-shell -F 1 \\\n{}{} }\n")
+# PY: ok = check("block-continued-adjacent", result.returncode == 0 and result.stderr == b"") and ok
+# PY: result = source("top-level-continued-adjacent", b"if-shell -F 1 \\\n{ display-message -p first }{ display-message -p second }\n")
+# PY: ok = check("top-level-continued-adjacent", result.returncode == 0 and result.stdout.endswith(b"first\n") and result.stderr == b"") and ok
+# PY: result = source("block-continued-semicolon-comment", b"if-shell -F 1 { display-message -p before;\\\n# ignored {\ndisplay-message -p after }\n")
+# PY: ok = check("block-continued-semicolon-comment", result.returncode == 0 and result.stdout.endswith(b"before\nafter\n") and b"ignored" not in result.stdout and result.stderr == b"") and ok
+# PY: result = source("block-continued-brace-comment", b"if-shell -F 1 { if-shell -F 1 { display-message -p nested }\\\n# ignored {\ndisplay-message -p after }\n")
+# PY: ok = check("block-continued-brace-comment", result.returncode == 0 and result.stdout.endswith(b"nested\nafter\n") and b"ignored" not in result.stdout and result.stderr == b"") and ok
+# PY: result = source("block-semicolon-comment", b"if-shell -F 1 { display-message -p before;# ignored {\ndisplay-message -p after }\n")
+# PY: ok = check("block-semicolon-comment", result.returncode == 0 and result.stdout.endswith(b"before\nafter\n") and b"ignored" not in result.stdout and result.stderr == b"") and ok
+# PY: result = source("block-brace-comment", b"if-shell -F 1 { if-shell -F 1 { display-message -p nested }# ignored {\ndisplay-message -p after }\n")
+# PY: ok = check("block-brace-comment", result.returncode == 0 and result.stdout.endswith(b"nested\nafter\n") and b"ignored" not in result.stdout and result.stderr == b"") and ok
+# PY: marker = "parser-prerequisite" if ok else "broken" + ((":" + ",".join(failures)) if failures else "")
+# PY: subprocess.run(client + ["set-environment", "-g", "CONFIG_NON_UTF8_BYTE_ORACLE", marker], env=client_env, check=True)
+run-shell 'python3 -c "exec(\"\".join(line[6:] for line in open(__import__(\"os\").environ[\"HOME\"]+\"/config-non-utf8-byte-matrix.txt\") if line.startswith(\"# PY: \")))"'
+out: show-environment -g CONFIG_NON_UTF8_BYTE_ORACLE

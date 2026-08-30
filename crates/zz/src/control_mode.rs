@@ -176,12 +176,7 @@ fn drive<W: Write>(
         return Ok(completed_exit_code(initial_result.exit_code, &state));
     }
 
-    if let Some(PendingReturn::Eof {
-        preceding_input, ..
-    }) = state.pending_return.as_mut()
-    {
-        *preceding_input = pending_stdin.len();
-    }
+    retain_first_initial_stdin_before_eof(&mut state.pending_return, &mut pending_stdin);
     if state
         .pending_return
         .as_ref()
@@ -1059,6 +1054,19 @@ fn capture_pending_return<W: Write>(
             }
         }
         Err(stdin) => pending_stdin.push_back(stdin),
+    }
+}
+
+fn retain_first_initial_stdin_before_eof(
+    pending_return: &mut Option<PendingReturn>,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) {
+    if let Some(PendingReturn::Eof {
+        preceding_input, ..
+    }) = pending_return.as_mut()
+    {
+        pending_stdin.truncate(1);
+        *preceding_input = pending_stdin.len();
     }
 }
 
@@ -2195,20 +2203,27 @@ mod tests {
     }
 
     #[test]
-    fn pending_return_keeps_its_first_observed_code_and_precedes_queued_input() {
+    fn initial_eof_keeps_only_the_first_queued_input() {
         let mut pending_return = None;
         let mut pending_stdin = VecDeque::new();
         let mut writer = ControlWriter::new(Vec::new(), false);
         capture_pending_return(
-            StdinEvent::Eof,
+            StdinEvent::Line("run-shell 'sleep 1'".to_owned()),
             0,
             &mut pending_return,
             &mut pending_stdin,
             &mut writer,
         );
         capture_pending_return(
-            StdinEvent::Line("detach-client".to_owned()),
-            1,
+            StdinEvent::Line("display-message -p SECOND".to_owned()),
+            0,
+            &mut pending_return,
+            &mut pending_stdin,
+            &mut writer,
+        );
+        capture_pending_return(
+            StdinEvent::Eof,
+            0,
             &mut pending_return,
             &mut pending_stdin,
             &mut writer,
@@ -2220,13 +2235,22 @@ mod tests {
             &mut pending_stdin,
             &mut writer,
         );
+        retain_first_initial_stdin_before_eof(&mut pending_return, &mut pending_stdin);
 
         assert_eq!(pending_return.as_ref().map(PendingReturn::code), Some(0));
+        assert!(
+            pending_return
+                .as_ref()
+                .is_some_and(PendingReturn::has_preceding_input)
+        );
         assert!(matches!(
             pending_stdin.pop_front(),
-            Some(StdinEvent::Line(line)) if line == "detach-client"
+            Some(StdinEvent::Line(line)) if line == "run-shell 'sleep 1'"
         ));
         assert!(pending_stdin.is_empty());
+        let pending_return = pending_return.as_mut().expect("pending return");
+        pending_return.consume_preceding_input();
+        assert!(!pending_return.has_preceding_input());
     }
 
     #[test]

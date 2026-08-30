@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; parallel wave 2 frozen at 0 of 3
+status: In Progress; parallel wave 2 at 1 of 3; shell-job cwd next
 tags:
 - tmux
 - compatibility
@@ -36,22 +36,21 @@ and closed history. The
 [2026-08-22 tmux CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
 records the source-anchored baseline used to build this plan.
 
-# Current checkpoint, 2026-08-29
+# Current checkpoint, 2026-08-30
 
-Slices 10w through 10ah plus the Config and Key fronts form the local 2026-08-29 checkpoint. The
-three-front trial closed all 3 frozen chunks and registered 3 residual groups. Unresolved work
-stayed at 65: 45 open and 20 blocked. The tracker has 87 active groups, 590 classified
-active items, 119 closed groups, and 22 accepted active groups. Its secondary ledger settlement is
-141 of 206 known groups (68.4%). The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client
+The three-front trial closed all 3 frozen chunks and registered 3 residual groups. Wave 2 then
+closed slice 10ai as its first of 3 frozen chunks without a new residual. Unresolved work moved from
+65 to 64: 44 open and 20 blocked. The tracker has 86 active groups, 589 classified active items,
+120 closed groups, and 22 accepted active groups. Its secondary ledger settlement is 142 of 206
+known groups (68.9%). The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client
 `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
 `8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
 Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`
 without a public protocol change. The integrated mux suite passes 531 tests, the focused strict-key
 run passes 40 steps plus 161 fixture checks on both engines, and formatting and mux clippy pass.
-Slice 10ah closes
-`control-mode.kill-server-response-order`; slice 10ai is now the sole `next` group under
-`control-mode.exit-pane-output`.
+Slice 10ah closes `control-mode.kill-server-response-order`. Slice 10ai closes
+`control-mode.exit-pane-output`; shell-job cwd is now the sole `next` group.
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
 matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
 named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
@@ -65,9 +64,10 @@ The three-front trial is positive: all three bounded chunks reached `main`, thei
 not intersect, and integration had no merge conflicts. Six independent review repairs were needed,
 so the next wave uses two active editors, one permanent oracle and reviewer, and the root as
 coordinator. Full corpus and workspace gates remain centralized in one warm integration lane.
-Wave 2 freezes Control exit pane-output discard, shell-job cwd, and literal DEL identity as three
-independent chunks. The first two start with editors. The DEL front probes and reviews before it
-rotates into editing.
+Wave 2 froze Control exit pane-output discard, shell-job cwd, and literal DEL identity as three
+independent chunks. Shell-job cwd has an accepted candidate awaiting coordinator-owned
+attached-client proof. The DEL candidate is under repair after live PTY review found failures in
+prefix and configured-backspace transport.
 The final workspace run passed every non-daemon package. Three daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake
 class. Strict workspace clippy, formatting, tracker, stored-summary, and OKF validation pass.
@@ -339,10 +339,10 @@ A direct daemon launch has no bootstrap base, and later sources use the register
 isolated startup-client-cwd differential passes exactly on both engines without a public
 protocol change.
 
-The full eight-case startup diagnostic now reaches `control-mode.exit-pane-output`. zz may drain
-three to five queued shell-prompt `%output %0` rows after a flags-0 `%end` and before `%exit`; ten
-equivalent pinned-tmux probes emitted none. Slice 10ai owns pending and later pane-byte discard on
-EOF or blank Return. Hard-disconnect cancellation, command output, retained status, and flow control
+The full eight-case startup diagnostic exposed `control-mode.exit-pane-output`. Slice 10ai now
+starts stdin observation before initial preparation and discards queued and later pane-byte records
+after EOF or blank Return. It retains already-written pane output, other Control records, return
+status, and one final exit. Hard-disconnect cancellation, wait behavior, and transport pressure
 remain outside that slice.
 
 Slice 10ah closes `control-mode.kill-server-response-order`. Shutdown freezes response admission
@@ -351,11 +351,10 @@ under the active-request lock, waits a bounded interval for admitted replies, pu
 retains the listener through that drain, removes the endpoint while it still owns the listener, and
 then drops it. Deterministic tests cover the old race, late Control and Command requests, stalled and
 disconnected writers, replacement binding during cleanup, and immediate fresh-daemon startup.
-Pane-output discard follows as slice 10ai.
+Slice 10ai then closes pane-output discard.
 
-The registry now has 87 active groups and 590 active items, with 119 closed records: 45 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 141 of 206 groups (68.4%).
-Slices 10w through 10ah plus the Config and Key fronts form the local 2026-08-29 checkpoint. The
+The registry now has 86 active groups and 589 active items, with 120 closed records: 44 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 142 of 206 groups (68.9%). The
 persisted accepted artifact covers 104 scenarios and 1,672 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
 `8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Focused mux and

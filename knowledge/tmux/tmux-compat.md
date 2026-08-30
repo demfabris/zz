@@ -350,19 +350,16 @@ Slice 10ag closes `source-file.startup-client-cwd`. Only the cold launcher that 
 passes private `--bootstrap-client-cwd`; startup carries that bounded UTF-8 base through nested
 relative sources and literal metacharacter paths, then clears it before runtime commands. The
 isolated differential passes exactly on both engines without a public protocol change. The full
-eight-case diagnostic separately exposes queued pane output during Control exit.
+eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 87 active groups, 594 items, and 116 closed records: 45 open, 20 blocked, and
-22 accepted. Closed records plus accepted active groups resolve 138 of 203 known groups (68.0%).
-Slices 10w through 10ag form the authorized 2026-08-29 checkpoint. The persisted accepted slice 10ag
-artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two approved GEO
+The live registry has 86 active groups, 589 items, and 120 closed records: 44 open, 20 blocked, and
+22 accepted. Closed records plus accepted active groups resolve 142 of 206 known groups (68.9%).
+The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Package validation passes
-653 zz unit tests plus 113 CLI binary tests, and 736 serialized daemon tests plus two active agent
-integrations; one soak remains ignored. The full workspace excluding the daemon, full workspace
-clippy, and `cargo fmt --check` pass. Slice 10ah takes
-`control-mode.kill-server-response-order`, followed by slice 10ai under
-`control-mode.exit-pane-output`.
+`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Slice 10ai starts Control
+stdin observation before initial preparation, discards queued and future pane-byte records after
+EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd is
+the next group, with its candidate awaiting coordinator-owned attached-client proof.
 
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.

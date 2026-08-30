@@ -577,37 +577,6 @@
       "reason": "zz now cancels a background if-shell or run-shell callback when its origin is gone before callback entry, but immediate hook and source replay has no connection-owned cancellation token once command execution has started. Pinned tmux frees the remaining client-owned queue on hard connection loss while letting the in-flight worker finish; graceful Return follows a different drain path."
     },
     {
-      "id": "control-mode.exit-pane-output",
-      "title": "Discard pending pane output when Control exits",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "client",
-      "items": [
-        "semantic:control-mode-exit-pane-output-discard"
-      ],
-      "evidence": [
-        "resource:crates/zz/src/control_mode.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "file:crates/zz/tests/cli_binary.rs",
-        "file:compat/startup-diagnostics.sh",
-        "resource:third_party/tmux-reference/UPSTREAM.md",
-        "resource:knowledge/references/tmux-upstream.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "After an attached Control client receives EOF or a blank Return, every pending or later %output and %extended-output pane-byte frame is discarded; pane output already written before the return remains visible.",
-        "Queued guards, config diagnostics, command output, pause or continue notifications, retained return status, and exactly one final %exit keep their pinned order.",
-        "The cold -C new-session startup probe emits its startup diagnostics, one flags-0 success guard, no pane-output frame, and %exit, while a long-lived Control client still receives ordinary pane output before requesting exit."
-      ],
-      "depends_on": [],
-      "reason": "On EOF or a blank line, pinned tmux marks the client exiting, removes queued pane-byte blocks, rejects later pane bytes, and drains only the remaining control stream before exit. zz sends Detach and renders queued PaneOutput events during the exit drain, allowing a newly created shell prompt to appear between the command guard and %exit."
-    },
-    {
       "id": "control-mode.local-parser-environment",
       "title": "Parse Control tilde with daemon environment",
       "decision": "adopt",
@@ -1402,7 +1371,7 @@
       "title": "Select pinned working directories for shell jobs",
       "decision": "adopt",
       "status": "open",
-      "priority": "later",
+      "priority": "next",
       "ease": "medium",
       "impact": [
         "daily",
@@ -3375,6 +3344,21 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Shell-evaluated if-shell -b and run-shell -bC now retain the originating Control client separately from replay_client and map its inserted work to protocol v77 flags 0. The triggering flags-1 frame closes first, later flags-1 input may overtake the callback, and each inserted command, source command, and sourced child receives an independent frame in parent-before-child order. Successful and false-branch output stays inside its callback frame. Missing sources and runtime failures end their flags-0 frames with %error and set sticky status 1; a later flags-1 success does not clear that status before Return. Both producers keep a malformed delayed command list silent, unframed, and status-neutral. Ordinary run-shell -b shell jobs remain unframed, immediate if-shell -bF remains synchronous flags 1, and foreground run-shell -C retains the closed synchronous path. The callback clears replay_client and checks that its exact Control client is still registered before callback execution begins. A client disconnected before that point gets no callback frame or inserted side effect, and no output migrates to a later client. control-mode.disconnect-cancels-command-queue owns hard disconnect after an immediate hook or source queue has already started. Non-Control background behavior is unchanged. The implementation reuses protocol v77 without a wire bump. Focused daemon and serialized Control CLI regressions pass, shell syntax and formatting checks pass, and the strict 11-step smoke/source-file-control differential has zero topology, geometry, format, output, or warning differences with no skips. The partial differential leaves the stored canonical summary unchanged."
+    },
+    {
+      "id": "control-mode.exit-pane-output",
+      "title": "Discard pending pane output when Control exits",
+      "closed_on": "2026-08-30",
+      "evidence": [
+        "resource:crates/zz/src/control_mode.rs",
+        "file:crates/zz/tests/cli_binary.rs",
+        "file:compat/startup-diagnostics.sh",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/tmux-compat.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Control stdin observation now begins before initial command preparation. A blank Return or EOF immediately disables pane-byte publication, removes deferred PaneOutput and PaneOutputAged records, and rejects later pane bytes while preserving pane output already written. Pause and continue records, ordinary notifications, config diagnostics, command guards, command output, retained return status, and one final exit keep their existing order. An EOF already observed during initial startup retains at most the first admitted stdin command, matching the pin without executing later buffered mutations. Thirty-three focused Control units, the full EOF, blank, and detach return matrix, a held-command live differential, the long-lived pane-output path, and all eight startup-diagnostic cases pass against pinned tmux. Hard-disconnect queue cancellation remains under its separate owner."
     },
     {
       "id": "control-mode.hook-command-frames",

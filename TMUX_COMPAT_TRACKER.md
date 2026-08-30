@@ -1,14 +1,14 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **PARALLEL WAVE 2 FROZEN AT 0/3; LAST WAVE 3/3 CLOSED**
+> Campaign delivery: **PARALLEL WAVE 2 AT 1/3; LAST WAVE 3/3 CLOSED**
 >
-> Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED); SLICE 10AI NEXT**
+> Live work: **64 UNRESOLVED GROUPS (44 OPEN, 20 BLOCKED); SHELL-JOB CWD NEXT**
 >
-> Ledger settlement: **68.4% (141 of 206 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **68.9% (142 of 206 known groups); SECONDARY DIAGNOSTIC**
 >
 > Exit evidence: **104 SCENARIOS, 1,672 STEPS, ATTACHED-CLIENT PASS**
 >
-> Integrated campaign base: **2026-08-29** at `fde87af317c4317e9b5176f7e79d4e8765e397cd`
+> Wave 2 base: **2026-08-30** at `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -36,17 +36,17 @@ channel. Slice 10ag closes startup initial-client cwd. A cold auto-spawned daemo
 launcher's bounded UTF-8 cwd through a private argument, uses it only for startup config replay,
 then clears it before ordinary client commands. The isolated startup-client-cwd differential passes
 exactly on both engines. The full eight-case startup diagnostic reaches a separate Control
-exit difference: zz may drain queued shell-prompt `%output` after the flags-0 guard, while pinned
-tmux discards it before `%exit`. A rerank then exposed a higher-priority shutdown race: `kill-server`
-can close a client mailbox before its successful response is admitted. That response-order item is
-the only `next` group; pane-output discard is frozen as slice 10ai. Slice 10ah now closes that race
-without a wire change: shutdown freezes admissions, waits for active responses, drains all client
-writers while retaining the listener, then removes the endpoint. Pane-output discard becomes the
-sole `next` group. The three-front trial also closes UTF-8 config tilde parsing and strict tmux key
+exit difference: zz could drain queued shell-prompt `%output` after the flags-0 guard, while pinned
+tmux discarded it before `%exit`. Slice 10ah closes the higher-priority kill-server response race,
+and slice 10ai closes pane-output discard without a wire change. The three-front trial also closes
+UTF-8 config tilde parsing and strict tmux key
 grammar while retaining separate residuals for parser environment provenance, non-UTF-8 home
 paths, and DEL key identity. The persisted accepted artifact covers 104 scenarios and 1,672 steps,
 with attached-client `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
 `8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`.
+Wave 2 slice 10ai closes Control exit pane-output discard without a daemon or protocol change.
+Shell-job cwd is the next registry group; its independently reviewed candidate awaits the
+coordinator-owned attached-client proof.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -72,16 +72,16 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Integrated campaign base | `fde87af317c4317e9b5176f7e79d4e8765e397cd` |
-| Delivery | Local `main` contains the trial workflow and all three committed closures; remote `main` remains at `562b950c` through slice 10ag |
+| Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
+| Delivery | Local `main` contains wave 2 planning and slice 10ai; remote `main` remains at `562b950c` through slice 10ag |
 | Campaign worktrees | Wave 2 uses three new worktrees from its freeze commit; the retained trial worktrees remain untouched |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Active fixed cohort | Wave 2: 0 of 3 frozen chunks closed, 0 residual groups registered, 65 unresolved at freeze |
+| Active fixed cohort | Wave 2: 1 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 64 |
 | Last completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Two editors start 10ai and shell-job cwd; the DEL front starts as oracle and reviewer |
-| Live registry | 87 active groups, 590 active items, 119 closed records |
-| Active status | 45 open, 20 blocked, 22 accepted |
+| Campaign point | Slice 10ai is closed; shell-job cwd is next; the DEL candidate is under repair |
+| Live registry | 86 active groups, 589 active items, 120 closed records |
+| Active status | 44 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
@@ -99,14 +99,14 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Active fixed cohort | Wave 2: 0 of 3 frozen chunks closed |
+| Active fixed cohort | Wave 2: 1 of 3 frozen chunks closed |
 | Last completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
-| New residual groups | Wave 2: 0 at freeze; prior trial: 3 |
-| Unresolved movement | Wave 2: 65 at freeze, 65 current |
-| Live unresolved | 45 open + 20 blocked = 65 |
-| Practical exit gate | Open; slice 10ai is the sole `next` group |
+| New residual groups | Wave 2: 0; prior trial: 3 |
+| Unresolved movement | Wave 2: 65 at freeze, 64 current |
+| Live unresolved | 44 open + 20 blocked = 64 |
+| Practical exit gate | Open; shell-job cwd is the sole `next` group |
 | Accepted differential | 104 scenarios, 1,672 steps, attached-client `PASS`, 2 registered GEO rows |
-| Ledger settlement | 141 of 206 known groups = 68.4% |
+| Ledger settlement | 142 of 206 known groups = 68.9% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -120,7 +120,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(119 + 22) / (119 + 87) = 141 / 206 = 68.4%
+(120 + 22) / (120 + 86) = 142 / 206 = 68.9%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -963,9 +963,9 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 87 active groups, 590 active items, and 119 closed records: 45 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 141 of 206 groups (68.4%).
-Priority has one `next`, 64 `later`, and 22 `none` groups.
+The live registry now has 86 active groups, 589 active items, and 120 closed records: 44 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 142 of 206 groups (68.9%).
+Priority has one `next`, 63 `later`, and 22 `none` groups.
 
 Slice 10ah closes
 `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.
@@ -976,15 +976,16 @@ race, late Control and Command requests, stalled and disconnected writers, and r
 during cleanup. CLI tests prove the empty successful response, one final Control `%exit`, and an
 immediate fresh-daemon launch.
 
-Slice 10ai is frozen under
-`control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard`. On EOF or a blank
-Return, it must discard pending and later `%output` and `%extended-output` pane bytes while retaining
-pane output already written before the return. Config diagnostics, command output, guards,
-pause/continue notifications, retained return status, and exactly one final `%exit` keep their
-pinned order. The cold startup probe must emit diagnostics, one flags-0 success guard, no pane-output
-frame, and `%exit`; a long-lived Control client must still receive ordinary pane output before exit.
-Hard-disconnect queue cancellation, detach targeting, async command output, no-output, pause, wait,
-and transport pressure stay outside 10ai.
+Slice 10ai closes
+`control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard`. Control input
+observation starts before initial preparation. EOF or a blank Return removes queued pane-byte
+records and blocks later `%output` and `%extended-output` while retaining pane output already
+written. Config diagnostics, command output, guards, pause and continue notifications, retained
+return status, and one final `%exit` keep their pinned order. Early EOF retains at most the first
+admitted stdin command, so a later buffered mutation stays discarded. Thirty-three Control units,
+the return matrix, a held-command live differential, long-lived pane output, and all eight startup
+diagnostic cases pass. Hard-disconnect queue cancellation, detach targeting, async command output,
+no-output, wait behavior, and transport pressure stay outside 10ai.
 
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. Tilde expansion
 now follows the pin through closing quotes, continuations, quoted newlines, stripped comments,
@@ -1002,10 +1003,9 @@ separate from their literal forms across list, filter, unbind, option readback, 
 40-step differential and 161 fixture checks pass on both engines. Literal DEL, caret plus DEL, and
 `0x7f` remain under `keys.literal-delete-identity`.
 
-Kill-server response order is closed. Exit pane-output discard remains the next independently
-closable Control slice and is frozen as 10ai. `jobs.shell-job-cwd` follows as a separate
-process-launch producer fix. Immediate background `run-shell` ordering stays later and hard because
-it must prove absent-delay and `-d 0` queue order without timer races.
+Kill-server response order and Control exit pane-output discard are closed. `jobs.shell-job-cwd` is
+the next separate process-launch producer fix. Immediate background `run-shell` ordering stays
+later and hard because it must prove absent-delay and `-d 0` queue order without timer races.
 
 `jobs.run-shell-immediate-background-environment` no longer depends on 10af, but it remains later
 and hard. It owns absent-delay and `-d 0` foreground blocking plus same-group background ordering
@@ -1110,24 +1110,24 @@ each passed when rerun alone, matching the repository's documented load-flake cl
 
 ## Parallel wave 2, 2026-08-30
 
-Wave 2 freezes three independent groups with 65 unresolved groups at the start. Two editors work at
-once. The third front owns pin research and independent review, then takes its DEL slice when an
-editor slot opens.
+Wave 2 froze three independent groups with 65 unresolved groups at the start. Slice 10ai is the
+first closure, leaving 64 unresolved groups and no new residual. Shell-job cwd has an accepted
+candidate, and the DEL candidate is under independent review.
 
-| Front | Starting role | Worktree and branch | Tracker contract | Exclusive production and proof zone |
+| Front | State | Worktree and branch | Tracker contract | Exclusive production and proof zone |
 | --- | --- | --- | --- | --- |
-| Control output | Editor | `$HOME/dev/zz-tmux-control-output`, `codex/tmux-control-10ai` | Slice 10ai: `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | `crates/zz/src/control_mode.rs`, focused tests in that file, Control sections of `crates/zz/tests/cli_binary.rs`, and one unique Control scenario or fixture |
-| Shell-job cwd | Editor | `$HOME/dev/zz-tmux-job-cwd`, `codex/tmux-job-cwd` | `jobs.shell-job-cwd/semantic:command-shell-job-cwd` and `semantic:status-shell-job-cwd` | `crates/zz-daemon/src/daemon.rs`, `crates/zz-daemon/src/status.rs`, focused daemon tests, and one unique shell-job-cwd scenario or fixture |
-| DEL identity | Oracle and reviewer, then editor | `$HOME/dev/zz-tmux-key-del`, `codex/tmux-key-del` | `keys.literal-delete-identity/semantic:literal-delete-key-identity` | `crates/zz-mux/src/command.rs`, the strict-key scenario and fixture, and focused mux tests |
+| Control output | Closed after one review repair | `$HOME/dev/zz-tmux-control-output`, `codex/tmux-control-10ai` | Slice 10ai: `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | `crates/zz/src/control_mode.rs`, focused tests in that file, Control sections of `crates/zz/tests/cli_binary.rs`, and one unique Control scenario or fixture |
+| Shell-job cwd | Candidate accepted; next integration | `$HOME/dev/zz-tmux-job-cwd`, `codex/tmux-job-cwd` | `jobs.shell-job-cwd/semantic:command-shell-job-cwd` and `semantic:status-shell-job-cwd` | `crates/zz-daemon/src/daemon.rs`, `crates/zz-daemon/src/status.rs`, focused daemon tests, and one unique shell-job-cwd scenario or fixture |
+| DEL identity | Repair after live PTY review | `$HOME/dev/zz-tmux-key-del`, `codex/tmux-key-del` | `keys.literal-delete-identity/semantic:literal-delete-key-identity` | `crates/zz-mux/src/command.rs`, the strict-key scenario and fixture, focused mux tests, and live prefix and backspace byte capture |
 
 The Control front treats `crates/zz-daemon/src/daemon.rs` as evidence only. It stops if the fix needs
 that file because the shell-job front owns it. The coordinator keeps exclusive ownership of the
 registry, generated report, tracker, shared OKF pages, accepted result summary, attached-client
 fixture, and startup diagnostic script.
 
-Integrate 10ai first, rerank the live registry, then consider shell-job cwd. The DEL front may begin
-editing after either candidate enters review. Each candidate needs its focused proof and an
-independent review before the coordinator updates shared artifacts and creates one closure commit.
+After the 10ai closure, integrate shell-job cwd only after its coordinator-owned attached-client
+proof passes. The DEL candidate keeps its separate review. Each accepted candidate receives its own
+closure commit with shared artifacts updated by the coordinator.
 
 ## Validation and closure gates
 

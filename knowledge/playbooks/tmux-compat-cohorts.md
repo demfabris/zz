@@ -386,18 +386,15 @@ literal metacharacter paths, then clears it before runtime source selection on s
 direct daemon launch has no bootstrap base. The isolated startup-client-cwd differential passes
 exactly on both engines without a public protocol change.
 
-The full eight-case startup diagnostic reaches `control-mode.exit-pane-output`: zz may drain queued
-shell-prompt `%output` after a flags-0 guard and before `%exit`, while ten equivalent pinned probes
-emitted none. That gap remains independent of hard-disconnect queue cancellation, command output,
-retained status, and Control flow behavior.
+The full eight-case startup diagnostic reached `control-mode.exit-pane-output`: zz could drain
+queued shell-prompt `%output` after a flags-0 guard and before `%exit`, while ten equivalent pinned
+probes emitted none. Slice 10ai now discards pending and later pane output after EOF or blank Return
+while preserving admitted command responses, non-pane Control records, and one final exit.
 
-The rerank freezes `control-mode.kill-server-response-order` as slice 10ah. Shutdown can publish
-`ServerStopping` and close a client mailbox before the handler admits the successful response.
-Control must receive its empty flags-1 `%end` before one `%exit`; ordinary Command must receive its
-success response before socket teardown. A synchronization-controlled daemon test must force the
-old ordering, while stalled, disconnected, and genuine-loss paths remain bounded. Pane-output
-discard follows as the independent slice 10ai. Shell-job cwd ranks after those two; immediate
-background `run-shell` ordering remains later and hard.
+Slice 10ah closed `control-mode.kill-server-response-order`, and slice 10ai closes the independent
+pane-output discard contract. The 10ai review caught and repaired early EOF admitting a second
+buffered command before integration. Shell-job cwd is next; immediate background `run-shell`
+ordering remains later and hard.
 
 The post-10ag ledger has 87 active groups with 594 items and 116 closed records: 45 open, 20
 blocked, and 22 accepted, for 68.0% resolution (138 of 203 groups). The persisted accepted slice 10ag
@@ -591,10 +588,10 @@ closure is that exception.
 | 10ae | Option-name format coverage | Closed under `options.option-name-format-coverage/semantic:option-name-format-coverage` on 2026-08-29 | Committed in `562b950c` | Generic precedence, four scopes, inheritance, array values, selected and missing targets, loops, direct daemon producers, detached status sharing, a clean 60-step differential, and attached status proof |
 | 10af | Positive-delay run-shell environment timing | Closed under `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing` on 2026-08-29 | Committed in `562b950c` | Scheduling retains command, target, expanded arguments, and cwd; child launch reads global, original-session, terminal, startup, and cwd-fallback state; focused foreground daemon, twelve-check background differential, full corpus, and attached-client proof pass |
 | 10ag | Startup initial-client cwd | Closed under `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd` on 2026-08-29 | Committed in `562b950c` | Private cold-launch cwd provenance, startup-only lifetime, nested and literal-path selection, later runtime expiry, and an exact isolated differential |
-| 10ah | Control kill-server response order | `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` | Frozen next | Preserve the successful invoking command response before daemon shutdown closes the Control mailbox |
-| 10ai | Control exit pane-output discard | `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | Frozen later | Discard pending and later pane bytes after EOF or blank Return while draining non-pane Control records and one final exit |
+| 10ah | Control kill-server response order | Closed under `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` on 2026-08-30 | Committed in `4800255d` | The invoking response is admitted before shutdown closes the Control mailbox |
+| 10ai | Control exit pane-output discard | Closed under `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` on 2026-08-30 | Complete | EOF or blank Return discards pending and later pane bytes while draining non-pane Control records and one final exit |
 | Pending rerank | Immediate background run-shell ordering | `jobs.run-shell-immediate-background-environment` | Unranked | Match absent-delay and `-d 0` queue ordering without timing races |
-| Pending rerank | Shell-job cwd | `jobs.shell-job-cwd` | Unranked | Command and status cwd producer selection stays separate from environment sampling |
+| Wave 2 next | Shell-job cwd | `jobs.shell-job-cwd` | Candidate accepted; coordinator proof pending | Command and status cwd producer selection stays separate from environment sampling |
 | Pending rerank | Context producer runtime fidelity | `formats.context-producer-fidelity` (`adopt`, open) | Unranked | Producer value fidelity remains separate from source registration |
 | Pending rerank | Remaining modifier runtime fidelity | `formats.modifier-fidelity` (`adopt`, open) | Unranked | `I`, `L`, `O`, and `V` need their context models; `w` also needs style parsing, live width overrides, the 162-entry cache, host policy, and Unicode proof |
 | Accepted partition | Native typed context producers | `formats.native-typed-context-producers` (`native`, accepted) | Complete | The 54 native literal pairs are registered without pretending they are tmux runtime gaps |
@@ -608,10 +605,10 @@ closure is that exception.
 | Pending rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Unranked | Requires the interactive-refresh decision and remains broader than copy mode |
 | Pending rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Unranked | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10ag are closed. Commit `562b950c` contains cumulative slices
-10w through 10ag. The post-10ag ledger has 87 active groups with 594 items and 116
-closed records: 45 open, 20 blocked, and 22 accepted, resolving 138 of 203 groups (68.0%). Slice
-10ah takes Control kill-server response order, followed by pane-output discard in 10ai. Under
+Slices 9a through 9f and 10a through 10ai are closed. Commit `562b950c` contains cumulative slices
+10w through 10ag; `4800255d` closes 10ah. The current ledger has 86 active groups with 589 items and
+120 closed records: 44 open, 20 blocked, and 22 accepted, resolving 142 of 206 groups (68.9%).
+Wave 2 is 1 of 3 complete, with shell-job cwd next. Under
 `detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
 and only flagged clients fall back to the newest attached session when no detached survivor exists.
@@ -693,7 +690,7 @@ option-consumer roster to `command::TMUX_OPTION_CONSUMERS`, preserves the `BEHAV
 an exact 180 = 105 consumers + 75 live gaps guard without runtime changes. Slice 10ae closes
 generic option-name lookup across mux and daemon format producers. Slice 10af closes positive-delay
 shell-form `run-shell` environment timing. Slice 10ag closes startup initial-client cwd. Slice 10ah
-takes kill-server response order, followed by Control exit pane-output discard in 10ai.
+closes kill-server response order, and slice 10ai then closes Control exit pane-output discard.
 
 # Multi-front Codex pipeline
 
@@ -716,15 +713,17 @@ behind 10ah because it uses the same Control paths.
 
 ## Wave 2 fronts
 
-Wave 2 starts on 2026-08-30 with three frozen chunks and 65 unresolved groups. Two fronts edit at
-once. The third handles pin research and review, then rotates into editing when one candidate
-finishes.
+Wave 2 started on 2026-08-30 with three frozen chunks and 65 unresolved groups. Slice 10ai is
+integrated locally, leaving 64 unresolved groups and the wave at 1 of 3. The shell-job cwd candidate
+passed independent review and awaits coordinator-owned attached-client proof. The DEL candidate is
+under repair after live PTY review found two transport failures missed by its initial mux-level
+assertions.
 
 | Front | Starting role | Worktree | Branch | Chunk | Exclusive production and proof zone |
 | --- | --- | --- | --- | --- | --- |
-| Control output | Editor | `/Users/demfabris/dev/zz-tmux-control-output` | `codex/tmux-control-10ai` | `control-mode.exit-pane-output` | Control client exit drain and focused Control CLI proof; daemon source stays evidence-only |
-| Shell-job cwd | Editor | `/Users/demfabris/dev/zz-tmux-job-cwd` | `codex/tmux-job-cwd` | `jobs.shell-job-cwd` | Daemon command-job and status-job cwd selection plus a unique scenario |
-| DEL identity | Oracle and reviewer, then editor | `/Users/demfabris/dev/zz-tmux-key-del` | `codex/tmux-key-del` | `keys.literal-delete-identity` | Mux key identity and the strict-key differential |
+| Control output | Complete | `/Users/demfabris/dev/zz-tmux-control-output` | `codex/tmux-control-10ai` | `control-mode.exit-pane-output` | Accepted after an early-EOF repair; coordinator integration is slice 10ai |
+| Shell-job cwd | Accepted candidate | `/Users/demfabris/dev/zz-tmux-job-cwd` | `codex/tmux-job-cwd` | `jobs.shell-job-cwd` | Daemon command-job and status-job cwd selection plus a unique scenario; attached-client proof remains |
+| DEL identity | Repair | `/Users/demfabris/dev/zz-tmux-key-del` | `codex/tmux-key-del` | `keys.literal-delete-identity` | Preserve three DEL identities and prove actual PTY bytes for prefix and configured backspace |
 
 Integrate Control output first and rerank before each later acceptance. The coordinator owns every
 shared campaign artifact and runs aggregate gates. A front stops when its implementation needs
@@ -833,17 +832,13 @@ surprise.
 Paste this prompt into the next session:
 
 ```text
-Continue the tmux compatibility campaign from commit `562b950c`, which includes slices 10w through
-10ag. The persisted accepted slice 10ag artifact covers 103 scenarios and 1,630 steps with
-attached-client `PASS`, exactly two approved GEO rows, every other
+Continue the tmux compatibility campaign from current local `main`. Wave 2 started at `9a8c8790`
+with three frozen chunks. Slice 10ai closes Control exit pane-output discard after review caught and
+repaired early EOF admitting a second buffered command. The persisted accepted artifact covers 104
+scenarios and 1,672 steps with attached-client `PASS`, exactly two approved GEO rows, every other
 channel clean, and SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Slice 10ag closes startup
-initial-client cwd; its isolated differential passes exactly on both engines. The full eight-case
-startup diagnostic exposes the separately registered Control exit pane-output gap. Full zz
-validation passes 653 unit tests plus 113 CLI tests, and serialized daemon validation passes 736
-unit tests plus two active agent integrations with one soak ignored. The full workspace excluding
-the daemon, full workspace clippy, and `cargo fmt --check` pass. Preserve unrelated work and do not
-push without explicit authorization.
+`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Preserve unrelated work,
+commit each accepted integration separately, and do not push without explicit authorization.
 
 Verify that the session-cwd, requested-client-flags, retained-client-sizing, client-environment,
 client-formats, client-hooks, asynchronous copy-pipe, daemon-invalid-flag, positional-maximum, and
@@ -959,17 +954,18 @@ The historical 10aa artifact has 101 scenarios and 1,550 steps with attached-cli
 28-step `formats-values` row, and SHA-256
 `bc0f6ad0fb52d35b6e2e20869d896174ac06b6cb12243e03bcf13e7536134119`.
 
-Confirm the current tracker has 87 active groups and 594 items: 45 open, 20 blocked, and 22
-accepted, plus 116 closed records; 138 of 203 groups are resolved (68.0%). Priority is one next, 64
-later, and 22 none. Confirm slice 10ad moved
+Confirm the current tracker has 86 active groups and 589 items: 44 open, 20 blocked, and 22
+accepted, plus 120 closed records; 142 of 206 groups are resolved (68.9%). Priority is one next, 63
+later, and 22 none. Wave 2 is 1 of 3 complete, with unresolved work down from 65 to 64. Confirm
+slice 10ad moved
 the unchanged 105-name roster to `command::TMUX_OPTION_CONSUMERS`, preserved `BEHAVES`, and added an
 exact guard proving 180 pinned options equal 105 consumers plus 75 live option gaps and the closed
 tracker record. Treat `copy-mode-mark-style` as status option-variable consumption only, not visual
 mark rendering. The compatibility gate passed 445 mux tests plus three daemon inventory tests.
 
-The persisted runtime artifact is the accepted slice 10ag full-corpus run: 103 scenarios and 1,630
-steps with attached-client `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`.
+The persisted runtime artifact is the accepted post-trial full-corpus run: 104 scenarios and 1,672
+steps with attached-client `PASS`, exactly two approved GEO rows, every other channel clean, and
+SHA-256 `8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`.
 
 Confirm slice 10ae closes
 `options.option-name-format-coverage/semantic:option-name-format-coverage` across the 105-name
@@ -996,13 +992,12 @@ cold-launch provenance, a bounded valid UTF-8 cwd, nested relative and literal-m
 startup-only priority and cleanup, later registered-client runtime selection, and the exact isolated
 differential without a public protocol change.
 
-Take `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`
-next as slice 10ah. A successful Control kill-server must receive its matching empty flags-1
-`%end`, then exactly one `%exit`, with rc 0 and no unexpected-exit text. An ordinary Command client
-must receive success before connection and socket teardown. Force the old response-admission race
-with synchronization, not sleeps, and keep stalled, disconnected, and genuine-loss behavior
-bounded. Freeze `control-mode.exit-pane-output` as slice 10ai. Keep `w` later
-and hard until its proof covers style parsing, malformed markup, controls, live
+Confirm slices 10ah and 10ai are closed. Take `jobs.shell-job-cwd` next: integrate the accepted
+candidate only after the coordinator-owned attached-client proof covers status `#()` cwd and real
+Interactive and Control `run-shell` and `if-shell` targeting. Keep `keys.literal-delete-identity`
+in review until live PTY capture proves raw DEL, caret-plus-DEL, and textual `0x7f` independently
+for `send-prefix` and configured `BSpace`. Keep `w` later and hard until its proof covers style
+parsing, malformed markup, controls, live
 `codepoint-widths[]`, tmux's 162-entry cache, host `wcwidth`, and Unicode differences against zz's
 `unicode-width` 0.2.2. The alias snapshot prerequisite is closed.
 

@@ -93,6 +93,7 @@ fn drive<W: Write>(
     let mut stdin_started = false;
     let mut state = ControlState::default();
     let mut pending_stdin = VecDeque::new();
+    ensure_stdin_reader(&events, &mut stdin_started);
     let prepared = prepare_command_unit(
         client.as_ref(),
         &receiver,
@@ -175,7 +176,24 @@ fn drive<W: Write>(
         return Ok(completed_exit_code(initial_result.exit_code, &state));
     }
 
-    ensure_stdin_reader(&events, &mut stdin_started);
+    retain_first_initial_stdin_before_eof(&mut state.pending_return, &mut pending_stdin);
+    if state
+        .pending_return
+        .as_ref()
+        .is_some_and(|pending_return| !pending_return.has_preceding_input())
+        && let Some(pending_return) = state.pending_return.take()
+    {
+        return finish_control_return(
+            client.as_ref(),
+            pending_return,
+            output,
+            &mut state,
+            &events,
+            &mut stdin_started,
+            &receiver,
+            &mut pending_stdin,
+        );
+    }
     loop {
         let event = pending_stdin.pop_front().map_or_else(
             || receiver.recv().unwrap_or(MainEvent::Disconnected),
@@ -431,6 +449,7 @@ fn prepare_command_unit<W: Write>(
                     state.return_code,
                     &mut pending_return,
                     pending_stdin,
+                    output,
                 );
             }
             MainEvent::Disconnected => {
@@ -562,6 +581,7 @@ fn execute_command<W: Write>(
                         state.return_code,
                         &mut deferred_return,
                         pending_stdin,
+                        output,
                     );
                 } else {
                     capture_pending_return(
@@ -569,6 +589,7 @@ fn execute_command<W: Write>(
                         state.return_code,
                         &mut state.pending_return,
                         pending_stdin,
+                        output,
                     );
                 }
             }
@@ -703,7 +724,7 @@ fn handle_protocol<W: Write>(
                 }
             }
             EventPayload::PaneOutput { pane, bytes } => {
-                output.notify(&render_pane_output(pane, &bytes))?;
+                output.pane_output(&render_pane_output(pane, &bytes))?;
             }
             EventPayload::PaneOutputState { pane, paused } => {
                 output.notify(
@@ -715,7 +736,7 @@ fn handle_protocol<W: Write>(
                 age_ms,
                 bytes,
             } => {
-                output.notify(&render_pane_output_aged(pane, age_ms, &bytes))?;
+                output.pane_output(&render_pane_output_aged(pane, age_ms, &bytes))?;
             }
             EventPayload::ControlFlags { wait_exit, .. } => state.wait_exit = wait_exit,
             EventPayload::SubscriptionChanged {
@@ -1016,19 +1037,36 @@ fn completed_exit_code(command_exit_code: u8, state: &ControlState) -> u8 {
     }
 }
 
-fn capture_pending_return(
+fn capture_pending_return<W: Write>(
     stdin: StdinEvent,
     return_code: u8,
     pending_return: &mut Option<PendingReturn>,
     pending_stdin: &mut VecDeque<StdinEvent>,
+    output: &mut ControlWriter<W>,
 ) {
     match PendingReturn::from_stdin(stdin, return_code, pending_stdin.len()) {
         Ok(return_event) => {
+            if return_event.discards_pane_output() {
+                output.discard_pane_output();
+            }
             if pending_return.is_none() {
                 *pending_return = Some(return_event);
             }
         }
         Err(stdin) => pending_stdin.push_back(stdin),
+    }
+}
+
+fn retain_first_initial_stdin_before_eof(
+    pending_return: &mut Option<PendingReturn>,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) {
+    if let Some(PendingReturn::Eof {
+        preceding_input, ..
+    }) = pending_return.as_mut()
+    {
+        pending_stdin.truncate(1);
+        *preceding_input = pending_stdin.len();
     }
 }
 
@@ -1054,6 +1092,9 @@ fn finish_control_return<W: Write>(
     receiver: &mpsc::Receiver<MainEvent>,
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<u8> {
+    if pending_return.discards_pane_output() {
+        output.discard_pane_output();
+    }
     let code = pending_return.code();
     let (input_closed, input_error) = match pending_return {
         PendingReturn::Blank { .. } => (false, None),
@@ -1230,6 +1271,7 @@ fn unix_timestamp() -> u64 {
 
 enum DeferredOutput {
     Notification(Vec<u8>),
+    PaneOutput(Vec<u8>),
     DiagnosticError {
         time: u64,
         text: String,
@@ -1250,6 +1292,7 @@ struct ControlWriter<W: Write> {
     next_number: u64,
     block_open: bool,
     deferred: VecDeque<DeferredOutput>,
+    pane_output_enabled: bool,
     st_sent: bool,
 }
 
@@ -1261,6 +1304,7 @@ impl<W: Write> ControlWriter<W> {
             next_number: 1,
             block_open: false,
             deferred: VecDeque::new(),
+            pane_output_enabled: true,
             st_sent: false,
         }
     }
@@ -1284,6 +1328,26 @@ impl<W: Write> ControlWriter<W> {
         self.output.flush()
     }
 
+    fn pane_output(&mut self, line: &[u8]) -> io::Result<()> {
+        if !self.pane_output_enabled {
+            return Ok(());
+        }
+        if self.block_open {
+            self.deferred
+                .push_back(DeferredOutput::PaneOutput(line.to_vec()));
+            return Ok(());
+        }
+        self.output.write_all(line)?;
+        self.output.write_all(b"\n")?;
+        self.output.flush()
+    }
+
+    fn discard_pane_output(&mut self) {
+        self.pane_output_enabled = false;
+        self.deferred
+            .retain(|deferred| !matches!(deferred, DeferredOutput::PaneOutput(_)));
+    }
+
     fn startup_config_causes(&mut self, causes: &[String]) -> io::Result<()> {
         for cause in causes {
             self.output.write_all(b"%config-error ")?;
@@ -1296,7 +1360,7 @@ impl<W: Write> ControlWriter<W> {
     fn flush_deferred(&mut self) -> io::Result<()> {
         while let Some(deferred) = self.deferred.pop_front() {
             match deferred {
-                DeferredOutput::Notification(line) => {
+                DeferredOutput::Notification(line) | DeferredOutput::PaneOutput(line) => {
                     self.output.write_all(&line)?;
                     self.output.write_all(b"\n")?;
                 }
@@ -1623,6 +1687,10 @@ impl PendingReturn {
             Self::Blank { code, .. } | Self::Eof { code, .. } => *code,
             Self::InputError { .. } => 1,
         }
+    }
+
+    fn discards_pane_output(&self) -> bool {
+        matches!(self, Self::Blank { .. } | Self::Eof { .. })
     }
 
     fn has_preceding_input(&self) -> bool {
@@ -2135,46 +2203,74 @@ mod tests {
     }
 
     #[test]
-    fn pending_return_keeps_its_first_observed_code_and_precedes_queued_input() {
+    fn initial_eof_keeps_only_the_first_queued_input() {
         let mut pending_return = None;
         let mut pending_stdin = VecDeque::new();
-        capture_pending_return(StdinEvent::Eof, 0, &mut pending_return, &mut pending_stdin);
+        let mut writer = ControlWriter::new(Vec::new(), false);
         capture_pending_return(
-            StdinEvent::Line("detach-client".to_owned()),
-            1,
+            StdinEvent::Line("run-shell 'sleep 1'".to_owned()),
+            0,
             &mut pending_return,
             &mut pending_stdin,
+            &mut writer,
+        );
+        capture_pending_return(
+            StdinEvent::Line("display-message -p SECOND".to_owned()),
+            0,
+            &mut pending_return,
+            &mut pending_stdin,
+            &mut writer,
+        );
+        capture_pending_return(
+            StdinEvent::Eof,
+            0,
+            &mut pending_return,
+            &mut pending_stdin,
+            &mut writer,
         );
         capture_pending_return(
             StdinEvent::Line(String::new()),
             1,
             &mut pending_return,
             &mut pending_stdin,
+            &mut writer,
         );
+        retain_first_initial_stdin_before_eof(&mut pending_return, &mut pending_stdin);
 
         assert_eq!(pending_return.as_ref().map(PendingReturn::code), Some(0));
+        assert!(
+            pending_return
+                .as_ref()
+                .is_some_and(PendingReturn::has_preceding_input)
+        );
         assert!(matches!(
             pending_stdin.pop_front(),
-            Some(StdinEvent::Line(line)) if line == "detach-client"
+            Some(StdinEvent::Line(line)) if line == "run-shell 'sleep 1'"
         ));
         assert!(pending_stdin.is_empty());
+        let pending_return = pending_return.as_mut().expect("pending return");
+        pending_return.consume_preceding_input();
+        assert!(!pending_return.has_preceding_input());
     }
 
     #[test]
     fn pending_return_waits_for_input_observed_before_it() {
         let mut pending_return = None;
         let mut pending_stdin = VecDeque::new();
+        let mut writer = ControlWriter::new(Vec::new(), false);
         capture_pending_return(
             StdinEvent::Line("display-message -p queued".to_owned()),
             0,
             &mut pending_return,
             &mut pending_stdin,
+            &mut writer,
         );
         capture_pending_return(
             StdinEvent::Line(String::new()),
             0,
             &mut pending_return,
             &mut pending_stdin,
+            &mut writer,
         );
 
         let pending_return = pending_return.as_mut().expect("pending return");
@@ -2470,6 +2566,151 @@ mod tests {
         assert_eq!(
             writer.output,
             b"%sessions-changed\n%begin 21 1 1\nbody\n%end 21 1 1\n%window-add @3\n%window-renamed @3 shell\n%session-renamed $1 dev\n"
+        );
+    }
+
+    #[test]
+    fn blank_and_eof_discard_queued_and_future_pane_output_only() {
+        for stdin in [StdinEvent::Line(String::new()), StdinEvent::Eof] {
+            let pane = zz_protocol::PaneId(7);
+            let mut state = ControlState::default();
+            let mut writer = ControlWriter::new(Vec::new(), false);
+            let event = |sequence, payload| {
+                ProtocolMessage::Event(zz_protocol::Event { sequence, payload })
+            };
+
+            handle_protocol(
+                event(
+                    1,
+                    EventPayload::PaneOutput {
+                        pane,
+                        bytes: b"before".to_vec(),
+                    },
+                ),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+            let frame = writer.begin_at(21, 1).unwrap();
+            for (sequence, payload) in [
+                (
+                    2,
+                    EventPayload::PaneOutput {
+                        pane,
+                        bytes: b"queued".to_vec(),
+                    },
+                ),
+                (
+                    3,
+                    EventPayload::PaneOutputAged {
+                        pane,
+                        age_ms: 42,
+                        bytes: b"queued-aged".to_vec(),
+                    },
+                ),
+                (4, EventPayload::PaneOutputState { pane, paused: true }),
+            ] {
+                handle_protocol(event(sequence, payload), &mut state, &mut writer).unwrap();
+            }
+            writer.notify(b"%window-add @3").unwrap();
+            writer.diagnostic_error_at(22, "diagnostic").unwrap();
+            writer
+                .control_command_guard_at(23, "guard", false, 0)
+                .unwrap();
+            writer
+                .control_source_file(ControlSourceFileEvent::ReadError("source".to_owned()))
+                .unwrap();
+            writer.control_command_output("command").unwrap();
+
+            let mut pending_return = None;
+            let mut pending_stdin = VecDeque::new();
+            capture_pending_return(
+                stdin,
+                0,
+                &mut pending_return,
+                &mut pending_stdin,
+                &mut writer,
+            );
+            for (sequence, payload) in [
+                (
+                    5,
+                    EventPayload::PaneOutput {
+                        pane,
+                        bytes: b"after".to_vec(),
+                    },
+                ),
+                (
+                    6,
+                    EventPayload::PaneOutputAged {
+                        pane,
+                        age_ms: 84,
+                        bytes: b"after-aged".to_vec(),
+                    },
+                ),
+                (
+                    7,
+                    EventPayload::PaneOutputState {
+                        pane,
+                        paused: false,
+                    },
+                ),
+            ] {
+                handle_protocol(event(sequence, payload), &mut state, &mut writer).unwrap();
+            }
+            writer
+                .response(
+                    &frame,
+                    CommandResponse::Success {
+                        request_id: 1,
+                        output: "body\n".to_owned(),
+                        exit_code: 0,
+                        stderr: String::new(),
+                    },
+                )
+                .unwrap();
+            writer.emit_exit(None).unwrap();
+
+            assert!(pending_return.is_some());
+            assert!(pending_stdin.is_empty());
+            assert_eq!(
+                writer.output,
+                b"%output %7 before\n\
+                  %begin 21 1 1\nbody\n%end 21 1 1\n\
+                  %pause %7\n%window-add @3\n\
+                  %begin 22 2 1\ndiagnostic\n%error 22 2 1\n\
+                  %begin 23 3 0\nguard\n%end 23 3 0\n\
+                  source\ncommand\n%continue %7\n%exit\n"
+            );
+        }
+    }
+
+    #[test]
+    fn input_error_keeps_pane_output_enabled() {
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin_at(21, 1).unwrap();
+        writer.pane_output(b"%output %7 queued").unwrap();
+        let mut pending_return = None;
+        let mut pending_stdin = VecDeque::new();
+        capture_pending_return(
+            StdinEvent::Error("input failed".to_owned()),
+            0,
+            &mut pending_return,
+            &mut pending_stdin,
+            &mut writer,
+        );
+        writer
+            .pane_output(b"%extended-output %7 42 : after")
+            .unwrap();
+        writer.end(&frame, false).unwrap();
+
+        assert!(matches!(
+            pending_return,
+            Some(PendingReturn::InputError { .. })
+        ));
+        assert_eq!(
+            writer.output,
+            b"%begin 21 1 1\n%end 21 1 1\n\
+              %output %7 queued\n%extended-output %7 42 : after\n"
         );
     }
 

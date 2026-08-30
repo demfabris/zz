@@ -718,7 +718,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   : >"$tmux_stderr"
 
   if [ "$run_zz" -eq 1 ]; then
-    if zz_command "${command_args[@]}" >"$zz_stdout" 2>"$zz_stderr"; then
+    if zz_command "${command_args[@]}" </dev/null >"$zz_stdout" 2>"$zz_stderr"; then
       zz_rc=0
     else
       zz_rc=$?
@@ -728,7 +728,7 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   fi
 
   if [ "$run_tmux" -eq 1 ]; then
-    if tmux_command "${command_args[@]}" >"$tmux_stdout" 2>"$tmux_stderr"; then
+    if tmux_command "${command_args[@]}" </dev/null >"$tmux_stdout" 2>"$tmux_stderr"; then
       tmux_rc=0
     else
       tmux_rc=$?

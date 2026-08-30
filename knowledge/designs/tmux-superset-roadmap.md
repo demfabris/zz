@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; F-ALIASES-MULTI-BODY closed; dispatch board active
+status: In Progress; F-SOURCE-REPLAY-DIAGNOSTICS-V3 integrated and F-PANE-BORDER-SPANS-V2 closed 2026-08-31; dispatch board active
 tags:
 - tmux
 - compatibility
@@ -11,7 +11,7 @@ tags:
 - fleet
 - native-superset
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 last_updated_by: Codex
 ---
 
@@ -36,15 +36,17 @@ and closed history. The
 [2026-08-22 tmux CLI compatibility audit](/research/2026-08-22-tmux-cli-compatibility-audit.md)
 records the source-anchored baseline used to build this plan.
 
-# Current checkpoint, 2026-08-30
+# Current checkpoint, 2026-08-31
 
-The three-front trial closed all 3 frozen chunks and registered 3 residual groups. Wave 2 then
-closed slice 10ai, shell-job cwd, and literal DEL identity as 3 of 3 frozen chunks without a new
-residual. Unresolved work moved from 65 to 62: 42 open and 20 blocked. The tracker has 84 active
-groups, 586 classified active items, 123 closed groups, and 22 accepted active groups. Its secondary
-ledger settlement is 145 of 207 known groups (70.0%). The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client
-`PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Slice 10af closes
+`F-SOURCE-REPLAY-DIAGNOSTICS-V3` integrated first and restored the two source-replay
+argument-parser rows. `F-PANE-BORDER-SPANS-V2` then closed ordinary split-built adjacent-span
+ownership in the raw TUI while retaining mutable tiled-order cases as a separate active group.
+Unresolved work is 65 groups: 45 open and 20 blocked. The tracker has 87 active groups, 586
+classified active items, 124 closed groups, and 22 accepted active groups. Its secondary ledger
+settlement is 146 of 211 known groups (69.2%). The persisted accepted artifact covers 109 scenarios
+and 1,755 steps, with attached-client `PASS`, exactly two approved GEO rows, every other channel
+clean, and SHA-256
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
 Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`
 without a public protocol change. The focused strict-key run passes 40 steps plus 196 fixture checks
@@ -377,11 +379,11 @@ engine with no differing channel. The attached fixture keeps pane cwd separate f
 proves status cwd, and covers 24 Interactive and Control `run-shell` and `if-shell` cases across
 valid, missing, and omitted targets. No protocol or snapshot field changed.
 
-The registry now has 84 active groups and 586 active items, with 123 closed records: 42 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 145 of 207 groups (70.0%). The
-persisted accepted artifact covers 106 scenarios and 1,683 steps with attached-client `PASS`,
+The registry now has 87 active groups and 586 active items, with 124 closed records: 45 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 146 of 211 groups (69.2%). The
+persisted accepted artifact covers 109 scenarios and 1,755 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Focused mux and
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`. Focused mux and
 compatibility gates from the accepted artifact pass. The DEL closure adds 196 strict-key fixture
 checks per engine without changing the scenario or step count. The final workspace run passed every
 non-daemon package; two daemon tests failed only under parallel load and passed alone. Strict
@@ -1882,6 +1884,23 @@ permanent product decision has been recorded for them.
   84 active groups and 586 items, with 123 closed records and 145 of 207 groups resolved (70.0%).
   Closure review advanced protocol v85 for typed post-admission callback provenance and
   daemon-authoritative `Attached` reconnect state, not for an alias child-vector field.
+
+- 2026-08-31: `F-SOURCE-REPLAY-DIAGNOSTICS-V3` integrated first and restored the two source-replay
+  argument-parser rows. `F-PANE-BORDER-SPANS-V2` then closed
+  `presentation.border-span-owner`. The raw TUI styles each shared divider per adjacent pane span
+  and applies the active style only when that span touches the active pane. With `A | (B / C)` and
+  C active, the A/B span stays inactive while the junction and A/C span use the active style.
+  Owner lookup falls back through top, bottom, left, then right, and ordinary split-built same-side
+  ties choose the lower `PaneId`. The 10-step `LC_ALL=C` strict row matches pinned tmux in every
+  channel, while the exact base fails its renderer-marker assertion. Same-side ties after
+  `join-pane`, `swap-pane`, or serialized `select-layout` remain under
+  `presentation:border-style-owner-z-order` because the snapshot does not carry mutable tiled
+  order. The closure changes no protocol, wire snapshot, or GPUI behavior. The registry has 87
+  active groups and 586 active items, with 124 closed records: 45 open, 20 blocked, and 22 accepted.
+  Closed history plus accepted groups resolve 146 of 211 groups (69.2%). The persisted aggregate
+  covers 109 scenarios and 1,755 steps with attached-client `PASS`, exactly two approved GEO rows,
+  every other channel clean, and SHA-256
+  `0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
 
 # Related
 

@@ -128,15 +128,21 @@ without leaking literal `R` syntax into either row.
 
 ## Current compatibility checkpoint
 
-At the current 2026-08-30 checkpoint, zz implements 31 of the pin's 36 format modifiers. Five active
-tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 84 active groups, 586 active items,
-and 123 closed records: 42 open, 20 blocked, and 22 accepted. Closed records plus accepted active
-groups resolve 145 of 207 known groups (70.0%). The persisted accepted artifact covers 106 scenarios
-and 1,683 steps with attached-client `PASS`, exactly two approved GEO rows, every other
+At the current 2026-08-31 checkpoint, zz implements 31 of the pin's 36 format modifiers. Five active
+tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 87 active groups, 586 active items,
+and 124 closed records: 45 open, 20 blocked, and 22 accepted. Sixty-five groups remain unresolved.
+Closed records plus accepted active groups resolve 146 of 211 known groups (69.2%). The persisted
+accepted artifact covers 109 scenarios and 1,755 steps with attached-client `PASS`, exactly two
+approved GEO rows, every other
 channel clean, and SHA-256
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. The 45-step
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`. The 45-step
 `formats-values` row passes as part of that artifact. The source
 partition contains 95 direct mux values, 32 daemon-delegated values, and 71 active gaps.
+
+Source Replay V3 contributes a 60-step clean row for located source diagnostics, physical command
+groups, Command stderr, Control frames, and detached callback shutdown order. The ten-step
+`pane-border-span-owner` row proves raw zz-tui's adjacent-span ownership without changing the format
+partition, protocol, snapshots, or GPUI theme ownership.
 
 The historical 10aa checkpoint covered 101 scenarios and 1,550 steps with a 28-step
 `formats-values` row, attached-client `PASS`, and SHA-256
@@ -169,8 +175,8 @@ command caches, while unattached query clients share entries by effective cwd. T
 shell-job tests and 32 status tests pass. The three-step
 `smoke/jobs-shell-job-cwd` row completes eight checks per engine with no differing channel. The
 attached fixture covers 24 real cases across Interactive and Control clients, `run-shell` and
-`if-shell`, and valid, missing, and omitted targets. The final strict and attached aggregate rerun
-remains pending.
+`if-shell`, and valid, missing, and omitted targets. The final strict and attached aggregate passed
+at 105 scenarios and 1,675 steps.
 
 Slice 10ad closes `tracker.semantic-coverage/semantic:tracker-option-consumer-registration`. The
 unchanged 105-name roster now lives in `command::TMUX_OPTION_CONSUMERS`, while `BEHAVES` remains an

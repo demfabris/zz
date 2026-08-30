@@ -1,12 +1,12 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **`F-SOURCE-REPLAY-DIAGNOSTICS-V3` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **`F-PANE-BORDER-SPANS-V2` AND `F-SOURCE-REPLAY-DIAGNOSTICS-V3` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
 >
 > Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED)**
 >
-> Ledger settlement: **69.0% (145 of 210 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **69.2% (146 of 211 known groups); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **108 SCENARIOS, 1,745 STEPS, ATTACHED-CLIENT PASS**
+> Exit evidence: **109 SCENARIOS, 1,755 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
@@ -41,9 +41,9 @@ tmux discarded it before `%exit`. Slice 10ah closes the higher-priority kill-ser
 and slice 10ai closes pane-output discard without a wire change. The three-front trial also closes
 UTF-8 config tilde parsing and strict tmux key
 grammar while retaining separate residuals for parser environment provenance, non-UTF-8 home
-paths, and DEL key identity. The persisted accepted artifact covers 106 scenarios and 1,683 steps,
+paths, and DEL key identity. The persisted accepted artifact covers 109 scenarios and 1,755 steps,
 with attached-client `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
 Wave 2 slice 10ai closes Control exit pane-output discard without a daemon or protocol change.
 The second chunk closes shell-job cwd selection. Its three-step differential completes eight checks
 per engine with no differing channel, and the attached fixture covers 24 Interactive and Control
@@ -76,14 +76,14 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | `F-SOURCE-REPLAY-DIAGNOSTICS-V3` restores located source replay diagnostics and drains detached Control callback guards before exit; `F-CONFIG-BYTE-ENGINE` and `F-CONFIG-BYTE-LOADERS` remain queued |
+| Delivery | `F-PANE-BORDER-SPANS-V2` closes per-span raw-TUI border ownership; `F-SOURCE-REPLAY-DIAGNOSTICS-V3` restores located source replay diagnostics and drains detached Control callback guards before exit |
 | Campaign worktrees | Each editor creates a dedicated worktree after claiming its front; shared campaign artifacts remain coordinator-owned |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Source replay preserves physical command groups, located parser diagnostics, Command and Control framing, and post-shutdown guard order; sourced-hook and event-hook cwd remain queued |
-| Live registry | 87 active groups, 586 active items, 123 closed records |
+| Campaign point | Raw zz-tui styles shared dividers per adjacent pane span, while mutable tiled z-order remains registered; source replay preserves physical command groups, located parser diagnostics, Command and Control framing, and post-shutdown guard order |
+| Live registry | 87 active groups, 586 active items, 124 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
@@ -108,9 +108,9 @@ found during that wave.
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
 | Live unresolved | 45 open + 20 blocked = 65 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 108 scenarios, 1,745 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
-| Differential SHA-256 | `479809f27e291e22e332813b55267be372ea26ee81f59678f4c08c63dd0ed1e0` |
-| Ledger settlement | 145 of 210 known groups = 69.0% |
+| Latest differential | 109 scenarios, 1,755 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
+| Differential SHA-256 | `0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0` |
+| Ledger settlement | 146 of 211 known groups = 69.2% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -124,7 +124,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(123 + 22) / (123 + 87) = 145 / 210 = 69.0%
+(124 + 22) / (124 + 87) = 146 / 211 = 69.2%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -1231,6 +1231,22 @@ warning differences. The accepted full corpus covers 108 scenarios and 1,745 ste
 attached-client `PASS`, two registered geometry rows, and every other channel clean. The existing
 config-grammar row now expects the located warning from both engines. Workspace tests and clippy
 pass, and this defect front changes no registry record.
+
+## Completed front: F-PANE-BORDER-SPANS-V2, 2026-08-31
+
+Raw zz-tui now assigns each shared divider cell to an adjacent pane span. A span uses the active
+style only when it touches the active pane. Junction ownership checks top, bottom, left, then right,
+and same-side ties created by ordinary splits choose the lower `PaneId`.
+
+The dedicated `pane-border-span-owner` scenario passes all 10 steps with zero topology, geometry,
+format, output, or warning differences. The accepted full corpus covers 109 scenarios and 1,755
+steps with attached-client `PASS`, exactly two approved geometry rows, and every other channel
+clean. Its SHA-256 digest is
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
+
+The patch stays inside raw zz-tui rendering. It leaves the wire protocol, pane snapshots, and GPUI
+rendering unchanged. Mutable tiled z-order after `join-pane`, `swap-pane`, or serialized
+`select-layout` remains registered under `F-PANE-BORDER-ZORDER`.
 
 ## Validation and closure gates
 

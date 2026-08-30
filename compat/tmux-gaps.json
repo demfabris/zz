@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "updated_on": "2026-08-30",
+  "updated_on": "2026-08-31",
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "gaps": [
     {
@@ -2114,7 +2114,7 @@
         "option:pane-scrollbars-position",
         "option:pane-scrollbars-style",
         "option:pane-scrollbars-timeout",
-        "presentation:border-style-owner-granularity",
+        "presentation:border-style-owner-z-order",
         "presentation:renderer-style-residue"
       ],
       "evidence": [
@@ -2125,7 +2125,7 @@
         "GUI and TUI consume meaningful pane chrome fields and document unsupported cell-level attributes."
       ],
       "depends_on": [],
-      "reason": "The appearance bridge handles colors but not full border segments, formats, or scrollbars."
+      "reason": "The appearance bridge handles colors and per-span divider ownership, but not border formats, scrollbars, mutable join/swap/serialized-layout tie order, or tiled z-order transport."
     },
     {
       "id": "options.remain-on-exit-format",
@@ -4200,6 +4200,17 @@
         "resource:knowledge/tmux/status-line.md"
       ],
       "resolution": "The daemon expands `window-status-separator` after each nonfinal item in the `status-format[]` window loop. It resolves the separator in that window's option and format context, including per-window overrides, nested formats, and style directives; the last item emits no separator. The TUI owns exact tmux row output. The native GUI derives its window controls from snapshot state and does not paint this separator."
+    },
+    {
+      "id": "presentation.border-span-owner",
+      "title": "Style pane borders per adjacent span",
+      "closed_on": "2026-08-31",
+      "evidence": [
+        "resource:crates/zz-tui/src/layout.rs",
+        "scenario:compat/scenarios/pane-border-span-owner.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Raw zz-tui styles each shared divider per adjacent pane span instead of per full segment. In an A|(B/C) split with C active, the A/B span renders inactive, while the junction cell and the A/C span render with the active style; directional fallback resolves top, bottom, left, then right. Aligned same-side ties from splits resolve by PaneId creation order. The 10-step LC_ALL=C strict differential proves the red upper span with green junction, horizontal, and lower spans against pinned tmux with zero divergence, and the exact base fails its renderer marker row, so the coverage discriminates. This closure is bounded: same-side ties after join-pane, swap-pane, or serialized select-layout stay open under presentation:border-style-owner-z-order, and tiled z-order transport belongs to the pane-border z-order contract."
     },
     {
       "id": "sessions.new-session-attach-cwd",

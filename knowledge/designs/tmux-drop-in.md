@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; F-ALIASES-MULTI-BODY closed 2026-08-30
+status: Original nine phases shipped 2026-08-20; F-PANE-BORDER-SPANS-V2 closed 2026-08-31
 tags:
 - tmux
 - compatibility
@@ -11,7 +11,7 @@ tags:
 - control-mode
 - roadmap
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 ---
 
 # Overview
@@ -71,7 +71,7 @@ The target splits in two:
    session-scoped prefixes stay parked.
 10. Each reviewed wave commits to `main` locally; pushes stay explicit.
 
-# Where this stands (2026-08-30)
+# Where this stands (2026-08-31)
 
 **All nine original implementation phases shipped.** A human typing `tmux new -s foo` lands inside
 the session, explicit attach works, and bare packaged `zz` now lazily creates and attaches session
@@ -91,14 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The persisted accepted compatibility inventory contains 106 differential scenarios and 1,683
+The persisted accepted compatibility inventory contains 109 differential scenarios and 1,755
 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The
-persisted full-corpus run from 2026-08-30 leaves every ordinary row clean.
+persisted full-corpus run from 2026-08-31 leaves every ordinary row clean.
 `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one approved GEO divergence with every other channel
 clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
 The 10l source registration and 10m key-structure checkpoints add no differential scenario or step.
 Slice 10n adds seven attached confirmation cases plus a one-byte pane sentinel without adding a
 differential row.
@@ -534,8 +534,10 @@ Control exit pane-output discard. The 2026-08-30 shell-job cwd front closes comm
 working-directory selection with focused and attached evidence, and the DEL front closes the three
 distinct DEL spellings with live transport proof. `F-ALIASES-MULTI-BODY` then closes executable
 empty and multi-command user aliases while registering forced-shutdown multi-window hook order as a
-separate residual. The registry has 84 active groups, 586 classified active items, and 123 closed
-records: 42 open, 20 blocked, and 22 accepted; 145 of 207 groups are resolved (70.0%). The current
+separate residual. `F-SOURCE-REPLAY-DIAGNOSTICS-V3` restores the two source-replay argument-parser
+rows, and `F-PANE-BORDER-SPANS-V2` closes adjacent-span ownership for raw-TUI pane dividers. The
+registry has 87 active groups, 586 classified active items, and 124 closed records: 45 open, 20
+blocked, and 22 accepted; 146 of 211 groups are resolved (69.2%). The current
 198-name partition
 has 95 direct mux values, 32 daemon-delegated values, and 71 live gaps. Slice 10x gives existing
 `new-session -A -c` targets the attach cwd path and preserves fresh explicit-empty session state.
@@ -970,7 +972,9 @@ the parked `remain-on-exit-format` — and the flag ledger fell 128 to 127
 proven end-to-end by the restored per-window PTY smoke. Two divergences opened with the
 new surfaces and are ledgered: border-style owner granularity (one colour per divider
 where the pin resolves per cell span) and the one-appearance channel bounding per-window
-copy-mode styles. The run-2 attach-clear bell asymmetry and the remaining alert state edges
+copy-mode styles. `F-PANE-BORDER-SPANS-V2` closed the ordinary split-built span case on 2026-08-31;
+same-side ties after `join-pane`, `swap-pane`, or serialized `select-layout` remain under the
+border-owner z-order item. The run-2 attach-clear bell asymmetry and the remaining alert state edges
 closed on 2026-08-24. The full Alert cohort closed on 2026-08-26 with daemon-owned message
 lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
 
@@ -1122,10 +1126,13 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
      ledgered.
    - `pane-border-style`/`pane-active-border-style` explicit COLOURS resolve per pane
      during personalized snapshot stamping (`stamp_pane_border_colours`, formats expanded
-     in pane context) onto the v71 `PaneSnapshot` fields. The TUI colours dividers
-     (style-owner: active-adjacent pane first) and pane headers, with its normal colours
-     as the fallback when a field is `None`. The GPUI client ignores both fields and
-     derives pane frames, split hairlines, and active-split highlights from `cx.theme()`.
+     in pane context) onto the v71 `PaneSnapshot` fields. The TUI styles each shared divider
+     by adjacent pane span, applying the active style only to spans that touch the active pane.
+     Owner lookup falls back through top, bottom, left, then right; ordinary split-built
+     same-side ties choose the lower `PaneId`. A `None` field selects the normal TUI colour.
+     Same-side ties created by `join-pane`, `swap-pane`, or serialized `select-layout` remain
+     open because `PaneSnapshot` does not carry mutable tiled order. The GPUI client ignores both
+     fields and derives pane frames, split hairlines, and active-split highlights from `cx.theme()`.
      Non-colour attributes stay ledgered.
 
 The full B and C target moves `BEHAVES` from 67 to 105: 12 Wave B consumers and 26 Wave C
@@ -2671,9 +2678,13 @@ Layout: `main-pane-width/height`, `other-pane-width/height`, `tiled-layout-max-c
 (today five hardcoded constants in `layout.rs`), `window-size`, `default-size`. Overlays:
 `display-panes-time/-format`, `remain-on-exit-format`. Shared: `command-alias[]` (shipped
 2026-08-21). Maintainer correction 2026-08-24: the raw TUI honors explicit
-`pane-border-style`/`pane-active-border-style` colors, while the GPUI client keeps its
-pane borders under the zz chrome theme (attributes beyond color remain ignored, one
-divergence row); `window-style`/`window-active-style` (inactive-pane dimming) and the
+`pane-border-style`/`pane-active-border-style` colors. Since 2026-08-31 it resolves those colors
+for each adjacent pane span, applies the active style only to spans touching the active pane, uses
+the top, bottom, left, then right fallback, and gives ordinary split-built same-side ties to the
+lower `PaneId`. Mutable tiled order after `join-pane`, `swap-pane`, or serialized `select-layout`
+remains open because the snapshot does not transport it. The GPUI client keeps pane borders under
+the zz chrome theme; this closure changes no GPUI behavior. Attributes beyond color remain ignored.
+`window-style`/`window-active-style` (inactive-pane dimming) and the
 `mode-style`/`copy-mode-*-style` selection/match/mark styles ALL render in the GUI
 terminal renderer — content styling, no chrome-doctrine conflict. The remaining lifecycle
 flags (`exit-empty`, `exit-unattached`, `destroy-unattached`) are honored when a config

@@ -42,6 +42,7 @@
 | new-session-environment | 18 | yes | 0 | yes | yes | yes |
 | option-name-formats | 60 | yes | 0 | yes | yes | yes |
 | options-readback | 15 | yes | 0 | yes | yes | yes |
+| pane-border-span-owner | 10 | yes | 0 | yes | yes | yes |
 | pane-dead-time | 6 | yes | 0 | yes | yes | yes |
 | pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
 | panes | 9 | yes | 0 | yes | yes | yes |

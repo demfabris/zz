@@ -5,7 +5,7 @@ description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmu
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, philosophy, reimplementation, cli]
 timestamp: 2026-08-24T00:00:00-03:00
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 last_updated_by: Codex
 ---
 
@@ -86,7 +86,7 @@ product disposition as open, blocked, or accepted. `depends_on` records delivery
 set status.
 
 `just compat-check` calls `compat/check.sh`, validates the clean pinned oracle and registry, requires
-eight named mux compatibility tests in the full `zz-mux` library run, then runs three named daemon
+nine named mux compatibility tests in the full `zz-mux` library run, then runs three named daemon
 compatibility tests through `--exact`. The Rust gate reconciles upstream command and alias names,
 flag arities, positional bounds, custom argument rules, option names, global formats, literal and
 derived context producers, format modifiers, and hook names. It classifies native commands, native aliases, zz-only flags
@@ -352,14 +352,30 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 84 active groups, 586 items, and 123 closed records: 42 open, 20 blocked, and
-22 accepted. Closed records plus accepted active groups resolve 145 of 207 known groups (70.0%).
-The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client `PASS`, exactly two approved GEO
+The live registry has 87 active groups, 586 items, and 124 closed records: 45 open, 20 blocked, and
+22 accepted. Sixty-five groups remain unresolved. Closed records plus accepted active groups
+resolve 146 of 211 known groups (69.2%). The persisted accepted artifact covers 109 scenarios and
+1,755 steps, with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Slice 10ai starts Control
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`. Slice 10ai starts Control
 stdin observation before initial preparation, discards queued and future pane-byte records after
 EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd and
 literal DEL identity are closed with their focused and aggregate proof.
+
+`F-SOURCE-REPLAY-DIAGNOSTICS-V3` keeps each syntax or command diagnostic on its physical source
+path and line. Command stderr, Control flags, command-error hooks, later siblings, and physical
+command groups retain pinned ownership. Detached `run-shell -bC` shutdown drains kill,
+nested-source, hook, and outer callback guards before one final `%exit`; foreground queues keep
+their prior exit order. The focused `smoke/source-replay-diagnostics` row passes all 60 steps with
+zero topology, geometry, format, output, or warning differences. The front changes no registry
+record.
+
+`F-PANE-BORDER-SPANS-V2` makes raw zz-tui style shared borders by adjacent pane span. The active
+owner applies only where that pane touches the span. Directional ownership falls back through top,
+bottom, left, then right; ordinary split-built same-side ties choose the lower `PaneId`. The focused
+`pane-border-span-owner` row passes all ten steps with every comparison channel clean. Protocol,
+snapshots, and GPUI retain their prior contracts. Mutable tiled order after `join-pane`,
+`swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`.
 
 `F-ALIASES-MULTI-BODY` closes executable empty and multi-command user aliases. Preparation stores one
 opaque typed group in protocol v84's existing `CommandInvocation` shape: empty groups succeed
@@ -526,6 +542,11 @@ cells. zz publishes daemon-owned state and renders it in its clients:
 - The raw TUI consumes command prompts, confirmations, menus, popups, choose trees, choose buffers,
   and display-panes. `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity` retain
   the broader behavior classes outside those presentation closures.
+- The raw TUI styles each shared divider by adjacent pane span. Active ownership applies only to
+  spans that touch the active pane. Top, bottom, left, then right supply the directional fallback,
+  and ordinary split-built same-side ties choose the lower `PaneId`. Mutable tiled order after
+  join, swap, or serialized layout restoration retains its own tracked owner. GPUI keeps theme
+  ownership for pane chrome.
 - A native surface may look different. Its command, key, target, exit, and state semantics remain
   part of the compatibility contract for every client that presents it.
 

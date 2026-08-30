@@ -5,7 +5,7 @@ description: How to run the pinned tmux differential corpus, read topology, geom
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 last_updated_by: Codex
 ---
 
@@ -57,7 +57,7 @@ callbacks as six effective rules. The remaining inventories contain 180 options,
 format-table names, 31 literal context-producer scopes with 153 scoped pairs and 108 unique names,
 10 derived families, five propagation records, 36 modifier tokens, 68 hooks, and 303 default
 bindings across `root`, `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. The 198 global names
-divide into 93 values resolved directly by the mux, 32 delegated to daemon `StatusHooks`, and 73
+divide into 95 values resolved directly by the mux, 32 delegated to daemon `StatusHooks`, and 71
 constant-backed names that remain active `format:` gaps.
 
 The Rust gate reconciles command and alias names, flag arities, positional bounds, custom argument
@@ -130,9 +130,27 @@ it from retained winlink RB-tree history, while zz retains only the final index-
 alias group itself reuses protocol v84's `CommandInvocation` shape. Closure review advanced v85 for
 typed callback provenance and daemon-authoritative `Attached` reconnect state; no alias child-vector
 field or snapshot field is added.
-The persisted aggregate now covers 106 scenarios and 1,683 steps with attached-client `PASS`,
+The persisted aggregate now covers 109 scenarios and 1,755 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
+
+The 2026-08-31 Source Replay V3 close keeps each syntax or command diagnostic on its physical
+source path and line. Command stderr, Control flags, command-error hooks, later siblings, and
+physical command groups retain pinned ownership. Detached `run-shell -bC` shutdown drains kill,
+nested-source, hook, and outer callback guards before one final `%exit`; foreground queues keep
+their prior exit order. The focused `smoke/source-replay-diagnostics` row passes all 60 steps with
+zero TOPO, GEO, FMT, OUT, or WARN differences.
+
+The same checkpoint closes `F-PANE-BORDER-SPANS-V2` in raw zz-tui. The renderer divides a shared
+border into adjacent pane spans and applies the active owner only where that pane touches the span.
+Directional ownership falls back through top, bottom, left, then right; ordinary split-built
+same-side ties choose the lower `PaneId`. The focused `pane-border-span-owner` row passes all ten
+steps with zero TOPO, GEO, FMT, OUT, or WARN differences. Protocol, snapshots, and GPUI retain their
+prior contracts, and GPUI continues to take pane colors from its theme. Mutable tiled order after
+`join-pane`, `swap-pane`, or serialized `select-layout` remains under `F-PANE-BORDER-ZORDER`. The
+live registry has 87 active groups and 586 items, with 45 open, 20 blocked, 22 accepted, and 124
+closed records. Sixty-five groups remain unresolved; closed records plus accepted active groups
+resolve 146 of 211 known groups (69.2%).
 
 The remaining `w` modifier needs a wider proof than the earlier forecast recorded. Pinned
 `format_width` handles leading hashes, `#[...]` style spans, malformed markup, controls,
@@ -456,10 +474,10 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted acceptance artifact. It records 106 scenarios and 1,683
+`compat/results/summary.md` is the persisted acceptance artifact. It records 109 scenarios and 1,755
 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean, the attached-client
 fixture is `PASS`, and exactly two approved rows carry GEO differences. Its SHA-256 is
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
 
 Slice 10ag extends `compat/startup-diagnostics.sh` to eight cases. Its startup-client-cwd case builds
 distinct initial-client, top-level-config, containing-directory, runtime-client, and glob-decoy
@@ -715,12 +733,13 @@ Prompt chaining and multi-answer `%2` remain under the prompt-fidelity owner.
 
 The checked-in summary includes the current focused counts: `smoke/source-file-diagnostics`,
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps,
+`smoke/source-replay-diagnostics` contains 60 steps, and `pane-border-span-owner` contains 10.
 `resize-directions` and `formats` contain 16, `formats-values` contains 45, and `new-session-cwd`
 contains 10. `smoke/config-alias-parse-unit` and `smoke/config-chain-parse-abort` contain 2 each,
 `smoke/jobs-command-environment` contains 3, `aliases-multi-body` contains 8, and
 `option-name-formats` contains 60.
 The summary SHA-256 is
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
+`0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
 The historical 10r and 10s checkpoints remain 98 scenarios and 1,517 steps at SHA-256
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,
@@ -741,8 +760,8 @@ The historical 10d checkpoint remains 92 scenarios and 1,499 steps at SHA-256
 
 `compat/run.sh --check-summary` compares the exact current scenario paths, static step counts, and
 all seven stored row cells against the ordinary clean tuple or each registered known tuple. It also
-requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-28
-canonical checkpoint and exits before building or running either server. Linux CI first asserts that
+requires its persisted attached-client status to be `PASS`. The check passes for the 2026-08-31
+accepted checkpoint and exits before building or running either server. Linux CI first asserts that
 `compat/results/summary.md` is tracked, then runs
 the inventory and result check after checkout. A named partial run, a headless-only full run, a failed
 run, or a run with a SKIP cannot overwrite the canonical report. After a complete strict run with

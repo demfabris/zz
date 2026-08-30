@@ -1,14 +1,14 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **PARALLEL WAVE 2 CLOSED 3/3; WAVE 3 RERANK PENDING**
+> Campaign delivery: **PARALLEL WAVE 2 CLOSED 3/3; WAVE 3 FROZEN AND READY**
 >
-> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED); NO GROUP MARKED NEXT**
+> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED); 2 EDITORS + 1 READ-ONLY REVIEWER**
 >
 > Ledger settlement: **69.9% (144 of 206 known groups); SECONDARY DIAGNOSTIC**
 >
 > Exit evidence: **105 SCENARIOS, 1,675 STEPS, ATTACHED-CLIENT PASS**
 >
-> Wave 2 base: **2026-08-30** at `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2`
+> Wave 3 launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,13 +76,13 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Local `main` contains all three Wave 2 closures; publish the commit containing this checkpoint before opening Wave 3 claims |
-| Campaign worktrees | Wave 2 used three isolated worktrees from its freeze commit; retire or reuse them only after checking their live state |
+| Delivery | Wave 2 is closed and Wave 3 is frozen; claims open only after the commit containing this freeze is published |
+| Campaign worktrees | Each Wave 3 editor creates a dedicated worktree after claiming its front; the reviewer remains read-only |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
-| GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
+| GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | All Wave 2 chunks are closed; rerank and freeze the next disjoint fronts before implementation |
+| Campaign point | Wave 3 is frozen with two disjoint editor chunks and one read-only format reviewer |
 | Live registry | 84 active groups, 586 active items, 122 closed records |
 | Active status | 42 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
@@ -107,7 +107,7 @@ found during that wave.
 | New residual groups | Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
 | Live unresolved | 42 open + 20 blocked = 62 |
-| Practical exit gate | Open; rerank is required because no active group is marked `next` |
+| Practical exit gate | Open; Wave 3 has 2 frozen editor chunks and 1 read-only review front |
 | Accepted differential | 105 scenarios, 1,675 steps, attached-client `PASS`, 2 registered GEO rows |
 | Ledger settlement | 144 of 206 known groups = 69.9% |
 
@@ -1141,6 +1141,39 @@ fixture, and startup diagnostic script.
 Shell-job cwd passed its coordinator-owned attached-client proof. Literal DEL identity passed live
 prefix and configured-backspace capture after its transport repair. Each accepted candidate
 received its own closure commit with shared artifacts updated by the coordinator.
+
+## Parallel wave 3, 2026-08-30
+
+Wave 3 freezes two write-disjoint editor chunks and one read-only review front. It starts from the
+published `origin/main` commit containing this section. Issue #7 owns claims: a session must claim
+one READY front before creating its worktree or editing, and must stop if its required path overlaps
+another claim or a coordinator-owned artifact.
+
+| Front | Role and state | Tracker contract | Exclusive production and proof zone |
+| --- | --- | --- | --- |
+| `W3-CONTROL-DIAGNOSTICS` | Editor; READY after publication | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | `crates/zz-protocol/src/message.rs`, `crates/zz-protocol/tests/hunt_claims.rs`, config-diagnostic publication and tests in `crates/zz-daemon/src/daemon.rs`, `crates/zz/src/control_mode.rs`, focused Control tests in `crates/zz/tests/cli_binary.rs`, and uniquely named `control-config-diagnostic-typing` scenario and fixture files |
+| `W3-COPY-ACTIONS-1` | Editor; READY after publication | Close only `semantic:copy-mode-action-vocabulary`; the six behavior items remain in `copy-mode.action-fidelity` | `crates/zz-mux/src/command.rs`, `crates/zz-mux/src/compat_manifest_tests.rs`, `compat/tmux-oracle.py`, `compat/tmux-oracle.json`, the relevant structural code in `compat/tmux-tracker.py`, and `compat/check.sh` |
+| `W3-FORMATS-SPLIT` | Read-only reviewer; READY after publication | Produce the implementation split for `formats.context-producer-fidelity` and `formats.modifier-fidelity`; close nothing | Read any relevant source, oracle, and tracker material; edit no file and create no commit |
+
+The Control editor appends typed `ConfigDiagnostic(String)` identity to the existing source-file
+event, advances protocol v84 to v85, emits it from daemon config publication, renders
+`%config-error` from the typed event, and removes prose-based config-message classification. It
+does not change source-read placement, completion numbering, command guards, parser environment,
+disconnect cancellation, asynchronous output, or other clients.
+
+The Copy editor records the exact 95-name pinned action vocabulary and the zz partition of 66
+mapped plus 29 missing actions. This is structural inventory only: it does not implement an action,
+change copy-mode behavior, touch terminal runtime paths, add a runtime scenario, edit the live gap
+registry, or edit shared knowledge pages. The coordinator performs the registry split when the
+candidate is accepted.
+
+The Formats reviewer returns an exact producer and modifier split, dependencies, owned paths, and
+the smallest disjoint implementation candidates. It remains read-only because the Copy editor owns
+the oracle and mux inventory paths during this wave.
+
+The coordinator alone edits `compat/tmux-gaps.json`, `knowledge/tmux/gaps.md`, this tracker, shared
+knowledge pages, `compat/results/summary.md`, and Issue #7 state. It reviews and integrates one
+candidate at a time, updates shared artifacts, and runs aggregate validation.
 
 ## Validation and closure gates
 

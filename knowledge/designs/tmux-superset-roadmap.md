@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; parallel wave 2 closed 3 of 3; next wave rerank pending
+status: In Progress; parallel wave 2 closed 3 of 3; Wave 3 frozen and ready
 tags:
 - tmux
 - compatibility
@@ -51,7 +51,8 @@ without a public protocol change. The focused strict-key run passes 40 steps plu
 on both engines, and the mux package, formatting, and mux clippy gates pass.
 Slice 10ah closes `control-mode.kill-server-response-order`. Slice 10ai closes
 `control-mode.exit-pane-output`. The second Wave 2 chunk closes `jobs.shell-job-cwd`; the third
-closes `keys.literal-delete-identity`. No active group is marked `next` until Wave 3 is frozen.
+closes `keys.literal-delete-identity`. Wave 3 now freezes two editor chunks and one read-only review
+front without mutating the registry's priority labels.
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
 matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
 named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
@@ -70,6 +71,11 @@ independent chunks and closed all three. Shell-job cwd passed its three-step dif
 coordinator-owned attached-client proof. The DEL candidate passed independent review after repairs
 for failures in prefix and configured-backspace transport, then passed its 40-step differential and
 196 fixture checks per engine.
+Wave 3 assigns typed Control config diagnostics to one protocol, daemon, and app editor; the
+copy-action vocabulary inventory to one mux and oracle editor; and the remaining context-producer
+and modifier split to a read-only reviewer. The two editors have disjoint write zones. Issue #7 owns
+claims against the published base, while the coordinator retains the registry, generated report,
+shared knowledge pages, accepted summary, review, and integration.
 The final workspace run passed every non-daemon package. Three daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake
 class. Strict workspace clippy, formatting, tracker, stored-summary, and OKF validation pass.

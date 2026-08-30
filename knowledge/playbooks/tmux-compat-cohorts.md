@@ -606,12 +606,13 @@ closure is that exception.
 | Pending rerank | Immediate background run-shell ordering | `jobs.run-shell-immediate-background-environment` | Unranked | Match absent-delay and `-d 0` queue ordering without timing races |
 | Wave 2 chunk | Shell-job cwd | Closed under `jobs.shell-job-cwd` on 2026-08-30 | Complete | The three-step differential completes eight checks per engine, and the attached fixture covers 24 client, command, and target-mode cases |
 | Wave 2 chunk | Literal DEL identity | Closed under `keys.literal-delete-identity` on 2026-08-30 | Complete | Raw DEL, caret plus DEL, and textual `0x7f` retain distinct identities, pinned rendering, and literal prefix and backspace transport |
-| Pending rerank | Context producer runtime fidelity | `formats.context-producer-fidelity` (`adopt`, open) | Unranked | Producer value fidelity remains separate from source registration |
-| Pending rerank | Remaining modifier runtime fidelity | `formats.modifier-fidelity` (`adopt`, open) | Unranked | `I`, `L`, `O`, and `V` need their context models; `w` also needs style parsing, live width overrides, the 162-entry cache, host policy, and Unicode proof |
+| Wave 3 editor | Typed Control config diagnostics | `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | Frozen | Carry diagnostic identity through protocol, daemon, and Control rendering without prose matching |
+| Wave 3 review | Context producer runtime fidelity | `formats.context-producer-fidelity` (`adopt`, open) | Read-only split | Producer value fidelity remains separate from source registration |
+| Wave 3 review | Remaining modifier runtime fidelity | `formats.modifier-fidelity` (`adopt`, open) | Read-only split | `I`, `L`, `O`, and `V` need their context models; `w` also needs style parsing, live width overrides, the 162-entry cache, host policy, and Unicode proof |
 | Accepted partition | Native typed context producers | `formats.native-typed-context-producers` (`native`, accepted) | Complete | The 54 native literal pairs are registered without pretending they are tmux runtime gaps |
 | Completed slice | Startup initial-client cwd | Closed under `source-file.startup-client-cwd` in slice 10ag | Committed in `562b950c` | Cold launch provenance expires after startup without a public protocol change |
 | Completed dependency | Config and source replay alias snapshot | Closed under `aliases.config-parse-unit` in slice 10y | Committed in `562b950c` | One snapshot per parsed file is ready for eager validation |
-| Pending rerank | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Unranked | Record and classify all 95 pinned actions before behavior changes |
+| Wave 3 editor | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Frozen | Record and classify all 95 pinned actions before behavior changes |
 | Pending rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Unranked | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
 | Pending rerank | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Unranked | Seven keys become honest only after their five actions exist |
 | Pending rerank | Copy command fidelity | `copy-mode.command-fidelity` | Unranked | Requires the interactive-refresh decision |
@@ -741,9 +742,36 @@ live PTY review, then passed 196 fixture checks per engine.
 | Shell-job cwd | Complete | `/Users/demfabris/dev/zz-tmux-job-cwd` | `codex/tmux-job-cwd` | `jobs.shell-job-cwd` | Daemon command-job and status-job cwd selection, a clean three-step scenario, and 24 attached-client cases |
 | DEL identity | Complete | `/Users/demfabris/dev/zz-tmux-key-del` | `codex/tmux-key-del` | `keys.literal-delete-identity` | Three DEL identities plus literal prefix and configured-backspace transport are closed |
 
-Integrate Control output first and rerank before each later acceptance. The coordinator owns every
+Wave 2 integrated Control output, shell-job cwd, then DEL identity. The coordinator owns every
 shared campaign artifact and runs aggregate gates. A front stops when its implementation needs
 another front's file zone.
+
+## Wave 3 fronts
+
+Wave 3 starts only from the published `origin/main` commit containing this freeze. Issue #7 owns
+claims and state changes. Each session claims one READY front before creating a worktree or editing,
+records its base SHA and branch, and stops on any write-path overlap.
+
+| Front | Role | Contract | Owned write zone |
+| --- | --- | --- | --- |
+| `W3-CONTROL-DIAGNOSTICS` | READY editor | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | Protocol message and hunt-claim tests; daemon config-diagnostic publication and focused tests; Control rendering and focused CLI tests; uniquely named diagnostic scenario and fixture |
+| `W3-COPY-ACTIONS-1` | READY editor | Close only `semantic:copy-mode-action-vocabulary`; leave six behavior items active | Mux command inventory and manifest test, oracle generator and JSON, relevant tracker structural code, and compatibility check script |
+| `W3-FORMATS-SPLIT` | READY read-only reviewer | Split `formats.context-producer-fidelity` and `formats.modifier-fidelity` into bounded future chunks | None; return findings in Issue #7 without editing or committing |
+
+The Control front appends typed config-diagnostic identity to the existing source-file event,
+advances protocol v84 to v85, routes daemon config diagnostics through that identity, renders
+`%config-error` without prose matching, and adds the smallest focused differential. Source-read
+placement, completion numbers, guards, parser environment, disconnect behavior, asynchronous
+output, and other clients stay outside it.
+
+The Copy front registers the pin's 95 action names and the zz partition of 66 mapped and 29 missing
+actions. It is inventory only. It does not implement copy behavior, touch terminal runtime paths,
+add a runtime scenario, or edit the registry and shared knowledge pages. The coordinator performs
+the registry split during integration.
+
+The Formats front is read-only because it examines paths owned by the Copy editor. It returns the
+exact producer and modifier partitions, dependencies, write zones, and smallest disjoint successors
+without changing source or tracker state.
 
 ## Ownership and handoff
 
@@ -843,199 +871,37 @@ The campaign reaches compatible-enough status when all of these hold:
 The tracker can retain long-tail work after this gate. It cannot retain an unclassified daily-use
 surprise.
 
-# Bootstrap prompt for the next session
+# Bootstrap prompt for a Wave 3 session
 
-Paste this prompt into the next session:
+Paste this prompt into a new session after the dispatch commit is visible on GitHub:
 
 ```text
-Continue the tmux compatibility campaign from current local `main`. Wave 2 started at `9a8c8790`
-with three frozen chunks. Slice 10ai closes Control exit pane-output discard after review caught and
-repaired early EOF admitting a second buffered command. The second chunk closes
-`jobs.shell-job-cwd`: its three-step differential completes eight checks per engine with no differing
-channel, and its attached proof covers 24 Interactive and Control `run-shell` and `if-shell` cases
-across valid, missing, and omitted targets. The persisted accepted artifact covers 105
-scenarios and 1,675 steps with attached-client `PASS`, exactly two approved GEO rows, every other
-channel clean, and SHA-256
-`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Preserve unrelated work,
-commit each accepted integration separately, and do not push without explicit authorization.
+Continue the tmux compatibility campaign from the published origin/main base recorded in GitHub
+Issue #7. Read AGENTS.md, TMUX_COMPAT_TRACKER.md, knowledge/index.md, and
+knowledge/playbooks/tmux-compat-cohorts.md first. Wave 2 is closed 3 of 3 with no new residual:
+62 unresolved groups remain, and the secondary ledger is 144 of 206 groups (69.9%). The accepted
+artifact covers 105 scenarios and 1,675 steps with attached-client PASS, exactly two approved GEO
+rows, every other channel clean, and SHA-256
+a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e.
 
-Verify that the session-cwd, requested-client-flags, retained-client-sizing, client-environment,
-client-formats, client-hooks, asynchronous copy-pipe, daemon-invalid-flag, positional-maximum, and
-positional-minimum milestones are committed and their tracker entries are closed. Also verify the
-shared arity and shared flag closures plus the complete CLI and app-library gate repair. Confirm the
-focused command-flag scenario reports 516 matching probes, then use the current canonical summary
-for the full scenario count, attached-client result, and the two documented GEO rows.
+Before editing, claim exactly one READY Wave 3 front in Issue #7 and record your machine, branch,
+worktree, and exact base SHA. Do not claim an occupied front. Use a dedicated worktree. Stop and
+report if the work needs a path owned by another front or the coordinator.
 
-Confirm that slice 10r is closed under `mux.local-cli-autospawn-parse-abort`, with 83 implemented
-and nine parked syntax entries, exact attach-tail and `-N` coverage, one post-config preparation
-snapshot, the generation-owned one-shot lease, and 11 cold probes per engine. Treat warm unaliased
-command groups and config or source-file replay as separate residual owners.
+W3-CONTROL-DIAGNOSTICS is the protocol, daemon-config-publication, Control-rendering, focused CLI,
+and uniquely named scenario front. Close only
+control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics.
 
-Confirm that slice 10s is closed under `tracker.nonconstant-format-behavior`: 92 direct mux values,
-32 daemon-delegated values, and 74 active `format:` gaps partition all 198 pinned names, with every
-delegated name resolved through the production consumer. Treat runtime value parity, open context
-formats, and option consumers as separate residual owners.
+W3-COPY-ACTIONS-1 is the mux and oracle structural-inventory front. Register all 95 pinned copy
+actions and the exact 66 mapped plus 29 missing partition. Close only
+semantic:copy-mode-action-vocabulary. Do not implement copy behavior or edit terminal runtime paths.
 
-Confirm that slice 10t is closed under `formats.session-path/format:session_path`: 93 direct values,
-32 delegated values, and 73 live gaps partition the 198 pinned names. Confirm that the 18-step
-`formats-values` row proves two creates, two explicit targets, filtered list output, and lexical
-`..`, while mux tests prove missing retained state and production `attach-session -c` updates. At
-the 10t checkpoint, the accepted artifact had 98 scenarios and 1,522 steps, attached-client `PASS`,
-two registered GEO rows, and SHA-256
-`810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
+W3-FORMATS-SPLIT is read-only. Return the exact split, dependencies, ownership zones, and smallest
+future chunks for formats.context-producer-fidelity and formats.modifier-fidelity. Edit no file and
+create no commit.
 
-Confirm slice 10aa closes `formats.session-runtime/format:session_active`. `FormatClient` must
-represent no client, an unattached client, and one attached session. Keep the raw invoking client
-separate from the current or explicitly selected target client across list, filter, command,
-status, deferred-output, shell, buffer, capture, overlay, Control, and display-panes producers.
-Require focused mux and daemon coverage plus the 28-step `formats-values` pass. Confirm unit,
-source-file, `run-shell`, `if-shell`, per-client snapshot, and attached-client fixture proofs show
-that `client_*` facts and `session_active` use the same selected client. Confirm the change adds no
-protocol or snapshot field.
-
-Confirm slice 10ab closes `formats.window-activity-time/format:window_activity`. Require optional
-Unix-second state separate from the logical MRU counter; creation, parsed nonempty pane output, and
-pinned current-window transitions must refresh it. Same-window selection, pane selection, pane
-creation, splits, and layout-only changes without output must leave it unchanged. Confirm the
-direct daemon `switch-client` path refreshes the injected engine clock before selection. Require
-empty-context, plain, boolean, comparison, list-row, time-modified, move-window, swap-window, target
-isolation, and output proofs plus the clean 45-step `formats-values` row. Confirm the change adds no
-protocol or snapshot field.
-
-Confirm slice 10ac closes
-`jobs.command-status-environment/semantic:shell-job-clean-environment`. Shell-form `run-shell` and
-`if-shell` must start from an empty process environment, then apply global and selected-session
-values in order. Status `#()` must apply global values only and use `TMUX=socket,pid,-1`. Require
-hidden and unset removal, explicit missing-target session loss, visible modeled `TMUX_PANE`
-retention without synthesis, startup-preserved TERM values, post-startup terminal identity, and a
-private tmux launcher built from modeled PATH. Require the three-step scenario with eight internal
-assertions per engine and the attached global-only status proof. Keep delayed `run-shell` timing,
-`copy-pipe`, popup jobs, and status cwd active.
-
-Then confirm slice 10x closes
-`sessions.new-session-attach-cwd`: existing-session `new-session -A -c` shares the attach cwd path,
-expands once in target and invoking-client context, and stores before nonnested terminal-open
-preflight. Clientless calls remain inert; permitted Control attaches; nested Interactive, Control,
-and `-A -d` refuse before expansion or mutation. Fresh creation and an `-A` miss retain an empty
-session cwd while the initial pane keeps its donor or caller fallback. Require the clean ten-step
-`new-session-cwd` differential and focused mux and daemon proof.
-
-Confirm that slice 10y closes `aliases.config-parse-unit`. Each file parses, applies its environment
-assignments, and prepares all alias-expanded commands or stored errors under one engine lock before
-replay. Startup roots and top-level matched source batches finish construction before their batch
-replay; nested sources receive a fresh snapshot when the parent source command runs. Stored errors
-retain source, physical-group, and replay-position metadata, including frozen Control
-warning-versus-guard classification. `source-file -n` keeps its no-effect behavior and suppresses
-stored alias errors. Require the clean two-step `smoke/config-alias-parse-unit` differential and
-four focused daemon tests.
-
-Confirm that slice 10z closes `mux.chain-parse-abort`. Each config or source file applies permitted
-bare assignments, expands aliases, and validates every command group before any command from that
-file runs. The first construction failure preserves earlier bare assignments and drops all command
-effects from that file. `source-file -n` validates against the pre-file environment and commits no
-effects. Startup roots and top-level matches remain independent file units constructed in path
-order; a failed nested child does not suppress its parent's later physical groups. Runtime target
-and effect errors remain sequential. Control emits one located `%config-error` without a failed
-command guard and delays construction warnings until sibling replay completes. Verbose output
-retains completed groups and successful alias-subparse traces before failure. Require the clean
-two-step `smoke/config-chain-parse-abort` differential and focused parser, mux, and daemon proof.
-
-Confirm that `hooks.queue` is closed as an oracle correction. Pinned tmux does not produce
-`after-queue` for ordinary single-command or multi-command queues; explicit `set-hook -R` runs the
-stored hook once. Require 64 automatic producers, explicit-only `after-queue`, and three active
-pane-event gaps, plus the existing clean three-step set-hook differential.
-
-Confirm that slice 10u is delivered under `mux.command-group-argument-parse-abort`. Warm local
-Command-client vectors validate ordinary unaliased tmux grammar across the complete vector before
-effects while runtime target and effect errors remain sequential. Only vector-index-0 exact
-unaliased `attach` or `attach-session` keeps the private positional parser; later exact spellings and
-aliases use the catalog. Leave Control, remote `--host`, config and source replay, native zz grammar,
-alias snapshots, and runtime rollback outside the closure. Confirm six warm fixture probes and the
-focused three-step scenario report zero differences. Slice 10y later closes the replay alias
-snapshot; the other exclusions retain their owners.
-
-Confirm that slice 10v is closed under `tracker.format-vocabulary-registration` with oracle schema
-5. Require 31 literal `path:function` scopes, 153 scoped pairs, 108 unique names, 10 derived
-families, five propagation records, and 36 modifier tokens. At the 10v checkpoint, require the
-literal partition to be 58 implemented, 54 native, and 41 active gaps; the derived partition to be
-eight implemented and two active gaps; and the modifier partition to be 30 implemented and six
-active gaps. This is registration and classification only. Do not claim runtime modifier or context parity,
-option-consumer work, protocol, snapshots, scenarios, or a new accepted artifact.
-
-Confirm the post-10v ledger correction closes already-shipped first-diagnostic whole-file abort
-under `config.parser-abort`. Then confirm local slice 10w closes `formats.repeat-modifier`: exact
-`R` split, recursive operand expansion, bounds and invalid-count behavior, escaped commas, nesting,
-post-transform order, the deterministic 40,960,000-byte intermediate guard, and default `P:` and
-`S:` row proof. The modifier partition is 31 implemented tokens and five active gaps: `I`, `L`,
-`O`, `V`, and `w`.
-
-The historical 10aa artifact has 101 scenarios and 1,550 steps with attached-client `PASS`, a
-28-step `formats-values` row, and SHA-256
-`bc0f6ad0fb52d35b6e2e20869d896174ac06b6cb12243e03bcf13e7536134119`.
-
-Confirm the current tracker has 84 active groups and 586 items: 42 open, 20 blocked, and 22
-accepted, plus 122 closed records; 144 of 206 groups are resolved (69.9%). Priority is 62 later and
-22 none. Wave 2 is 3 of 3 complete, with unresolved work down from 65 to 62. Confirm
-slice 10ad moved
-the unchanged 105-name roster to `command::TMUX_OPTION_CONSUMERS`, preserved `BEHAVES`, and added an
-exact guard proving 180 pinned options equal 105 consumers plus 75 live option gaps and the closed
-tracker record. Treat `copy-mode-mark-style` as status option-variable consumption only, not visual
-mark rendering. The compatibility gate passed 445 mux tests plus three daemon inventory tests.
-
-The persisted runtime artifact is the accepted post-trial full-corpus run: 104 scenarios and 1,672
-steps with attached-client `PASS`, exactly two approved GEO rows, every other channel clean, and
-SHA-256 `8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`.
-
-Confirm slice 10ae closes
-`options.option-name-format-coverage/semantic:option-name-format-coverage` across the 105-name
-roster and four scope counts. Require generic precedence, selected targets, inheritance, exact and
-legacy names, whole and indexed arrays, attached fallback, loops, direct daemon producers,
-detached-status batch sharing, the clean 60-step differential, and the attached status proof. No
-protocol, wire snapshot, or native GUI styling changed.
-
-Confirm slice 10af closes
-`jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
-Shell-form `run-shell` with explicit positive `-d` must retain command, target identity and numeric
-session id, expanded text and numeric arguments, and cwd string at scheduling. Child launch must read
-current global state, live or retained original-session state, `default-terminal`, startup TERM
-state, and cwd existence. A missing scheduling target stays sessionless with `TMUX` id `-1` after a
-matching session appears. Require deterministic foreground daemon coverage through
-`active_shell_jobs` plus the three-step background differential with twelve checks per engine across
-live, destroyed and recreated, missing and later-created, and startup-crossing cases. Keep
-`run-shell -C`, `if-shell`, absent `-d`, `-d 0`, immediate background ordering, cwd producer
-selection, `copy-pipe`, and popup jobs under their separate owners.
-
-Confirm slice 10ag closes
-`source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`. Require private
-cold-launch provenance, a bounded valid UTF-8 cwd, nested relative and literal-metacharacter paths,
-startup-only priority and cleanup, later registered-client runtime selection, and the exact isolated
-differential without a public protocol change.
-
-Confirm slices 10ah and 10ai plus `jobs.shell-job-cwd` and `keys.literal-delete-identity` are
-closed. Shell-form `run-shell` and
-`if-shell` select cwd in pinned order from literal `-c`, startup client, unattached provenance
-client, explicit target session, attached invoking-client session, HOME, then root. Positive-delay
-jobs freeze that choice before the timer. Status `#()` uses the attached session path and a
-per-attached-client command cache with cwd-shared unattached entries. Require the clean three-step,
-eight-check-per-engine differential and 24
-attached Interactive and Control cases across both commands and all three target modes. Require the
-DEL closure's live PTY capture of raw DEL, caret-plus-DEL, and textual `0x7f` independently for
-`send-prefix` and configured `BSpace`, plus 196 strict-key fixture checks per engine. Keep `w`
-later and hard until its proof covers style
-parsing, malformed markup, controls, live
-`codepoint-widths[]`, tmux's 162-entry cache, host `wcwidth`, and Unicode differences against zz's
-`unicode-width` 0.2.2. The alias snapshot prerequisite is closed.
-
-Read AGENTS.md, this playbook, the live tracker, the roadmap, the relevant OKF pages, and cited
-source before editing. Use the three-front trial described above only while the selected chunks
-keep disjoint production and proof paths. Each front probes pinned tmux, traces its current owners,
-freezes the contract, and builds the minimum differential proof before implementation. The
-coordinator owns shared campaign artifacts and integration.
-
-Run focused tests, build a fresh debug binary, and run the full attached-client fixture when the
-slice touches attached clients. Rerun the canonical strict differential at the next campaign
-checkpoint, when a change invalidates the artifact, or when a new scenario joins the
-corpus. Update the tracker
-and OKF documents, validate them, and get an independent review. Commit each accepted integration
-only after every required gate passes. Do not push without explicit authorization.
+The coordinator alone edits compat/tmux-gaps.json, knowledge/tmux/gaps.md,
+TMUX_COMPAT_TRACKER.md, shared knowledge pages, compat/results/summary.md, and Issue #7 state.
+Editors run focused proof and commit one candidate on their branch. Do not push to main or integrate
+another front.
 ```

@@ -6833,8 +6833,26 @@ impl MuxEngine {
         } else if options.has("-l") {
             vec![KeyToken::Literal(positional.concat())]
         } else {
-            positional.iter().map(|value| key_token(value)).collect()
+            positional
+                .iter()
+                .filter_map(|value| {
+                    if value == "BSpace" {
+                        return match self.server_options.backspace.as_str() {
+                            "\x7f" | "0x7f" => Some(KeyToken::Literal("\x7f".to_owned())),
+                            "C-\x7f" => None,
+                            _ => Some(key_token(value)),
+                        };
+                    }
+                    Some(key_token(value))
+                })
+                .collect()
         };
+        if keys.is_empty()
+            && positional.iter().any(|value| value == "BSpace")
+            && self.server_options.backspace == "C-\x7f"
+        {
+            return Ok(Execution::default());
+        }
         Ok(Execution::effect(MuxEffect::SendKeys {
             pane,
             keys,
@@ -6853,13 +6871,18 @@ impl MuxEngine {
             let Some(prefix2) = self.keys.prefix2() else {
                 return Ok(Execution::default());
             };
-            tmux_key_display(prefix2)
+            prefix2
         } else {
-            tmux_key_display(self.keys.prefix())
+            self.keys.prefix()
+        };
+        let key = match key {
+            "\x7f" | "0x7f" => KeyToken::Literal("\x7f".to_owned()),
+            "C-\x7f" => return Ok(Execution::default()),
+            key => KeyToken::Named(tmux_key_display(key)),
         };
         Ok(Execution::effect(MuxEffect::SendKeys {
             pane,
-            keys: vec![KeyToken::Named(key)],
+            keys: vec![key],
             repeat: 1,
         }))
     }
@@ -12673,6 +12696,9 @@ fn tmux_key_display(canonical: &str) -> String {
     if let Some(code) = tmux_hex_ascii_code(canonical) {
         return char::from(code).to_string();
     }
+    if let Some(modifiers) = canonical.strip_suffix('\x7f') {
+        return format!("{modifiers}C-?");
+    }
     canonical.strip_suffix(' ').map_or_else(
         || canonical.to_owned(),
         |modifiers| format!("{modifiers}Space"),
@@ -12865,7 +12891,7 @@ fn parse_tmux_key(value: &str) -> Option<String> {
         if code < 32 {
             return Some(TMUX_CONTROL_KEY_NAMES[code as usize].to_owned());
         }
-        if code <= 126 {
+        if code <= 127 {
             return Some(format!("0x{code:x}"));
         }
         return char::from_u32(code).map(|character| character.to_string());
@@ -12951,7 +12977,7 @@ fn tmux_hex_ascii_code(value: &str) -> Option<u8> {
     let code = parse_scanf_unsigned_prefix(value.strip_prefix("0x")?, 16)?;
     u8::try_from(code)
         .ok()
-        .filter(|code| (32..=126).contains(code))
+        .filter(|code| (32..=127).contains(code))
 }
 
 fn tmux_option_key_display(name: &str, value: &str) -> String {
@@ -33881,6 +33907,171 @@ mod tests {
         }
         assert_eq!(parse_tmux_key("\u{1}"), None);
         assert_eq!(parse_tmux_key("C-\u{1}"), None);
+    }
+
+    #[test]
+    fn literal_delete_spellings_keep_distinct_identity_rendering_and_effects() {
+        let raw = "\x7f";
+        let caret = "^\x7f";
+        let control_raw = "C-\x7f";
+        let hex = "0x7f";
+        for (key, canonical, rendered) in [
+            (raw, raw, "C-?"),
+            (caret, control_raw, "C-C-?"),
+            (hex, hex, raw),
+        ] {
+            assert_eq!(parse_tmux_key(key).as_deref(), Some(canonical));
+            assert_eq!(
+                parse_tmux_key_details(key).map(|parsed| parsed.rendered),
+                Some(rendered.to_owned())
+            );
+        }
+
+        let raw_identity = tmux_key_identity(raw).unwrap();
+        let control_identity = tmux_key_identity(control_raw).unwrap();
+        let hex_identity = tmux_key_identity(hex).unwrap();
+        assert_eq!(raw_identity.base, 0x7f);
+        assert_eq!(raw_identity.modifiers, 0);
+        assert_eq!(control_identity.base, 0x7f);
+        assert_eq!(control_identity.modifiers, 2);
+        assert_eq!(hex_identity.base, 0x4100_007f);
+        assert!(!raw_identity.masked_eq(&control_identity));
+        assert!(!raw_identity.masked_eq(&hex_identity));
+        assert!(!control_identity.masked_eq(&hex_identity));
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "literal-delete"]),
+            )
+            .unwrap();
+        for (key, label) in [
+            (raw, "raw-delete"),
+            (caret, "caret-delete"),
+            (hex, "hex-delete"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "bind-key",
+                        &["-T", "literal-delete", key, "display-message", label],
+                    ),
+                )
+                .unwrap();
+        }
+        assert!(engine.keys.get("literal-delete", raw).is_some());
+        assert!(engine.keys.get("literal-delete", control_raw).is_some());
+        assert!(engine.keys.get("literal-delete", hex).is_some());
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "literal-delete", "-F", "#{key_string}|#{key_command}",],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "C-?|display-message raw-delete\n\
+             \x7f|display-message hex-delete\n\
+             C-C-?|display-message caret-delete"
+        );
+        for (filter, expected) in [
+            (raw, "C-?|display-message raw-delete"),
+            (caret, "C-C-?|display-message caret-delete"),
+            (hex, "\x7f|display-message hex-delete"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command(
+                            "list-keys",
+                            &[
+                                "-T",
+                                "literal-delete",
+                                "-F",
+                                "#{key_string}|#{key_command}",
+                                filter,
+                            ],
+                        ),
+                    )
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+
+        for (key, remaining) in [(caret, &[raw, hex][..]), (raw, &[hex][..]), (hex, &[][..])] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("unbind-key", &["-T", "literal-delete", key]),
+                )
+                .unwrap();
+            for remaining in remaining {
+                assert!(engine.keys.get("literal-delete", remaining).is_some());
+            }
+            assert!(engine.keys.get("literal-delete", key).is_none());
+        }
+
+        for (key, stored, rendered, sends_delete) in [
+            (raw, raw, "C-?", true),
+            (caret, control_raw, "C-C-?", false),
+            (hex, hex, raw, true),
+        ] {
+            for (scope, option) in [("-g", "prefix"), ("-g", "prefix2"), ("-s", "backspace")] {
+                engine
+                    .execute(&mut context, &command("set-option", &[scope, option, key]))
+                    .unwrap();
+            }
+            assert_eq!(engine.keys.prefix(), stored);
+            assert_eq!(engine.keys.prefix2(), Some(stored));
+            assert_eq!(engine.server_options.backspace, stored);
+            for args in [
+                &["-gv", "prefix"] as &[&str],
+                &["-gv", "prefix2"],
+                &["-sv", "backspace"],
+            ] {
+                assert_eq!(
+                    engine
+                        .execute(&mut context, &command("show-options", args))
+                        .unwrap()
+                        .output,
+                    rendered
+                );
+            }
+            for args in [&[] as &[&str], &["-2"]] {
+                let execution = engine
+                    .execute(&mut context, &command("send-prefix", args))
+                    .unwrap();
+                if sends_delete {
+                    assert!(matches!(
+                        execution.effects.as_slice(),
+                        [MuxEffect::SendKeys { keys, .. }]
+                            if matches!(keys.as_slice(), [KeyToken::Literal(key)] if key == raw)
+                    ));
+                } else {
+                    assert!(execution.effects.is_empty());
+                }
+            }
+            let backspace = engine
+                .execute(&mut context, &command("send-keys", &["BSpace"]))
+                .unwrap();
+            if sends_delete {
+                assert!(matches!(
+                    backspace.effects.as_slice(),
+                    [MuxEffect::SendKeys { keys, .. }]
+                        if matches!(keys.as_slice(), [KeyToken::Literal(key)] if key == raw)
+                ));
+            } else {
+                assert!(backspace.effects.is_empty());
+            }
+        }
     }
 
     #[test]

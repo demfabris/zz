@@ -139,10 +139,10 @@ without leaking literal `R` syntax into either row.
 
 ## Current compatibility checkpoint
 
-At Wave 2 chunk 2 of 3 on 2026-08-30, zz implements 31 of the pin's 36 format modifiers. Five active
-tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 85 active groups, 587 active items,
-and 121 closed records: 43 open, 20 blocked, and 22 accepted. Closed records plus accepted active
-groups resolve 143 of 206 known groups (69.4%). The persisted accepted artifact covers 105
+At the completed Wave 2 checkpoint on 2026-08-30, zz implements 31 of the pin's 36 format modifiers.
+Five active tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 84 active groups, 586
+active items, and 122 closed records: 42 open, 20 blocked, and 22 accepted. Closed records plus
+accepted active groups resolve 144 of 206 known groups (69.9%). The persisted accepted artifact covers 105
 scenarios and 1,675 steps with attached-client `PASS`, exactly two approved GEO rows, every other
 channel clean, and SHA-256
 `a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. The 45-step

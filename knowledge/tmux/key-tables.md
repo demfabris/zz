@@ -119,9 +119,11 @@ those aliases through the shared native parser.
 Caret followed by a literal control byte from 1 through 31 works across bind, list, filter, unbind,
 `prefix`, `prefix2`, and `backspace`. Printable ASCII hex keys keep identity separate from their
 literal forms while displaying the same character, so `A` and `0x41`, or `Space` and `0x20`, may
-coexist and be filtered or removed independently. Literal DEL, caret plus DEL, and `0x7f` remain
-tracked under `keys.literal-delete-identity` because their identities and rendered forms are not yet
-fully distinct.
+coexist and be filtered or removed independently. Raw DEL, caret plus DEL, and textual `0x7f` also
+retain distinct identities. They render as `C-?`, `C-C-?`, and a raw DEL byte respectively, and can
+coexist, be filtered, and be removed independently. Raw and textual-hex DEL send one literal DEL
+through `send-prefix` and configured `BSpace`; the caret-modified value sends nothing, matching the
+pinned tmux behavior.
 
 # bind / unbind semantics
 

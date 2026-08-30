@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; shell-job cwd closed with aggregate proof 2026-08-30
+status: Original nine phases shipped 2026-08-20; parallel Wave 2 closed 3 of 3 on 2026-08-30
 tags:
 - tmux
 - compatibility
@@ -531,10 +531,11 @@ closes config and source file-unit construction. Local slice 10aa closes the thr
 source ownership, local slice 10ae closes option-name format lookup, and local slice 10af closes
 positive-delay shell-form `run-shell` environment timing. Local slice 10ag closes cold startup
 initial-client cwd. Slice 10ah takes Control kill-server response order, and slice 10ai follows with
-Control exit pane-output discard. The 2026-08-30 shell-job cwd front then closes command and status
-job working-directory selection with focused and attached evidence while its aggregate rerun stays
-pending. The registry has 85 active groups, 587 classified active items, and 121 closed records: 43
-open, 20 blocked, and 22 accepted; 143 of 206 groups are resolved (69.4%). The current
+Control exit pane-output discard. The 2026-08-30 shell-job cwd front closes command and status job
+working-directory selection with focused and attached evidence, and the DEL front closes the three
+distinct DEL spellings with live transport proof. The registry has 84 active groups, 586 classified
+active items, and 122 closed records: 42 open, 20 blocked, and 22 accepted; 144 of 206 groups are
+resolved (69.9%). The current
 198-name partition
 has 95 direct mux values, 32 daemon-delegated values, and 71 live gaps. Slice 10x gives existing
 `new-session -A -c` targets the attach cwd path and preserves fresh explicit-empty session state.

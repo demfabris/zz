@@ -5,7 +5,7 @@ description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmu
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, philosophy, reimplementation, cli]
 timestamp: 2026-08-24T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 last_updated_by: Codex
 ---
 
@@ -352,14 +352,15 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 85 active groups, 587 items, and 121 closed records: 43 open, 20 blocked, and
-22 accepted. Closed records plus accepted active groups resolve 143 of 206 known groups (69.4%).
+The live registry has 84 active groups, 586 items, and 122 closed records: 42 open, 20 blocked, and
+22 accepted. Closed records plus accepted active groups resolve 144 of 206 known groups (69.9%).
 The persisted accepted artifact covers 105 scenarios and 1,675 steps, with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
 `a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Slice 10ai starts Control
 stdin observation before initial preparation, discards queued and future pane-byte records after
-EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd is
-closed with its full aggregate proof, and literal DEL identity is next.
+EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd and
+literal DEL identity are closed with their focused and aggregate proof. No active group is marked
+`next` until the next parallel wave is frozen.
 
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.

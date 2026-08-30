@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **PARALLEL WAVE 2 AT 2/3; LAST WAVE 3/3 CLOSED**
+> Campaign delivery: **PARALLEL WAVE 2 CLOSED 3/3; WAVE 3 RERANK PENDING**
 >
-> Live work: **63 UNRESOLVED GROUPS (43 OPEN, 20 BLOCKED); LITERAL DEL IDENTITY NEXT**
+> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED); NO GROUP MARKED NEXT**
 >
-> Ledger settlement: **69.4% (143 of 206 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **69.9% (144 of 206 known groups); SECONDARY DIAGNOSTIC**
 >
 > Exit evidence: **105 SCENARIOS, 1,675 STEPS, ATTACHED-CLIENT PASS**
 >
@@ -47,8 +47,9 @@ with attached-client `PASS`, exactly two approved GEO rows, every other channel 
 Wave 2 slice 10ai closes Control exit pane-output discard without a daemon or protocol change.
 The second chunk closes shell-job cwd selection. Its three-step differential completes eight checks
 per engine with no differing channel, and the attached fixture covers 24 Interactive and Control
-`run-shell` and `if-shell` cases across valid, missing, and omitted targets. Literal DEL identity is
-next.
+`run-shell` and `if-shell` cases across valid, missing, and omitted targets. The third chunk closes
+literal DEL identity across bindings, key options, and live prefix and backspace transport. Its
+40-step differential completes 196 fixture checks per engine with no differing channel.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -75,15 +76,15 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Local `main` contains wave 2 planning and slice 10ai; the current milestone closes shell-job cwd; remote `main` remains at `562b950c` through slice 10ag |
-| Campaign worktrees | Wave 2 uses three new worktrees from its freeze commit; the retained trial worktrees remain untouched |
+| Delivery | Local `main` contains all three Wave 2 closures; publish the commit containing this checkpoint before opening Wave 3 claims |
+| Campaign worktrees | Wave 2 used three isolated worktrees from its freeze commit; retire or reuse them only after checking their live state |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Active fixed cohort | Wave 2: 2 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 63 |
-| Last completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Slice 10ai and shell-job cwd are closed; literal DEL identity is next with an accepted candidate |
-| Live registry | 85 active groups, 587 active items, 121 closed records |
-| Active status | 43 open, 20 blocked, 22 accepted |
+| Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
+| Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
+| Campaign point | All Wave 2 chunks are closed; rerank and freeze the next disjoint fronts before implementation |
+| Live registry | 84 active groups, 586 active items, 122 closed records |
+| Active status | 42 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
@@ -101,14 +102,14 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Active fixed cohort | Wave 2: 2 of 3 frozen chunks closed |
-| Last completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
+| Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed |
+| Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
 | New residual groups | Wave 2: 0; prior trial: 3 |
-| Unresolved movement | Wave 2: 65 at freeze, 63 current |
-| Live unresolved | 43 open + 20 blocked = 63 |
-| Practical exit gate | Open; literal DEL identity is the sole `next` group |
+| Unresolved movement | Wave 2: 65 at freeze, 62 at close |
+| Live unresolved | 42 open + 20 blocked = 62 |
+| Practical exit gate | Open; rerank is required because no active group is marked `next` |
 | Accepted differential | 105 scenarios, 1,675 steps, attached-client `PASS`, 2 registered GEO rows |
-| Ledger settlement | 143 of 206 known groups = 69.4% |
+| Ledger settlement | 144 of 206 known groups = 69.9% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -122,7 +123,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(121 + 22) / (121 + 85) = 143 / 206 = 69.4%
+(122 + 22) / (122 + 84) = 144 / 206 = 69.9%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -954,7 +955,7 @@ rendered none. `control-mode.exit-pane-output/semantic:control-mode-exit-pane-ou
 that behavior. Event-hook cwd, sourced Control-hook cwd, non-UTF-8 path transport, and top-level
 config discovery retain their existing owners.
 
-## Candidate queue after 10ag
+## Candidate queue after Wave 2
 
 The pre-10x forecast treated `semantic:format-modifier-width` as a small isolated change. The
 pinned implementation requires more than a call to zz's current `unicode-width` dependency.
@@ -965,9 +966,9 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 85 active groups, 587 active items, and 121 closed records: 43 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 143 of 206 groups (69.4%).
-Priority has one `next`, 62 `later`, and 22 `none` groups.
+The live registry now has 84 active groups, 586 active items, and 122 closed records: 42 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 144 of 206 groups (69.9%).
+Priority has 62 `later` and 22 `none` groups. The next wave must freeze its own execution order.
 
 Slice 10ah closes
 `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.
@@ -1002,8 +1003,11 @@ aliases and malformed function, User, and hex names before state changes while a
 short modifiers, named keys, caret forms, numeric prefix parsing, and 32-bit wrap behavior. Literal
 controls 1 through 31 work across binding and key options. Printable ASCII hex keys retain identity
 separate from their literal forms across list, filter, unbind, option readback, and send-prefix. The
-40-step differential and 161 fixture checks pass on both engines. Literal DEL, caret plus DEL, and
-`0x7f` remain under `keys.literal-delete-identity`.
+40-step differential and 196 fixture checks pass on both engines. The Wave 2 DEL closure keeps raw
+DEL, caret plus DEL, and textual `0x7f` distinct across bind, list, filter, unbind, `prefix`,
+`prefix2`, and `backspace`. Raw DEL renders as `C-?`, caret plus DEL as `C-C-?`, and textual `0x7f`
+as a raw DEL byte. Raw and textual-hex values send one literal DEL through `send-prefix` and
+configured `BSpace`; the caret-modified value sends nothing.
 
 Kill-server response order, Control exit pane-output discard, and `jobs.shell-job-cwd` are closed.
 Shell-form `run-shell` and `if-shell` select cwd from literal `-c`, startup client, unattached
@@ -1014,9 +1018,8 @@ while unattached query clients share entries by effective cwd. The three-step
 differential completes eight checks per engine with no differing channel. The attached fixture
 keeps pane cwd separate from session cwd, proves status cwd, and covers 24 Interactive and Control
 `run-shell` and `if-shell` cases across valid, missing, and omitted targets on zz and pinned tmux.
-No protocol or snapshot field changed. Literal DEL identity is next. Immediate background
-`run-shell` ordering stays later and hard because it must prove absent-delay and `-d 0` queue order
-without timer races.
+No protocol or snapshot field changed. Immediate background `run-shell` ordering stays later and
+hard because it must prove absent-delay and `-d 0` queue order without timer races.
 
 `jobs.run-shell-immediate-background-environment` no longer depends on 10af, but it remains later
 and hard. It owns absent-delay and `-d 0` foreground blocking plus same-group background ordering
@@ -1120,24 +1123,24 @@ each passed when rerun alone, matching the repository's documented load-flake cl
 
 ## Parallel wave 2, 2026-08-30
 
-Wave 2 froze three independent groups with 65 unresolved groups at the start. Slice 10ai and
-shell-job cwd are closed, leaving 63 unresolved groups and no new residual. The literal DEL
-identity candidate passed independent review and is next.
+Wave 2 froze three independent groups with 65 unresolved groups at the start. Slice 10ai,
+shell-job cwd, and literal DEL identity are closed, leaving 62 unresolved groups and no new
+residual. All three candidates passed independent review before integration.
 
 | Front | State | Worktree and branch | Tracker contract | Exclusive production and proof zone |
 | --- | --- | --- | --- | --- |
 | Control output | Closed after one review repair | `$HOME/dev/zz-tmux-control-output`, `codex/tmux-control-10ai` | Slice 10ai: `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | `crates/zz/src/control_mode.rs`, focused tests in that file, Control sections of `crates/zz/tests/cli_binary.rs`, and one unique Control scenario or fixture |
 | Shell-job cwd | Closed after attached-client proof | `$HOME/dev/zz-tmux-job-cwd`, `codex/tmux-job-cwd` | `jobs.shell-job-cwd/semantic:command-shell-job-cwd` and `semantic:status-shell-job-cwd` | `crates/zz-daemon/src/daemon.rs`, `crates/zz-daemon/src/status.rs`, focused daemon tests, and one unique shell-job-cwd scenario or fixture |
-| DEL identity | Accepted candidate; next integration | `$HOME/dev/zz-tmux-key-del`, `codex/tmux-key-del` | `keys.literal-delete-identity/semantic:literal-delete-key-identity` | `crates/zz-mux/src/command.rs`, the strict-key scenario and fixture, focused mux tests, and live prefix and backspace byte capture |
+| DEL identity | Closed after transport repair | `$HOME/dev/zz-tmux-key-del`, `codex/tmux-key-del` | `keys.literal-delete-identity/semantic:literal-delete-key-identity` | `crates/zz-mux/src/command.rs`, the strict-key scenario and fixture, focused mux tests, and live prefix and backspace byte capture |
 
 The Control front treats `crates/zz-daemon/src/daemon.rs` as evidence only. It stops if the fix needs
 that file because the shell-job front owns it. The coordinator keeps exclusive ownership of the
 registry, generated report, tracker, shared OKF pages, accepted result summary, attached-client
 fixture, and startup diagnostic script.
 
-Shell-job cwd passed its coordinator-owned attached-client proof. Integrate literal DEL identity
-next from its accepted candidate. Each accepted candidate receives its own closure commit with
-shared artifacts updated by the coordinator.
+Shell-job cwd passed its coordinator-owned attached-client proof. Literal DEL identity passed live
+prefix and configured-backspace capture after its transport repair. Each accepted candidate
+received its own closure commit with shared artifacts updated by the coordinator.
 
 ## Validation and closure gates
 

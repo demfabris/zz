@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; parallel wave 2 at 2 of 3; literal DEL identity next
+status: In Progress; parallel wave 2 closed 3 of 3; next wave rerank pending
 tags:
 - tmux
 - compatibility
@@ -39,19 +39,19 @@ records the source-anchored baseline used to build this plan.
 # Current checkpoint, 2026-08-30
 
 The three-front trial closed all 3 frozen chunks and registered 3 residual groups. Wave 2 then
-closed slice 10ai and shell-job cwd as 2 of 3 frozen chunks without a new residual. Unresolved work
-moved from 65 to 63: 43 open and 20 blocked. The tracker has 85 active groups, 587 classified active
-items, 121 closed groups, and 22 accepted active groups. Its secondary ledger settlement is 143 of
-206 known groups (69.4%). The persisted accepted artifact covers 105 scenarios and 1,675 steps, with attached-client
+closed slice 10ai, shell-job cwd, and literal DEL identity as 3 of 3 frozen chunks without a new
+residual. Unresolved work moved from 65 to 62: 42 open and 20 blocked. The tracker has 84 active
+groups, 586 classified active items, 122 closed groups, and 22 accepted active groups. Its secondary
+ledger settlement is 144 of 206 known groups (69.9%). The persisted accepted artifact covers 105 scenarios and 1,675 steps, with attached-client
 `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
 `a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
 Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`
-without a public protocol change. The integrated mux suite passes 531 tests, the focused strict-key
-run passes 40 steps plus 161 fixture checks on both engines, and formatting and mux clippy pass.
+without a public protocol change. The focused strict-key run passes 40 steps plus 196 fixture checks
+on both engines, and the mux package, formatting, and mux clippy gates pass.
 Slice 10ah closes `control-mode.kill-server-response-order`. Slice 10ai closes
-`control-mode.exit-pane-output`. The second Wave 2 chunk closes `jobs.shell-job-cwd`; literal DEL
-identity is now the sole `next` group.
+`control-mode.exit-pane-output`. The second Wave 2 chunk closes `jobs.shell-job-cwd`; the third
+closes `keys.literal-delete-identity`. No active group is marked `next` until Wave 3 is frozen.
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
 matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
 named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
@@ -59,16 +59,17 @@ and non-UTF-8 passwd home paths remain in separate active groups.
 The Key front closes `keys.strict-validation`. Its tmux command parser matches short modifiers,
 named and caret forms, exact function-key bounds, and the pin's prefix-consuming User and hex number
 grammar. It rejects invalid names before state changes and keeps printable ASCII hex keys distinct
-from literal keys. Literal DEL, caret plus DEL, and `0x7f` remain under
-`keys.literal-delete-identity`.
+from literal keys. Wave 2 then closes `keys.literal-delete-identity`: raw DEL, caret plus DEL, and
+textual `0x7f` retain distinct identities, pinned rendering, and literal transport behavior.
 The three-front trial is positive: all three bounded chunks reached `main`, their changed paths did
 not intersect, and integration had no merge conflicts. Six independent review repairs were needed,
 so the next wave uses two active editors, one permanent oracle and reviewer, and the root as
 coordinator. Full corpus and workspace gates remain centralized in one warm integration lane.
 Wave 2 froze Control exit pane-output discard, shell-job cwd, and literal DEL identity as three
-independent chunks. Shell-job cwd passed its three-step differential and coordinator-owned
-attached-client proof. The DEL candidate passed independent review after repairs for failures in
-prefix and configured-backspace transport.
+independent chunks and closed all three. Shell-job cwd passed its three-step differential and
+coordinator-owned attached-client proof. The DEL candidate passed independent review after repairs
+for failures in prefix and configured-backspace transport, then passed its 40-step differential and
+196 fixture checks per engine.
 The final workspace run passed every non-daemon package. Three daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake
 class. Strict workspace clippy, formatting, tracker, stored-summary, and OKF validation pass.
@@ -364,12 +365,13 @@ engine with no differing channel. The attached fixture keeps pane cwd separate f
 proves status cwd, and covers 24 Interactive and Control `run-shell` and `if-shell` cases across
 valid, missing, and omitted targets. No protocol or snapshot field changed.
 
-The registry now has 85 active groups and 587 active items, with 121 closed records: 43 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 143 of 206 groups (69.4%). The
+The registry now has 84 active groups and 586 active items, with 122 closed records: 42 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 144 of 206 groups (69.9%). The
 persisted accepted artifact covers 105 scenarios and 1,675 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
 `a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Focused mux and
-compatibility gates from the accepted artifact pass. The final workspace run passed every
+compatibility gates from the accepted artifact pass. The DEL closure adds 196 strict-key fixture
+checks per engine without changing the scenario or step count. The final workspace run passed every
 non-daemon package; three daemon tests failed only under parallel load and passed alone. Strict
 workspace clippy, formatting, tracker, stored-summary, and OKF validation pass. The coordinator
 has replaced the persisted artifact with the completed aggregate above.

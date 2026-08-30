@@ -132,6 +132,62 @@ probe hex-prefix2-show 0 ' ' show-options -gv prefix2
 probe hex-backspace-set 0 '' set-option -s backspace 0x41
 probe hex-backspace-show 0 A show-options -sv backspace
 
+delete_raw="$(printf '\177x')"
+delete_raw="${delete_raw%x}"
+delete_caret="$(printf '^\177x')"
+delete_caret="${delete_caret%x}"
+probe delete-raw-bind 0 '' \
+    bind-key -T zzdelete "$delete_raw" display-message delete-raw
+probe delete-caret-bind 0 '' \
+    bind-key -T zzdelete "$delete_caret" display-message delete-caret
+probe delete-hex-bind 0 '' \
+    bind-key -T zzdelete 0x7f display-message delete-hex
+probe delete-list-all 0 "C-?|display-message delete-raw
+$delete_raw|display-message delete-hex
+C-C-?|display-message delete-caret" \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}'
+probe delete-raw-filter 0 'C-?|display-message delete-raw' \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' "$delete_raw"
+probe delete-caret-filter 0 'C-C-?|display-message delete-caret' \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' "$delete_caret"
+probe delete-hex-filter 0 "$delete_raw|display-message delete-hex" \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' 0x7f
+probe delete-caret-unbind 0 '' unbind-key -T zzdelete "$delete_caret"
+probe_missing delete-caret-missing \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' "$delete_caret"
+probe delete-raw-after-caret-unbind 0 'C-?|display-message delete-raw' \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' "$delete_raw"
+probe delete-hex-after-caret-unbind 0 "$delete_raw|display-message delete-hex" \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' 0x7f
+probe delete-raw-unbind 0 '' unbind-key -T zzdelete "$delete_raw"
+probe_missing delete-raw-missing \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' "$delete_raw"
+probe delete-hex-after-raw-unbind 0 "$delete_raw|display-message delete-hex" \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' 0x7f
+probe delete-hex-unbind 0 '' unbind-key -T zzdelete 0x7f
+probe_missing delete-hex-missing \
+    list-keys -T zzdelete -F '#{key_string}|#{key_command}' 0x7f
+
+probe delete-raw-prefix-set 0 '' set-option -g prefix "$delete_raw"
+probe delete-raw-prefix-show 0 C-? show-options -gv prefix
+probe delete-raw-prefix2-set 0 '' set-option -g prefix2 "$delete_raw"
+probe delete-raw-prefix2-show 0 C-? show-options -gv prefix2
+probe delete-raw-backspace-set 0 '' set-option -s backspace "$delete_raw"
+probe delete-raw-backspace-show 0 C-? show-options -sv backspace
+probe delete-caret-prefix-set 0 '' set-option -g prefix "$delete_caret"
+probe delete-caret-prefix-show 0 C-C-? show-options -gv prefix
+probe delete-caret-prefix2-set 0 '' set-option -g prefix2 "$delete_caret"
+probe delete-caret-prefix2-show 0 C-C-? show-options -gv prefix2
+probe delete-caret-backspace-set 0 '' set-option -s backspace "$delete_caret"
+probe delete-caret-backspace-show 0 C-C-? show-options -sv backspace
+probe delete-hex-prefix-set 0 '' set-option -g prefix 0x7f
+probe delete-hex-prefix-show 0 "$delete_raw" show-options -gv prefix
+probe delete-hex-prefix2-set 0 '' set-option -g prefix2 0x7f
+probe delete-hex-prefix2-show 0 "$delete_raw" show-options -gv prefix2
+probe delete-hex-backspace-set 0 '' set-option -s backspace 0x7f
+probe delete-hex-backspace-show 0 "$delete_raw" show-options -sv backspace
+probe_missing delete-table-missing unbind-key -a -T zzdelete
+
 tab="$(control_argument 9)"
 tab="${tab%x}"
 enter="$(control_argument 13)"
@@ -155,7 +211,7 @@ probe prefix2-restored 0 "$prefix2_before" show-options -gv prefix2
 probe backspace-restored 0 "$backspace_before" show-options -sv backspace
 probe table-cleanup 0 '' unbind-key -a -T zzliteral
 
-if [ "$check_count" -ne 161 ]; then
+if [ "$check_count" -ne 196 ]; then
     failed=1
     printf '%s\n' count-mismatch >>"$work/failures"
 fi

@@ -2175,8 +2175,12 @@ impl MuxClient {
         snapshot: MuxSnapshot,
         cx: &mut Context<Self>,
     ) {
-        self.core
-            .handle_message(ProtocolMessage::Attached { session, snapshot });
+        self.core.handle_message(ProtocolMessage::Attached {
+            session,
+            snapshot,
+            read_only: false,
+            client_flags: String::new(),
+        });
         self.discard_core_effects();
         cx.notify();
     }
@@ -4549,8 +4553,12 @@ mod tests {
 
     /// Reduce an attachment into the core, session and snapshot together.
     fn seed_attachment(mux: &mut MuxClient, session: SessionId, snapshot: MuxSnapshot) {
-        mux.core
-            .handle_message(ProtocolMessage::Attached { session, snapshot });
+        mux.core.handle_message(ProtocolMessage::Attached {
+            session,
+            snapshot,
+            read_only: false,
+            client_flags: String::new(),
+        });
         mux.discard_core_effects();
     }
 
@@ -5248,6 +5256,8 @@ mod tests {
                         generation: 1,
                         ..MuxSnapshot::default()
                     },
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5285,6 +5295,8 @@ mod tests {
                         generation: 1,
                         ..MuxSnapshot::default()
                     },
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5338,6 +5350,8 @@ mod tests {
                 ProtocolMessage::Attached {
                     session: SessionId(1),
                     snapshot: MuxSnapshot::default(),
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5351,6 +5365,8 @@ mod tests {
                 ProtocolMessage::Attached {
                     session: SessionId(2),
                     snapshot: MuxSnapshot::default(),
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5383,6 +5399,8 @@ mod tests {
                         generation: 1,
                         ..MuxSnapshot::default()
                     },
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5429,6 +5447,8 @@ mod tests {
                 ProtocolMessage::Attached {
                     session: SessionId(1),
                     snapshot: MuxSnapshot::default(),
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5495,6 +5515,8 @@ mod tests {
                         generation: 1,
                         ..MuxSnapshot::default()
                     },
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5513,6 +5535,8 @@ mod tests {
                         generation: 2,
                         ..MuxSnapshot::default()
                     },
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5555,6 +5579,8 @@ mod tests {
                 ProtocolMessage::Attached {
                     session: SessionId(9),
                     snapshot: MuxSnapshot::default(),
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5568,6 +5594,8 @@ mod tests {
                 ProtocolMessage::Attached {
                     session: SessionId(9),
                     snapshot: MuxSnapshot::default(),
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );
@@ -5695,6 +5723,8 @@ mod tests {
                             focused_window: None,
                             sessions: Vec::new(),
                         },
+                        read_only: false,
+                        client_flags: String::new(),
                     },
                     cx,
                 );
@@ -6117,6 +6147,8 @@ mod tests {
                 &ProtocolMessage::Attached {
                     session: remote_session,
                     snapshot: server_snapshot.clone(),
+                    read_only: false,
+                    client_flags: String::new(),
                 },
             )
             .expect("write remote Attached");
@@ -6184,6 +6216,8 @@ mod tests {
                 &ProtocolMessage::Attached {
                     session: remote_session,
                     snapshot: reconnected_snapshot,
+                    read_only: false,
+                    client_flags: String::new(),
                 },
             )
             .expect("write reconnect Attached");
@@ -6584,6 +6618,8 @@ mod tests {
                             focused_window: None,
                             sessions: Vec::new(),
                         },
+                        read_only: false,
+                        client_flags: String::new(),
                     },
                     cx,
                 );
@@ -7443,6 +7479,8 @@ mod tests {
                             focused_window: None,
                             sessions: Vec::new(),
                         },
+                        read_only: false,
+                        client_flags: String::new(),
                     },
                     cx,
                 );
@@ -7528,6 +7566,8 @@ mod tests {
                             focused_window: None,
                             sessions: Vec::new(),
                         },
+                        read_only: false,
+                        client_flags: String::new(),
                     },
                     cx,
                 );

@@ -435,8 +435,6 @@ pub(crate) enum InitialAttach {
     AlreadyAttached {
         session: zz_protocol::SessionId,
         messages: Vec<ProtocolMessage>,
-        read_only: bool,
-        client_flags: Option<String>,
     },
 }
 
@@ -450,7 +448,7 @@ pub(crate) fn run(
     fleet_hosts: Vec<HostEntry>,
     browser_provider: Option<Box<dyn BrowserFrameProvider>>,
 ) -> Result<(), String> {
-    let (attach_target, attach_request, read_only, client_flags, initial_messages, attempt) =
+    let (attach_target, attach_request, mut read_only, mut client_flags, initial_messages, attempt) =
         match initial_attach {
             InitialAttach::Request {
                 target,
@@ -472,16 +470,11 @@ pub(crate) fn run(
                     attempt,
                 )
             }
-            InitialAttach::AlreadyAttached {
-                session,
-                messages,
-                read_only,
-                client_flags,
-            } => (
+            InitialAttach::AlreadyAttached { session, messages } => (
                 session.to_string(),
                 None,
-                read_only,
-                client_flags,
+                false,
+                None,
                 messages,
                 AttachAttempt::Explicit,
             ),
@@ -742,6 +735,8 @@ pub(crate) fn run(
                                 } else {
                                     browser.reset_connection();
                                     renderer.reset_kitty_images();
+                                    read_only = false;
+                                    client_flags = None;
                                     endpoint = next_endpoint;
                                     model.set_connected_host(host, &lock_core(&core));
                                     model.begin_client_focus_attach();
@@ -776,6 +771,12 @@ pub(crate) fn run(
                     continue;
                 }
                 if let CoreEvent::Attached { .. } = &*event {
+                    {
+                        let core = lock_core(&core);
+                        read_only = core.attached_read_only();
+                        client_flags = (!core.attached_client_flags().is_empty())
+                            .then(|| core.attached_client_flags().to_owned());
+                    }
                     browser.reset_connection();
                     renderer.reset_kitty_images();
                     reconnect_available = true;

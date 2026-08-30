@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    cell::{Cell, RefCell},
     cmp::Reverse,
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     ffi::OsStr,
@@ -1164,9 +1165,9 @@ impl Daemon {
             shared.request_shutdown();
         }
         let shutdown_result = startup_result.and(accept_result);
-        shared.request_shutdown();
+        shared.request_shutdown_after_blockers();
         shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
-        shared.publish(EventPayload::ServerStopping);
+        shared.announce_shutdown();
         shared.drain_client_writers_for_shutdown(SHUTDOWN_WRITER_TIMEOUT);
         socket_guard.release();
         drop(socket_guard);
@@ -2484,6 +2485,11 @@ struct Shared {
     client_message_deadline_rx:
         Mutex<Option<crossbeam_channel::Receiver<ClientMessageDeadlineCommand>>>,
     stopping: AtomicBool,
+    shutdown_pending: AtomicBool,
+    shutdown_forced: AtomicBool,
+    shutdown_announced: AtomicBool,
+    shutdown_blockers: Mutex<ShutdownBlockerState>,
+    shutdown_drops_event_hooks: AtomicBool,
     startup_ready: Mutex<bool>,
     startup_changed: Condvar,
     startup_config_causes: Mutex<Option<Vec<String>>>,
@@ -3262,6 +3268,13 @@ struct ResponseAdmissionState {
     frozen: bool,
 }
 
+#[derive(Default)]
+struct ShutdownBlockerState {
+    active: usize,
+    detached: usize,
+    closed: bool,
+}
+
 #[cfg(test)]
 struct ResponseAdmissionHook {
     reached: crossbeam_channel::Sender<()>,
@@ -3526,6 +3539,11 @@ impl Shared {
             client_message_deadline_tx,
             client_message_deadline_rx: Mutex::new(Some(client_message_deadline_rx)),
             stopping: AtomicBool::new(false),
+            shutdown_pending: AtomicBool::new(false),
+            shutdown_forced: AtomicBool::new(false),
+            shutdown_announced: AtomicBool::new(false),
+            shutdown_blockers: Mutex::new(ShutdownBlockerState::default()),
+            shutdown_drops_event_hooks: AtomicBool::new(false),
             startup_ready: Mutex::new(true),
             startup_changed: Condvar::new(),
             startup_config_causes: Mutex::new(None),
@@ -3927,11 +3945,99 @@ impl Shared {
         drained
     }
 
-    fn request_shutdown(&self) {
+    fn request_shutdown(self: &Arc<Self>) {
+        self.shutdown_forced.store(true, Ordering::Release);
+        self.request_shutdown_with_hooks(true);
+    }
+
+    fn request_shutdown_without_hooks(self: &Arc<Self>) {
+        self.request_shutdown_with_hooks(false);
+    }
+
+    fn request_shutdown_with_hooks(self: &Arc<Self>, run_hooks: bool) {
+        self.shutdown_pending.store(true, Ordering::Release);
+        if run_hooks {
+            self.enter_queue_shutdown_phase();
+        }
+        if !self.close_shutdown_blockers() {
+            return;
+        }
         self.stopping.store(true, Ordering::Release);
         self.startup_changed.notify_all();
-        let (wakes, pipes, output_taps, shell_jobs, popups, menu_waiters, confirm_waiters) = {
+        let events = self.stop_shutdown_resources(true, run_hooks);
+        if run_hooks && !self.shutdown_drops_event_hooks.load(Ordering::Acquire) {
+            self.run_shutdown_event_hooks(events);
+        }
+    }
+
+    fn stop_shutdown_resources(
+        self: &Arc<Self>,
+        terminate_shell_jobs: bool,
+        destroy_sessions: bool,
+    ) -> Vec<PendingHookEvent> {
+        let (
+            events,
+            terminals,
+            wakes,
+            pipes,
+            output_taps,
+            shell_jobs,
+            popups,
+            menu_waiters,
+            confirm_waiters,
+        ) = {
             let mut inner = self.inner.lock();
+            let mut terminals = std::mem::take(&mut inner.terminals)
+                .into_values()
+                .collect::<Vec<_>>();
+            terminals.extend(
+                inner
+                    .command_outputs
+                    .values()
+                    .map(|output| Arc::clone(&output.terminal)),
+            );
+            let mut events = Vec::new();
+            if destroy_sessions {
+                let mut sessions = inner
+                    .engine
+                    .state
+                    .sessions
+                    .values()
+                    .map(|session| (session.name.clone(), session.id, session.windows.clone()))
+                    .collect::<Vec<_>>();
+                sessions.sort_by(|left, right| left.0.cmp(&right.0));
+                for (_, session, windows) in sessions {
+                    let before = MuxHookSnapshot::capture(&inner.engine);
+                    if inner.engine.state.kill_session(session).is_ok()
+                        && let Some(session_state) = before.sessions.get(&session)
+                    {
+                        events.push(PendingHookEvent::session(
+                            "session-closed",
+                            session,
+                            session_state,
+                            &before,
+                        ));
+                        for window in windows {
+                            if let Some(window_state) = before.windows.get(&window) {
+                                events.push(PendingHookEvent::winlink(
+                                    "window-unlinked",
+                                    session,
+                                    session_state,
+                                    window,
+                                    window_state,
+                                    &before,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            inner.terminal_spawns.clear();
+            inner.terminal_geometries.clear();
+            inner.attached.clear();
+            inner.visible_terminals.clear();
+            inner.visible_agents.clear();
+            inner.focused_windows.clear();
             let wakes = take_all_wait_wakes(&mut inner.wait_channels);
             let pipes = std::mem::take(&mut inner.pane_pipes)
                 .into_values()
@@ -3939,9 +4045,13 @@ impl Shared {
             let output_taps = std::mem::take(&mut inner.control_output_taps)
                 .into_values()
                 .collect::<Vec<_>>();
-            let shell_jobs = std::mem::take(&mut inner.shell_jobs)
-                .into_values()
-                .collect::<Vec<_>>();
+            let shell_jobs = if terminate_shell_jobs {
+                std::mem::take(&mut inner.shell_jobs)
+                    .into_values()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             let popups = std::mem::take(&mut inner.popups)
                 .into_iter()
                 .map(|(client, popup)| {
@@ -3961,6 +4071,8 @@ impl Shared {
                 })
                 .collect::<Vec<_>>();
             (
+                events,
+                terminals,
                 wakes,
                 pipes,
                 output_taps,
@@ -3970,6 +4082,9 @@ impl Shared {
                 confirm_waiters,
             )
         };
+        for terminal in terminals {
+            terminal.terminate();
+        }
         wake_wait_items(wakes);
         for pipe in pipes {
             stop_pane_pipe(pipe);
@@ -3989,6 +4104,55 @@ impl Shared {
         for waiter in confirm_waiters {
             let _ = waiter.try_send(false);
         }
+        events
+    }
+
+    fn begin_queue_shutdown(&self) {
+        self.shutdown_forced.store(true, Ordering::Release);
+        self.shutdown_pending.store(true, Ordering::Release);
+    }
+
+    fn enter_queue_shutdown_phase(self: &Arc<Self>) {
+        self.shutdown_forced.store(true, Ordering::Release);
+        if self.shutdown_blockers.lock().detached != 0 {
+            self.shutdown_drops_event_hooks
+                .store(true, Ordering::Release);
+        }
+        let events = self.stop_shutdown_resources(false, true);
+        if !self.shutdown_drops_event_hooks.load(Ordering::Acquire) {
+            self.run_shutdown_event_hooks(events);
+        }
+    }
+
+    fn announce_shutdown(&self) {
+        if !self.shutdown_announced.swap(true, Ordering::AcqRel) {
+            let clients = self
+                .inner
+                .lock()
+                .subscribers
+                .keys()
+                .copied()
+                .collect::<Vec<_>>();
+            for client in clients {
+                self.publish_to_client(client, EventPayload::ServerStopping);
+            }
+        }
+    }
+
+    fn request_shutdown_after_blockers(self: &Arc<Self>) {
+        if self.close_shutdown_blockers() {
+            self.request_shutdown_with_hooks(self.shutdown_forced.load(Ordering::Acquire));
+        }
+    }
+
+    fn close_shutdown_blockers(&self) -> bool {
+        let mut blockers = self.shutdown_blockers.lock();
+        blockers.closed = true;
+        blockers.active == 0
+    }
+
+    fn active_shutdown_blockers(&self) -> usize {
+        self.shutdown_blockers.lock().active
     }
 
     fn should_shutdown_if_empty(&self, state: &ServerState) -> bool {
@@ -4281,7 +4445,7 @@ impl Shared {
     ) -> Option<(ClientId, ServerHello)> {
         let startup_ready = *self.startup_ready.lock();
         let mut inner = self.inner.lock();
-        if self.stopping.load(Ordering::Acquire) {
+        if self.stopping.load(Ordering::Acquire) || self.shutdown_pending.load(Ordering::Acquire) {
             return None;
         }
         inner.engine.set_format_now(unix_timestamp());
@@ -4464,6 +4628,10 @@ impl Shared {
         session: SessionId,
         snapshot: MuxSnapshot,
     ) -> bool {
+        let (read_only, client_flags) = {
+            let flags = self.inner.lock().client_flags.get(client);
+            (flags.read_only, flags.reconnect_flags())
+        };
         let target = self.startup_config_delivery_target(client, false);
         let mut pending = target.map(|_| self.startup_config_causes.lock());
         if pending.as_ref().is_some_and(|causes| causes.is_none()) {
@@ -4471,7 +4639,12 @@ impl Shared {
         }
         outbound.reset_kitty_images();
         outbound.reset_pasted_images();
-        if !outbound.enqueue_reliable(&ProtocolMessage::Attached { session, snapshot }) {
+        if !outbound.enqueue_reliable(&ProtocolMessage::Attached {
+            session,
+            snapshot,
+            read_only,
+            client_flags,
+        }) {
             return false;
         }
         let startup_delivery = match (target, pending.as_ref().and_then(|causes| causes.as_ref())) {
@@ -4653,7 +4826,7 @@ impl Shared {
         }
         self.refresh_control_output_taps();
         if shutdown {
-            self.request_shutdown();
+            self.request_shutdown_without_hooks();
         }
     }
 
@@ -4715,7 +4888,12 @@ impl Shared {
         };
         let previous_control_target = context.control_command_target();
         if kind == ClientKind::Control {
-            context.set_control_command_target(Some((client, CONTROL_COMMAND_FRAME_FLAGS_CONTROL)));
+            let flags = if command.source.is_none() {
+                CONTROL_COMMAND_FRAME_FLAGS_NONE
+            } else {
+                CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+            };
+            context.set_control_command_target(Some((client, flags)));
         }
         let execution = self.execute_with_mux_source_routed(
             client,
@@ -4995,8 +5173,27 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
+        self.execute_with_mux_source_in_queue(client, kind, context, command, mux_source, None)
+    }
+
+    fn execute_with_mux_source_in_queue(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+        queue_execution: Option<&CommandQueueExecution>,
+    ) -> Result<Execution, DaemonError> {
         let routed = resolve_and_prepare_command(&self.inner.lock().engine, command)?.0;
-        self.execute_with_mux_source_routed(client, kind, context, &routed, mux_source)
+        self.execute_with_mux_source_routed_in_queue(
+            client,
+            kind,
+            context,
+            &routed,
+            mux_source,
+            queue_execution,
+        )
     }
 
     fn execute_with_mux_source_routed(
@@ -5007,6 +5204,20 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
     ) -> Result<Execution, DaemonError> {
+        self.execute_with_mux_source_routed_in_queue(
+            client, kind, context, command, mux_source, None,
+        )
+    }
+
+    fn execute_with_mux_source_routed_in_queue(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        command: &CommandInvocation,
+        mux_source: MuxOptionSource,
+        queue_execution: Option<&CommandQueueExecution>,
+    ) -> Result<Execution, DaemonError> {
         let client_terminal = if context.has_no_client() {
             ClientTerminal::NoClient
         } else {
@@ -5016,17 +5227,18 @@ impl Shared {
                 client_terminal(&inner, client, kind)
             })
         };
-        self.execute_with_mux_source_routed_for_terminal(
+        self.execute_with_mux_source_routed_for_terminal_in_queue(
             client,
             kind,
             context,
             command,
             mux_source,
             client_terminal,
+            queue_execution,
         )
     }
 
-    fn execute_with_mux_source_routed_for_terminal(
+    fn execute_with_mux_source_routed_for_terminal_in_queue(
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
@@ -5034,11 +5246,42 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
         client_terminal: ClientTerminal,
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         if MuxEngine::is_command_alias_group(command) {
-            return self.execute_command_alias_group(client, kind, context, command, mux_source);
+            let detached = queue_execution.is_some_and(|execution| execution.detached);
+            let shutdown_blocker =
+                queue_execution.and_then(|execution| execution.fork_shutdown_blocker(detached));
+            let alias_execution = CommandQueueExecution {
+                draining: queue_execution.is_some_and(CommandQueueExecution::is_draining),
+                wait_yields: queue_execution.is_some_and(|execution| execution.wait_yields),
+                detached,
+                deferred_shutdown: Cell::new(DeferredShutdown::None),
+                yielded: Cell::new(CommandQueueYield::None),
+                yield_boundary: false,
+                shutdown_blocker: RefCell::new(shutdown_blocker),
+                pending_event_hooks: RefCell::new(Vec::new()),
+                suppress_after_hooks: Cell::new(
+                    queue_execution.is_some_and(|execution| execution.suppress_after_hooks.get()),
+                ),
+                suppress_output: Cell::new(
+                    queue_execution.is_some_and(|execution| execution.suppress_output.get()),
+                ),
+            };
+            let result = self.execute_command_alias_group(
+                client,
+                kind,
+                context,
+                command,
+                mux_source,
+                client_terminal,
+                &alias_execution,
+            );
+            self.finish_command_queue_execution(&alias_execution, queue_execution);
+            return result;
         }
-        let no_hooks = context.no_hooks;
+        let no_hooks = context.no_hooks
+            || queue_execution.is_some_and(|execution| execution.suppress_after_hooks.get());
         let original_context = context.clone();
         let name = canonical_command(&command.name).to_owned();
         let previous_client_terminal = context_client_terminal(context);
@@ -5076,6 +5319,7 @@ impl Shared {
             command,
             mux_source,
             client_terminal,
+            queue_execution,
         );
         set_context_client_terminal(context, previous_client_terminal);
         context.copy_client_attachment(&original_context);
@@ -5097,7 +5341,7 @@ impl Shared {
                 let inner = self.inner.lock();
                 inner.engine.repair_context(&mut hook_context);
             }
-            self.run_command_hook(client, kind, &hook_context, command, &hook)
+            self.run_command_hook(client, kind, &hook_context, command, &hook, queue_execution)
         };
         match result {
             Ok(mut execution) => {
@@ -5123,6 +5367,68 @@ impl Shared {
         }
     }
 
+    fn finish_command_queue_execution(
+        self: &Arc<Self>,
+        execution: &CommandQueueExecution,
+        parent: Option<&CommandQueueExecution>,
+    ) {
+        if let Some(parent) = parent {
+            if let Some(blocker) = execution.shutdown_blocker.borrow_mut().take() {
+                let mut parent_blocker = parent.shutdown_blocker.borrow_mut();
+                if parent_blocker.is_none() {
+                    *parent_blocker = Some(blocker);
+                }
+            }
+            parent.deferred_shutdown.set(
+                parent
+                    .deferred_shutdown
+                    .get()
+                    .max(execution.deferred_shutdown.get()),
+            );
+            if execution.has_yielded() {
+                if execution.yield_boundary {
+                    parent.yield_locally();
+                } else if execution.yielded.get() == CommandQueueYield::Propagate {
+                    parent.yield_queue();
+                }
+            }
+            if !execution.yield_boundary && execution.yielded.get() == CommandQueueYield::Local {
+                parent.suppress_after_hooks.set(true);
+            }
+            if execution.suppress_after_hooks.get() {
+                parent.suppress_after_hooks.set(true);
+            }
+            if execution.suppress_output.get() && !execution.yield_boundary {
+                parent.suppress_output.set(true);
+            }
+            parent
+                .pending_event_hooks
+                .borrow_mut()
+                .extend(execution.pending_event_hooks.borrow_mut().drain(..));
+            return;
+        }
+        let deferred_shutdown = execution.deferred_shutdown.get();
+        let pending_event_hooks = execution
+            .pending_event_hooks
+            .borrow_mut()
+            .drain(..)
+            .collect::<Vec<_>>();
+        if deferred_shutdown != DeferredShutdown::Force {
+            self.run_event_hooks(pending_event_hooks);
+        }
+        let shutdown_requested = match deferred_shutdown {
+            DeferredShutdown::None => false,
+            DeferredShutdown::Recheck => self.should_shutdown_if_empty(&self.inner.lock()),
+            DeferredShutdown::Force => true,
+        };
+        if shutdown_requested {
+            if deferred_shutdown == DeferredShutdown::Force {
+                self.enter_queue_shutdown_phase();
+            }
+            self.request_shutdown_after_blockers();
+        }
+    }
+
     fn execute_with_mux_source_raw(
         self: &Arc<Self>,
         client: ClientId,
@@ -5131,6 +5437,7 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
         invoking_client_terminal: ClientTerminal,
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let canonical = canonical_command(&command.name);
         if (daemon_command_dispatch(canonical).is_some() || canonical == "display-panes")
@@ -5158,10 +5465,10 @@ impl Shared {
                         self.capture_pane(context, canonical, &command.args)
                     }
                     DaemonCommandDispatch::RunShell => {
-                        self.run_shell(client, kind, context, canonical, command)
+                        self.run_shell(client, kind, context, canonical, command, queue_execution)
                     }
                     DaemonCommandDispatch::IfShell => {
-                        self.if_shell(client, kind, context, canonical, command)
+                        self.if_shell(client, kind, context, canonical, command, queue_execution)
                     }
                     DaemonCommandDispatch::AgentSend => {
                         self.agent_send(client, kind, context, &command.args)
@@ -5197,6 +5504,17 @@ impl Shared {
                     }
                     DaemonCommandDispatch::RefreshClient => {
                         self.refresh_client(client, kind, canonical, &command.args)
+                    }
+                    DaemonCommandDispatch::WaitFor
+                        if queue_execution.is_some_and(CommandQueueExecution::is_draining) =>
+                    {
+                        if let Some(queue_execution) = queue_execution
+                            && queue_execution.draining
+                            && queue_execution.wait_yields
+                        {
+                            queue_execution.yield_queue();
+                        }
+                        Ok(Execution::default())
                     }
                     DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &command.args),
                     DaemonCommandDispatch::PipePane => {
@@ -5258,6 +5576,7 @@ impl Shared {
                 command,
                 mux_source,
                 target_terminal,
+                queue_execution,
             )
         } else {
             self.execute_with_mux_source_inner(
@@ -5267,6 +5586,7 @@ impl Shared {
                 command,
                 mux_source,
                 invoking_client_terminal,
+                queue_execution,
             )
         };
         let publish_snapshot = {
@@ -5318,6 +5638,7 @@ impl Shared {
         context: &ExecutionContext,
         command: &CommandInvocation,
         hook: &str,
+        parent_queue: Option<&CommandQueueExecution>,
     ) -> String {
         let commands = self
             .inner
@@ -5333,6 +5654,7 @@ impl Shared {
             context,
             commands,
             &hook_format_variables(command, hook),
+            parent_queue,
         )
     }
 
@@ -5343,8 +5665,19 @@ impl Shared {
         context: &ExecutionContext,
         commands: Vec<Vec<CommandInvocation>>,
         variables: &BTreeMap<String, String>,
+        parent_queue: Option<&CommandQueueExecution>,
     ) -> String {
-        self.run_hook_commands_with_policy(client, kind, context, commands, variables, false)
+        self.run_hook_commands_with_policy(
+            client,
+            kind,
+            context,
+            commands,
+            variables,
+            false,
+            parent_queue,
+            false,
+        )
+        .0
     }
 
     fn run_hook_commands_with_policy(
@@ -5355,9 +5688,32 @@ impl Shared {
         commands: Vec<Vec<CommandInvocation>>,
         variables: &BTreeMap<String, String>,
         skip_resolution_errors: bool,
-    ) -> String {
+        parent_queue: Option<&CommandQueueExecution>,
+        initial_draining: bool,
+    ) -> (String, bool) {
         let mut output = String::new();
+        let mut yielded_any = false;
         for commands in commands {
+            let detached = parent_queue.is_some_and(|execution| execution.detached);
+            let shutdown_blocker =
+                parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached));
+            let queue_execution = CommandQueueExecution {
+                draining: initial_draining
+                    || parent_queue.is_some_and(CommandQueueExecution::is_draining),
+                wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
+                detached,
+                deferred_shutdown: Cell::new(DeferredShutdown::None),
+                yielded: Cell::new(CommandQueueYield::None),
+                yield_boundary: true,
+                shutdown_blocker: RefCell::new(shutdown_blocker),
+                pending_event_hooks: RefCell::new(Vec::new()),
+                suppress_after_hooks: Cell::new(
+                    parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
+                ),
+                suppress_output: Cell::new(
+                    parent_queue.is_some_and(|execution| execution.suppress_output.get()),
+                ),
+            };
             let mut hook_context = context.clone();
             let control_target = hook_context
                 .control_command_target()
@@ -5375,6 +5731,13 @@ impl Shared {
             }
             hook_context.enter_hook(variables.clone());
             for command in commands {
+                if queue_execution.has_yielded()
+                    || self.stopping.load(Ordering::Acquire)
+                        && !queue_execution.is_draining()
+                        && !queue_execution.detached
+                {
+                    break;
+                }
                 hook_context.no_hooks = true;
                 hook_context.format_variables.clone_from(variables);
                 let execution = match control_target {
@@ -5386,13 +5749,15 @@ impl Shared {
                         target,
                         true,
                         MuxOptionSource::RuntimeCommand,
+                        InsertedCommandMode::Standard(&queue_execution),
                     ),
-                    None => self.execute_with_mux_source_routed(
+                    None => self.execute_with_mux_source_routed_in_queue(
                         client,
                         kind,
                         &mut hook_context,
                         &command,
                         MuxOptionSource::RuntimeCommand,
+                        Some(&queue_execution),
                     ),
                 };
                 match execution {
@@ -5402,6 +5767,12 @@ impl Shared {
                         }
                     }
                     Err(error) => {
+                        if queue_execution.deferred_shutdown.get() == DeferredShutdown::Force
+                            && kind == ClientKind::Command
+                            && client != ClientId(u64::MAX)
+                        {
+                            self.record_command_stderr(client, &daemon_error_text(&error));
+                        }
                         if skip_resolution_errors && hook_resolution_error(&error) {
                             break;
                         }
@@ -5420,11 +5791,30 @@ impl Shared {
                     }
                 }
             }
+            let yielded = queue_execution.has_yielded();
+            yielded_any |= yielded;
+            self.finish_command_queue_execution(&queue_execution, parent_queue);
+            if yielded {
+                break;
+            }
         }
-        output
+        (output, yielded_any)
     }
 
     fn run_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
+        self.run_event_hooks_with_control(events, true);
+    }
+
+    fn run_shutdown_event_hooks(self: &Arc<Self>, events: Vec<PendingHookEvent>) {
+        self.run_event_hooks_with_control(events, false);
+    }
+
+    fn run_event_hooks_with_control(
+        self: &Arc<Self>,
+        events: Vec<PendingHookEvent>,
+        publish_control: bool,
+    ) {
+        let shutdown_already_blocked = self.active_shutdown_blockers() != 0;
         for event in events {
             let attached_only = matches!(
                 event.name,
@@ -5451,14 +5841,16 @@ impl Shared {
                     control_variables.insert("hook_session_name".to_owned(), name);
                 }
             }
-            self.publish_to_control_clients(
-                EventPayload::HookEvent {
-                    name: event.name.to_owned(),
-                    variables: control_variables,
-                },
-                event.exclude_client,
-                attached_only,
-            );
+            if publish_control {
+                self.publish_to_control_clients(
+                    EventPayload::HookEvent {
+                        name: event.name.to_owned(),
+                        variables: control_variables,
+                    },
+                    event.exclude_client,
+                    attached_only,
+                );
+            }
             let (context, commands) = {
                 let inner = self.inner.lock();
                 let mut context = event.context.clone();
@@ -5472,14 +5864,21 @@ impl Shared {
             let Some(commands) = commands else {
                 continue;
             };
-            let _ = self.run_hook_commands_with_policy(
+            let draining =
+                self.shutdown_pending.load(Ordering::Acquire) && !shutdown_already_blocked;
+            let (_, yielded) = self.run_hook_commands_with_policy(
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 &context,
                 commands,
                 &event.variables,
                 true,
+                None,
+                draining,
             );
+            if draining && yielded {
+                break;
+            }
         }
     }
 
@@ -5491,6 +5890,7 @@ impl Shared {
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
         invoking_client_terminal: ClientTerminal,
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let mut format_variables = context.format_variables.clone();
         let event_hooks_enabled = !context.no_hooks;
@@ -5532,11 +5932,11 @@ impl Shared {
         let mut status_formats_changed = false;
         let mut status_refresh_sessions = BTreeSet::new();
         let mut mode_styles_changed = false;
-        let mut shutdown_requested = false;
+        let mut force_shutdown_requested = false;
         let mut immediate_hooks = Vec::new();
         let mut option_signals = Vec::new();
         let mut pending_hook_events = Vec::new();
-        let (mut execution, mux_options_event) = {
+        let (mut execution, mux_options_event, recheck_shutdown_requested) = {
             let mut inner = self.inner.lock();
             format_variables.insert("config_files".to_owned(), inner.config_files.clone());
             let hook_snapshot_before =
@@ -6970,7 +7370,7 @@ impl Shared {
                     MuxEffect::ReloadConfig => {
                         reload_config = true;
                     }
-                    MuxEffect::KillServer => shutdown_requested = true,
+                    MuxEffect::KillServer => force_shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
                     MuxEffect::ModeStylesChanged => mode_styles_changed = true,
                     MuxEffect::UserOptionChanged { channel } => {
@@ -7021,7 +7421,7 @@ impl Shared {
                 output.push('\n');
                 execution.output = output;
             }
-            shutdown_requested |= self.should_shutdown_if_empty(&inner);
+            let recheck_shutdown_requested = self.should_shutdown_if_empty(&inner);
             if snapshot_changed {
                 unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
                 let clients = inner
@@ -7068,18 +7468,65 @@ impl Shared {
                     ));
                 }
             }
-            (execution, mux_options_changed)
+            (execution, mux_options_changed, recheck_shutdown_requested)
         };
+
+        if force_shutdown_requested {
+            if let Some((control, _)) = context.control_command_target() {
+                self.publish_to_client(
+                    control,
+                    EventPayload::ControlExit {
+                        reason: String::new(),
+                    },
+                );
+            }
+            if let Some(queue_execution) = queue_execution
+                && !queue_execution.ensure_shutdown_blocker(self)
+            {
+                return Err(
+                    ServerError::InvalidCommand("server is shutting down".to_owned()).into(),
+                );
+            }
+            self.response_admissions.lock().frozen = true;
+            if queue_execution.is_some() {
+                self.begin_queue_shutdown();
+            }
+        }
 
         for (name, commands, context) in immediate_hooks {
             let mut variables = context.format_variables.clone();
             variables.insert("hook".to_owned(), name);
-            let hook_output = self.run_hook_commands(client, kind, &context, commands, &variables);
+            let hook_output = self.run_hook_commands(
+                client,
+                kind,
+                &context,
+                commands,
+                &variables,
+                queue_execution,
+            );
             append_inserted_output(&mut execution.output, &hook_output);
         }
 
-        if shutdown_requested {
-            self.request_shutdown();
+        let deferred_shutdown_request = if force_shutdown_requested {
+            DeferredShutdown::Force
+        } else if recheck_shutdown_requested {
+            DeferredShutdown::Recheck
+        } else {
+            DeferredShutdown::None
+        };
+        if deferred_shutdown_request != DeferredShutdown::None {
+            if let Some(queue_execution) = queue_execution {
+                queue_execution.deferred_shutdown.set(
+                    queue_execution
+                        .deferred_shutdown
+                        .get()
+                        .max(deferred_shutdown_request),
+                );
+            } else if deferred_shutdown_request == DeferredShutdown::Force {
+                self.request_shutdown();
+            } else {
+                self.request_shutdown_without_hooks();
+            }
         }
 
         for pipe in pipes_to_close {
@@ -7317,6 +7764,8 @@ impl Shared {
         });
         let control_client = control_target.map(|(client, _)| client);
         let mut source_file_error = None;
+        let mut source_path_error = false;
+        let mut source_path_matched = false;
         let mut control_source_errors = Vec::new();
         let mut control_source_matched = false;
         let mut source_verbose_output = String::new();
@@ -7324,13 +7773,17 @@ impl Shared {
         let mut source_diagnostics_output = String::new();
         let mut source_invocations = SourceInvocationAccounting::default();
         let mut pending_source_files = Vec::new();
-        let control_source_invocation = control_target.is_some() && !source_files.is_empty();
+        let source_invocation = !source_files.is_empty();
+        let control_source_invocation = control_target.is_some() && source_invocation;
+        let suppress_source_replay_output = source_kind == ClientKind::Command
+            && queue_execution.is_some_and(CommandQueueExecution::is_draining);
         let captured_control_source = control_client.is_some_and(|client| {
             !source_files.is_empty() && self.is_capturing_control_command_events(client)
         });
         for request in source_files {
             let path = request.path;
             if path == "-" {
+                source_path_error = true;
                 if captured_control_source {
                     control_source_errors.push(STANDARD_INPUT_SOURCE_WARNING.to_owned());
                 } else {
@@ -7352,6 +7805,7 @@ impl Shared {
             let declared_path = PathBuf::from(&path);
             let pattern = resolve_source_path(&path, source_working_directory.as_deref());
             let matches = source_glob_matches(&pattern);
+            source_path_error |= !matches.errors.is_empty();
             for error in &matches.errors {
                 let text = source_glob_error_warning(&declared_path, error);
                 if control_target.is_some() {
@@ -7367,6 +7821,7 @@ impl Shared {
             }
             if matches.paths.is_empty() && matches.errors.is_empty() {
                 if !request.quiet {
+                    source_path_error = true;
                     let error = missing_source_error(&declared_path);
                     if control_target.is_some() {
                         control_source_errors.push(error);
@@ -7381,9 +7836,8 @@ impl Shared {
                 }
                 continue;
             }
-            if control_target.is_some() && !matches.paths.is_empty() {
-                control_source_matched = true;
-            }
+            source_path_matched |= !matches.paths.is_empty();
+            control_source_matched |= control_target.is_some() && !matches.paths.is_empty();
             for path in matches.paths {
                 pending_source_files.push(PendingConfigFile {
                     path,
@@ -7395,6 +7849,7 @@ impl Shared {
                         control_target,
                         replay_client: (source_client != ClientId(u64::MAX))
                             .then_some(source_client),
+                        suppress_replay_output: suppress_source_replay_output,
                     },
                 });
             }
@@ -7416,9 +7871,20 @@ impl Shared {
                 control_target,
                 control_source_errors.join("\n"),
                 source_command_error && !control_source_matched,
-                source_command_error && frame_flags == CONTROL_COMMAND_FRAME_FLAGS_NONE,
+                source_command_error,
             );
             control_source_errors.clear();
+        }
+        if source_invocation && queue_execution.is_some_and(CommandQueueExecution::is_draining) {
+            self.enter_queue_shutdown_phase();
+        }
+        if source_invocation
+            && let Some(queue_execution) = queue_execution
+            && queue_execution.wait_yields
+            && queue_execution.is_draining()
+        {
+            queue_execution.yield_queue();
+            pending_source_files.clear();
         }
         let mut parsed_source_files = Vec::new();
         for pending in pending_source_files {
@@ -7466,7 +7932,7 @@ impl Shared {
                 options,
             } = pending;
             let replayed = parsed.map_or(Ok(()), |parsed| {
-                self.replay_config_file(
+                self.replay_config_file_with_parent_queue(
                     &path,
                     parsed,
                     &mut context,
@@ -7477,6 +7943,7 @@ impl Shared {
                     &mut source_invocations,
                     options,
                     &mut deferred_control_config_warnings,
+                    queue_execution,
                 )
             });
             match replayed {
@@ -7487,15 +7954,22 @@ impl Shared {
                     } else {
                         source_glob_error_warning(&path, &error.to_string())
                     };
-                    if let Some(target) = control_target {
-                        self.publish_control_source_read_error(
-                            target,
-                            context.pane,
-                            error.kind(),
-                            warning,
-                        );
-                    } else {
-                        self.route_source_error(source_client, source_kind, context.pane, &warning);
+                    if !options.suppress_replay_output {
+                        if let Some(target) = control_target {
+                            self.publish_control_source_read_error(
+                                target,
+                                context.pane,
+                                error.kind(),
+                                warning,
+                            );
+                        } else {
+                            self.route_source_error(
+                                source_client,
+                                source_kind,
+                                context.pane,
+                                &warning,
+                            );
+                        }
                     }
                 }
                 Err(error) => {
@@ -7507,60 +7981,62 @@ impl Shared {
             if !options.parse_only {
                 self.apply_stored_mux_config_overrides("source-file-replay");
             }
-            if let Some((verbose, replay)) = report.stdout_transcript() {
-                append_inserted_output(&mut source_verbose_output, verbose);
-                append_inserted_output(&mut source_replay_output, replay);
-            }
-            if let Some(diagnostics) = report.stdout_diagnostics() {
-                append_inserted_output(&mut source_diagnostics_output, diagnostics);
-            }
-            if control_target.is_none() && source_kind == ClientKind::Command {
-                for (index, diagnostic) in report.diagnostics().iter().enumerate() {
-                    if !report.replayed_diagnostics.contains(&index) {
-                        self.record_command_stdout(source_client, diagnostic);
-                    }
-                    self.record_command_failure(source_client);
+            if !options.suppress_replay_output {
+                if let Some((verbose, replay)) = report.stdout_transcript() {
+                    append_inserted_output(&mut source_verbose_output, verbose);
+                    append_inserted_output(&mut source_replay_output, replay);
                 }
-            }
-            if let Some((client, flags)) = control_target {
-                if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                if let Some(diagnostics) = report.stdout_diagnostics() {
+                    append_inserted_output(&mut source_diagnostics_output, diagnostics);
+                }
+                if control_target.is_none() && source_kind == ClientKind::Command {
+                    for (index, diagnostic) in report.diagnostics().iter().enumerate() {
+                        if !report.replayed_diagnostics.contains(&index) {
+                            self.record_command_stdout(source_client, diagnostic);
+                        }
+                        self.record_command_failure(source_client);
+                    }
+                }
+                if let Some((client, flags)) = control_target {
+                    if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                        self.route_config_replay_errors(
+                            client,
+                            ClientKind::Control,
+                            context.pane,
+                            &mut report,
+                        );
+                    } else {
+                        report.delivered_replay_issues = report.replay_issues().len();
+                    }
+                } else {
                     self.route_config_replay_errors(
-                        client,
-                        ClientKind::Control,
+                        source_client,
+                        source_kind,
                         context.pane,
                         &mut report,
                     );
-                } else {
-                    report.delivered_replay_issues = report.replay_issues().len();
                 }
-            } else {
-                self.route_config_replay_errors(
-                    source_client,
-                    source_kind,
-                    context.pane,
-                    &mut report,
-                );
-            }
-            if control_target.is_none()
-                && source_kind == ClientKind::Command
-                && let Some(skipped) = report.skipped_summary()
-            {
-                self.record_command_stderr(source_client, &skipped);
-            }
-            let summary = if control_target.is_some() && report.control_guarded {
-                report.skipped_summary()
-            } else {
-                report.message()
-            };
-            if let Some(summary) = summary {
-                self.publish_to_client(
-                    control_client.unwrap_or(source_client),
-                    EventPayload::ClientMessage {
-                        pane: context.pane,
-                        kind: ClientMessageKind::Warning,
-                        text: summary,
-                    },
-                );
+                if control_target.is_none()
+                    && source_kind == ClientKind::Command
+                    && let Some(skipped) = report.skipped_summary()
+                {
+                    self.record_command_stderr(source_client, &skipped);
+                }
+                let summary = if control_target.is_some() && report.control_guarded {
+                    report.skipped_summary()
+                } else {
+                    report.message()
+                };
+                if let Some(summary) = summary {
+                    self.publish_to_client(
+                        control_client.unwrap_or(source_client),
+                        EventPayload::ClientMessage {
+                            pane: context.pane,
+                            kind: ClientMessageKind::Warning,
+                            text: summary,
+                        },
+                    );
+                }
             }
         }
         self.publish_deferred_control_config_warnings(deferred_control_config_warnings);
@@ -7600,15 +8076,32 @@ impl Shared {
         if std::mem::take(&mut self.inner.lock().deferred_control_refresh) {
             self.refresh_control_output_taps();
         }
-        self.run_event_hooks(pending_hook_events);
+        if let Some(queue_execution) = queue_execution {
+            queue_execution
+                .pending_event_hooks
+                .borrow_mut()
+                .extend(pending_hook_events);
+        } else {
+            self.run_event_hooks(pending_hook_events);
+        }
         // `prompt_incremental_start` fires the callback from inside
         // `status_prompt_set`, and the callback queues its command behind the
         // item that raised the prompt. Running it last is that ordering.
         if let Some(submission) = incremental_start {
             self.submit_command_prompt(source_client, source_kind, context, &submission);
         }
+        if suppress_source_replay_output
+            && source_path_matched
+            && let Some(queue_execution) = queue_execution
+        {
+            queue_execution.suppress_output.set(true);
+        }
         match source_file_error {
             Some(error) => Err(prepend_command_output(execution.output, error)),
+            None if source_path_error && !source_path_matched => Err(DaemonError::CommandExit {
+                output: execution.output,
+                exit_code: 1,
+            }),
             None => Ok(execution),
         }
     }
@@ -7835,6 +8328,7 @@ impl Shared {
             let receiver = {
                 let mut inner = self.inner.lock();
                 if self.stopping.load(Ordering::Acquire)
+                    || self.shutdown_pending.load(Ordering::Acquire)
                     || !inner.client_instances.contains_key(&client)
                 {
                     return Ok(Execution::default());
@@ -7891,6 +8385,7 @@ impl Shared {
         let receiver = {
             let mut inner = self.inner.lock();
             if self.stopping.load(Ordering::Acquire)
+                || self.shutdown_pending.load(Ordering::Acquire)
                 || !inner.client_instances.contains_key(&client)
             {
                 return Ok(Execution::default());
@@ -8533,9 +9028,12 @@ impl Shared {
         context: &mut ExecutionContext,
         command_name: &str,
         invocation: &CommandInvocation,
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let args = &invocation.args;
         let parsed = parse_run_shell_args(args)?;
+        let draining = queue_execution.is_some_and(CommandQueueExecution::is_draining);
+        let detached = queue_execution.is_some_and(|execution| execution.detached);
         let (
             target,
             command_context,
@@ -8668,7 +9166,7 @@ impl Shared {
                 .control_command_target()
                 .map(|(client, _)| client)
                 .or_else(|| (kind == ClientKind::Control).then_some(client)),
-            foreground: !parsed.background,
+            foreground: !parsed.background && !draining,
             target_requested: parsed.target.is_some(),
             target,
         };
@@ -8676,7 +9174,12 @@ impl Shared {
         match command {
             None if parsed.delay.is_none() => Ok(Execution::default()),
             None => {
-                if parsed.background {
+                if parsed.background || draining {
+                    if draining && !parsed.background {
+                        queue_execution
+                            .expect("draining command queue")
+                            .yield_queue();
+                    }
                     self.spawn_delay(delay, || {})?;
                     Ok(Execution::default())
                 } else {
@@ -8691,7 +9194,12 @@ impl Shared {
                 }
             }
             Some(source @ (InsertedCommandSource::String(_) | InsertedCommandSource::Block(_))) => {
-                if parsed.background {
+                if parsed.background || draining && !delay.is_zero() {
+                    if draining && !parsed.background {
+                        queue_execution
+                            .expect("draining command queue")
+                            .yield_queue();
+                    }
                     let shared = Arc::clone(self);
                     let mut command_context = command_context;
                     let control_target = command_context
@@ -8701,21 +9209,49 @@ impl Shared {
                         selected_deferred_client(&self.inner.lock(), &command_context, client);
                     command_context.set_replay_client(replay_client);
                     command_context.set_control_command_target(control_target);
+                    let detached_callback_blocker = if parsed.background && delay.is_zero() {
+                        Some(
+                            queue_execution
+                                .and_then(|execution| execution.fork_shutdown_blocker(true))
+                                .or_else(|| ShutdownBlocker::acquire(self, true))
+                                .ok_or_else(|| {
+                                    ServerError::InvalidCommand("failed to run command".to_owned())
+                                })?,
+                        )
+                    } else {
+                        None
+                    };
                     self.spawn_delay(delay, move || {
+                        if !parsed.background && shared.stopping.load(Ordering::Acquire) {
+                            return;
+                        }
                         if control_target
                             .is_some_and(|(client, _)| !shared.control_client_is_connected(client))
                         {
                             return;
                         }
                         let mut context = command_context;
-                        match shared.execute_inserted_commands_with_control_target(
-                            client,
-                            kind,
-                            &mut context,
-                            &source,
-                            "<run-shell -C>",
-                            control_target,
-                        ) {
+                        let execution = if parsed.background {
+                            shared.execute_detached_inserted_commands_with_control_target(
+                                client,
+                                kind,
+                                &mut context,
+                                &source,
+                                "<run-shell -C>",
+                                control_target,
+                                detached_callback_blocker,
+                            )
+                        } else {
+                            shared.execute_inserted_commands_with_control_target(
+                                client,
+                                kind,
+                                &mut context,
+                                &source,
+                                "<run-shell -C>",
+                                control_target,
+                            )
+                        };
+                        match execution {
                             Ok(result) => {
                                 let _ = shared.finish_inserted_run_shell(
                                     route,
@@ -8756,13 +9292,19 @@ impl Shared {
                         &mut command_context,
                         &source,
                         "<run-shell -C>",
+                        queue_execution,
                     )?;
                     *context = command_context;
                     self.finish_inserted_run_shell(route, "run-shell".to_owned(), &result)
                 }
             }
             Some(InsertedCommandSource::Shell(command)) => {
-                if parsed.background {
+                if parsed.background || draining {
+                    if draining && !parsed.background {
+                        queue_execution
+                            .expect("draining command queue")
+                            .yield_queue();
+                    }
                     let shared = Arc::clone(self);
                     let background_command = command.clone();
                     let worker_context = command_context.clone();
@@ -8775,7 +9317,16 @@ impl Shared {
                         environment_timing,
                         parsed.show_stderr,
                         delay,
+                        ShellJobSpawnPolicy {
+                            wait_for_start: draining && !parsed.background && delay.is_zero(),
+                            shutdown_blocking: draining && !parsed.background && delay.is_zero(),
+                            detached,
+                        },
+                        queue_execution,
                         move |result| {
+                            if draining {
+                                return;
+                            }
                             if let Ok(result) = result {
                                 let _ =
                                     shared.finish_run_shell(route, &background_command, &result);
@@ -8813,6 +9364,12 @@ impl Shared {
                         environment_timing,
                         parsed.show_stderr,
                         delay,
+                        ShellJobSpawnPolicy {
+                            wait_for_start: false,
+                            shutdown_blocking: delay.is_zero(),
+                            detached,
+                        },
+                        queue_execution,
                         move |result| {
                             let _ = sender.send(result);
                         },
@@ -8838,8 +9395,11 @@ impl Shared {
         context: &mut ExecutionContext,
         command_name: &str,
         command: &CommandInvocation,
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_if_shell_args(&command.args)?;
+        let draining = queue_execution.is_some_and(CommandQueueExecution::is_draining);
+        let detached = queue_execution.is_some_and(|execution| execution.detached);
         let branches = parsed
             .positional
             .iter()
@@ -8926,12 +9486,18 @@ impl Shared {
                 &mut command_context,
                 source,
                 "<if-shell>",
+                queue_execution,
             )?;
             *context = command_context;
             return inserted_execution(client, kind, result);
         }
 
-        if parsed.background {
+        if parsed.background || draining {
+            if draining && !parsed.background {
+                queue_execution
+                    .expect("draining command queue")
+                    .yield_queue();
+            }
             let shared = Arc::clone(self);
             let condition_for_error = condition.clone();
             let mut command_context = command_context;
@@ -8951,7 +9517,16 @@ impl Shared {
                 ShellJobEnvironmentTiming::CommandTime,
                 false,
                 Duration::ZERO,
+                ShellJobSpawnPolicy {
+                    wait_for_start: draining,
+                    shutdown_blocking: draining && !parsed.background,
+                    detached,
+                },
+                queue_execution,
                 move |result| {
+                    if draining {
+                        return;
+                    }
                     if control_target
                         .is_some_and(|(client, _)| !shared.control_client_is_connected(client))
                     {
@@ -8995,7 +9570,7 @@ impl Shared {
                                 );
                             }
                         }
-                    } else {
+                    } else if !draining {
                         let error = ServerError::InvalidCommand(format!(
                             "failed to run command: {condition_for_error}"
                         ))
@@ -9023,6 +9598,12 @@ impl Shared {
             ShellJobEnvironmentTiming::CommandTime,
             false,
             Duration::ZERO,
+            ShellJobSpawnPolicy {
+                wait_for_start: false,
+                shutdown_blocking: true,
+                detached,
+            },
+            queue_execution,
             move |result| {
                 let _ = sender.send(result);
             },
@@ -9043,6 +9624,7 @@ impl Shared {
             &mut command_context,
             source,
             "<if-shell>",
+            queue_execution,
         )?;
         *context = command_context;
         inserted_execution(client, kind, result)
@@ -9055,18 +9637,23 @@ impl Shared {
         context: &mut ExecutionContext,
         source: &InsertedCommandSource,
         label: &str,
+        parent_queue: Option<&CommandQueueExecution>,
     ) -> Result<InsertedCommandResult, DaemonError> {
         let control_target = context
             .control_command_target()
             .filter(|(client, _)| self.is_capturing_control_command_events(*client));
-        self.execute_inserted_commands_with_control_target(
+        self.execute_inserted_commands_with_control_target_in_queue(
             client,
             kind,
             context,
             source,
             label,
             control_target,
+            parent_queue,
+            false,
+            None,
         )
+        .map_err(post_admission_callback_error)
     }
 
     fn execute_command_alias_group(
@@ -9076,16 +9663,13 @@ impl Shared {
         context: &mut ExecutionContext,
         command: &CommandInvocation,
         mux_source: MuxOptionSource,
+        client_terminal: ClientTerminal,
+        queue_execution: &CommandQueueExecution,
     ) -> Result<Execution, DaemonError> {
-        let commands = MuxEngine::command_alias_group_commands(command)?.ok_or_else(|| {
+        let body = MuxEngine::command_alias_group_body(command).ok_or_else(|| {
             ServerError::CommandParse(format!("unknown command: {}", command.name))
         })?;
-        let body = commands
-            .iter()
-            .map(format_command)
-            .collect::<Vec<_>>()
-            .join(" ; ");
-        let source = InsertedCommandSource::Block(body);
+        let source = InsertedCommandSource::Block(body.to_owned());
         let control_target = context.control_command_target();
         let result = self.execute_inserted_commands_with_control_target_and_mux_source(
             client,
@@ -9095,6 +9679,10 @@ impl Shared {
             "<command-alias>",
             control_target,
             mux_source,
+            InsertedCommandMode::CommandAlias {
+                client_terminal,
+                queue_execution,
+            },
         )?;
         inserted_execution(client, kind, result)
     }
@@ -9121,7 +9709,75 @@ impl Shared {
         label: &str,
         control_target: Option<(ClientId, u8)>,
     ) -> Result<InsertedCommandResult, DaemonError> {
-        self.execute_inserted_commands_with_control_target_and_mux_source(
+        self.execute_inserted_commands_with_control_target_in_queue(
+            client,
+            kind,
+            context,
+            source,
+            label,
+            control_target,
+            None,
+            false,
+            None,
+        )
+    }
+
+    fn execute_detached_inserted_commands_with_control_target(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source: &InsertedCommandSource,
+        label: &str,
+        control_target: Option<(ClientId, u8)>,
+        shutdown_blocker: Option<ShutdownBlocker>,
+    ) -> Result<InsertedCommandResult, DaemonError> {
+        self.execute_inserted_commands_with_control_target_in_queue(
+            client,
+            kind,
+            context,
+            source,
+            label,
+            control_target,
+            None,
+            true,
+            shutdown_blocker,
+        )
+    }
+
+    fn execute_inserted_commands_with_control_target_in_queue(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        source: &InsertedCommandSource,
+        label: &str,
+        control_target: Option<(ClientId, u8)>,
+        parent_queue: Option<&CommandQueueExecution>,
+        detached: bool,
+        shutdown_blocker: Option<ShutdownBlocker>,
+    ) -> Result<InsertedCommandResult, DaemonError> {
+        let detached = parent_queue.map_or(detached, |execution| execution.detached);
+        let shutdown_blocker = shutdown_blocker.or_else(|| {
+            parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached))
+        });
+        let queue_execution = CommandQueueExecution {
+            draining: parent_queue.is_some_and(CommandQueueExecution::is_draining),
+            wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
+            detached,
+            deferred_shutdown: Cell::new(DeferredShutdown::None),
+            yielded: Cell::new(CommandQueueYield::None),
+            yield_boundary: false,
+            shutdown_blocker: RefCell::new(shutdown_blocker),
+            pending_event_hooks: RefCell::new(Vec::new()),
+            suppress_after_hooks: Cell::new(
+                parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
+            ),
+            suppress_output: Cell::new(
+                parent_queue.is_some_and(|execution| execution.suppress_output.get()),
+            ),
+        };
+        let mut result = self.execute_inserted_commands_with_control_target_and_mux_source(
             client,
             kind,
             context,
@@ -9129,7 +9785,13 @@ impl Shared {
             label,
             control_target,
             MuxOptionSource::RuntimeCommand,
-        )
+            InsertedCommandMode::Standard(&queue_execution),
+        );
+        if let Ok(result) = &mut result {
+            result.yielded = queue_execution.has_yielded();
+        }
+        self.finish_command_queue_execution(&queue_execution, parent_queue);
+        result
     }
 
     fn execute_inserted_commands_with_control_target_and_mux_source(
@@ -9141,6 +9803,7 @@ impl Shared {
         label: &str,
         control_target: Option<(ClientId, u8)>,
         mux_source: MuxOptionSource,
+        mode: InsertedCommandMode,
     ) -> Result<InsertedCommandResult, DaemonError> {
         let (input, prepared) = match source {
             InsertedCommandSource::String(input) => (input, false),
@@ -9168,6 +9831,13 @@ impl Shared {
         let mut first_error = None;
         let mut failed_group = None;
         for command in parsed.commands {
+            if mode.queue_execution().has_yielded()
+                || self.stopping.load(Ordering::Acquire)
+                    && !mode.queue_execution().is_draining()
+                    && !mode.queue_execution().detached
+            {
+                break;
+            }
             let group = command
                 .source
                 .as_ref()
@@ -9180,12 +9850,43 @@ impl Shared {
             }
             let execution = match control_target {
                 Some(target) => self.execute_control_command_with_guard(
-                    client, kind, context, &command, target, prepared, mux_source,
+                    client, kind, context, &command, target, prepared, mux_source, mode,
                 ),
-                None if prepared => {
-                    self.execute_with_mux_source_routed(client, kind, context, &command, mux_source)
-                }
-                None => self.execute(client, kind, context, &command),
+                None if prepared => match mode {
+                    InsertedCommandMode::Standard(queue_execution) => self
+                        .execute_with_mux_source_routed_in_queue(
+                            client,
+                            kind,
+                            context,
+                            &command,
+                            mux_source,
+                            Some(queue_execution),
+                        ),
+                    InsertedCommandMode::CommandAlias {
+                        client_terminal,
+                        queue_execution,
+                    } => self.execute_with_mux_source_routed_for_terminal_in_queue(
+                        client,
+                        kind,
+                        context,
+                        &command,
+                        mux_source,
+                        client_terminal,
+                        Some(queue_execution),
+                    ),
+                },
+                None => match mode {
+                    InsertedCommandMode::Standard(queue_execution) => self
+                        .execute_with_mux_source_in_queue(
+                            client,
+                            kind,
+                            context,
+                            &command,
+                            MuxOptionSource::RuntimeCommand,
+                            Some(queue_execution),
+                        ),
+                    InsertedCommandMode::CommandAlias { .. } => unreachable!(),
+                },
             };
             if let Some((guard_client, flags)) = control_target {
                 match execution {
@@ -9200,6 +9901,12 @@ impl Shared {
                                 .exit_code = exit_code;
                         }
                         result.exit_code = exit_code;
+                        if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                            if canonical_command(&command.name) == "source-file" {
+                                break;
+                            }
+                            continue;
+                        }
                         if prepared {
                             failed_group = Some(group);
                             continue;
@@ -9221,6 +9928,12 @@ impl Shared {
                             result.exit_code = 1;
                         }
                         if prepared {
+                            if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                                if first_error.is_none() {
+                                    first_error = Some(discard_all_command_output(error));
+                                }
+                                break;
+                            }
                             failed_group = Some(group);
                             continue;
                         }
@@ -9230,10 +9943,21 @@ impl Shared {
                 continue;
             }
             match execution {
-                Ok(execution) => append_inserted_output(&mut result.output, &execution.output),
+                Ok(execution) if !mode.queue_execution().suppress_output.get() => {
+                    append_inserted_output(&mut result.output, &execution.output);
+                }
+                Ok(_) => {}
                 Err(DaemonError::CommandExit { output, exit_code }) => {
-                    append_inserted_output(&mut result.output, &output);
+                    if !mode.queue_execution().suppress_output.get() {
+                        append_inserted_output(&mut result.output, &output);
+                    }
                     result.exit_code = exit_code;
+                    if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                        if canonical_command(&command.name) == "source-file" {
+                            break;
+                        }
+                        continue;
+                    }
                     if prepared {
                         failed_group = Some(group);
                         continue;
@@ -9242,13 +9966,26 @@ impl Shared {
                 }
                 Err(error) => {
                     if prepared {
-                        if let Some(error_output) = daemon_error_output(&error) {
+                        if !mode.queue_execution().suppress_output.get()
+                            && mode.queue_execution().deferred_shutdown.get()
+                                == DeferredShutdown::Force
+                            && kind == ClientKind::Command
+                            && client != ClientId(u64::MAX)
+                        {
+                            self.record_command_stderr(client, &daemon_error_text(&error));
+                        }
+                        if !mode.queue_execution().suppress_output.get()
+                            && let Some(error_output) = daemon_error_output(&error)
+                        {
                             append_inserted_output(&mut result.output, error_output);
                         }
-                        failed_group = Some(group);
                         if first_error.is_none() {
                             first_error = Some(discard_all_command_output(error));
                         }
+                        if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
+                            break;
+                        }
+                        failed_group = Some(group);
                         continue;
                     }
                     return Err(prepend_command_output(
@@ -9257,6 +9994,15 @@ impl Shared {
                     ));
                 }
             }
+        }
+        if mode.queue_execution().deferred_shutdown.get() == DeferredShutdown::Force {
+            result.exit_code = 0;
+            if client != ClientId(u64::MAX)
+                && let Some(streams) = self.inner.lock().command_streams.get_mut(&client)
+            {
+                streams.exit_code = 0;
+            }
+            return Ok(result);
         }
         if let Some(error) = first_error {
             return Err(prepend_command_output(result.output, error));
@@ -9273,6 +10019,7 @@ impl Shared {
         target: (ClientId, u8),
         prepared: bool,
         mux_source: MuxOptionSource,
+        mode: InsertedCommandMode,
     ) -> Result<Execution, DaemonError> {
         let capture = self.begin_control_command_event_capture(target.0);
         let routed = if prepared {
@@ -9284,17 +10031,54 @@ impl Shared {
         let source_command = routed
             .as_ref()
             .is_ok_and(|command| canonical_command(&command.name) == "source-file");
+        let alias_group = routed.as_ref().is_ok_and(MuxEngine::is_command_alias_group);
         let execution = match routed {
-            Ok(command) => {
-                self.execute_with_mux_source_routed(client, kind, context, &command, mux_source)
-            }
+            Ok(command) => match mode {
+                InsertedCommandMode::Standard(queue_execution) => self
+                    .execute_with_mux_source_routed_in_queue(
+                        client,
+                        kind,
+                        context,
+                        &command,
+                        mux_source,
+                        Some(queue_execution),
+                    ),
+                InsertedCommandMode::CommandAlias {
+                    client_terminal,
+                    queue_execution,
+                } => self.execute_with_mux_source_routed_for_terminal_in_queue(
+                    client,
+                    kind,
+                    context,
+                    &command,
+                    mux_source,
+                    client_terminal,
+                    Some(queue_execution),
+                ),
+            },
             Err(error) => Err(error.into()),
         };
         let captured_events = capture.finish();
-        if source_command && !captured_events.is_empty() {
+        let source_guard = source_command.then(|| {
+            captured_events
+                .iter()
+                .position(|event| matches!(event, EventPayload::ControlCommandGuard { .. }))
+        });
+        let source_error = source_guard
+            .flatten()
+            .and_then(|index| match &captured_events[index] {
+                EventPayload::ControlCommandGuard {
+                    output,
+                    error: true,
+                    ..
+                } => Some(output.clone()),
+                _ => None,
+            });
+        if alias_group || source_command && !captured_events.is_empty() {
             self.publish_captured_control_command_events(target.0, captured_events);
         } else {
-            let (output, error, sticky_failure) = control_command_guard_for_execution(&execution);
+            let (output, error, sticky_failure) =
+                control_command_guard_for_execution(&execution, mode);
             self.publish_control_command_guard_tree(
                 Some(target),
                 output,
@@ -9303,7 +10087,11 @@ impl Shared {
                 captured_events,
             );
         }
-        execution
+        if let Some(source_error) = source_error {
+            Err(ServerError::InvalidCommand(source_error).into())
+        } else {
+            execution
+        }
     }
 
     fn finish_run_shell(
@@ -9341,6 +10129,7 @@ impl Shared {
             InsertedCommandResult {
                 output,
                 exit_code: result.exit_code,
+                yielded: result.yielded,
             },
         )
     }
@@ -9520,11 +10309,22 @@ impl Shared {
         environment_timing: ShellJobEnvironmentTiming,
         show_stderr: bool,
         delay: Duration,
+        policy: ShellJobSpawnPolicy,
+        queue_execution: Option<&CommandQueueExecution>,
         callback: impl FnOnce(Result<ShellJobResult, ()>) + Send + 'static,
     ) -> Result<(), DaemonError> {
-        let permit = ShellJobPermit::acquire(self).ok_or_else(|| {
-            ServerError::InvalidCommand(format!("failed to run command: {command}"))
-        })?;
+        let inherited_blocker = if policy.shutdown_blocking {
+            queue_execution.and_then(|execution| execution.fork_shutdown_blocker(policy.detached))
+        } else {
+            None
+        };
+        let permit = ShellJobPermit::acquire(
+            self,
+            policy.detached,
+            policy.shutdown_blocking,
+            inherited_blocker,
+        )
+        .ok_or_else(|| ServerError::InvalidCommand(format!("failed to run command: {command}")))?;
         let failed_command = command.clone();
         let zz_socket = self.socket_path.clone();
         let startup_reentry =
@@ -9540,10 +10340,24 @@ impl Shared {
         );
         #[cfg(not(unix))]
         let (tmux_shim, zz_executable) = (None::<PathBuf>, None::<PathBuf>);
+        let (started_sender, started_receiver) = if policy.wait_for_start {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
         thread::Builder::new()
             .name("zz-run-shell".to_owned())
             .spawn(move || {
                 thread::sleep(delay);
+                if permit.shared.stopping.load(Ordering::Acquire)
+                    && !policy.detached
+                    && !policy.shutdown_blocking
+                {
+                    drop(permit);
+                    callback(Err(()));
+                    return;
+                }
                 let (environment, default_terminal, startup_reentry) = match environment_timing {
                     ShellJobEnvironmentTiming::CommandTime => {
                         (environment, default_terminal, startup_reentry)
@@ -9578,15 +10392,21 @@ impl Shared {
                     show_stderr,
                     &permit.process,
                     &permit.shared.stopping,
+                    policy.detached || policy.shutdown_blocking,
+                    started_sender.as_ref(),
                 );
                 drop(permit);
                 callback(result);
             })
-            .map(|_| ())
             .map_err(|_| {
                 ServerError::InvalidCommand(format!("failed to run command: {failed_command}"))
-                    .into()
-            })
+            })?;
+        if let Some(started_receiver) = started_receiver {
+            started_receiver.recv().map_err(|_| {
+                ServerError::InvalidCommand(format!("failed to run command: {failed_command}"))
+            })?;
+        }
+        Ok(())
     }
 
     fn agent_send(
@@ -11213,6 +12033,7 @@ impl Shared {
         }
         let mut command_context = context.clone();
         self.run_confirm_commands(client, kind, &mut command_context, &blocking_commands)
+            .map_err(post_admission_callback_error)
     }
 
     fn parse_confirm_commands(
@@ -14305,6 +15126,7 @@ impl Shared {
             let execution = match execution {
                 Ok(execution) => execution,
                 Err(error) => {
+                    let command_exit = matches!(&error, DaemonError::CommandExit { .. });
                     if let Some(error_output) = daemon_error_output(&error)
                         && !output_truncated
                     {
@@ -14317,7 +15139,7 @@ impl Shared {
                         command.args,
                     );
                     failed_group = Some(group);
-                    if first_error.is_none() {
+                    if !command_exit && first_error.is_none() {
                         first_error = Some(error);
                     }
                     continue;
@@ -17384,7 +18206,9 @@ impl Shared {
                 | EventPayload::ControlSourceFile { .. }
                 | EventPayload::ControlCommandOutput { .. }
                 | EventPayload::ClientMessage { .. }
-        ) {
+                | EventPayload::ServerStopping
+        ) || matches!(&payload, EventPayload::ControlExit { reason } if reason.is_empty())
+        {
             let capture_key = (client, thread::current().id());
             let mut inner = self.inner.lock();
             if let Some(capture) = inner
@@ -19199,11 +20023,99 @@ impl Shared {
         options: SourceFileLoadOptions,
         deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
     ) -> Result<(), DaemonError> {
+        self.replay_config_file_with_parent_queue(
+            path,
+            parsed,
+            context,
+            depth,
+            report,
+            client_terminal,
+            source_client_base,
+            source_invocations,
+            options,
+            deferred_control_config_warnings,
+            None,
+        )
+    }
+
+    fn replay_config_file_with_parent_queue(
+        self: &Arc<Self>,
+        path: &Path,
+        parsed: PreparedConfig,
+        context: &mut ExecutionContext,
+        depth: usize,
+        report: &mut ConfigLoadReport,
+        client_terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
+        source_invocations: &mut SourceInvocationAccounting,
+        options: SourceFileLoadOptions,
+        deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
+        parent_queue: Option<&CommandQueueExecution>,
+    ) -> Result<(), DaemonError> {
+        let detached = parent_queue.is_some_and(|execution| execution.detached);
+        let shutdown_blocker =
+            parent_queue.and_then(|execution| execution.fork_shutdown_blocker(detached));
+        let queue_execution = CommandQueueExecution {
+            draining: parent_queue.is_some_and(CommandQueueExecution::is_draining),
+            wait_yields: true,
+            detached,
+            deferred_shutdown: Cell::new(DeferredShutdown::None),
+            yielded: Cell::new(CommandQueueYield::None),
+            yield_boundary: false,
+            shutdown_blocker: RefCell::new(shutdown_blocker),
+            pending_event_hooks: RefCell::new(Vec::new()),
+            suppress_after_hooks: Cell::new(
+                parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
+            ),
+            suppress_output: Cell::new(
+                parent_queue.is_some_and(|execution| execution.suppress_output.get()),
+            ),
+        };
+        let result = self.replay_config_file_in_queue(
+            path,
+            parsed,
+            context,
+            depth,
+            report,
+            client_terminal,
+            source_client_base,
+            source_invocations,
+            options,
+            deferred_control_config_warnings,
+            &queue_execution,
+        );
+        self.finish_command_queue_execution(&queue_execution, parent_queue);
+        result
+    }
+
+    fn replay_config_file_in_queue(
+        self: &Arc<Self>,
+        path: &Path,
+        parsed: PreparedConfig,
+        context: &mut ExecutionContext,
+        depth: usize,
+        report: &mut ConfigLoadReport,
+        client_terminal: ClientTerminal,
+        source_client_base: Option<&Path>,
+        source_invocations: &mut SourceInvocationAccounting,
+        options: SourceFileLoadOptions,
+        deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
+        queue_execution: &CommandQueueExecution,
+    ) -> Result<(), DaemonError> {
+        let _suppressed_control_capture = if options.suppress_replay_output {
+            options
+                .control_target
+                .map(|(client, _)| self.begin_control_command_event_capture(client))
+        } else {
+            None
+        };
         let commands = match parsed.construction {
             Ok(_) if options.parse_only => return Ok(()),
             Ok(commands) => commands,
             Err(failure) => {
-                if let Some(replay_client) = options.replay_client {
+                if !options.suppress_replay_output
+                    && let Some(replay_client) = options.replay_client
+                {
                     let replay_kind = self
                         .inner
                         .lock()
@@ -19224,7 +20136,9 @@ impl Shared {
                     failure.message
                 );
                 report.note_invalid_command(&failure.original, &failure.message);
-                if let Some((client, _)) = options.control_target {
+                if !options.suppress_replay_output
+                    && let Some((client, _)) = options.control_target
+                {
                     deferred_control_config_warnings.push(DeferredControlConfigWarning {
                         client,
                         pane: context.pane,
@@ -19236,8 +20150,17 @@ impl Shared {
         };
         let mut failed_group = None;
         for prepared in commands {
+            if queue_execution.has_yielded()
+                || self.stopping.load(Ordering::Acquire)
+                    && !queue_execution.is_draining()
+                    && !queue_execution.detached
+            {
+                break;
+            }
             let command = prepared.original;
-            if let Some(replay_client) = options.replay_client {
+            if !options.suppress_replay_output
+                && let Some(replay_client) = options.replay_client
+            {
                 let replay_kind = self
                     .inner
                     .lock()
@@ -19258,6 +20181,19 @@ impl Shared {
                 continue;
             }
             let routed = prepared.routed;
+            let routed_name = canonical_command(&routed.name);
+            let show_buffer_waits = routed_name == "show-buffer"
+                && client_terminal == ClientTerminal::Absent
+                && options.replay_client.is_some_and(|client| {
+                    self.inner.lock().client_kinds.get(&client) == Some(&ClientKind::Command)
+                });
+            if queue_execution.draining
+                && queue_execution.wait_yields
+                && (matches!(routed_name, "load-buffer" | "save-buffer") || show_buffer_waits)
+            {
+                queue_execution.yield_queue();
+                break;
+            }
             if routed.name == "reload-config" {
                 log::warn!(
                     "{}: ignoring reload-config while loading configuration",
@@ -19415,6 +20351,11 @@ impl Shared {
                     source_parse_error || source_command_error && !source_has_file,
                     false,
                 );
+                if queue_execution.wait_yields && queue_execution.is_draining() {
+                    queue_execution.yield_queue();
+                    self.publish_control_source_complete(options.control_target);
+                    break;
+                }
                 let mut pending_sources = Vec::new();
                 for (source_request, sources) in prepared_sources {
                     let nested_options = SourceFileLoadOptions {
@@ -19424,6 +20365,7 @@ impl Shared {
                         suppress_verbose: options.suppress_verbose,
                         control_target: options.control_target,
                         replay_client: options.replay_client,
+                        suppress_replay_output: options.suppress_replay_output,
                     };
                     for source in sources {
                         pending_sources.push(PendingConfigFile {
@@ -19472,7 +20414,7 @@ impl Shared {
                 let mut nested_control_config_warnings = Vec::new();
                 for (pending, parsed) in parsed_sources {
                     let mut source_context = pending.context.clone();
-                    match self.replay_config_file(
+                    match self.replay_config_file_with_parent_queue(
                         &pending.path,
                         parsed,
                         &mut source_context,
@@ -19483,6 +20425,7 @@ impl Shared {
                         source_invocations,
                         pending.options,
                         &mut nested_control_config_warnings,
+                        Some(queue_execution),
                     ) {
                         Err(DaemonError::Io(error)) => {
                             let warning = if options.control_target.is_some()
@@ -19522,7 +20465,7 @@ impl Shared {
                 }
                 continue;
             }
-            if options.control_target.is_some() {
+            if options.control_target.is_some() && !MuxEngine::is_command_alias_group(&routed) {
                 let name_error = match resolve_command(&routed.name) {
                     CommandResolution::Ambiguous(message) => Some(message),
                     CommandResolution::Unknown => Some(format!("unknown command: {}", routed.name)),
@@ -19545,6 +20488,7 @@ impl Shared {
                 }
             }
             let previous_replay_client = context.replay_client();
+            let alias_group = MuxEngine::is_command_alias_group(&routed);
             let execution_replay_client = if options.control_target.is_some()
                 && !matches!(canonical_command(&routed.name), "if-shell" | "run-shell")
             {
@@ -19559,13 +20503,14 @@ impl Shared {
                 .control_target
                 .map(|(client, _)| client)
                 .map(|client| self.begin_control_command_event_capture(client));
-            let result = self.execute_with_mux_source_routed_for_terminal(
+            let result = self.execute_with_mux_source_routed_for_terminal_in_queue(
                 ClientId(u64::MAX),
                 ClientKind::Command,
                 context,
                 &routed,
                 MuxOptionSource::TmuxConfig,
                 client_terminal,
+                Some(queue_execution),
             );
             context.set_replay_client(previous_replay_client);
             context.set_control_command_target(previous_control_target);
@@ -19581,27 +20526,31 @@ impl Shared {
                 report.note_startup_display(&command, &execution.output);
             }
             report.note_stdout(&captured_output);
+            let publish_guard =
+                |output: String, error: bool, sticky_failure: bool, captured_events| {
+                    if alias_group {
+                        if let Some((client, _)) = options.control_target {
+                            self.publish_captured_control_command_events(client, captured_events);
+                        }
+                    } else {
+                        self.publish_control_command_guard_tree(
+                            options.control_target,
+                            output,
+                            error,
+                            sticky_failure,
+                            captured_events,
+                        );
+                    }
+                };
             match result.map_err(discard_command_output) {
-                Ok(_) => self.publish_control_command_guard_tree(
-                    options.control_target,
-                    captured_output,
-                    false,
-                    false,
-                    captured_events,
-                ),
+                Ok(_) => publish_guard(captured_output, false, false, captured_events),
                 Err(DaemonError::Server(ServerError::UnsupportedCommand(unsupported))) => {
                     log::warn!(
                         "{}: ignoring unsupported tmux command: {unsupported}",
                         path.display()
                     );
                     report.note_skip_command(&command, &unsupported);
-                    self.publish_control_command_guard_tree(
-                        options.control_target,
-                        captured_output,
-                        false,
-                        false,
-                        captured_events,
-                    );
+                    publish_guard(captured_output, false, false, captured_events);
                 }
                 Err(DaemonError::InsertedCommandParse(message)) => {
                     log::warn!(
@@ -19622,13 +20571,7 @@ impl Shared {
                         &mut captured_output,
                         &config_command_error(&command, &message),
                     );
-                    self.publish_control_command_guard_tree(
-                        options.control_target,
-                        captured_output,
-                        true,
-                        false,
-                        captured_events,
-                    );
+                    publish_guard(captured_output, true, false, captured_events);
                     failed_group = group;
                 }
                 Err(DaemonError::Server(error)) => {
@@ -19636,30 +20579,20 @@ impl Shared {
                     log::warn!("{}: tmux command error: {message}", path.display());
                     report.note_command_error(&command, &message);
                     append_inserted_output(&mut captured_output, &message);
-                    self.publish_control_command_guard_tree(
-                        options.control_target,
-                        captured_output,
-                        true,
-                        true,
-                        captured_events,
-                    );
+                    publish_guard(captured_output, true, true, captured_events);
                     failed_group = group;
                 }
                 Err(error) => {
                     report.note_startup_command_cause(&command, &daemon_error_text(&error));
                     append_inserted_output(&mut captured_output, &daemon_error_text(&error));
-                    self.publish_control_command_guard_tree(
-                        options.control_target,
-                        captured_output,
-                        true,
-                        true,
-                        captured_events,
-                    );
+                    publish_guard(captured_output, true, true, captured_events);
                     return Err(error);
                 }
             }
         }
-        if let Some(replay_client) = options.replay_client {
+        if !options.suppress_replay_output
+            && let Some(replay_client) = options.replay_client
+        {
             let replay_kind = self
                 .inner
                 .lock()
@@ -20394,6 +21327,7 @@ struct SourceFileLoadOptions {
     suppress_verbose: bool,
     control_target: Option<(ClientId, u8)>,
     replay_client: Option<ClientId>,
+    suppress_replay_output: bool,
 }
 
 struct PendingConfigFile {
@@ -20958,6 +21892,18 @@ struct ClientFlagState {
 impl ClientFlagState {
     const fn is_empty(self) -> bool {
         !self.read_only && !self.ignore_size && !self.active_pane && !self.no_detach_on_destroy
+    }
+
+    fn reconnect_flags(self) -> String {
+        [
+            ("ignore-size", self.ignore_size),
+            ("active-pane", self.active_pane),
+            ("no-detach-on-destroy", self.no_detach_on_destroy),
+        ]
+        .into_iter()
+        .filter_map(|(name, enabled)| enabled.then_some(name))
+        .collect::<Vec<_>>()
+        .join(",")
     }
 }
 
@@ -25186,28 +26132,123 @@ fn command_prompt_edit_key(
     }
 }
 
+struct ShutdownBlocker {
+    shared: Arc<Shared>,
+    detached: bool,
+}
+
+impl ShutdownBlocker {
+    fn acquire(shared: &Arc<Shared>, detached: bool) -> Option<Self> {
+        let mut blockers = shared.shutdown_blockers.lock();
+        if blockers.closed {
+            return None;
+        }
+        blockers.active = blockers
+            .active
+            .checked_add(1)
+            .expect("shutdown blocker count overflow");
+        if detached {
+            blockers.detached = blockers
+                .detached
+                .checked_add(1)
+                .expect("detached shutdown blocker count overflow");
+        }
+        drop(blockers);
+        Some(Self {
+            shared: Arc::clone(shared),
+            detached,
+        })
+    }
+
+    fn fork(&self, detached: bool) -> Self {
+        let mut blockers = self.shared.shutdown_blockers.lock();
+        blockers.active = blockers
+            .active
+            .checked_add(1)
+            .expect("shutdown blocker count overflow");
+        if detached {
+            blockers.detached = blockers
+                .detached
+                .checked_add(1)
+                .expect("detached shutdown blocker count overflow");
+        }
+        drop(blockers);
+        Self {
+            shared: Arc::clone(&self.shared),
+            detached,
+        }
+    }
+}
+
+impl Drop for ShutdownBlocker {
+    fn drop(&mut self) {
+        let resume_shutdown = {
+            let mut blockers = self.shared.shutdown_blockers.lock();
+            blockers.active = blockers
+                .active
+                .checked_sub(1)
+                .expect("shutdown blocker count underflow");
+            if self.detached {
+                blockers.detached = blockers
+                    .detached
+                    .checked_sub(1)
+                    .expect("detached shutdown blocker count underflow");
+            }
+            blockers.closed && blockers.active == 0
+        };
+        if resume_shutdown {
+            self.shared
+                .request_shutdown_with_hooks(self.shared.shutdown_forced.load(Ordering::Acquire));
+        }
+    }
+}
+
 struct ShellJobPermit {
     shared: Arc<Shared>,
     token: u64,
     process: Arc<Mutex<Option<Child>>>,
+    managed: bool,
+    shutdown_blocker: Option<ShutdownBlocker>,
 }
 
 impl ShellJobPermit {
-    fn acquire(shared: &Arc<Shared>) -> Option<Self> {
+    fn acquire(
+        shared: &Arc<Shared>,
+        detached: bool,
+        shutdown_blocking: bool,
+        shutdown_blocker: Option<ShutdownBlocker>,
+    ) -> Option<Self> {
+        let mut shutdown_blocker = if shutdown_blocking {
+            Some(match shutdown_blocker {
+                Some(blocker) => blocker,
+                None => ShutdownBlocker::acquire(shared, detached)?,
+            })
+        } else {
+            None
+        };
         let mut inner = shared.inner.lock();
-        if shared.stopping.load(Ordering::Acquire) || inner.active_shell_jobs >= MAX_SHELL_JOBS {
+        if shared.stopping.load(Ordering::Acquire) && !detached
+            || inner.active_shell_jobs >= MAX_SHELL_JOBS
+        {
+            drop(inner);
+            drop(shutdown_blocker.take());
             return None;
         }
         inner.next_shell_job_token = inner.next_shell_job_token.wrapping_add(1).max(1);
         let token = inner.next_shell_job_token;
         let process = Arc::new(Mutex::new(None));
+        let managed = !detached && !shutdown_blocking;
         inner.active_shell_jobs += 1;
-        inner.shell_jobs.insert(token, Arc::clone(&process));
+        if managed {
+            inner.shell_jobs.insert(token, Arc::clone(&process));
+        }
         drop(inner);
         Some(Self {
             shared: Arc::clone(shared),
             token,
             process,
+            managed,
+            shutdown_blocker,
         })
     }
 }
@@ -25215,8 +26256,12 @@ impl ShellJobPermit {
 impl Drop for ShellJobPermit {
     fn drop(&mut self) {
         let mut inner = self.shared.inner.lock();
-        inner.shell_jobs.remove(&self.token);
+        if self.managed {
+            inner.shell_jobs.remove(&self.token);
+        }
         inner.active_shell_jobs = inner.active_shell_jobs.saturating_sub(1);
+        drop(inner);
+        drop(self.shutdown_blocker.take());
     }
 }
 
@@ -25239,6 +26284,8 @@ fn run_shell_job(
     show_stderr: bool,
     job_process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
+    detached: bool,
+    started: Option<&mpsc::SyncSender<()>>,
 ) -> Result<ShellJobResult, ()> {
     use std::{
         os::{fd::OwnedFd, unix::net::UnixStream, unix::process::CommandExt as _},
@@ -25279,7 +26326,10 @@ fn run_shell_job(
     let child = process.spawn().map_err(|_| ())?;
     drop(process);
     drop(child_socket);
-    install_shell_job_process(job_process, stopping, child)?;
+    install_shell_job_process(job_process, stopping, child, detached)?;
+    if let Some(started) = started {
+        let _ = started.send(());
+    }
     let mut bytes = Vec::new();
     if output.read_to_end(&mut bytes).is_err() {
         terminate_managed_process(job_process);
@@ -25306,6 +26356,8 @@ fn run_shell_job(
     show_stderr: bool,
     job_process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
+    detached: bool,
+    started: Option<&mpsc::SyncSender<()>>,
 ) -> Result<ShellJobResult, ()> {
     let cwd = existing_job_working_directory(cwd);
     let mut process = shell_process(command);
@@ -25339,7 +26391,10 @@ fn run_shell_job(
         return Err(());
     };
     let stderr = child.stderr.take();
-    install_shell_job_process(job_process, stopping, child)?;
+    install_shell_job_process(job_process, stopping, child, detached)?;
+    if let Some(started) = started {
+        let _ = started.send(());
+    }
     let stdout = thread::spawn(move || {
         let mut output = Vec::new();
         stdout.read_to_end(&mut output).map(|_| output)
@@ -25363,9 +26418,10 @@ fn install_shell_job_process(
     process: &Mutex<Option<Child>>,
     stopping: &AtomicBool,
     mut child: Child,
+    detached: bool,
 ) -> Result<(), ()> {
     let mut process = process.lock();
-    if stopping.load(Ordering::Acquire) {
+    if stopping.load(Ordering::Acquire) && !detached {
         drop(process);
         let _ = terminate_copy_pipe(&mut child);
         return Err(());
@@ -26985,10 +28041,93 @@ enum InsertedCommandSource {
     Block(String),
 }
 
+struct CommandQueueExecution {
+    draining: bool,
+    wait_yields: bool,
+    detached: bool,
+    deferred_shutdown: Cell<DeferredShutdown>,
+    yielded: Cell<CommandQueueYield>,
+    yield_boundary: bool,
+    shutdown_blocker: RefCell<Option<ShutdownBlocker>>,
+    pending_event_hooks: RefCell<Vec<PendingHookEvent>>,
+    suppress_after_hooks: Cell<bool>,
+    suppress_output: Cell<bool>,
+}
+
+impl CommandQueueExecution {
+    fn is_draining(&self) -> bool {
+        self.draining || self.deferred_shutdown.get() == DeferredShutdown::Force
+    }
+
+    fn has_yielded(&self) -> bool {
+        self.yielded.get() != CommandQueueYield::None
+    }
+
+    fn yield_queue(&self) {
+        self.yielded.set(CommandQueueYield::Propagate);
+    }
+
+    fn yield_locally(&self) {
+        if !self.has_yielded() {
+            self.yielded.set(CommandQueueYield::Local);
+        }
+    }
+
+    fn ensure_shutdown_blocker(&self, shared: &Arc<Shared>) -> bool {
+        let mut blocker = self.shutdown_blocker.borrow_mut();
+        if blocker.is_none() {
+            *blocker = ShutdownBlocker::acquire(shared, self.detached);
+        }
+        blocker.is_some()
+    }
+
+    fn fork_shutdown_blocker(&self, detached: bool) -> Option<ShutdownBlocker> {
+        self.shutdown_blocker
+            .borrow()
+            .as_ref()
+            .map(|blocker| blocker.fork(detached))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DeferredShutdown {
+    None,
+    Recheck,
+    Force,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CommandQueueYield {
+    None,
+    Local,
+    Propagate,
+}
+
+#[derive(Clone, Copy)]
+enum InsertedCommandMode<'a> {
+    Standard(&'a CommandQueueExecution),
+    CommandAlias {
+        client_terminal: ClientTerminal,
+        queue_execution: &'a CommandQueueExecution,
+    },
+}
+
+impl<'a> InsertedCommandMode<'a> {
+    fn queue_execution(self) -> &'a CommandQueueExecution {
+        match self {
+            Self::Standard(queue_execution)
+            | Self::CommandAlias {
+                queue_execution, ..
+            } => queue_execution,
+        }
+    }
+}
+
 #[derive(Default)]
 struct InsertedCommandResult {
     output: String,
     exit_code: u8,
+    yielded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -27006,6 +28145,13 @@ enum ShellJobEnvironmentTiming {
     LaunchTime {
         session_environment: Option<RetainedJobEnvironment>,
     },
+}
+
+#[derive(Clone, Copy)]
+struct ShellJobSpawnPolicy {
+    wait_for_start: bool,
+    shutdown_blocking: bool,
+    detached: bool,
 }
 
 struct ParsedRunShellArgs {
@@ -27337,9 +28483,15 @@ fn daemon_error_output(error: &DaemonError) -> Option<&str> {
 
 fn control_command_guard_for_execution(
     result: &Result<Execution, DaemonError>,
+    mode: InsertedCommandMode,
 ) -> (String, bool, bool) {
     match result {
         Ok(execution) => (execution.output.clone(), false, false),
+        Err(DaemonError::CommandExit { output, .. })
+            if matches!(mode, InsertedCommandMode::CommandAlias { .. }) =>
+        {
+            (output.clone(), false, false)
+        }
         Err(error) => {
             let mut output = daemon_error_output(error).unwrap_or_default().to_owned();
             let (error, sticky_failure, message) = control_command_guard_error(error);
@@ -27363,14 +28515,20 @@ fn control_command_guard_error(error: &DaemonError) -> (bool, bool, String) {
 fn hook_resolution_error(error: &DaemonError) -> bool {
     match error {
         DaemonError::CommandFailed { error, .. } => hook_resolution_error(error),
-        DaemonError::Server(
-            ServerError::MissingTarget(_)
-            | ServerError::SessionNotFound(_)
-            | ServerError::WindowNotFound(_)
-            | ServerError::PaneNotFound(_)
-            | ServerError::PaneNotAttached(_)
-            | ServerError::PaneExited(_),
-        ) => true,
+        DaemonError::Server(error) => hook_resolution_server_error(error),
+        _ => false,
+    }
+}
+
+fn hook_resolution_server_error(error: &ServerError) -> bool {
+    match error {
+        ServerError::PostAdmissionCallback(error) => hook_resolution_server_error(error),
+        ServerError::MissingTarget(_)
+        | ServerError::SessionNotFound(_)
+        | ServerError::WindowNotFound(_)
+        | ServerError::PaneNotFound(_)
+        | ServerError::PaneNotAttached(_)
+        | ServerError::PaneExited(_) => true,
         _ => false,
     }
 }
@@ -29009,6 +30167,7 @@ fn handle_connection<S: TransportStream>(
                 .any(|capability| capability == ClientHello::CLIENT_TERMINAL_CAPABILITY),
         startup_reentry,
     ) else {
+        best_effort_server_stopping_reply(&mut stream);
         return Ok(());
     };
     {
@@ -29138,6 +30297,9 @@ fn handle_connection<S: TransportStream>(
             inbound_frame.len(),
             inbound_frame.capacity(),
         );
+        if shared.shutdown_pending.load(Ordering::Acquire) {
+            continue;
+        }
         match message {
             ProtocolMessage::CommandRequest(CommandRequest {
                 request_id,
@@ -29418,6 +30580,18 @@ fn best_effort_protocol_mismatch_reply(stream: &mut impl Write, client: u16) {
     }
 }
 
+fn best_effort_server_stopping_reply(stream: &mut impl Write) {
+    let message = ProtocolMessage::CommandResponse(CommandResponse::Error {
+        request_id: 0,
+        error: ServerError::InvalidCommand("server exited unexpectedly".to_owned()),
+        output: String::new(),
+    });
+    let mut frame = Vec::new();
+    if encode_protocol_message_into(&message, &mut frame).is_ok() {
+        let _ = stream.write_all(&frame).and_then(|()| stream.flush());
+    }
+}
+
 fn write_outbound(stream: &mut impl TransportStream, outbound: &OutboundMailbox) {
     while let Some(frame) = outbound.recv() {
         let started = diagnostic_timer();
@@ -29468,6 +30642,21 @@ fn daemon_server_error(error: DaemonError) -> ServerError {
             ServerError::Internal(format!("command exited with status {exit_code}"))
         }
         other => ServerError::Internal(other.to_string()),
+    }
+}
+
+fn post_admission_callback_error(error: DaemonError) -> DaemonError {
+    match error {
+        error @ DaemonError::CommandExit { .. } => error,
+        DaemonError::CommandFailed { output, error } => DaemonError::CommandFailed {
+            output,
+            error: Box::new(DaemonError::Server(ServerError::PostAdmissionCallback(
+                Box::new(daemon_server_error(*error)),
+            ))),
+        },
+        error => DaemonError::Server(ServerError::PostAdmissionCallback(Box::new(
+            daemon_server_error(error),
+        ))),
     }
 }
 
@@ -30120,6 +31309,17 @@ mod tests {
             )
             .expect("read global option")
             .output
+    }
+
+    fn control_stdin_command(
+        name: impl Into<String>,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> CommandInvocation {
+        CommandInvocation::new(name, args).with_source(SourceSpan {
+            source: "<control>".to_owned(),
+            line: 1,
+            column: 1,
+        })
     }
 
     fn retained_startup_causes(shared: &Shared) -> Vec<String> {
@@ -31597,6 +32797,61 @@ mod tests {
                 .output,
             "same=set-option -g @alias-same old"
         );
+    }
+
+    #[test]
+    fn config_alias_groups_preserve_authoritative_client_terminal() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("aliases.conf");
+        fs::write(&root, "single\nmulti\n").expect("alias config");
+        let shared = Arc::new(Shared::new(1));
+        let mut context = ExecutionContext::default();
+        for (index, value) in [
+            ("40", "single=new-session -s alias-single"),
+            (
+                "41",
+                "multi=new-session -s alias-multi ; display-message -p reached",
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("seed config alias");
+        }
+        let mut report = ConfigLoadReport::default();
+        let mut source_invocations = SourceInvocationAccounting::default();
+        shared
+            .load_config_file_with_report_for_terminal(
+                &root,
+                &mut context,
+                0,
+                &mut report,
+                ClientTerminal::NoClient,
+                None,
+                &mut source_invocations,
+            )
+            .expect("load alias config");
+
+        let inner = shared.inner.lock();
+        for name in ["alias-single", "alias-multi"] {
+            assert!(
+                inner
+                    .engine
+                    .state
+                    .sessions
+                    .values()
+                    .any(|session| session.name == name),
+                "missing {name}"
+            );
+        }
+        assert!(report.replay_issues.is_empty());
     }
 
     #[test]
@@ -36193,11 +37448,12 @@ mod tests {
                 assert!(
                     shutdown_shared.freeze_response_admissions_and_wait(Duration::from_secs(2))
                 );
-                shutdown_shared.publish(EventPayload::ServerStopping);
+                shutdown_shared.announce_shutdown();
                 assert!(shutdown_shared.drain_client_writers_for_shutdown(Duration::from_secs(2)));
             });
             release_tx.send(()).expect("release response admission");
 
+            let mut saw_clean_control_exit = false;
             loop {
                 let response =
                     zz_protocol::read_protocol_message(&mut client).expect("kill-server response");
@@ -36210,6 +37466,18 @@ mod tests {
                 ));
                 if matches!(
                     &response,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlExit { reason },
+                        ..
+                    }) if reason.is_empty()
+                ) {
+                    assert_eq!(kind, ClientKind::Control);
+                    assert!(!saw_clean_control_exit);
+                    saw_clean_control_exit = true;
+                    continue;
+                }
+                if matches!(
+                    &response,
                     ProtocolMessage::CommandResponse(CommandResponse::Success {
                         request_id: 41,
                         output,
@@ -36220,6 +37488,7 @@ mod tests {
                     break;
                 }
             }
+            assert_eq!(saw_clean_control_exit, kind == ClientKind::Control);
             if kind == ClientKind::Control {
                 loop {
                     if matches!(
@@ -38143,6 +39412,7 @@ mod tests {
                 ProtocolMessage::Attached {
                     session: attached,
                     snapshot,
+                    ..
                 } if *attached == session
                     && snapshot.sessions.iter().any(|candidate| candidate.id == session)
             )
@@ -38396,6 +39666,7 @@ mod tests {
                 ProtocolMessage::Attached {
                     session: attached,
                     snapshot,
+                    ..
                 } if *attached == session => Some(snapshot),
                 _ => None,
             })
@@ -41139,14 +42410,18 @@ mod tests {
             )
         }));
 
-        shared
-            .execute(
+        assert!(matches!(
+            shared.execute(
                 client,
                 ClientKind::Interactive,
                 &mut context,
                 &CommandInvocation::new("source-file", [&missing]),
-            )
-            .expect("loud no-match source glob");
+            ),
+            Err(DaemonError::CommandExit {
+                output,
+                exit_code: 1,
+            }) if output.is_empty()
+        ));
         assert!(take_reliable_messages(&mailbox).iter().any(|message| {
             matches!(
                 message,
@@ -41161,14 +42436,18 @@ mod tests {
             )
         }));
 
-        shared
-            .execute(
+        assert!(matches!(
+            shared.execute(
                 client,
                 ClientKind::Interactive,
                 &mut context,
                 &CommandInvocation::new("source-file", ["-q", "-"]),
-            )
-            .expect("standard-input refusal");
+            ),
+            Err(DaemonError::CommandExit {
+                output,
+                exit_code: 1,
+            }) if output.is_empty()
+        ));
         assert!(take_reliable_messages(&mailbox).iter().any(|message| {
             matches!(
                 message,
@@ -41724,7 +43003,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 1,
-                &CommandInvocation::new(
+                &control_stdin_command(
                     "source-file",
                     [
                         good.display().to_string(),
@@ -41806,7 +43085,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 1,
-                &CommandInvocation::new("source-file", [root.display().to_string()]),
+                &control_stdin_command("source-file", [root.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 1,
@@ -43120,7 +44399,7 @@ mod tests {
                 ClientKind::Control,
                 &mut context,
                 1,
-                &CommandInvocation::new("source-file", [success_root.display().to_string()]),
+                &control_stdin_command("source-file", [success_root.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 1,
@@ -43199,7 +44478,7 @@ mod tests {
                     ClientKind::Control,
                     &mut context,
                     request_id,
-                    &CommandInvocation::new("source-file", [source.display().to_string()]),
+                    &control_stdin_command("source-file", [source.display().to_string()]),
                 ),
                 CommandResponse::Success {
                     request_id,
@@ -43270,7 +44549,7 @@ mod tests {
                     ClientKind::Control,
                     &mut context,
                     request_id,
-                    &CommandInvocation::new("source-file", [source.display().to_string()]),
+                    &control_stdin_command("source-file", [source.display().to_string()]),
                 ),
                 CommandResponse::Success {
                     request_id,
@@ -43294,7 +44573,7 @@ mod tests {
                 ClientKind::Control,
                 &mut context,
                 2,
-                &CommandInvocation::new("source-file", [missing_root.display().to_string()]),
+                &control_stdin_command("source-file", [missing_root.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 2,
@@ -43310,7 +44589,7 @@ mod tests {
                 (
                     format!("No such file or directory: {}", missing.display()),
                     true,
-                    false,
+                    true,
                 ),
                 ("AFTER_MISSING".to_owned(), false, false),
             ]
@@ -43322,7 +44601,7 @@ mod tests {
                 ClientKind::Control,
                 &mut context,
                 2,
-                &CommandInvocation::new("source-file", [error_root.display().to_string()]),
+                &control_stdin_command("source-file", [error_root.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 2,
@@ -43364,7 +44643,7 @@ mod tests {
                 ClientKind::Control,
                 &mut context,
                 4,
-                &CommandInvocation::new("display-message", ["-p", "OUTSIDE_REPLAY"]),
+                &control_stdin_command("display-message", ["-p", "OUTSIDE_REPLAY"]),
             ),
             CommandResponse::Success {
                 request_id: 4,
@@ -43403,7 +44682,7 @@ mod tests {
                 ClientKind::Control,
                 &mut context,
                 5,
-                &CommandInvocation::new("source-file", [hook_root.display().to_string()]),
+                &control_stdin_command("source-file", [hook_root.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 5,
@@ -43529,7 +44808,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 1,
-                &CommandInvocation::new("source-file", [trigger.display().to_string()]),
+                &control_stdin_command("source-file", [trigger.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 1,
@@ -43624,7 +44903,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 2,
-                &CommandInvocation::new("source-file", [command_error.display().to_string()]),
+                &control_stdin_command("source-file", [command_error.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 2,
@@ -43661,7 +44940,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 3,
-                &CommandInvocation::new("source-file", [final_source.display().to_string()]),
+                &control_stdin_command("source-file", [final_source.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 3,
@@ -44505,7 +45784,7 @@ mod tests {
             ClientKind::Control,
             &mut control_context,
             2,
-            &CommandInvocation::new("source-file", [grouped.display().to_string()]),
+            &control_stdin_command("source-file", [grouped.display().to_string()]),
         );
         assert_eq!(
             response,
@@ -44526,7 +45805,7 @@ mod tests {
             ClientKind::Control,
             &mut control_context,
             3,
-            &CommandInvocation::new("source-file", [separate.display().to_string()]),
+            &control_stdin_command("source-file", [separate.display().to_string()]),
         );
         assert_eq!(
             response,
@@ -44550,7 +45829,7 @@ mod tests {
             ClientKind::Control,
             &mut control_context,
             4,
-            &CommandInvocation::new("source-file", [mixed_read.display().to_string()]),
+            &control_stdin_command("source-file", [mixed_read.display().to_string()]),
         );
         assert_eq!(
             response,
@@ -44602,7 +45881,7 @@ mod tests {
             ClientKind::Control,
             &mut control_context,
             41,
-            &CommandInvocation::new("source-file", [invalid_utf8.display().to_string()]),
+            &control_stdin_command("source-file", [invalid_utf8.display().to_string()]),
         );
         assert_eq!(
             response,
@@ -44649,7 +45928,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 40,
-                &CommandInvocation::new("source-file", [colon_read.display().to_string()]),
+                &control_stdin_command("source-file", [colon_read.display().to_string()]),
             );
             assert_eq!(
                 response,
@@ -44799,7 +46078,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 1,
-                &CommandInvocation::new("source-file", [root.display().to_string()]),
+                &control_stdin_command("source-file", [root.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 1,
@@ -44871,7 +46150,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 1,
-                &CommandInvocation::new("source-file", [source.display().to_string()]),
+                &control_stdin_command("source-file", [source.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 1,
@@ -44986,7 +46265,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 1,
-                &CommandInvocation::new("source-file", [root.display().to_string()]),
+                &control_stdin_command("source-file", [root.display().to_string()]),
             ),
             CommandResponse::Success {
                 request_id: 1,
@@ -45031,7 +46310,7 @@ mod tests {
                 ClientKind::Control,
                 &mut control_context,
                 2,
-                &CommandInvocation::new("display-message", ["-p", "TRIGGER"]),
+                &control_stdin_command("display-message", ["-p", "TRIGGER"]),
             ),
             CommandResponse::Success {
                 request_id: 2,
@@ -51834,7 +53113,8 @@ mod tests {
             .expect_err("quoted braces remain a string");
         assert!(matches!(
             error,
-            DaemonError::InsertedCommandParse(message) if message == "syntax error"
+            DaemonError::Server(ServerError::PostAdmissionCallback(error))
+                if matches!(&*error, ServerError::CommandParse(message) if message == "syntax error")
         ));
     }
 
@@ -53480,7 +54760,8 @@ mod tests {
             .expect_err("quoted brace text stays a command string");
         assert!(matches!(
             error,
-            DaemonError::InsertedCommandParse(message) if message == "syntax error"
+            DaemonError::Server(ServerError::PostAdmissionCallback(error))
+                if matches!(&*error, ServerError::CommandParse(message) if message == "syntax error")
         ));
 
         let output = shared
@@ -66726,10 +68007,14 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("blocking confirm result")
             .expect_err("blocking child failure");
         worker.join().expect("blocking confirm worker");
+        let DaemonError::CommandFailed { output, error } = error else {
+            panic!("expected command failure with callback provenance");
+        };
+        assert_eq!(output, "before");
         assert!(matches!(
-            error,
-            DaemonError::CommandFailed { output, error }
-                if output == "before" && daemon_error_text(&error) == "can't find pane: missing"
+            *error,
+            DaemonError::Server(ServerError::PostAdmissionCallback(error))
+                if matches!(&*error, ServerError::PaneNotFound(target) if target == "missing")
         ));
         assert!(
             !take_reliable_messages(&mailbox)
@@ -67993,11 +69278,12 @@ bind - split-window -v -c "#{pane_current_path}"
         let shared = Arc::new(Shared::new(1));
         let (a, _, _) = switch_test_session(&shared, "A");
         let (b, _, _) = switch_test_session(&shared, "B");
+        let mailbox = OutboundMailbox::new();
         let (client, _) = shared.register_subscribed(
             ClientKind::Interactive,
             Some("flags".to_owned()),
             None,
-            OutboundMailbox::new(),
+            Arc::clone(&mailbox),
         );
         let mut context = ExecutionContext::default();
 
@@ -68021,6 +69307,20 @@ bind - split-window -v -c "#{pane_current_path}"
             format_client_flags(&shared.inner.lock(), client),
             "attached,focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
         );
+        let flags = shared.inner.lock().client_flags.get(client);
+        assert_eq!(
+            flags.reconnect_flags(),
+            "ignore-size,active-pane,no-detach-on-destroy"
+        );
+        let messages = take_reliable_messages(&mailbox);
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProtocolMessage::Attached {
+                read_only: true,
+                client_flags,
+                ..
+            } if client_flags == "ignore-size,active-pane,no-detach-on-destroy"
+        )));
         assert!(client_ignores_size(&shared.inner.lock(), client));
 
         shared
@@ -69758,7 +71058,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ("43", "empty="),
             (
                 "44",
-                "failing=display-message -p before ; has-session -t missing ; display-message -p after",
+                "failing=display-message -p before\nhas-session -t missing\ndisplay-message -p after",
             ),
         ] {
             shared
@@ -69776,7 +71076,13 @@ bind - split-window -v -c "#{pane_current_path}"
 
         let prepare = |name: &str, args: Vec<&str>| {
             let command = shared
-                .prepare_command_list(vec![CommandInvocation::new(name, args)])
+                .prepare_command_list(vec![CommandInvocation::new(name, args).with_source(
+                    SourceSpan {
+                        source: "<control>".to_owned(),
+                        line: 1,
+                        column: 1,
+                    },
+                )])
                 .remove(0);
             assert_eq!(command.result, PreparedCommandResult::Ready);
             assert!(MuxEngine::is_command_alias_group(&command.invocation));
@@ -69850,7 +71156,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &failing,
                 true,
             ),
-            CommandResponse::Success { exit_code: 1, output, .. } if output.is_empty()
+            CommandResponse::Error { output, .. } if output.is_empty()
         ));
         let guards = take_reliable_messages(&mailbox)
             .into_iter()
@@ -69866,6 +71172,1507 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(guards[0], ("before".to_owned(), false));
         assert!(guards[1].1);
         assert!(!guards.iter().any(|(output, _)| output == "after"));
+    }
+
+    #[test]
+    fn control_alias_source_failure_stops_the_remaining_children() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let missing = directory.path().join("missing.conf");
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "work");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[53]".to_owned(),
+                        format!(
+                            "missing-source=display-message -p before ; source-file '{}' ; set-option -g @after-missing-source yes",
+                            missing.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("source alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "missing-source",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                control,
+                ClientKind::Control,
+                &mut context,
+                53,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Error {
+                error: ServerError::InvalidCommand(message),
+                ..
+            } if message == missing_source_error(&missing)
+        ));
+        assert_eq!(
+            control_command_guards(take_reliable_messages(&mailbox)),
+            [
+                ("before".to_owned(), false, false),
+                (missing_source_error(&missing), true, true),
+            ]
+        );
+        let command = ClientId(u64::from(u16::MAX));
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                54,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success {
+                exit_code: 1,
+                stderr,
+                ..
+            } if stderr.contains(&missing_source_error(&missing))
+        ));
+        assert!(read_global_option(&shared, "@after-missing-source").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_alias_command_exits_end_and_continue() {
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "work");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[45]",
+                        "shell=display-message -p before ; run-shell 'exit 3' ; display-message -p after",
+                    ],
+                ),
+            )
+            .expect("shell alias write");
+        let shell = shared
+            .prepare_command_list(vec![
+                CommandInvocation::new("shell", [] as [&str; 0]).with_source(SourceSpan {
+                    source: "<control>".to_owned(),
+                    line: 1,
+                    column: 1,
+                }),
+            ])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                control,
+                ClientKind::Control,
+                &mut context,
+                45,
+                &shell,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 3, output, .. } if output.is_empty()
+        ));
+        let timeline = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlCommandGuard {
+                            output,
+                            error,
+                            flags,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("guard:{flags}:{error}:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandOutput { output },
+                    ..
+                }) => Some(format!("raw:{output}")),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            timeline,
+            [
+                "guard:1:false:before".to_owned(),
+                "guard:1:false:".to_owned(),
+                "raw:'exit 3' returned 3".to_owned(),
+                "guard:1:false:after".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_alias_hooks_emit_only_child_guards() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = switch_test_session(&shared, "work");
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        for (index, value) in [
+            (
+                "46",
+                "hookmulti=display-message -p alias-one ; display-message -p alias-two",
+            ),
+            ("47", "hookempty="),
+        ] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        ["-s", &format!("command-alias[{index}]"), value],
+                    ),
+                )
+                .expect("alias write");
+        }
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "after-new-window", "hookmulti"]),
+            )
+            .expect("multi alias hook");
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).expect("control attach");
+        take_reliable_messages(&mailbox);
+
+        assert!(matches!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                46,
+                &CommandInvocation::new("new-window", ["-d"]),
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert_eq!(
+            control_command_frames(take_reliable_messages(&mailbox)),
+            [
+                (
+                    "alias-one".to_owned(),
+                    false,
+                    false,
+                    CONTROL_COMMAND_FRAME_FLAGS_NONE,
+                ),
+                (
+                    "alias-two".to_owned(),
+                    false,
+                    false,
+                    CONTROL_COMMAND_FRAME_FLAGS_NONE,
+                ),
+            ]
+        );
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-g", "after-new-window", "hookempty"]),
+            )
+            .expect("empty alias hook");
+        assert!(matches!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                47,
+                &CommandInvocation::new("new-window", ["-d"]),
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert_eq!(control_command_frames(take_reliable_messages(&mailbox)), []);
+    }
+
+    #[test]
+    fn control_source_replay_accepts_alias_groups() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("alias-group.conf");
+        fs::write(&source, "control-source-group\n").expect("alias source");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "alias-source"]),
+            )
+            .expect("source session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[48]",
+                        "control-source-group=display-message -p FIRST ; display-message -p SECOND",
+                    ],
+                ),
+            )
+            .expect("source alias");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, context.session.expect("source session id"))
+            .expect("source control attach");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                48,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 48,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            control_command_frames(take_reliable_messages(&mailbox)),
+            [
+                (
+                    "FIRST".to_owned(),
+                    false,
+                    false,
+                    CONTROL_COMMAND_FRAME_FLAGS_NONE,
+                ),
+                (
+                    "SECOND".to_owned(),
+                    false,
+                    false,
+                    CONTROL_COMMAND_FRAME_FLAGS_NONE,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_alias_self_shutdown_marks_the_kill_guard_before_clean_exit() {
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[61]",
+                        "self-stop=kill-server ; display-message -p AFTER",
+                    ],
+                ),
+            )
+            .expect("self-stop alias");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new("self-stop", [] as [&str; 0])])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                control,
+                ClientKind::Control,
+                &mut context,
+                61,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        shared.announce_shutdown();
+        let events = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandGuard { output, .. },
+                    ..
+                }) => Some(format!("guard:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlExit { reason },
+                    ..
+                }) if reason.is_empty() => Some("clean-exit".to_owned()),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ServerStopping,
+                    ..
+                }) => Some("server-stopping".to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events,
+            ["guard:", "clean-exit", "guard:AFTER", "server-stopping"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_alias_drains_children_before_server_shutdown() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[49]".to_owned(),
+                        format!(
+                            "shutdown-alias=kill-server ; wait-for never ; run-shell 'printf first > {}' ; run-shell 'printf second > {}'",
+                            first.display(),
+                            second.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("shutdown alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "shutdown-alias",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert_eq!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                49,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success {
+                request_id: 49,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !first.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fs::read_to_string(first).expect("first marker"), "first");
+        assert!(!second.exists());
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn command_alias_rechecks_transient_empty_state_at_queue_completion() {
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "old");
+        shared.initialize(false).expect("initialize daemon state");
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-s", "exit-empty", "on"]),
+            )
+            .expect("exit-empty option");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[50]",
+                        "replace=kill-session -t old ; new-session -d -s replacement ; set-option -g @after-replace yes",
+                    ],
+                ),
+            )
+            .expect("replacement alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new("replace", [] as [&str; 0])])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                50,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .values()
+                .any(|session| session.name == "replacement")
+        );
+        assert_eq!(read_global_option(&shared, "@after-replace"), "yes");
+        assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn command_alias_defers_structural_hooks_until_its_children_finish() {
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "anchor");
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "session-created",
+                        "set-option -g @alias-event visible",
+                    ],
+                ),
+            )
+            .expect("session-created hook");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[59]",
+                        "event-order=new-session -d -s created ; display-message -p '#{@alias-event}'",
+                    ],
+                ),
+            )
+            .expect("event-order alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new("event-order", [] as [&str; 0])])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                59,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success {
+                output,
+                exit_code: 0,
+                ..
+            } if output.is_empty()
+        ));
+        assert_eq!(read_global_option(&shared, "@alias-event"), "visible");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forced_alias_shutdown_discards_structural_hooks_queued_before_kill_server() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("closed");
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "old");
+        switch_test_session(&shared, "survivor");
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "session-closed".to_owned(),
+                        format!("run-shell 'printf x >> {}'", marker.display()),
+                    ],
+                ),
+            )
+            .expect("session-closed hook");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[60]",
+                        "force-order=kill-session -t old ; kill-server",
+                    ],
+                ),
+            )
+            .expect("force-order alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new("force-order", [] as [&str; 0])])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                60,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert_eq!(fs::read_to_string(marker).expect("close hook marker"), "x");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_alias_queue_bubbles_shutdown_and_yield_to_its_parent() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let nested = directory.path().join("nested");
+        let outer = directory.path().join("outer");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[51]".to_owned(),
+                        format!(
+                            "nested-shutdown=run-shell -C {{ kill-server ; wait-for never ; run-shell 'printf nested > {}' }} ; run-shell 'printf outer > {}'",
+                            nested.display(),
+                            outer.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("nested shutdown alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "nested-shutdown",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                51,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !nested.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fs::read_to_string(nested).expect("nested marker"), "nested");
+        assert!(!outer.exists());
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sourced_wait_yields_an_inherited_shutdown_queue() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("child.conf");
+        let nested = directory.path().join("nested");
+        let outer = directory.path().join("outer");
+        fs::write(
+            &source,
+            format!(
+                "wait-for never ; run-shell 'printf nested > {}'\n",
+                nested.display()
+            ),
+        )
+        .expect("source body");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[52]".to_owned(),
+                        format!(
+                            "source-shutdown=kill-server ; source-file '{}' ; run-shell 'printf outer > {}'",
+                            source.display(),
+                            outer.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("source shutdown alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "source-shutdown",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                52,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        thread::sleep(Duration::from_millis(150));
+        assert!(!nested.exists());
+        assert!(!outer.exists());
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_source_yields_an_inherited_shutdown_queue_at_its_root() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("child.conf");
+        let grandchild = directory.path().join("grandchild.conf");
+        fs::write(&grandchild, "set-option -g @grandchild yes\n").expect("grandchild source");
+        fs::write(
+            &child,
+            format!(
+                "set-option -g @before-nested-source yes\nsource-file '{}'\nset-option -g @after-nested-source yes\n",
+                grandchild.display()
+            ),
+        )
+        .expect("child source");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[59]".to_owned(),
+                        format!(
+                            "nested-source-shutdown=kill-server ; source-file '{}' ; set-option -g @after-outer-source yes",
+                            child.display()
+                        ),
+                    ],
+                ),
+            )
+            .expect("nested source shutdown alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "nested-source-shutdown",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                59,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert_eq!(read_global_option(&shared, "@before-nested-source"), "yes");
+        assert!(read_global_option(&shared, "@grandchild").is_empty());
+        assert!(read_global_option(&shared, "@after-nested-source").is_empty());
+        assert!(read_global_option(&shared, "@after-outer-source").is_empty());
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inherited_shutdown_suppresses_sourced_output_without_skipping_effects() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("child.conf");
+        let outer = directory.path().join("outer");
+        fs::write(
+            &source,
+            "set-option -g @sourced-effect yes\ndisplay-message -p CHILD\nhas-session -t missing\n",
+        )
+        .expect("source body");
+        let shared = Arc::new(Shared::new(1));
+        let (command, _) = shared
+            .register(
+                ClientKind::Command,
+                ClientInstanceId::default(),
+                None,
+                None,
+                false,
+                false,
+            )
+            .expect("command client");
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[56]".to_owned(),
+                        format!(
+                            "source-output-shutdown=kill-server ; source-file '{}' ; display-message -p OUTER ; run-shell 'printf outer > {}'",
+                            source.display(),
+                            outer.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("source output alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "source-output-shutdown",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert_eq!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                56,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success {
+                request_id: 56,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@sourced-effect"), "yes");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !outer.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fs::read_to_string(outer).expect("outer marker"), "outer");
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unattached_sourced_show_buffer_yields_an_inherited_shutdown_queue() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("child.conf");
+        let outer = directory.path().join("outer");
+        fs::write(&source, "show-buffer\n").expect("source body");
+        let shared = Arc::new(Shared::new(1));
+        let (command, _) = shared
+            .register(
+                ClientKind::Command,
+                ClientInstanceId::default(),
+                None,
+                None,
+                false,
+                false,
+            )
+            .expect("command client");
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["payload"]),
+            )
+            .expect("paste buffer");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[57]".to_owned(),
+                        format!(
+                            "source-show-buffer-shutdown=kill-server ; source-file '{}' ; run-shell 'printf outer > {}'",
+                            source.display(),
+                            outer.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("show-buffer alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "source-show-buffer-shutdown",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                57,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success {
+                output,
+                exit_code: 0,
+                stderr,
+                ..
+            } if output.is_empty() && stderr.is_empty()
+        ));
+        assert!(!outer.exists());
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_waits_for_a_draining_foreground_shell_job() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("foreground");
+        let outer = directory.path().join("outer");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[58]".to_owned(),
+                        format!(
+                            "long-shell-shutdown=kill-server ; run-shell 'sleep 0.35; printf foreground > {}' ; run-shell 'printf outer > {}'",
+                            marker.display(),
+                            outer.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("long shell alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "long-shell-shutdown",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                58,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert!(!marker.exists());
+        assert!(!outer.exists());
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !marker.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            fs::read_to_string(marker).expect("foreground marker"),
+            "foreground"
+        );
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
+        assert!(!outer.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_shutdown_waits_for_preexisting_foreground_jobs() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shell_marker = directory.path().join("shell");
+        let condition_marker = directory.path().join("condition");
+        let branch_marker = directory.path().join("branch");
+
+        let shared = Arc::new(Shared::new(1));
+        let worker_shared = Arc::clone(&shared);
+        let shell_command = format!("sleep 0.2; printf shell > {}", shell_quote(&shell_marker));
+        let shell = thread::spawn(move || {
+            worker_shared.execute(
+                ClientId(201),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", [shell_command]),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.active_shutdown_blockers() != 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.active_shutdown_blockers(), 1);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            )
+            .expect("direct shutdown");
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        shell
+            .join()
+            .expect("foreground shell worker")
+            .expect("foreground shell result");
+        assert_eq!(
+            fs::read_to_string(&shell_marker).expect("shell marker"),
+            "shell"
+        );
+        assert!(shared.stopping.load(Ordering::Acquire));
+
+        let shared = Arc::new(Shared::new(2));
+        let worker_shared = Arc::clone(&shared);
+        let condition = format!(
+            "sleep 0.2; printf condition > {}; true",
+            shell_quote(&condition_marker)
+        );
+        let branch = format!("run-shell 'printf branch > {}'", branch_marker.display());
+        let if_shell = thread::spawn(move || {
+            worker_shared.execute(
+                ClientId(202),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("if-shell", [condition, branch]),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.active_shutdown_blockers() != 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.active_shutdown_blockers(), 1);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            )
+            .expect("shutdown during if-shell");
+        if_shell
+            .join()
+            .expect("foreground if-shell worker")
+            .expect("foreground if-shell result");
+        assert_eq!(
+            fs::read_to_string(condition_marker).expect("condition marker"),
+            "condition"
+        );
+        assert!(!branch_marker.exists());
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_shutdown_runs_session_close_hooks() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("session-close-hook");
+        let tail = directory.path().join("session-close-tail");
+        let unlinked = directory.path().join("window-unlinked-hook");
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "hooked");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "session-closed".to_owned(),
+                        format!(
+                            "run-shell 'printf hook > {}' ; run-shell 'printf tail > {}'",
+                            marker.display(),
+                            tail.display()
+                        ),
+                    ],
+                ),
+            )
+            .expect("session close hook");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "window-unlinked".to_owned(),
+                        format!("run-shell 'printf unlinked > {}'", unlinked.display()),
+                    ],
+                ),
+            )
+            .expect("window unlink hook");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            )
+            .expect("direct shutdown");
+        assert_eq!(
+            fs::read_to_string(marker).expect("session close hook marker"),
+            "hook"
+        );
+        assert!(!tail.exists());
+        assert!(!unlinked.exists());
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn forced_shutdown_groups_close_events_in_session_name_order() {
+        let shared = Arc::new(Shared::new(1));
+        let (z, z_window, _) = switch_test_session(&shared, "z");
+        let (a, a_window, _) = switch_test_session(&shared, "a");
+
+        let events = shared.stop_shutdown_resources(false, true);
+        let observed = events
+            .iter()
+            .map(|event| {
+                let session = &event.variables[HOOK_SESSION_NAME_CONTEXT_FORMAT];
+                event.variables.get(HOOK_WINDOW_CONTEXT_FORMAT).map_or_else(
+                    || format!("{}:{session}", event.name),
+                    |window| format!("{}:{session}:{window}", event.name),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            [
+                "session-closed:a".to_owned(),
+                format!("window-unlinked:a:{a_window}"),
+                "session-closed:z".to_owned(),
+                format!("window-unlinked:z:{z_window}"),
+            ]
+        );
+        assert!(!shared.inner.lock().engine.state.sessions.contains_key(&a));
+        assert!(!shared.inner.lock().engine.state.sessions.contains_key(&z));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_blocker_keeps_all_forced_shutdown_hook_items() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("hook-order");
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "hooked");
+        for (hook, value) in [
+            (
+                "session-closed",
+                format!(
+                    "run-shell 'printf S >> {}' ; run-shell 'printf s >> {}'",
+                    marker.display(),
+                    marker.display()
+                ),
+            ),
+            (
+                "window-unlinked",
+                format!(
+                    "run-shell 'printf U >> {}' ; run-shell 'printf u >> {}'",
+                    marker.display(),
+                    marker.display()
+                ),
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("set-hook", ["-g", hook, value.as_str()]),
+                )
+                .expect("shutdown hook");
+        }
+        let blocker = ShutdownBlocker::acquire(&shared, false).expect("blocker admitted");
+
+        shared.request_shutdown();
+
+        assert_eq!(fs::read_to_string(marker).expect("hook order"), "SsUu");
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        drop(blocker);
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forced_shutdown_drops_delayed_event_hooks() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let delayed = directory.path().join("delayed");
+        let unlinked = directory.path().join("unlinked");
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "hooked");
+        for (hook, value) in [
+            (
+                "session-closed",
+                format!("run-shell -d 0.2 'printf delayed > {}'", delayed.display()),
+            ),
+            (
+                "window-unlinked",
+                format!("run-shell 'printf unlinked > {}'", unlinked.display()),
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("set-hook", ["-g", hook, value.as_str()]),
+                )
+                .expect("shutdown hook");
+        }
+
+        shared.request_shutdown();
+
+        assert!(shared.stopping.load(Ordering::Acquire));
+        thread::sleep(Duration::from_millis(300));
+        assert!(!delayed.exists());
+        assert!(!unlinked.exists());
+    }
+
+    #[test]
+    fn quiet_shutdown_cause_survives_announcement_and_blocker() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, _) = switch_test_session(&shared, "keeper");
+        let blocker = ShutdownBlocker::acquire(&shared, false).expect("blocker admitted");
+
+        shared.request_shutdown_without_hooks();
+        shared.announce_shutdown();
+
+        assert!(!shared.shutdown_forced.load(Ordering::Acquire));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        assert!(ShutdownBlocker::acquire(&shared, false).is_none());
+        drop(blocker);
+        assert!(shared.stopping.load(Ordering::Acquire));
+        assert!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .contains_key(&session)
+        );
+    }
+
+    #[test]
+    fn closed_shutdown_gate_rejects_late_job_admission() {
+        let shared = Arc::new(Shared::new(1));
+
+        assert!(shared.close_shutdown_blockers());
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        assert!(ShutdownBlocker::acquire(&shared, true).is_none());
+        assert!(ShellJobPermit::acquire(&shared, false, true, None).is_none());
+
+        let shared = Arc::new(Shared::new(2));
+        let blocker = ShutdownBlocker::acquire(&shared, false).expect("blocker admitted");
+        shared.request_shutdown_after_blockers();
+
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        assert!(ShutdownBlocker::acquire(&shared, false).is_none());
+        let inherited = blocker.fork(true);
+        drop(blocker);
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        drop(inherited);
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn foreground_job_admission_blocks_shutdown_before_state_lock() {
+        let shared = Arc::new(Shared::new(1));
+        let inner = shared.inner.lock();
+        let permit_shared = Arc::clone(&shared);
+        let (permit_sender, permit_receiver) = mpsc::sync_channel(1);
+        let permit_worker = thread::spawn(move || {
+            permit_sender
+                .send(ShellJobPermit::acquire(&permit_shared, false, true, None))
+                .expect("send foreground permit");
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while shared.active_shutdown_blockers() != 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.active_shutdown_blockers(), 1);
+
+        let shutdown_shared = Arc::clone(&shared);
+        let shutdown = thread::spawn(move || shutdown_shared.request_shutdown());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared.shutdown_pending.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.shutdown_pending.load(Ordering::Acquire));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        drop(inner);
+
+        let permit = permit_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive foreground permit")
+            .expect("foreground permit admitted");
+        permit_worker.join().expect("foreground permit worker");
+        shutdown.join().expect("deferred shutdown worker");
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        drop(permit);
+        assert!(shared.stopping.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detached_command_mode_job_survives_alias_shutdown() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("detached");
+        let hook_marker = directory.path().join("hook");
+        let shared = Arc::new(Shared::new(1));
+        switch_test_session(&shared, "hooked");
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "session-closed".to_owned(),
+                        format!("run-shell 'printf hook > {}'", hook_marker.display()),
+                    ],
+                ),
+            )
+            .expect("session-closed hook");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[55]".to_owned(),
+                        format!(
+                            "detached-shutdown=kill-server ; run-shell -bC {{ run-shell 'sleep 0.2; printf detached > {}' }}",
+                            marker.display(),
+                        ),
+                    ],
+                ),
+            )
+            .expect("detached shutdown alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "detached-shutdown",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                55,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success { exit_code: 0, .. }
+        ));
+        assert!(!shared.stopping.load(Ordering::Acquire));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !marker.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            fs::read_to_string(marker).expect("detached marker"),
+            "detached"
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
+        assert!(!hook_marker.exists());
+    }
+
+    #[test]
+    fn shutdown_wins_over_a_later_alias_child_error() {
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[54]",
+                        "shutdown-error=kill-server ; has-session -t missing ; set-option -g @after-shutdown-error yes",
+                    ],
+                ),
+            )
+            .expect("shutdown error alias");
+        let prepared = shared
+            .prepare_command_list(vec![CommandInvocation::new(
+                "shutdown-error",
+                [] as [&str; 0],
+            )])
+            .remove(0)
+            .invocation;
+
+        assert!(matches!(
+            shared.execute_command_request_with_prepared(
+                command,
+                ClientKind::Command,
+                &mut context,
+                54,
+                &prepared,
+                true,
+            ),
+            CommandResponse::Success {
+                exit_code: 0,
+                stderr,
+                ..
+            } if stderr.contains("can't find session: missing")
+        ));
+        assert!(read_global_option(&shared, "@after-shutdown-error").is_empty());
+        assert!(shared.stopping.load(Ordering::Acquire));
     }
 
     #[test]
@@ -70242,6 +73049,122 @@ bind - split-window -v -c "#{pane_current_path}"
                 .engine
                 .global_environment_variable("BIND_GROUP_CONTINUED"),
             None
+        );
+    }
+
+    #[test]
+    fn key_binding_command_exits_are_queue_status_not_input_errors() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let missing = directory.path().join("missing.conf");
+        let shared = Arc::new(Shared::new(1));
+        let (session, _, pane) = switch_test_session(&shared, "binding-command-exit");
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("writer".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).expect("attach");
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("binding context");
+        let first_group = SourceSpan {
+            source: "<bind-key>".to_owned(),
+            line: 1,
+            column: 1,
+        };
+        let second_group = SourceSpan {
+            source: "<bind-key>".to_owned(),
+            line: 2,
+            column: 1,
+        };
+        let third_group = SourceSpan {
+            source: "<bind-key>".to_owned(),
+            line: 3,
+            column: 1,
+        };
+
+        shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[
+                    CommandInvocation::new("source-file", [missing.display().to_string()])
+                        .with_source(first_group.clone()),
+                    CommandInvocation::new(
+                        "set-environment",
+                        ["-g", "BIND_COMMAND_EXIT_SAME_GROUP", "no"],
+                    )
+                    .with_source(first_group.clone()),
+                    CommandInvocation::new(
+                        "set-environment",
+                        ["-g", "BIND_COMMAND_EXIT_NEXT_GROUP", "yes"],
+                    )
+                    .with_source(second_group.clone()),
+                ],
+                false,
+            )
+            .expect("command exit stays inside the key queue");
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner
+                    .engine
+                    .global_environment_variable("BIND_COMMAND_EXIT_SAME_GROUP"),
+                None
+            );
+            assert_eq!(
+                inner
+                    .engine
+                    .global_environment_variable("BIND_COMMAND_EXIT_NEXT_GROUP"),
+                Some("yes".to_owned())
+            );
+        }
+        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage {
+                        kind: ClientMessageKind::Warning,
+                        text,
+                        ..
+                    },
+                    ..
+                }) if text == &missing_source_error(&missing)
+            )
+        }));
+
+        let error = shared
+            .execute_key_commands(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                pane,
+                &[
+                    CommandInvocation::new("source-file", [missing.display().to_string()])
+                        .with_source(first_group),
+                    CommandInvocation::new("kill-pane", ["-t", "missing"])
+                        .with_source(second_group),
+                    CommandInvocation::new(
+                        "set-environment",
+                        ["-g", "BIND_COMMAND_EXIT_AFTER_ERROR", "yes"],
+                    )
+                    .with_source(third_group),
+                ],
+                false,
+            )
+            .expect_err("later server error escapes the key queue");
+        assert_eq!(daemon_error_text(&error), "can't find pane: missing");
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("BIND_COMMAND_EXIT_AFTER_ERROR"),
+            Some("yes".to_owned())
         );
     }
 
@@ -79008,9 +81931,10 @@ bind - split-window -v -c "#{pane_current_path}"
         )
         .expect("send first attach");
         let (session, pane) = loop {
-            if let ProtocolMessage::Attached { session, snapshot } =
-                zz_protocol::read_protocol_message(&mut client_stream)
-                    .expect("receive first Attached")
+            if let ProtocolMessage::Attached {
+                session, snapshot, ..
+            } = zz_protocol::read_protocol_message(&mut client_stream)
+                .expect("receive first Attached")
             {
                 let pane = snapshot.sessions[0].windows[0].active_pane;
                 break (session, pane);

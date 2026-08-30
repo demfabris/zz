@@ -5,3 +5,5 @@ bind-key -T zzalias F1 zzaliasmulti bound
 keys: zzalias F1
 set-option -s command-alias[91] zzaliasempty=
 out: zzaliasempty discarded
+run-shell "python3 -c '__import__(\"subprocess\").run([\"tmux\",\"set-option\",\"-s\",\"command-alias[92]\",\"zzaliasdash=display-message -p -- -literal\"+chr(10)+\"display-message -p ok\"],check=True)'"
+out: zzaliasdash

@@ -4100,6 +4100,8 @@ mod tests {
                 zz_protocol::ProtocolMessage::Attached {
                     session: SessionId(0),
                     snapshot: two_pane_snapshot_of(PaneId(0), PaneKindSnapshot::Terminal),
+                    read_only: false,
+                    client_flags: String::new(),
                 },
                 cx,
             );

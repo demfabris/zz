@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 84;
+pub const PROTOCOL_VERSION: u16 = 85;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1411,18 +1411,30 @@ pub enum ServerError {
     PaneNotFound(String),
     #[error("invalid command: {0}")]
     CommandParse(String),
+    #[error("{0}")]
+    PostAdmissionCallback(Box<ServerError>),
 }
 
 impl ServerError {
     #[must_use]
     pub const fn is_command_parse(&self) -> bool {
-        matches!(self, Self::CommandParse(_))
+        match self {
+            Self::CommandParse(_) => true,
+            Self::PostAdmissionCallback(error) => error.is_command_parse(),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_post_admission_callback(&self) -> bool {
+        matches!(self, Self::PostAdmissionCallback(_))
     }
 
     #[must_use]
     pub fn tmux_message(&self) -> String {
         match self {
             Self::InvalidCommand(message) | Self::CommandParse(message) => message.clone(),
+            Self::PostAdmissionCallback(error) => error.tmux_message(),
             error => error.to_string(),
         }
     }
@@ -2577,6 +2589,8 @@ pub enum ProtocolMessage {
     Attached {
         session: SessionId,
         snapshot: MuxSnapshot,
+        read_only: bool,
+        client_flags: String,
     },
     Detach,
     SetColorScheme(TerminalColorScheme),
@@ -2753,6 +2767,21 @@ mod tests {
         );
         assert!(error.is_command_parse());
         assert!(!super::ServerError::InvalidCommand(String::new()).is_command_parse());
+    }
+
+    #[test]
+    fn post_admission_callback_holds_wire_tag_thirteen() {
+        let error = super::ServerError::PostAdmissionCallback(Box::new(
+            super::ServerError::SessionNotFound("missing".to_owned()),
+        ));
+        let bytes = postcard::to_stdvec(&error).expect("callback error encodes");
+        assert_eq!(bytes[0], 13);
+        assert_eq!(
+            postcard::from_bytes::<super::ServerError>(&bytes).expect("callback error decodes"),
+            error
+        );
+        assert!(error.is_post_admission_callback());
+        assert_eq!(error.tmux_message(), "can't find session: missing");
     }
 
     #[test]
@@ -3791,7 +3820,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 84);
+        assert_eq!(super::PROTOCOL_VERSION, 85);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

@@ -5,7 +5,7 @@ description: A single-pass tmux-style tokenizer plus the daemon replay layer tha
 resource: crates/zz-mux/src/parser.rs
 tags: [tmux, parser, config, tokenizer, mux-conf]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 last_updated_by: Codex
 ---
 
@@ -262,8 +262,13 @@ and defers sibling construction warnings until the batch finishes replay.
 Verbose output includes completed physical groups and successful alias-subparse traces before the
 first failure, including parse-only files. A failing expanded alias emits no successful alias trace.
 Parser, mux, and daemon regressions plus the two-step `smoke/config-chain-parse-abort` differential
-cover these rules. Recognized unsupported `choose-client` and `switch-mode` typed positions,
-multi-command alias bodies, non-UTF-8 config bytes, and source stdin retain their existing owners.
+cover these rules. At the slice-10z checkpoint, recognized unsupported `choose-client` and
+`switch-mode` typed positions, multi-command alias bodies, non-UTF-8 config bytes, and source stdin
+retained separate owners. Under the 2026-08-30 `aliases.command-bodies` closure, the daemon now
+carries valid multi-command and empty bodies through replay as one opaque prepared group. Children
+retain their physical source groups, caller arguments reach only the final child, and a yielded
+nested source stops at its owning queue boundary. The other three exclusions retain their existing
+owners.
 `-t` resolves one pane target before path expansion and replay. A missing target follows tmux's
 `CMD_FIND_CANFAIL` path: the file still loads with an empty target context, while the invoking client
 cwd remains the source base. `-F` reads the resolved target context. `-v` emits canonical parsed

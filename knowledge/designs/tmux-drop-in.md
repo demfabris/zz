@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; parallel Wave 2 closed 3 of 3 on 2026-08-30
+status: Original nine phases shipped 2026-08-20; F-ALIASES-MULTI-BODY closed 2026-08-30
 tags:
 - tmux
 - compatibility
@@ -71,7 +71,7 @@ The target splits in two:
    session-scoped prefixes stay parked.
 10. Each reviewed wave commits to `main` locally; pushes stay explicit.
 
-# Where this stands (2026-08-29)
+# Where this stands (2026-08-30)
 
 **All nine original implementation phases shipped.** A human typing `tmux new -s foo` lands inside
 the session, explicit attach works, and bare packaged `zz` now lazily creates and attaches session
@@ -91,15 +91,14 @@ flags and documented semantic divergences.
 | 7 — the binary surface | complete 2026-08-18 |
 | 8 — the attach contract | shipped 2026-08-20; empty-daemon regression repaired 2026-08-22 |
 
-The persisted accepted slice 10ag compatibility inventory contains 103 differential scenarios and
-1,630 executable steps against pinned tmux `d77c9dc6`, including
-the config and plugin corpus. The persisted full-corpus run from 2026-08-29 leaves every ordinary
-row clean.
+The persisted accepted compatibility inventory contains 106 differential scenarios and 1,683
+executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The
+persisted full-corpus run from 2026-08-30 leaves every ordinary row clean.
 `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one approved GEO divergence with every other channel
 clean. The combined summary records the attached-client fixture as `PASS`, and
 `compat/run.sh --check-summary` passes. Its SHA-256 is
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`.
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
 The 10l source registration and 10m key-structure checkpoints add no differential scenario or step.
 Slice 10n adds seven attached confirmation cases plus a one-byte pane sentinel without adding a
 differential row.
@@ -533,9 +532,10 @@ positive-delay shell-form `run-shell` environment timing. Local slice 10ag close
 initial-client cwd. Slice 10ah takes Control kill-server response order, and slice 10ai follows with
 Control exit pane-output discard. The 2026-08-30 shell-job cwd front closes command and status job
 working-directory selection with focused and attached evidence, and the DEL front closes the three
-distinct DEL spellings with live transport proof. The registry has 84 active groups, 586 classified
-active items, and 122 closed records: 42 open, 20 blocked, and 22 accepted; 144 of 206 groups are
-resolved (69.9%). The current
+distinct DEL spellings with live transport proof. `F-ALIASES-MULTI-BODY` then closes executable
+empty and multi-command user aliases while registering forced-shutdown multi-window hook order as a
+separate residual. The registry has 84 active groups, 586 classified active items, and 123 closed
+records: 42 open, 20 blocked, and 22 accepted; 145 of 207 groups are resolved (70.0%). The current
 198-name partition
 has 95 direct mux values, 32 daemon-delegated values, and 71 live gaps. Slice 10x gives existing
 `new-session -A -c` targets the attach cwd path and preserves fresh explicit-empty session state.
@@ -1034,12 +1034,14 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    pane dead after the live PTY/VT actor exits, so the proposed feed path does not exist.
    The tracker keeps whole-catalog option-name format coverage in a separate mux-owned group;
    separator and hook-listing evidence does not close that audit.
-6. `command-alias`: **shipped 2026-08-21.** `MuxEngine::resolve_command_alias` resolves one
-   layer through the config tokenizer, appends caller arguments, and never recurses (the
-   pin's `CMD_PARSE_NOALIAS`). Its typed result distinguishes a miss, a supported expansion, and a
-   matched empty, multi-command, or unparsable body; the last case refuses instead of falling
-   through to a shadowed canonical or catalog-alias command. Standalone mux execution resolves once
-   before canonical lookup.
+6. `command-alias`: **shipped 2026-08-21; multi-body completion 2026-08-30.**
+   `MuxEngine::resolve_command_alias` resolves one layer through the config tokenizer and never
+   recurses (the pin's `CMD_PARSE_NOALIAS`). Its typed result distinguishes a miss, a single
+   expansion, an empty success, an opaque multi-command group, and an unparsable body. An
+   unparsable exact match refuses instead of falling through to a shadowed canonical or
+   catalog-alias command. Caller arguments and client-owned stdin attach only to the final child of
+   a nonempty group; the group preserves option boundaries, empty arguments, typed blocks, source
+   spans, and physical groups. Standalone mux execution resolves once before canonical lookup.
    Daemon execution expands once before read-only authorization, then sends the same immutable
    invocation through logging, native preemption, mux dispatch, and hooks without another alias
    lookup. Stored `bind-key` and `set-hook` lists execute the commands constructed for storage
@@ -1055,7 +1057,10 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    groups during that pass, custom `@` values retain normalized textual groups, and typed ignored
    `-R` values still construct. Selecting a `display-menu` action
    begins a fresh stage. Each stage resolves no more than one user-alias layer and refuses matched
-   unsupported bodies.
+   unparsable bodies. `F-ALIASES-MULTI-BODY` makes empty groups successful no-ops and executes
+   nonempty groups through one ordinary queue. The wrapper is not dispatched, hooked, or exposed;
+   local CLI routing follows the final leaf, and read-only authorization checks the complete frozen
+   group before any effect.
    Protocol v74 closes the former Control-side static name check. Control asks the daemon to prepare
    the complete initial argv unit or LF line under one lock before allocating frames, then executes
    the immutable returned invocations without a second alias lookup. The protocol-internal
@@ -1063,14 +1068,15 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    including forged read-only requests. The six stored defaults match the pin; no catalog alias
    deletion was needed. Local default and explicit-socket invocations prepare their complete vector
    through v74 before routing. Exact attach shadows stay in command mode, arbitrary aliases to attach
-   or attaching `new-session` enter the TUI with the immutable vector, stdin follows the prepared
-   canonical command, and kill recovery requires an unaliased transport or handshake failure. Raw
+   or attaching `new-session` enter the TUI with the immutable vector, stdin and routing follow the
+   final prepared leaf, and kill recovery requires an unaliased transport or handshake failure. Raw
    `--kill-server` remains unaliasable, while `--restart-daemon` can recover from a failed live
    preparation. The local path scans every prepared result before
    stdin capture, attach or TUI routing, and execution, so a later typed name or alias-body error
    aborts the vector before any earlier effect. Runtime command failures keep tmux's sequential
-   queue behavior. The pin proves the unknown-name diagnostic shape; zz's malformed alias-body
-   diagnostic remains a local choice while `aliases.command-bodies` is open. If preparation cannot
+   queue behavior. Control emits no wrapper frame: initial children inherit flags 0, stdin children
+   flags 1, and hook children flags 0. The pin proves the unknown-name diagnostic shape; malformed
+   alias bodies remain loud preparation failures. If preparation cannot
    reach a live compatible daemon, slice 10r applies an alias-free raw syntax pass before any routing
    decision. It validates canonical names, built-in aliases, unique prefixes, flags, arity, and typed
    callback positions across the 83 implemented and nine recognized parked tmux verbs. Exact native
@@ -1084,7 +1090,10 @@ lifecycle, exact bounded log identity, and repeated pre-visit BEL delivery.
    an uncontested daemon, and registration fails once shutdown begins. Remote `--host` preparation
    remains under `aliases.remote-client-preflight`. Slice 10u closes warm unaliased argument groups,
    slice 10y closes config alias snapshots, and slice 10z closes config and source file-unit
-   construction under `mux.chain-parse-abort`; empty or multi-command bodies retain their separate owner.
+   construction under `mux.chain-parse-abort`. The eight-step `aliases-multi-body` differential is
+   clean. Forced-shutdown one-window hooks are covered; history-dependent multi-window
+   `window-unlinked` order remains under `hooks.shutdown-window-unlinked-order` because zz does not
+   retain tmux's winlink red-black-tree shape.
 7. `update-environment`: **shipped 2026-08-21.** `seed_session_environment` and
    `global_tmux_option_value` both read the stored array; the frozen constant is gone from
    `command.rs`. Creation-time `new-session -e/-E` shipped 2026-08-22. Protocol v82 later added the

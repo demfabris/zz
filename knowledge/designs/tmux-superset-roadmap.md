@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; parallel wave 2 closed 3 of 3; Wave 3 frozen and ready
+status: In Progress; F-ALIASES-MULTI-BODY closed; dispatch board active
 tags:
 - tmux
 - compatibility
@@ -41,18 +41,23 @@ records the source-anchored baseline used to build this plan.
 The three-front trial closed all 3 frozen chunks and registered 3 residual groups. Wave 2 then
 closed slice 10ai, shell-job cwd, and literal DEL identity as 3 of 3 frozen chunks without a new
 residual. Unresolved work moved from 65 to 62: 42 open and 20 blocked. The tracker has 84 active
-groups, 586 classified active items, 122 closed groups, and 22 accepted active groups. Its secondary
-ledger settlement is 144 of 206 known groups (69.9%). The persisted accepted artifact covers 105 scenarios and 1,675 steps, with attached-client
+groups, 586 classified active items, 123 closed groups, and 22 accepted active groups. Its secondary
+ledger settlement is 145 of 207 known groups (70.0%). The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client
 `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
-`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Slice 10af closes
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
 Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`
 without a public protocol change. The focused strict-key run passes 40 steps plus 196 fixture checks
 on both engines, and the mux package, formatting, and mux clippy gates pass.
 Slice 10ah closes `control-mode.kill-server-response-order`. Slice 10ai closes
 `control-mode.exit-pane-output`. The second Wave 2 chunk closes `jobs.shell-job-cwd`; the third
-closes `keys.literal-delete-identity`. Wave 3 now freezes two editor chunks and one read-only review
-front without mutating the registry's priority labels.
+closes `keys.literal-delete-identity`. Wave 3 then froze two editor chunks and one read-only review
+front without mutating the registry's priority labels; the later append-only dispatch board
+superseded those READY briefs.
+The later `F-ALIASES-MULTI-BODY` dispatch-board front closes empty and multi-command alias bodies
+with an eight-step zero-difference focused scenario. It registers the history-dependent forced
+shutdown `window-unlinked` order as `hooks.shutdown-window-unlinked-order`, so unresolved work stays
+at 62 instead of disappearing into a false parity claim.
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
 matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
 named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
@@ -71,12 +76,13 @@ independent chunks and closed all three. Shell-job cwd passed its three-step dif
 coordinator-owned attached-client proof. The DEL candidate passed independent review after repairs
 for failures in prefix and configured-backspace transport, then passed its 40-step differential and
 196 fixture checks per engine.
-Wave 3 assigns typed Control config diagnostics to one protocol, daemon, and app editor; the
+Wave 3 assigned typed Control config diagnostics to one protocol, daemon, and app editor; the
 copy-action vocabulary inventory to one mux and oracle editor; and the remaining context-producer
 and modifier split to a read-only reviewer. The two editors have disjoint write zones. Issue #7 owns
-claims against the published base, while the coordinator retains the registry, generated report,
-shared knowledge pages, accepted summary, review, and integration.
-The final workspace run passed every non-daemon package. Three daemon tests failed only under the
+the later dispatch-board claims against each published base; workers must not reuse those historical
+READY labels. The coordinator retains the registry, generated report, shared knowledge pages,
+accepted summary, review, and integration.
+The final workspace run passed every non-daemon package. Two daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake
 class. Strict workspace clippy, formatting, tracker, stored-summary, and OKF validation pass.
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
@@ -371,14 +377,14 @@ engine with no differing channel. The attached fixture keeps pane cwd separate f
 proves status cwd, and covers 24 Interactive and Control `run-shell` and `if-shell` cases across
 valid, missing, and omitted targets. No protocol or snapshot field changed.
 
-The registry now has 84 active groups and 586 active items, with 122 closed records: 42 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 144 of 206 groups (69.9%). The
-persisted accepted artifact covers 105 scenarios and 1,675 steps with attached-client `PASS`,
+The registry now has 84 active groups and 586 active items, with 123 closed records: 42 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 145 of 207 groups (70.0%). The
+persisted accepted artifact covers 106 scenarios and 1,683 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
-`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Focused mux and
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Focused mux and
 compatibility gates from the accepted artifact pass. The DEL closure adds 196 strict-key fixture
 checks per engine without changing the scenario or step count. The final workspace run passed every
-non-daemon package; three daemon tests failed only under parallel load and passed alone. Strict
+non-daemon package; two daemon tests failed only under parallel load and passed alone. Strict
 workspace clippy, formatting, tracker, stored-summary, and OKF validation pass. The coordinator
 has replaced the persisted artifact with the completed aggregate above.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
@@ -862,9 +868,12 @@ work queue. Select exact gap IDs from the generated report before starting a sli
    textual groups, and typed ignored `-R` values still construct. A typed `display-menu` action
    drops its structural wrapper before the fresh selection parse, while a quoted brace string stays
    literal. A
-   typed alias result now keeps an exact empty, multi-command, or unparsable match from falling
-   through to the canonical or catalog-alias command it shadows. Actual empty and multi-command
-   execution remains under `aliases.command-bodies`.
+   typed alias result keeps an exact empty, multi-command, or unparsable match from falling through
+   to the canonical or catalog-alias command it shadows. `F-ALIASES-MULTI-BODY` then closes the
+   executable cases: an empty body succeeds without effects, while a multi-command body becomes one
+   immutable opaque group whose caller arguments and client-owned stdin reach only the final child.
+   The wrapper is neither dispatched nor framed; its children execute through the ordinary queue.
+   Unparsable bodies remain loud preparation failures.
    Protocol v74 closes Control's static unknown-name precheck by preparing each complete input unit
    under one daemon lock before framing. Prepared execution freezes only that alias lookup and still
    reauthorizes normally. A local CLI with a compatible daemon prepares the complete vector before
@@ -1859,6 +1868,20 @@ permanent product decision has been recorded for them.
   channel clean, and SHA-256
   `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Cumulative slices 10w
   through 10ag form the authorized 2026-08-29 checkpoint.
+- 2026-08-30: `F-ALIASES-MULTI-BODY` closed `aliases.command-bodies`. Alias preparation stores empty
+  and multi-command results in protocol v84's existing typed invocation: empty
+  groups are successful no-ops, and opaque groups preserve every child and physical source group
+  while forwarding caller arguments and client-owned stdin only to the final child. Mux, daemon,
+  stored bindings and hooks, config replay, local CLI routing, and Control all execute the same
+  frozen group. Control emits child frames with the enclosing queue's flags and no wrapper frame.
+  Queue-owned failure pruning, structural-hook deferral, nested-source yields, shell blockers,
+  delayed callback cancellation, and forced versus quiet shutdown are covered by focused tests; the
+  eight-step differential has zero mismatches. Review registered
+  `hooks.shutdown-window-unlinked-order`: tmux's forced-shutdown order depends on retained winlink
+  red-black-tree history that zz's index map cannot reconstruct. The registry therefore remains at
+  84 active groups and 586 items, with 123 closed records and 145 of 207 groups resolved (70.0%).
+  Closure review advanced protocol v85 for typed post-admission callback provenance and
+  daemon-authoritative `Attached` reconnect state, not for an alias child-vector field.
 
 # Related
 

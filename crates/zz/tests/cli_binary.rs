@@ -1865,11 +1865,28 @@ mod daemon_autostart {
     }
 
     #[test]
-    fn attaching_new_session_later_in_a_chain_enters_the_alternate_screen() {
+    fn attaching_new_session_inside_a_later_alias_enters_the_alternate_screen() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {
             return;
         }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "seed"])
+                .status
+                .success()
+        );
+        assert!(
+            fixture
+                .run(&[
+                    "set-option",
+                    "-s",
+                    "command-alias[40]",
+                    "go=new-session -s pty-attached ; split-window -h",
+                ])
+                .status
+                .success()
+        );
         let Ok((mut master, slave)) = open_pty() else {
             return;
         };
@@ -1877,19 +1894,7 @@ mod daemon_autostart {
         let stdout = slave.try_clone().expect("clone pty stdout");
         let mut command = fixture.command();
         command
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                "chain-before",
-                ";",
-                "new-session",
-                "-s",
-                "pty-attached",
-                ";",
-                "split-window",
-                "-h",
-            ])
+            .args(["new-session", "-d", "-s", "chain-before", ";", "go"])
             .stdin(Stdio::from(stdin))
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(slave));
@@ -1960,7 +1965,7 @@ mod daemon_autostart {
         );
         let listed = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
         assert_eq!(listed.status.code(), Some(0));
-        assert_eq!(listed.stdout, b"chain-before\npty-attached\n");
+        assert_eq!(listed.stdout, b"chain-before\npty-attached\nseed\n");
         assert!(listed.stderr.is_empty());
         let panes = fixture.run(&["list-panes", "-t", "pty-attached", "-F", "#{pane_index}"]);
         assert_eq!(panes.status.code(), Some(0));
@@ -2588,14 +2593,14 @@ mod daemon_autostart {
                     "set-option",
                     "-s",
                     "command-alias[40]",
-                    "go=attach-session -t named",
+                    "go=display-message -p before ; attach-session -t named",
                 ])
                 .status
                 .success()
         );
         let output = fixture.run(&["go"]);
         assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, b"before\n");
         assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
     }
 
@@ -2617,14 +2622,14 @@ mod daemon_autostart {
                     "set-option",
                     "-s",
                     "command-alias[40]",
-                    "pipe=agent-send -t %0",
+                    "pipe=display-message -p before ; agent-send -t %0",
                 ])
                 .status
                 .success()
         );
         let aliased = fixture.run_with_stdin(&["pipe"], b"review this\n");
         assert_eq!(aliased.status.code(), Some(1));
-        assert!(aliased.stdout.is_empty());
+        assert_eq!(aliased.stdout, b"before\n");
         assert_eq!(
             aliased.stderr,
             b"target not found: no agent pane in the window holding %0\n"
@@ -3117,7 +3122,7 @@ mod daemon_autostart {
                     "set-option",
                     "-s",
                     "command-alias[40]",
-                    "go=new-session -s frozen-old",
+                    "go=display-message -p before ; new-session -s frozen-old",
                 ])
                 .status
                 .success()
@@ -3131,6 +3136,7 @@ mod daemon_autostart {
             "go",
         ]);
         assert_eq!(frozen.status.code(), Some(1));
+        assert_eq!(frozen.stdout, b"before\n");
         assert_eq!(frozen.stderr, b"open terminal failed: not a terminal\n");
         let sessions = fixture.run(&["list-sessions", "-F", "#{session_name}"]);
         assert_eq!(sessions.status.code(), Some(0));
@@ -4545,6 +4551,343 @@ mod daemon_autostart {
             assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
         }
 
+        #[test]
+        fn control_alias_groups_inherit_flags_and_continue_after_shell_status() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let created =
+                fixture.run(&["new-session", "-d", "-s", "control-alias", "exec /bin/cat"]);
+            assert_eq!(created.status.code(), Some(0));
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[90]",
+                "auditmulti=display-message -p first ; display-message -p",
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+
+            let initial = fixture.run_with_stdin(&["-C", "auditmulti", "tail"], b"");
+            assert_eq!(initial.status.code(), Some(0));
+            assert!(initial.stderr.is_empty());
+            let stream = parse_stream(&initial.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &["first"], false);
+            assert_block(&stream.blocks[1], 2, 0, &["tail"], false);
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[91]",
+                "auditfail=display-message -p before ; run-shell 'exit 3' ; display-message -p after",
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+            let marker_path = fixture._directory.path().join("alias-shell-complete");
+            let output = run_control_until_return(
+                &fixture,
+                &["-C", "attach-session", "-t", "control-alias"],
+                "auditfail ; display-message -p same-line\n",
+                &marker_path,
+                "control alias shell completion",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 6, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &["before"], false);
+            assert_block(&stream.blocks[2], 3, 1, &[], false);
+            assert_block(&stream.blocks[3], 4, 1, &["after"], false);
+            assert_block(&stream.blocks[4], 5, 1, &["same-line"], false);
+            assert_block(&stream.blocks[5], 6, 1, &[], false);
+            assert!(
+                stream
+                    .outside
+                    .iter()
+                    .any(|line| line == "'exit 3' returned 3")
+            );
+
+            let source = write_source(
+                fixture._directory.path(),
+                "alias-source.conf",
+                "display-message -p CHILD_ONE\ndisplay-message -p CHILD_TWO\n",
+            );
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[92]",
+                &format!("auditsource=source-file '{source}'"),
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+            let initial = fixture.run_with_stdin(&["-C", "auditsource"], b"");
+            assert_eq!(initial.status.code(), Some(0));
+            let stream = parse_stream(&initial.stdout, false);
+            assert_eq!(stream.blocks.len(), 3, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 0, &["CHILD_ONE"], false);
+            assert_block(&stream.blocks[2], 3, 0, &["CHILD_TWO"], false);
+
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[94]",
+                &format!(
+                    "auditmiddle=display-message -p BEFORE ; source-file '{source}' ; display-message -p OUTER"
+                ),
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+            let initial = fixture.run_with_stdin(&["-C", "auditmiddle"], b"");
+            assert_eq!(initial.status.code(), Some(0));
+            let stream = parse_stream_allow_gaps(&initial.stdout, false);
+            assert_eq!(stream.blocks.len(), 5, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &["BEFORE"], false);
+            assert_block(&stream.blocks[1], 2, 0, &[], false);
+            assert_block(&stream.blocks[2], 3, 0, &["CHILD_ONE"], false);
+            assert_block(&stream.blocks[3], 4, 0, &["CHILD_TWO"], false);
+            assert_block(&stream.blocks[4], 6, 0, &["OUTER"], false);
+
+            let missing = fixture._directory.path().join("missing-alias-source.conf");
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[93]",
+                &format!(
+                    "auditmissing=display-message -p before-missing ; source-file '{}' ; display-message -p after-missing",
+                    missing.display()
+                ),
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+            let marker_path = fixture
+                ._directory
+                .path()
+                .join("alias-source-failure-complete");
+            let output = run_control_until_return(
+                &fixture,
+                &["-C", "attach-session", "-t", "control-alias"],
+                "auditmissing ; display-message -p same-line-missing\n",
+                &marker_path,
+                "control alias source failure",
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            assert!(
+                stream
+                    .blocks
+                    .iter()
+                    .any(|block| block.payload == ["before-missing"])
+            );
+            assert!(stream.blocks.iter().any(|block| {
+                block.error
+                    && block
+                        .payload
+                        .iter()
+                        .any(|line| line.contains("missing-alias-source.conf"))
+            }));
+            assert!(!stream.blocks.iter().any(|block| {
+                block
+                    .payload
+                    .iter()
+                    .any(|line| matches!(line.as_str(), "after-missing" | "same-line-missing"))
+            }));
+
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[95]",
+                &format!(
+                    "auditpartial=display-message -p before-partial ; source-file '{}' '{source}' ; display-message -p after-partial",
+                    missing.display()
+                ),
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+            let marker_path = fixture
+                ._directory
+                .path()
+                .join("alias-partial-source-complete");
+            let output = run_control_until_return(
+                &fixture,
+                &["-C", "attach-session", "-t", "control-alias"],
+                "auditpartial\n",
+                &marker_path,
+                "control alias partial source failure",
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            let payloads = stream
+                .blocks
+                .iter()
+                .flat_map(|block| block.payload.iter().map(String::as_str))
+                .collect::<Vec<_>>();
+            for expected in ["before-partial", "CHILD_ONE", "CHILD_TWO", "after-partial"] {
+                assert!(payloads.contains(&expected), "{stream:?}");
+            }
+            assert!(stream.blocks.iter().any(|block| {
+                !block.error
+                    && block
+                        .payload
+                        .iter()
+                        .any(|line| line.contains("missing-alias-source.conf"))
+            }));
+
+            let state_source = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../compat/scenarios/source-file-output-child.conf");
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[96]",
+                &format!(
+                    "auditshutdown=kill-server ; source-file '{}' ; display-message -p OUTER",
+                    state_source.display()
+                ),
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+            let output = fixture.run_with_stdin(&["-C", "auditshutdown"], b"");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let lines = std::str::from_utf8(&output.stdout)
+                .expect("UTF-8 shutdown alias output")
+                .lines()
+                .collect::<Vec<_>>();
+            let exits = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| **line == "%exit")
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            assert_eq!(exits.len(), 1, "{lines:?}");
+            let child = lines
+                .iter()
+                .position(|line| *line == "CHILD_ONE")
+                .expect("sourced child after shutdown");
+            assert!(exits[0] < child, "{lines:?}");
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            let child = stream
+                .blocks
+                .iter()
+                .position(|block| block.payload == ["CHILD_ONE"])
+                .expect("sourced child guard after shutdown");
+            assert!(stream.blocks[child + 1].payload.is_empty(), "{stream:?}");
+            assert!(
+                !stream
+                    .blocks
+                    .iter()
+                    .any(|block| block.payload == ["CHILD_TWO"])
+            );
+            assert!(
+                stream
+                    .blocks
+                    .iter()
+                    .skip(child + 2)
+                    .any(|block| block.payload == ["OUTER"])
+            );
+            fixture.assert_stopped();
+        }
+
+        #[test]
+        fn shutdown_hook_source_yields_locally_without_replaying_the_after_hook() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let created = fixture.run(&["new-session", "-d", "-s", "hookprobe", "exec /bin/cat"]);
+            assert_eq!(created.status.code(), Some(0));
+            let scenarios = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compat/scenarios");
+            let root = scenarios.join("source-file-output-hook-root.conf");
+            let child = scenarios.join("source-file-output-child.conf");
+            let hook = format!("source-file '{}'", child.display());
+            let configured =
+                fixture.run(&["set-hook", "-g", "after-display-message", hook.as_str()]);
+            assert_eq!(configured.status.code(), Some(0));
+            let callback = format!(
+                "kill-server ; source-file '{}' ; display-message -p OUTER",
+                root.display()
+            );
+            let output = fixture.run_with_stdin(&["-C", "run-shell", "-C", callback.as_str()], b"");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 3, "{stream:?}");
+            let payloads = stream
+                .blocks
+                .iter()
+                .flat_map(|block| block.payload.iter().map(String::as_str))
+                .collect::<Vec<_>>();
+            assert_eq!(payloads, ["OUTER", "HOOK_TRIGGER"]);
+            assert_eq!(
+                stream
+                    .blocks
+                    .iter()
+                    .filter(|block| block.payload.is_empty())
+                    .count(),
+                1
+            );
+            for suppressed in ["HOOK_LATER", "CHILD_ONE", "CHILD_TWO"] {
+                assert!(!payloads.contains(&suppressed), "{stream:?}");
+            }
+            let lines = std::str::from_utf8(&output.stdout)
+                .expect("UTF-8 shutdown hook output")
+                .lines()
+                .collect::<Vec<_>>();
+            assert_eq!(lines.iter().filter(|line| **line == "%exit").count(), 1);
+            assert_eq!(lines.last().copied(), Some("%exit"));
+            fixture.assert_stopped();
+        }
+
+        #[test]
+        fn draining_alias_shutdown_tears_down_panes_and_rejects_late_commands_cleanly() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let ready = fixture._directory.path().join("shutdown-pane-ready");
+            let trigger = fixture._directory.path().join("shutdown-pane-trigger");
+            let marker = fixture._directory.path().join("shutdown-pane-marker");
+            let pane_command = format!(
+                "printf ready > '{}'; while [ ! -e '{}' ]; do sleep 0.01; done; sleep 0.2; printf pane > '{}'; sleep 5",
+                ready.display(),
+                trigger.display(),
+                marker.display()
+            );
+            let created = fixture.run(&[
+                "new-session",
+                "-d",
+                "-s",
+                "draining-shutdown",
+                &pane_command,
+            ]);
+            assert_eq!(created.status.code(), Some(0));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !ready.exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(ready.exists(), "pane process did not start");
+            let configured = fixture.run(&[
+                "set-option",
+                "-s",
+                "command-alias[97]",
+                "slowshutdown=kill-server ; run-shell 'sleep 0.8'",
+            ]);
+            assert_eq!(configured.status.code(), Some(0));
+
+            let shutdown = fixture.run(&["slowshutdown"]);
+            assert_eq!(shutdown.status.code(), Some(0));
+            assert!(shutdown.stdout.is_empty());
+            assert!(shutdown.stderr.is_empty());
+            let late = fixture.run(&["list-sessions"]);
+            assert_eq!(late.status.code(), Some(1));
+            assert!(late.stdout.is_empty());
+            assert_eq!(late.stderr, b"server exited unexpectedly\n");
+            std::fs::write(&trigger, b"go").expect("release pane process");
+            thread::sleep(Duration::from_millis(400));
+            assert!(!marker.exists());
+            fixture.assert_stopped();
+            assert!(!marker.exists());
+        }
+
         #[cfg(unix)]
         #[test]
         fn control_sourced_run_shell_closes_before_raw_output_and_same_line_continues() {
@@ -5246,6 +5589,133 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn control_immediate_eof_keeps_a_direct_source_failure_status() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let missing = fixture._directory.path().join("immediate-eof-missing.conf");
+            let output = fixture.run_with_stdin(
+                &[
+                    "-C",
+                    "new-session",
+                    "-s",
+                    "immediate-eof-source",
+                    "exec /bin/cat",
+                ],
+                format!("source-file '{}'\n", missing.display()).as_bytes(),
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            assert!(stream.blocks.iter().any(|block| {
+                block.error
+                    && block
+                        .payload
+                        .iter()
+                        .any(|line| line.contains("immediate-eof-missing.conf"))
+            }));
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
+        fn control_attached_eof_keeps_the_current_admitted_failure_status() {
+            for kind in ["runtime", "source", "run-shell", "confirm-before"] {
+                let fixture = Fixture::new();
+                if !local_socket_bind_available(&fixture.socket) {
+                    return;
+                }
+                let session = format!("attached-eof-{kind}");
+                assert!(
+                    fixture
+                        .run(&["new-session", "-d", "-s", &session, "exec /bin/cat"])
+                        .status
+                        .success()
+                );
+                let output_path = fixture
+                    ._directory
+                    .path()
+                    .join(format!("attached-eof-{kind}.output"));
+                let missing = fixture
+                    ._directory
+                    .path()
+                    .join("attached-eof-source-missing.conf");
+                let (failure, expected) = match kind {
+                    "runtime" => (
+                        "kill-session -t attached-eof-runtime-missing".to_owned(),
+                        "can't find session: attached-eof-runtime-missing",
+                    ),
+                    "source" => (
+                        format!("source-file '{}'", missing.display()),
+                        "attached-eof-source-missing.conf",
+                    ),
+                    "run-shell" => (
+                        "run-shell -d not-a-number 'true'".to_owned(),
+                        "invalid delay time: not-a-number",
+                    ),
+                    "confirm-before" => (
+                        "confirm-before -c xx { display-message -p no }".to_owned(),
+                        "invalid confirm key",
+                    ),
+                    _ => unreachable!(),
+                };
+                let blocker_ready = fixture
+                    ._directory
+                    .path()
+                    .join(format!("attached-eof-{kind}.ready"));
+                let blocker_release = fixture
+                    ._directory
+                    .path()
+                    .join(format!("attached-eof-{kind}.release"));
+                let (mut child, mut stdin) = spawn_control_to_file(
+                    &fixture,
+                    &["-C", "attach-session", "-t", &format!("={session}")],
+                    &output_path,
+                );
+                wait_for_control_clients(&fixture, 1, &format!("attached EOF {kind}"));
+                writeln!(stdin, "display-message -p ATTACHED_EOF_READY")
+                    .expect("write attached EOF readiness command");
+                stdin.flush().expect("flush attached EOF readiness command");
+                wait_for_control_output_marker(
+                    &output_path,
+                    "ATTACHED_EOF_READY",
+                    &mut child,
+                    &format!("attached EOF {kind} readiness"),
+                );
+                writeln!(
+                    stdin,
+                    "run-shell 'touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.01; done' ; {failure}",
+                    blocker_ready.display(),
+                    blocker_release.display(),
+                )
+                .expect("write attached EOF failure");
+                stdin.flush().expect("flush attached EOF failure");
+                wait_for_control_marker(
+                    &blocker_ready,
+                    &mut child,
+                    &format!("attached EOF {kind} blocker"),
+                );
+                drop(stdin);
+                thread::sleep(Duration::from_millis(100));
+                std::fs::write(&blocker_release, b"").expect("release attached EOF blocker");
+
+                let output =
+                    collect_control_process(child, None, &format!("attached EOF {kind} failure"));
+                assert_eq!(output.status.code(), Some(1));
+                assert!(output.stderr.is_empty());
+                let stdout = std::fs::read(&output_path).expect("read attached EOF output");
+                let stream = parse_stream_allow_gaps(&stdout, false);
+                assert!(
+                    stream.blocks.iter().any(|block| {
+                        block.error && block.payload.iter().any(|line| line.contains(expected))
+                    }),
+                    "{stream:?}"
+                );
+                assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+            }
+        }
+
+        #[test]
         fn control_nonself_detach_stays_attached_and_preserves_queued_return() {
             for (label, detach, create_other, blank_return) in [
                 ("detach-others", "detach-client -a", false, true),
@@ -5519,31 +5989,63 @@ mod daemon_autostart {
             }
             let directory = fixture._directory.path().join("control return precedence");
             std::fs::create_dir(&directory).expect("create return precedence directory");
-            let ready = directory.join("pre-failure.ready");
-            let release = directory.join("pre-failure.release");
-            let delayed_command = format!(
-                "if-shell 'touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.01; done; true' 'kill-session -t pre-failure-missing'",
-                ready.display(),
-                release.display()
-            );
-            let (mut child, mut stdin) = fixture.spawn_with_open_stdin(&[
-                "-C",
-                "new-session",
-                "-s",
-                "pre-failure-return",
-                "exec /bin/cat",
-            ]);
-            writeln!(stdin, "{delayed_command}").expect("write delayed command");
-            stdin.flush().expect("flush delayed command");
-            wait_for_control_marker(&ready, &mut child, "pre-failure command wait");
-            drop(stdin);
-            thread::sleep(Duration::from_millis(100));
-            std::fs::write(&release, b"").expect("release delayed source");
-            let output = collect_control_process(child, None, "pre-failure EOF snapshot");
-            assert_eq!(output.status.code(), Some(0));
-            assert!(output.stderr.is_empty());
-            let stream = parse_stream(&output.stdout, false);
-            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+            for wrapper in ["if-shell", "if-shell-format", "run-shell"] {
+                let ready = directory.join(format!("pre-{wrapper}-failure.ready"));
+                let release = directory.join(format!("pre-{wrapper}-failure.release"));
+                let missing = format!("pre-{wrapper}-failure-missing");
+                let blocker = format!(
+                    "run-shell 'touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.01; done'",
+                    ready.display(),
+                    release.display()
+                );
+                let delayed_command = match wrapper {
+                    "if-shell" => format!(
+                        "if-shell 'touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.01; done; true' 'kill-session -t {missing}'",
+                        ready.display(),
+                        release.display()
+                    ),
+                    "if-shell-format" => {
+                        format!("if-shell -F 1 {{ {blocker} ; kill-session -t {missing} }}")
+                    }
+                    "run-shell" => {
+                        format!("run-shell -C {{ {blocker} ; kill-session -t {missing} }}")
+                    }
+                    _ => unreachable!(),
+                };
+                let session = format!("pre-{wrapper}-failure-return");
+                let (mut child, mut stdin) = fixture.spawn_with_open_stdin(&[
+                    "-C",
+                    "new-session",
+                    "-s",
+                    &session,
+                    "exec /bin/cat",
+                ]);
+                writeln!(stdin, "{delayed_command}").expect("write delayed command");
+                stdin.flush().expect("flush delayed command");
+                wait_for_control_marker(
+                    &ready,
+                    &mut child,
+                    &format!("pre-{wrapper}-failure command wait"),
+                );
+                drop(stdin);
+                thread::sleep(Duration::from_millis(100));
+                std::fs::write(&release, b"").expect("release delayed source");
+                let output = collect_control_process(
+                    child,
+                    None,
+                    &format!("pre-{wrapper}-failure EOF snapshot"),
+                );
+                let stream = parse_stream(&output.stdout, false);
+                assert_eq!(output.status.code(), Some(0), "{stream:?}");
+                assert!(output.stderr.is_empty());
+                assert!(
+                    stream.blocks.iter().any(|block| {
+                        block.error && block.payload.iter().any(|line| line.contains(&missing))
+                    }),
+                    "{stream:?}"
+                );
+                assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+            }
 
             let runtime_source = write_source(
                 &directory,

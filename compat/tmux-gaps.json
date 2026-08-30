@@ -4,29 +4,6 @@
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "gaps": [
     {
-      "id": "aliases.command-bodies",
-      "title": "Support multi-command aliases",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:command-alias-multi-body"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Alias tests cover multi-command and empty bodies with caller arguments appended to the final command."
-      ],
-      "depends_on": [],
-      "reason": "The typed resolver now refuses matched empty, multi-command, and unparsable bodies without falling through, but the current dispatch chokepoint still executes only one command per supported alias."
-    },
-    {
       "id": "aliases.remote-client-preflight",
       "title": "Prepare remote CLI aliases without starting SSH",
       "decision": "adopt",
@@ -1311,6 +1288,32 @@
       ],
       "depends_on": [],
       "reason": "Focus is per client and clipboard changes cross client ownership."
+    },
+    {
+      "id": "hooks.shutdown-window-unlinked-order",
+      "title": "Preserve forced-shutdown window-unlinked order",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:shutdown-window-unlinked-rb-order"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Forced-shutdown differentials reach the same multi-window session maps through distinct insertion, deletion, and renumber histories, then match the pin's complete session-closed and window-unlinked hook order."
+      ],
+      "depends_on": [],
+      "reason": "Pinned tmux session_destroy emits window-unlinked before repeatedly removing RB_ROOT from each session's winlink tree, so the order depends on insertion and rebalance history. zz retains only index-sorted session windows and cannot reconstruct that order from the final map."
     },
     {
       "id": "jobs.environment",
@@ -2774,6 +2777,22 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "For local default and explicit socket endpoints, the CLI now asks an already-running compatible daemon to prepare the complete argv chain once without spawning. Resolved command identity and alias-match metadata decide native attach, TUI new-session or attach, agent-send stdin capture, and kill-server recovery before any client-owned preprocessing. Exact attach and attach-session shadows stay in command mode, arbitrary aliases to attaching commands enter the TUI, aliases to agent-send read stdin, and an agent-send shadow does not. Command execution reuses the prepared connection; TUI carries the typed immutable vector across its second connection and sends prepared requests without a second alias lookup. The CLI scans every typed result before stdin capture, attach or TUI routing, and execution, so a later preparation error cannot fall through or follow an earlier effect. A bare unaliased kill-server enters verified incompatible-daemon recovery only for transport or handshake failure; alias errors and nonzero results return normally and leave the daemon alive. Raw --kill-server remains an unaliasable process selector, --restart-daemon still recovers after a failed preflight, and preparation never autospawns. The later mux.local-cli-autospawn-parse-abort closure supersedes the former spawnable missing-daemon fail-open path, and aliases.config-parse-unit later closed config replay snapshotting. Remote --host preprocessing remains open under aliases.remote-client-preflight, while replay-group parse abort remains under mux.chain-parse-abort."
+    },
+    {
+      "id": "aliases.command-bodies",
+      "title": "Support multi-command aliases",
+      "closed_on": "2026-08-30",
+      "evidence": [
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/lib.rs",
+        "resource:crates/zz/src/control_mode.rs",
+        "file:crates/zz/tests/cli_binary.rs",
+        "scenario:compat/scenarios/aliases-multi-body.txt",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/playbooks/compat-harness.md"
+      ],
+      "resolution": "User aliases now expand one immutable layer into an opaque typed command group. Multi-command bodies execute every child through the normal mux and daemon paths, caller arguments and client-owned stdin attach only to the final child, and empty bodies succeed without effects. Recursive group rendering preserves option boundaries, empty arguments, typed blocks, and physical source groups across preparation, stored commands, source replay, local CLI routing, and Control transport. Control omits a synthetic parent frame and emits inherited-flags child guards. Queue-owned failures, shutdown, source yields, structural hooks, and shell jobs retain the pin's tested ordering. The eight-step aliases-multi-body differential has zero mismatches, and focused mux, daemon, Control, CLI, and binary regressions pass. Exact forced-shutdown multi-window window-unlinked order remains open under hooks.shutdown-window-unlinked-order because tmux derives it from retained RB-tree history. The alias group itself reuses protocol v84's CommandInvocation shape. Closure review advanced protocol v85 to append typed post-admission callback provenance and daemon-authoritative Attached reconnect state; these hardening fields do not add an alias child-vector encoding."
     },
     {
       "id": "aliases.config-parse-unit",

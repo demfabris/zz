@@ -99,21 +99,44 @@ control_probe() {
     command="$3"
     raw="$work/control-$label.raw"
     error="$work/control-$label.err"
+    input="$work/control-$label.in"
     check_count=$((check_count + 1))
+    rm -f -- "$input"
+    mkfifo "$input"
     set +e
-    {
-        printf '%s\n' "$command"
-        printf '%s\n' 'detach-client'
-    } | control_client >"$raw" 2>"$error"
+    control_client <"$input" >"$raw" 2>"$error" &
+    control_pid=$!
+    exec 3>"$input"
+    printf '%s\n' "$command" >&3
+    control_error_ready=0
+    attempt=0
+    while [ "$attempt" -lt 500 ]; do
+        if grep -Eq '^%error [0-9]+ [0-9]+ 1$' "$raw" 2>/dev/null; then
+            control_error_ready=1
+            break
+        fi
+        if ! kill -0 "$control_pid" 2>/dev/null; then
+            break
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.01
+    done
+    if [ "$control_error_ready" -eq 1 ]; then
+        printf '%s\n' 'detach-client' >&3
+    fi
+    exec 3>&-
+    wait "$control_pid"
     status=$?
+    rm -f -- "$input"
     set -e
-    if [ "$status" -ne 0 ] || [ -s "$error" ] ||
+    if [ "$control_error_ready" -ne 1 ] || [ "$status" -ne 0 ] || [ -s "$error" ] ||
         ! awk -v expected="$expected" '
-            function finish_frame(kind, flags) {
+            function finish_frame(kind, time, number, flags) {
                 if (!active) {
                     bad = 1
                     return
                 }
+                if (time != frame_time || number != frame_number || flags != frame_flags) bad = 1
                 if (kind == "error") {
                     errors++
                     if (flags != 1 || payload != expected) bad = 1
@@ -124,25 +147,32 @@ control_probe() {
                 payload = ""
             }
             /^%begin [0-9]+ [0-9]+ [0-9]+$/ {
-                if (active) bad = 1
+                if (active || exited) bad = 1
                 active = 1
+                frame_time = $2
+                frame_number = $3
+                frame_flags = $4
                 payload = ""
                 next
             }
             /^%end [0-9]+ [0-9]+ [0-9]+$/ {
-                finish_frame("end", $4)
+                if (exited) bad = 1
+                finish_frame("end", $2, $3, $4)
                 next
             }
             /^%error [0-9]+ [0-9]+ [0-9]+$/ {
-                finish_frame("error", $4)
+                if (exited) bad = 1
+                finish_frame("error", $2, $3, $4)
                 next
             }
             /^%session-changed \$[0-9]+ w$/ {
-                if (active) bad = 1
+                if (active || exited) bad = 1
                 next
             }
             /^%exit$/ {
-                if (active) bad = 1
+                if (active || exited) bad = 1
+                exits++
+                exited = 1
                 next
             }
             /^%/ {
@@ -150,6 +180,7 @@ control_probe() {
                 next
             }
             {
+                if (exited) bad = 1
                 if (!active) {
                     if ($0 != "") bad = 1
                     next
@@ -157,7 +188,7 @@ control_probe() {
                 if (payload != "") payload = payload "\n"
                 payload = payload $0
             }
-            END { exit bad || active || errors != 1 }
+            END { exit bad || active || errors != 1 || exits != 1 }
         ' "$raw"; then
         fail_check "control-$label"
     fi

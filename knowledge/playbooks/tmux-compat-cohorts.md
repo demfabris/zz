@@ -606,13 +606,13 @@ closure is that exception.
 | Pending rerank | Immediate background run-shell ordering | `jobs.run-shell-immediate-background-environment` | Unranked | Match absent-delay and `-d 0` queue ordering without timing races |
 | Wave 2 chunk | Shell-job cwd | Closed under `jobs.shell-job-cwd` on 2026-08-30 | Complete | The three-step differential completes eight checks per engine, and the attached fixture covers 24 client, command, and target-mode cases |
 | Wave 2 chunk | Literal DEL identity | Closed under `keys.literal-delete-identity` on 2026-08-30 | Complete | Raw DEL, caret plus DEL, and textual `0x7f` retain distinct identities, pinned rendering, and literal prefix and backspace transport |
-| Wave 3 editor | Typed Control config diagnostics | `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | Frozen | Carry diagnostic identity through protocol, daemon, and Control rendering without prose matching |
-| Wave 3 review | Context producer runtime fidelity | `formats.context-producer-fidelity` (`adopt`, open) | Read-only split | Producer value fidelity remains separate from source registration |
-| Wave 3 review | Remaining modifier runtime fidelity | `formats.modifier-fidelity` (`adopt`, open) | Read-only split | `I`, `L`, `O`, and `V` need their context models; `w` also needs style parsing, live width overrides, the 162-entry cache, host policy, and Unicode proof |
+| Historical Wave 3 editor | Typed Control config diagnostics | `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | Superseded brief | Carry diagnostic identity through protocol, daemon, and Control rendering without prose matching |
+| Historical Wave 3 review | Context producer runtime fidelity | `formats.context-producer-fidelity` (`adopt`, open) | Superseded brief | Producer value fidelity remains separate from source registration |
+| Historical Wave 3 review | Remaining modifier runtime fidelity | `formats.modifier-fidelity` (`adopt`, open) | Superseded brief | `I`, `L`, `O`, and `V` need their context models; `w` also needs style parsing, live width overrides, the 162-entry cache, host policy, and Unicode proof |
 | Accepted partition | Native typed context producers | `formats.native-typed-context-producers` (`native`, accepted) | Complete | The 54 native literal pairs are registered without pretending they are tmux runtime gaps |
 | Completed slice | Startup initial-client cwd | Closed under `source-file.startup-client-cwd` in slice 10ag | Committed in `562b950c` | Cold launch provenance expires after startup without a public protocol change |
 | Completed dependency | Config and source replay alias snapshot | Closed under `aliases.config-parse-unit` in slice 10y | Committed in `562b950c` | One snapshot per parsed file is ready for eager validation |
-| Wave 3 editor | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Frozen | Record and classify all 95 pinned actions before behavior changes |
+| Historical Wave 3 editor | Copy action vocabulary inventory | `semantic:copy-mode-action-vocabulary` in `copy-mode.action-fidelity` | Superseded brief | Record and classify all 95 pinned actions before behavior changes |
 | Pending rerank | Copy action behavior | The other six `copy-mode.action-fidelity` semantics, one category per slice | Unranked | Cursor, logical-line, goto, selection, jump/prompt, and copy effects stay independently provable |
 | Pending rerank | Unsupported stock action bindings | `keys.copy-mode-unsupported-default-actions` | Unranked | Seven keys become honest only after their five actions exist |
 | Pending rerank | Copy command fidelity | `copy-mode.command-fidelity` | Unranked | Requires the interactive-refresh decision |
@@ -623,8 +623,8 @@ closure is that exception.
 Slices 9a through 9f and 10a through 10ai are closed, along with the Wave 2 shell-job cwd and
 literal DEL chunks.
 Commit `562b950c` contains cumulative slices 10w through 10ag; `4800255d` closes 10ah. The current
-ledger has 84 active groups with 586 items and 122 closed records: 42 open, 20 blocked, and 22
-accepted, resolving 144 of 206 groups (69.9%). Wave 2 is 3 of 3 complete, with no active group
+ledger has 84 active groups with 586 items and 123 closed records: 42 open, 20 blocked, and 22
+accepted, resolving 145 of 207 groups (70.0%). Wave 2 is 3 of 3 complete, with no active group
 marked `next`. Under
 `detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
@@ -746,32 +746,33 @@ Wave 2 integrated Control output, shell-job cwd, then DEL identity. The coordina
 shared campaign artifact and runs aggregate gates. A front stops when its implementation needs
 another front's file zone.
 
-## Wave 3 fronts
+## Historical Wave 3 fronts
 
-Wave 3 starts only from the published `origin/main` commit containing this freeze. Issue #7 owns
-claims and state changes. Each session claims one READY front before creating a worktree or editing,
-records its base SHA and branch, and stops on any write-path overlap.
+Wave 3 was frozen from its then-published `origin/main`. The append-only dispatch board later
+superseded these labels and briefs. This table is historical; workers must claim the board's live
+front instead of treating any row below as ready.
 
 | Front | Role | Contract | Owned write zone |
 | --- | --- | --- | --- |
-| `W3-CONTROL-DIAGNOSTICS` | READY editor | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | Protocol message and hunt-claim tests; daemon config-diagnostic publication and focused tests; Control rendering and focused CLI tests; uniquely named diagnostic scenario and fixture |
-| `W3-COPY-ACTIONS-1` | READY editor | Close only `semantic:copy-mode-action-vocabulary`; leave six behavior items active | Mux command inventory and manifest test, oracle generator and JSON, relevant tracker structural code, and compatibility check script |
-| `W3-FORMATS-SPLIT` | READY read-only reviewer | Split `formats.context-producer-fidelity` and `formats.modifier-fidelity` into bounded future chunks | None; return findings in Issue #7 without editing or committing |
+| `W3-CONTROL-DIAGNOSTICS` | Superseded editor brief | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | Protocol message and hunt-claim tests; daemon config-diagnostic publication and focused tests; Control rendering and focused CLI tests; uniquely named diagnostic scenario and fixture |
+| `W3-COPY-ACTIONS-1` | Superseded editor brief | Close only `semantic:copy-mode-action-vocabulary`; leave six behavior items active | Mux command inventory and manifest test, oracle generator and JSON, relevant tracker structural code, and compatibility check script |
+| `W3-FORMATS-SPLIT` | Superseded read-only brief | Split `formats.context-producer-fidelity` and `formats.modifier-fidelity` into bounded future chunks | None; return findings in Issue #7 without editing or committing |
 
-The Control front appends typed config-diagnostic identity to the existing source-file event,
-advances protocol v84 to v85, routes daemon config diagnostics through that identity, renders
-`%config-error` without prose matching, and adds the smallest focused differential. Source-read
-placement, completion numbers, guards, parser environment, disconnect behavior, asynchronous
-output, and other clients stay outside it.
+The frozen Control brief proposed appending typed config-diagnostic identity to the existing
+source-file event and advancing protocol v84 to v85. It was not executed under this brief; v85 was
+later assigned to the `F-ALIASES-MULTI-BODY` closure review. Any successor must select its version
+from current source rather than this historical forecast. The proposed work routed daemon config
+diagnostics through typed identity, rendered `%config-error` without prose matching, and added the
+smallest focused differential. Source-read placement, completion numbers, guards, parser
+environment, disconnect behavior, asynchronous output, and other clients stayed outside it.
 
-The Copy front registers the pin's 95 action names and the zz partition of 66 mapped and 29 missing
-actions. It is inventory only. It does not implement copy behavior, touch terminal runtime paths,
-add a runtime scenario, or edit the registry and shared knowledge pages. The coordinator performs
-the registry split during integration.
+The frozen Copy brief proposed registering the pin's 95 action names and the zz partition of 66
+mapped and 29 missing actions. It was inventory only: no copy behavior, terminal runtime path,
+runtime scenario, registry entry, or shared knowledge page belonged to that editor.
 
-The Formats front is read-only because it examines paths owned by the Copy editor. It returns the
-exact producer and modifier partitions, dependencies, write zones, and smallest disjoint successors
-without changing source or tracker state.
+The frozen Formats brief was read-only because it examined paths owned by the Copy editor. It asked
+for exact producer and modifier partitions, dependencies, write zones, and the smallest disjoint
+successors without changing source or tracker state.
 
 ## Ownership and handoff
 
@@ -871,9 +872,10 @@ The campaign reaches compatible-enough status when all of these hold:
 The tracker can retain long-tail work after this gate. It cannot retain an unclassified daily-use
 surprise.
 
-# Bootstrap prompt for a Wave 3 session
+# Historical Wave 3 bootstrap prompt
 
-Paste this prompt into a new session after the dispatch commit is visible on GitHub:
+This superseded prompt is retained as the launch record for Wave 3. Do not use it for a current
+dispatch-board claim.
 
 ```text
 Continue the tmux compatibility campaign from the published origin/main base recorded in GitHub

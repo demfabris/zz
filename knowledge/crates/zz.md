@@ -4,7 +4,7 @@ title: zz crate (the GPUI client)
 description: The long-lived GPUI desktop client. Reconciles recursive pane layouts and hosts stable terminal, Chromium browser, and native Agent pane entities.
 resource: crates/zz/src/lib.rs
 tags: [gpui, crate, client, terminal, browser, agent, ui]
-timestamp: 2026-08-26T00:00:00-03:00
+timestamp: 2026-08-30T00:00:00-03:00
 ---
 
 # Overview
@@ -58,7 +58,14 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
    `new-session` then receives numeric name `0` and zero-based ids. Output prints to stdout and the
    process exits without opening GPUI. `--version`/`-V` is
    answered in place, before that connection: routing it to the daemon would spawn one just to
-   report an unknown command.
+   report an unknown command. Live alias preparation may return an opaque multi-command group.
+   Client-owned attach and attaching `new-session` scan every child for TUI handoff, while stdin
+   capture inspects only the final leaf. Stdin capture appends its payload to that leaf, then
+   execution sends one opaque prepared group back to the daemon. Each `Attached` reply carries the
+   effective read-only and mutable client flags that the daemon actually applied, so reconnect does
+   not infer which alias child attached. Bare `kill-server` recovery
+   remains exact and unaliased. An empty group selects none of those routes and succeeds without
+   effects.
 7. **GUI mode** . `app`, or no arguments when the platform starts the bundle executable directly:
    `run_app` connects (or spawns-and-connects)
    `zz_daemon::InteractiveClient`; its default attach lazily creates session `0` if that daemon is
@@ -89,13 +96,22 @@ askpass . and only refuses to open the GUI, pointing at the bundle instead.
 
 ## Control-mode front end (`control_mode.rs`)
 
-The `-C` front end owns direct flags-1 command frames, stdin and protocol ordering, deferred Control
-command guards, source-file events, and the process exit code. Protocol v77 supplies
+The `-C` front end owns direct command frames, stdin and protocol ordering, deferred Control command
+guards, source-file events, and the process exit code. Protocol v77 supplies
 `ControlCommandGuard { output, error, sticky_failure, flags }` at the existing tail tag 47. Parser
 replay plus synchronous foreground shell-evaluated `if-shell`, immediate `if-shell -F` including
 `-bF`, and foreground `run-shell -C` keep flags 1. The writer closes the direct outer frame, then
 emits the containing command before each inserted command, and an inserted source before its child
 commands. Per-client and per-thread capture keeps nested trees isolated.
+
+Preparation represents a multi-command or empty alias body as one `Ready` invocation with
+`alias_matched = true` and `canonical_name = None`. `execute_command` recognizes that opaque
+group and does not allocate a `%begin` frame for it. The daemon emits one ordinary
+`ControlCommandGuard` for each child, with flags 0 for an initial argv group or flags 1 for a parsed
+stdin line. Alias children, callback descendants, and nested sources keep the inherited flags. The final
+`CommandResponse` settles the request without adding a wrapper `%end`; if dispatch fails before any
+child guard exists, the front end creates one error frame so the failure remains visible. Empty
+groups produce no command frame.
 
 Protocol v80 adds the startup cause event. `connect_or_spawn_daemon` passes startup ownership only
 to the successful connection made after this process spawned the daemon, and
@@ -139,15 +155,24 @@ shell output follows that source command's empty flags-1 guard before the next s
 `payload` preserves embedded LF and percent-prefixed lines and adds one final LF when absent.
 Foreground `run-shell -C` output remains inside its ordinary command frame.
 
+Forced shutdown keeps the wrapper rule. A top-level alias has no open parent frame, so its single
+`%exit` may precede child guards that the daemon drains after `kill-server`, as it does in tmux. If
+shutdown arrives while an ordinary outer frame is open, `ControlWriter` retains the exit until all
+deferred nested guards flush and then writes it once at the end. Hook-local source yields can stop a
+draining hook tail without generating another after-hook frame.
+
 `ControlState::return_code` now follows the pin's long-lived retval contract. Direct runtime errors,
 sourced runtime errors, nonruntime source failures returned through `source-file`, and v78
 source-read failures set it to 1. Non-UTF-8 config content remains under
 `config.non-utf8-file-bytes`; the pinned lone-`0xff` case succeeds where zz currently emits a typed
 Error and status 1. Generic nonzero successes and flags-1 parse or preparation failures do not set
 or change it, so a fresh client stays at 0 while a prior sticky failure stays at 1. A blank line or EOF
-captures the current value when that Return enters the queue. A Return captured while a preceding
-non-detach command waits keeps that snapshot and precedes later queued stdin, including detach. A
-Return observed while self-detach itself waits is discarded when the caller's `Detached` event
+captures the current value when that Return enters the queue. A direct error from the admitted input
+updates that snapshot to 1. A Return captured while another non-detach command waits keeps its
+arrival-time snapshot ahead of later inserted failures and queued stdin, including detach. The daemon
+wraps only a selected synchronous callback failure in `PostAdmissionCallback`; direct validation or
+runtime errors from `if-shell`, `run-shell`, and `confirm-before` remain ordinary errors. A Return
+observed while self-detach itself waits is discarded when the caller's `Detached` event
 arrives. An actual self-targeted `Detached` event exits 0 after the command response closes;
 `detach-client -a`, a target naming another client, an excluded
 or missing session, and aliases for those forms keep the caller alive and preserve the queued Return.
@@ -717,7 +742,8 @@ without either being wrong, and neither replaces CEF's own frame-rate ceilings.
 | File | Role |
 |------|------|
 | `crates/zz/src/main.rs` | Process entrypoint; calls `zz::run()` |
-| `crates/zz/src/lib.rs` | `zz::run()` . CEF-subprocess/daemon/CLI/GUI mode dispatch, window creation, app-quit/window-close shutdown wiring |
+| `crates/zz/src/lib.rs` | `zz::run()` . CEF-subprocess/daemon/CLI/GUI mode dispatch, final-leaf routing for prepared alias groups, window creation, app-quit/window-close shutdown wiring |
+| `crates/zz/src/control_mode.rs` | `-C` preparation and command loop, direct and per-child guard framing, source events, deferred output/exit ordering, sticky return status |
 | `crates/zz/src/fleet.rs` | `zz fleet add <name> <ssh-destination>` / `list` / `remove` . each one config-file edit, sharing `Endpoint::parse` and `config::validate_fleet_host` with the GUI dialog |
 | `crates/zz/src/macos_app.rs` | macOS application/window actions, native app menu, and standard command-key bindings |
 | `crates/zz/src/config/mod.rs` | Platform-aware bounded `zz/config` discovery/parsing, `host-<name>` fleet entries and their add/remove/republish helpers, the client-side ACP working directory, ordered daemon overrides (the three agent adapter keys among them), per-knob provenance, and comment-preserving atomic edits |

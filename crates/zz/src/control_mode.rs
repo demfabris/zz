@@ -207,6 +207,7 @@ fn drive<W: Write>(
                         PendingReturn::Blank {
                             code: state.return_code,
                             preceding_input: 0,
+                            observed_preceding_input: false,
                         },
                         output,
                         &mut state,
@@ -328,6 +329,7 @@ fn drive<W: Write>(
                     PendingReturn::Eof {
                         code: state.return_code,
                         preceding_input: 0,
+                        observed_preceding_input: false,
                     },
                     output,
                     &mut state,
@@ -522,10 +524,12 @@ fn execute_command<W: Write>(
     let alias_group = zz_mux::MuxEngine::is_command_alias_group(&command);
     let command_guard_frames = output.command_guard_frames;
     let frame = if alias_group {
+        output.hold_exit();
         None
     } else {
         Some(output.begin(flags)?)
     };
+    let exit_held = alias_group;
     let request_id = match client.execute_prepared(command) {
         Ok(request_id) => request_id,
         Err(error) => {
@@ -536,6 +540,9 @@ fn execute_command<W: Write>(
                 command_guard_frames,
                 &error.to_string(),
             )?;
+            if exit_held {
+                output.release_exit()?;
+            }
             return Ok(CommandResult {
                 exit_code: 1,
                 exit: ExitSignal::Unexpected,
@@ -550,8 +557,10 @@ fn execute_command<W: Write>(
                 ProtocolMessage::CommandResponse(response)
                     if response_request_id(&response) == request_id =>
                 {
-                    let abort_line = command_response_aborts_line(alias_group, &response);
-                    if response_sets_return_code(canonical_name, &response) {
+                    let abort_line = response_aborts_line(&response);
+                    let updates_return_code = response_sets_return_code(canonical_name, &response);
+                    let response_sets_new_failure = updates_return_code && state.return_code == 0;
+                    if updates_return_code {
                         state.return_code = 1;
                     }
                     settle_deferred_return(
@@ -559,6 +568,15 @@ fn execute_command<W: Write>(
                         &mut deferred_return,
                         state,
                     );
+                    if let Some(pending_return) = state.pending_return.as_mut() {
+                        if (response_sets_new_failure
+                            && !response_is_post_admission_callback_failure(&response))
+                            || (updates_return_code && canonical_name == Some("source-file"))
+                        {
+                            pending_return.observe_preceding_input();
+                        }
+                        pending_return.refresh_code_after_preceding_input(state.return_code);
+                    }
                     let exit_code = render_command_response(
                         output,
                         frame.as_ref(),
@@ -566,6 +584,9 @@ fn execute_command<W: Write>(
                         command_guard_frames,
                         response,
                     )?;
+                    if exit_held {
+                        output.release_exit()?;
+                    }
                     return Ok(CommandResult {
                         exit_code,
                         exit,
@@ -582,6 +603,9 @@ fn execute_command<W: Write>(
                             command_guard_frames,
                             "too far behind",
                         )?;
+                        if exit_held {
+                            output.release_exit()?;
+                        }
                         return Ok(CommandResult {
                             exit_code: 1,
                             exit: signal,
@@ -620,6 +644,9 @@ fn execute_command<W: Write>(
                     command_guard_frames,
                     "server exited unexpectedly",
                 )?;
+                if exit_held {
+                    output.release_exit()?;
+                }
                 return Ok(CommandResult {
                     exit_code: 1,
                     exit: if exit.is_some() {
@@ -738,7 +765,9 @@ fn handle_protocol<W: Write>(
     output: &mut ControlWriter<W>,
 ) -> io::Result<ExitSignal> {
     match message {
-        ProtocolMessage::Attached { session, snapshot } => state.attach(session, snapshot),
+        ProtocolMessage::Attached {
+            session, snapshot, ..
+        } => state.attach(session, snapshot),
         ProtocolMessage::Event(event) => match event.payload {
             EventPayload::Snapshot(snapshot) => state.adopt_snapshot(snapshot),
             EventPayload::HookEvent { name, variables } => {
@@ -831,7 +860,15 @@ fn handle_protocol<W: Write>(
                 state.attached_session = None;
                 return Ok(ExitSignal::Detached);
             }
-            EventPayload::ServerStopping => return Ok(ExitSignal::Clean),
+            EventPayload::ServerStopping => {
+                output.emit_exit(None)?;
+                return Ok(ExitSignal::Clean);
+            }
+            EventPayload::ControlExit { reason } if reason.is_empty() => {
+                output.release_exit()?;
+                output.emit_exit(None)?;
+                return Ok(ExitSignal::Clean);
+            }
             EventPayload::ControlExit { reason } if reason == "too far behind" => {
                 return Ok(ExitSignal::TooFarBehind);
             }
@@ -1037,10 +1074,6 @@ fn response_aborts_line(response: &CommandResponse) -> bool {
     matches!(response, CommandResponse::Error { .. })
 }
 
-fn command_response_aborts_line(alias_group: bool, response: &CommandResponse) -> bool {
-    response_aborts_line(response) || (alias_group && response_exit_code(response) != 0)
-}
-
 fn response_sets_return_code(canonical_name: Option<&str>, response: &CommandResponse) -> bool {
     match response {
         CommandResponse::Error { error, .. } => !error.is_command_parse(),
@@ -1048,6 +1081,13 @@ fn response_sets_return_code(canonical_name: Option<&str>, response: &CommandRes
             canonical_name == Some("source-file") && *exit_code != 0
         }
     }
+}
+
+fn response_is_post_admission_callback_failure(response: &CommandResponse) -> bool {
+    matches!(
+        response,
+        CommandResponse::Error { error, .. } if error.is_post_admission_callback()
+    )
 }
 
 fn response_request_id(response: &CommandResponse) -> u64 {
@@ -1367,6 +1407,7 @@ fn unix_timestamp() -> u64 {
 enum DeferredOutput {
     Notification(Vec<u8>),
     PaneOutput(Vec<u8>),
+    Exit(Option<String>),
     DiagnosticError {
         time: u64,
         text: String,
@@ -1389,6 +1430,8 @@ struct ControlWriter<W: Write> {
     block_open: bool,
     deferred: VecDeque<DeferredOutput>,
     pane_output_enabled: bool,
+    exit_requested: bool,
+    exit_held: bool,
     st_sent: bool,
 }
 
@@ -1402,6 +1445,8 @@ impl<W: Write> ControlWriter<W> {
             block_open: false,
             deferred: VecDeque::new(),
             pane_output_enabled: true,
+            exit_requested: false,
+            exit_held: false,
             st_sent: false,
         }
     }
@@ -1455,12 +1500,14 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn flush_deferred(&mut self) -> io::Result<()> {
+        let mut exit = None;
         while let Some(deferred) = self.deferred.pop_front() {
             match deferred {
                 DeferredOutput::Notification(line) | DeferredOutput::PaneOutput(line) => {
                     self.output.write_all(&line)?;
                     self.output.write_all(b"\n")?;
                 }
+                DeferredOutput::Exit(reason) => exit = Some(reason),
                 DeferredOutput::DiagnosticError { time, text } => {
                     let frame = self.allocate_frame(time, 1);
                     self.write_frame_begin(&frame)?;
@@ -1478,6 +1525,26 @@ impl<W: Write> ControlWriter<W> {
                 }
                 DeferredOutput::ControlCommandOutput(output) => self.payload(&output)?,
             }
+        }
+        if let Some(reason) = exit {
+            if self.exit_held {
+                self.deferred.push_back(DeferredOutput::Exit(reason));
+            } else {
+                self.write_exit(reason.as_deref())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn hold_exit(&mut self) {
+        self.exit_held = true;
+    }
+
+    fn release_exit(&mut self) -> io::Result<()> {
+        self.exit_held = false;
+        if !self.block_open {
+            self.flush_deferred()?;
+            self.output.flush()?;
         }
         Ok(())
     }
@@ -1662,13 +1729,26 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn emit_exit(&mut self, reason: Option<&str>) -> io::Result<()> {
-        self.block_open = false;
+        if self.exit_requested {
+            return Ok(());
+        }
+        self.exit_requested = true;
+        if self.block_open || self.exit_held {
+            self.deferred
+                .push_back(DeferredOutput::Exit(reason.map(str::to_owned)));
+            return Ok(());
+        }
         self.flush_deferred()?;
+        self.write_exit(reason)?;
+        self.output.flush()
+    }
+
+    fn write_exit(&mut self, reason: Option<&str>) -> io::Result<()> {
         match reason {
             Some(reason) => writeln!(self.output, "%exit {reason}")?,
             None => self.output.write_all(b"%exit\n")?,
         }
-        self.output.flush()
+        Ok(())
     }
 
     fn finish(&mut self) -> io::Result<()> {
@@ -1747,10 +1827,12 @@ enum PendingReturn {
     Blank {
         code: u8,
         preceding_input: usize,
+        observed_preceding_input: bool,
     },
     Eof {
         code: u8,
         preceding_input: usize,
+        observed_preceding_input: bool,
     },
     InputError {
         message: String,
@@ -1768,10 +1850,12 @@ impl PendingReturn {
             StdinEvent::Line(line) if line.is_empty() => Ok(Self::Blank {
                 code: return_code,
                 preceding_input,
+                observed_preceding_input: false,
             }),
             StdinEvent::Eof => Ok(Self::Eof {
                 code: return_code,
                 preceding_input: 0,
+                observed_preceding_input: false,
             }),
             StdinEvent::Error(message) => Ok(Self::InputError {
                 message,
@@ -1785,6 +1869,22 @@ impl PendingReturn {
         match self {
             Self::Blank { code, .. } | Self::Eof { code, .. } => *code,
             Self::InputError { .. } => 1,
+        }
+    }
+
+    fn refresh_code_after_preceding_input(&mut self, return_code: u8) {
+        match self {
+            Self::Blank {
+                code,
+                observed_preceding_input: true,
+                ..
+            }
+            | Self::Eof {
+                code,
+                observed_preceding_input: true,
+                ..
+            } => *code = return_code,
+            Self::Blank { .. } | Self::Eof { .. } | Self::InputError { .. } => {}
         }
     }
 
@@ -1809,14 +1909,37 @@ impl PendingReturn {
     fn consume_preceding_input(&mut self) {
         match self {
             Self::Blank {
-                preceding_input, ..
+                preceding_input,
+                observed_preceding_input,
+                ..
             }
             | Self::Eof {
-                preceding_input, ..
+                preceding_input,
+                observed_preceding_input,
+                ..
+            } => {
+                if *preceding_input != 0 {
+                    *preceding_input -= 1;
+                    *observed_preceding_input = true;
+                }
             }
-            | Self::InputError {
+            Self::InputError {
                 preceding_input, ..
             } => *preceding_input = preceding_input.saturating_sub(1),
+        }
+    }
+
+    fn observe_preceding_input(&mut self) {
+        match self {
+            Self::Blank {
+                observed_preceding_input,
+                ..
+            }
+            | Self::Eof {
+                observed_preceding_input,
+                ..
+            } => *observed_preceding_input = true,
+            Self::InputError { .. } => {}
         }
     }
 }
@@ -2388,16 +2511,29 @@ mod tests {
                 output: String::new(),
             }
         ));
-        let nonzero = CommandResponse::Success {
+        let direct = CommandResponse::Error {
             request_id: 5,
+            error: ServerError::InvalidCommand("can't find session: missing".to_owned()),
+            output: String::new(),
+        };
+        assert!(!response_is_post_admission_callback_failure(&direct));
+        let callback = CommandResponse::Error {
+            request_id: 6,
+            error: ServerError::PostAdmissionCallback(Box::new(ServerError::SessionNotFound(
+                "missing".to_owned(),
+            ))),
+            output: String::new(),
+        };
+        assert!(response_is_post_admission_callback_failure(&callback));
+        let nonzero = CommandResponse::Success {
+            request_id: 7,
             output: String::new(),
             exit_code: 3,
             stderr: String::new(),
         };
         assert!(!response_sets_return_code(Some("run-shell"), &nonzero));
         assert!(response_sets_return_code(Some("source-file"), &nonzero));
-        assert!(!command_response_aborts_line(false, &nonzero));
-        assert!(command_response_aborts_line(true, &nonzero));
+        assert!(!response_aborts_line(&nonzero));
         assert_eq!(completed_exit_code(3, &ControlState::default()), 3);
     }
 
@@ -2463,6 +2599,7 @@ mod tests {
             pending_return: Some(PendingReturn::Eof {
                 code: 0,
                 preceding_input: 2,
+                observed_preceding_input: false,
             }),
             ..ControlState::default()
         };
@@ -2500,6 +2637,7 @@ mod tests {
         let mut prepared_return = Some(PendingReturn::Blank {
             code: 1,
             preceding_input: 1,
+            observed_preceding_input: false,
         });
         assert!(
             settle_preparation_error_return(&mut prepared_return, &mut state.pending_return)
@@ -2545,6 +2683,17 @@ mod tests {
         assert!(pending_return.has_preceding_input());
         pending_return.consume_preceding_input();
         assert!(!pending_return.has_preceding_input());
+        pending_return.refresh_code_after_preceding_input(1);
+        assert_eq!(pending_return.code(), 1);
+
+        let Ok(mut in_flight) = PendingReturn::from_stdin(StdinEvent::Eof, 0, 0) else {
+            panic!("EOF did not create a pending return");
+        };
+        in_flight.refresh_code_after_preceding_input(1);
+        assert_eq!(in_flight.code(), 0);
+        in_flight.observe_preceding_input();
+        in_flight.refresh_code_after_preceding_input(1);
+        assert_eq!(in_flight.code(), 1);
     }
 
     #[test]
@@ -2556,6 +2705,7 @@ mod tests {
         let mut deferred_return = Some(PendingReturn::Eof {
             code: 1,
             preceding_input: 0,
+            observed_preceding_input: false,
         });
         settle_deferred_return(true, &mut deferred_return, &mut state);
         assert!(deferred_return.is_none());
@@ -2564,6 +2714,7 @@ mod tests {
         deferred_return = Some(PendingReturn::Eof {
             code: 1,
             preceding_input: 0,
+            observed_preceding_input: false,
         });
         settle_deferred_return(false, &mut deferred_return, &mut state);
         assert!(deferred_return.is_none());
@@ -3193,6 +3344,8 @@ mod tests {
             ExitSignal::Detached
         );
         assert_eq!(state.attached_session, None);
+
+        let mut writer = ControlWriter::new(Vec::new(), false);
         assert_eq!(
             handle_protocol(
                 ProtocolMessage::Event(zz_protocol::Event {
@@ -3204,6 +3357,141 @@ mod tests {
             )
             .unwrap(),
             ExitSignal::Clean
+        );
+        writer
+            .control_command_guard_at(3, "late child", false, 0)
+            .unwrap();
+        writer.emit_exit(None).unwrap();
+        assert_eq!(
+            writer.output,
+            b"%exit\n%begin 3 1 0\nlate child\n%end 3 1 0\n"
+        );
+    }
+
+    #[test]
+    fn logical_command_holds_server_exit_until_child_events_finish() {
+        let mut state = ControlState::default();
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        writer.hold_exit();
+        writer
+            .control_command_guard_at(1, "source child one", false, 0)
+            .unwrap();
+        writer
+            .control_command_guard_at(2, "source child two", false, 0)
+            .unwrap();
+        assert_eq!(
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 3,
+                    payload: EventPayload::ServerStopping,
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::Clean
+        );
+        assert!(!writer.output.ends_with(b"%exit\n"));
+        writer
+            .control_command_guard_at(4, "blocked child", false, 0)
+            .unwrap();
+        writer.notify(b"%sessions-changed").unwrap();
+        writer.release_exit().unwrap();
+        writer.emit_exit(None).unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 1 1 0\nsource child one\n%end 1 1 0\n\
+              %begin 2 2 0\nsource child two\n%end 2 2 0\n\
+              %begin 4 3 0\nblocked child\n%end 4 3 0\n\
+              %sessions-changed\n%exit\n"
+        );
+    }
+
+    #[test]
+    fn clean_control_exit_releases_only_the_initiating_alias() {
+        let mut state = ControlState::default();
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        writer.hold_exit();
+        assert_eq!(
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::ControlExit {
+                        reason: "unknown".to_owned(),
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::None
+        );
+        writer
+            .control_command_guard_at(2, "kill child", false, 0)
+            .unwrap();
+        assert_eq!(
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 3,
+                    payload: EventPayload::ControlExit {
+                        reason: String::new(),
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::Clean
+        );
+        assert_eq!(
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 4,
+                    payload: EventPayload::ServerStopping,
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::Clean
+        );
+        writer
+            .control_command_guard_at(5, "late child", false, 0)
+            .unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 2 1 0\nkill child\n%end 2 1 0\n%exit\n\
+              %begin 5 2 0\nlate child\n%end 5 2 0\n"
+        );
+    }
+
+    #[test]
+    fn open_guard_holds_server_exit_until_deferred_children_finish() {
+        let mut state = ControlState::default();
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        let frame = writer.begin_at(4, 1).unwrap();
+        assert_eq!(
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 3,
+                    payload: EventPayload::ServerStopping,
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap(),
+            ExitSignal::Clean
+        );
+        assert_eq!(writer.output, b"%begin 4 1 1\n");
+        writer
+            .control_command_guard_at(5, "child", false, 0)
+            .unwrap();
+        writer.emit_exit(None).unwrap();
+        writer.end(&frame, false).unwrap();
+        writer.emit_exit(None).unwrap();
+        assert_eq!(
+            writer.output,
+            b"%begin 4 1 1\n%end 4 1 1\n%begin 5 2 0\nchild\n%end 5 2 0\n%exit\n"
         );
     }
 

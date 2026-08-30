@@ -352,15 +352,27 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 84 active groups, 586 items, and 122 closed records: 42 open, 20 blocked, and
-22 accepted. Closed records plus accepted active groups resolve 144 of 206 known groups (69.9%).
-The persisted accepted artifact covers 105 scenarios and 1,675 steps, with attached-client `PASS`, exactly two approved GEO
+The live registry has 84 active groups, 586 items, and 123 closed records: 42 open, 20 blocked, and
+22 accepted. Closed records plus accepted active groups resolve 145 of 207 known groups (70.0%).
+The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
-`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Slice 10ai starts Control
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Slice 10ai starts Control
 stdin observation before initial preparation, discards queued and future pane-byte records after
 EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd and
-literal DEL identity are closed with their focused and aggregate proof. No active group is marked
-`next` until the next parallel wave is frozen.
+literal DEL identity are closed with their focused and aggregate proof.
+
+`F-ALIASES-MULTI-BODY` closes executable empty and multi-command user aliases. Preparation stores one
+opaque typed group in protocol v84's existing `CommandInvocation` shape: empty groups succeed
+without effects, caller arguments and client-owned stdin attach only to the final child, and
+nonempty groups preserve child
+boundaries and physical source groups through mux, daemon, stored command, config, local CLI, and
+Control execution. The wrapper is never dispatched or framed; Control emits each child with the
+enclosing queue's flags. Its eight-step differential has zero mismatches. Forced-shutdown
+multi-window `window-unlinked` order remains explicitly open under
+`hooks.shutdown-window-unlinked-order` because tmux derives it from winlink red-black-tree history
+that zz does not retain. Closure review advanced protocol v85 for typed post-admission callback
+provenance and daemon-authoritative `Attached` reconnect state, not for an alias child-vector field.
+The next worker claims the dispatch-board front from published `origin/main`.
 
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.

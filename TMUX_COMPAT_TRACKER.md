@@ -1,14 +1,14 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **PARALLEL WAVE 2 CLOSED 3/3; WAVE 3 FROZEN AND READY**
+> Campaign delivery: **`F-ALIASES-MULTI-BODY` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED); 2 EDITORS + 1 READ-ONLY REVIEWER**
+> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED)**
 >
-> Ledger settlement: **69.9% (144 of 206 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **70.0% (145 of 207 known groups); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **105 SCENARIOS, 1,675 STEPS, ATTACHED-CLIENT PASS**
+> Exit evidence: **106 SCENARIOS, 1,683 STEPS, ATTACHED-CLIENT PASS**
 >
-> Wave 3 launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
+> Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -41,9 +41,9 @@ tmux discarded it before `%exit`. Slice 10ah closes the higher-priority kill-ser
 and slice 10ai closes pane-output discard without a wire change. The three-front trial also closes
 UTF-8 config tilde parsing and strict tmux key
 grammar while retaining separate residuals for parser environment provenance, non-UTF-8 home
-paths, and DEL key identity. The persisted accepted artifact covers 105 scenarios and 1,675 steps,
+paths, and DEL key identity. The persisted accepted artifact covers 106 scenarios and 1,683 steps,
 with attached-client `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
-`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`.
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
 Wave 2 slice 10ai closes Control exit pane-output discard without a daemon or protocol change.
 The second chunk closes shell-job cwd selection. Its three-step differential completes eight checks
 per engine with no differing channel, and the attached fixture covers 24 Interactive and Control
@@ -76,14 +76,14 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Wave 2 is closed and Wave 3 is frozen; claims open only after the commit containing this freeze is published |
-| Campaign worktrees | Each Wave 3 editor creates a dedicated worktree after claiming its front; the reviewer remains read-only |
+| Delivery | `F-ALIASES-MULTI-BODY` closes `aliases.command-bodies`; the next worker claims the dispatch-board front from published `origin/main` |
+| Campaign worktrees | Each editor creates a dedicated worktree after claiming its front; shared campaign artifacts remain coordinator-owned |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Wave 3 is frozen with two disjoint editor chunks and one read-only format reviewer |
-| Live registry | 84 active groups, 586 active items, 122 closed records |
+| Campaign point | Multi-command and empty alias bodies are closed; forced-shutdown multi-window hook order is a separate registered residual |
+| Live registry | 84 active groups, 586 active items, 123 closed records |
 | Active status | 42 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
@@ -104,12 +104,12 @@ found during that wave.
 | --- | --- |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
-| New residual groups | Wave 2: 0; prior trial: 3 |
+| New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
 | Live unresolved | 42 open + 20 blocked = 62 |
-| Practical exit gate | Open; Wave 3 has 2 frozen editor chunks and 1 read-only review front |
-| Accepted differential | 105 scenarios, 1,675 steps, attached-client `PASS`, 2 registered GEO rows |
-| Ledger settlement | 144 of 206 known groups = 69.9% |
+| Practical exit gate | Open; continue from the next dispatch-board claim |
+| Accepted differential | 106 scenarios, 1,683 steps, attached-client `PASS`, 2 registered GEO rows |
+| Ledger settlement | 145 of 207 known groups = 70.0% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -123,7 +123,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(122 + 22) / (122 + 84) = 144 / 206 = 69.9%
+(123 + 22) / (123 + 84) = 145 / 207 = 70.0%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -612,7 +612,8 @@ SHA-256 `810a4adc857b27b42e81fd1bc0c3574e589fcd8d403cb386c5300dfea6276432`.
 Slice 10u changes no protocol or snapshot and excludes config or source-file replay construction,
 config alias snapshots, parser first-error policy, remote `--host`, Control input, runtime rollback,
 multi-command alias bodies, and native zz command grammar. The residual
-`mux.chain-parse-abort/semantic:config-source-group-parse-abort` remains active and later.
+`mux.chain-parse-abort/semantic:config-source-group-parse-abort` remained active and later at that
+checkpoint; `F-ALIASES-MULTI-BODY` later closes the alias-body exclusion.
 
 ## Completed slice: 10v format vocabulary registration
 
@@ -733,7 +734,7 @@ with summary SHA-256
 The slice changes no protocol. At the 10y checkpoint it did not close empty or multi-command alias
 bodies, generic alias recursion, or eager name, flag, arity, callback, and nested-child
 construction. Slice 10z below closes that last construction boundary, including validation under
-`source-file -n`.
+`source-file -n`; `F-ALIASES-MULTI-BODY` later closes empty and multi-command bodies.
 
 ## Completed slice: 10z config and source construction
 
@@ -764,8 +765,8 @@ summary SHA-256
 `afd1fdf9a79e06f449e8c43abd63b14a2a4968338110223750d4171889c34aaf`.
 
 The slice changes no protocol. Recognized unsupported `choose-client` and `switch-mode` typed
-positions, multi-command aliases, non-UTF-8 config bytes, and source stdin retain their existing
-owners.
+positions, non-UTF-8 config bytes, and source stdin retain their existing owners. Multi-command
+aliases retained their owner at this checkpoint and close later in `F-ALIASES-MULTI-BODY`.
 
 The same evidence pass closed `hooks.queue`. Pinned tmux stores `after-queue` but has no automatic
 queue-completion producer. Ordinary single-command and multi-command queues leave it untouched;
@@ -966,9 +967,9 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 84 active groups, 586 active items, and 122 closed records: 42 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 144 of 206 groups (69.9%).
-Priority has 62 `later` and 22 `none` groups. The next wave must freeze its own execution order.
+The live registry now has 84 active groups, 586 active items, and 123 closed records: 42 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 145 of 207 groups (70.0%).
+Priority has 62 `later` and 22 `none` groups. The next worker must claim the dispatch-board front.
 
 Slice 10ah closes
 `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.
@@ -1142,38 +1143,68 @@ Shell-job cwd passed its coordinator-owned attached-client proof. Literal DEL id
 prefix and configured-backspace capture after its transport repair. Each accepted candidate
 received its own closure commit with shared artifacts updated by the coordinator.
 
-## Parallel wave 3, 2026-08-30
+## Historical parallel wave 3 freeze, 2026-08-30
 
-Wave 3 freezes two write-disjoint editor chunks and one read-only review front. It starts from the
-published `origin/main` commit containing this section. Issue #7 owns claims: a session must claim
-one READY front before creating its worktree or editing, and must stop if its required path overlaps
-another claim or a coordinator-owned artifact.
+Wave 3 froze two write-disjoint editor chunks and one read-only review front from the published
+`origin/main` commit that contained this section. The append-only dispatch board later superseded
+these READY labels and withdrew or replaced fronts as the campaign moved. This table is historical;
+workers must use the launch rule and live Issue #7 board at the top of this file, not claim a row
+below.
 
 | Front | Role and state | Tracker contract | Exclusive production and proof zone |
 | --- | --- | --- | --- |
-| `W3-CONTROL-DIAGNOSTICS` | Editor; READY after publication | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | `crates/zz-protocol/src/message.rs`, `crates/zz-protocol/tests/hunt_claims.rs`, config-diagnostic publication and tests in `crates/zz-daemon/src/daemon.rs`, `crates/zz/src/control_mode.rs`, focused Control tests in `crates/zz/tests/cli_binary.rs`, and uniquely named `control-config-diagnostic-typing` scenario and fixture files |
-| `W3-COPY-ACTIONS-1` | Editor; READY after publication | Close only `semantic:copy-mode-action-vocabulary`; the six behavior items remain in `copy-mode.action-fidelity` | `crates/zz-mux/src/command.rs`, `crates/zz-mux/src/compat_manifest_tests.rs`, `compat/tmux-oracle.py`, `compat/tmux-oracle.json`, the relevant structural code in `compat/tmux-tracker.py`, and `compat/check.sh` |
-| `W3-FORMATS-SPLIT` | Read-only reviewer; READY after publication | Produce the implementation split for `formats.context-producer-fidelity` and `formats.modifier-fidelity`; close nothing | Read any relevant source, oracle, and tracker material; edit no file and create no commit |
+| `W3-CONTROL-DIAGNOSTICS` | Historical editor brief; superseded | Close `control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` | `crates/zz-protocol/src/message.rs`, `crates/zz-protocol/tests/hunt_claims.rs`, config-diagnostic publication and tests in `crates/zz-daemon/src/daemon.rs`, `crates/zz/src/control_mode.rs`, focused Control tests in `crates/zz/tests/cli_binary.rs`, and uniquely named `control-config-diagnostic-typing` scenario and fixture files |
+| `W3-COPY-ACTIONS-1` | Historical editor brief; superseded | Close only `semantic:copy-mode-action-vocabulary`; the six behavior items remain in `copy-mode.action-fidelity` | `crates/zz-mux/src/command.rs`, `crates/zz-mux/src/compat_manifest_tests.rs`, `compat/tmux-oracle.py`, `compat/tmux-oracle.json`, the relevant structural code in `compat/tmux-tracker.py`, and `compat/check.sh` |
+| `W3-FORMATS-SPLIT` | Historical read-only brief; superseded | Produce the implementation split for `formats.context-producer-fidelity` and `formats.modifier-fidelity`; close nothing | Read any relevant source, oracle, and tracker material; edit no file and create no commit |
 
-The Control editor appends typed `ConfigDiagnostic(String)` identity to the existing source-file
-event, advances protocol v84 to v85, emits it from daemon config publication, renders
-`%config-error` from the typed event, and removes prose-based config-message classification. It
-does not change source-read placement, completion numbering, command guards, parser environment,
-disconnect cancellation, asynchronous output, or other clients.
+The frozen Control brief proposed appending typed `ConfigDiagnostic(String)` identity to the existing
+source-file event and advancing protocol v84 to v85. It was not executed under that brief; v85 was
+later assigned to the `F-ALIASES-MULTI-BODY` closure review. Any successor must select its version
+from current source rather than this historical forecast. The proposal would have emitted the typed
+event from daemon config publication, rendered `%config-error` from it, and removed prose-based
+config-message classification without changing source-read placement, completion numbering, command
+guards, parser environment, disconnect cancellation, asynchronous output, or other clients.
 
-The Copy editor records the exact 95-name pinned action vocabulary and the zz partition of 66
+The frozen Copy brief covered the exact 95-name pinned action vocabulary and the zz partition of 66
 mapped plus 29 missing actions. This is structural inventory only: it does not implement an action,
 change copy-mode behavior, touch terminal runtime paths, add a runtime scenario, edit the live gap
 registry, or edit shared knowledge pages. The coordinator performs the registry split when the
 candidate is accepted.
 
-The Formats reviewer returns an exact producer and modifier split, dependencies, owned paths, and
+The Formats review brief asked for an exact producer and modifier split, dependencies, owned paths, and
 the smallest disjoint implementation candidates. It remains read-only because the Copy editor owns
 the oracle and mux inventory paths during this wave.
 
-The coordinator alone edits `compat/tmux-gaps.json`, `knowledge/tmux/gaps.md`, this tracker, shared
+Under that freeze, the coordinator alone edited `compat/tmux-gaps.json`, `knowledge/tmux/gaps.md`, this tracker, shared
 knowledge pages, `compat/results/summary.md`, and Issue #7 state. It reviews and integrates one
 candidate at a time, updates shared artifacts, and runs aggregate validation.
+
+## Completed front: F-ALIASES-MULTI-BODY, 2026-08-30
+
+`aliases.command-bodies/semantic:command-alias-multi-body` is closed. One live user-alias layer may
+now produce an empty or multi-command opaque group. Empty groups succeed without effects. A
+multi-command group preserves its typed children and physical groups, appends caller arguments and
+client-owned stdin only to the final child, and executes through the ordinary mux, daemon, stored
+binding, hook, config, local CLI, and Control paths without dispatching or framing a synthetic
+wrapper. Read-only authorization sees the complete frozen group before effects, and Control emits
+one child guard per executed command with the enclosing queue's flags.
+
+Daemon queue coverage pins failure pruning, structural-hook deferral, foreground and detached shell
+blockers, nested source yields, shutdown rechecks, delayed callback cancellation, and final Control
+exit ordering. The focused eight-step `aliases-multi-body` differential has zero topology, geometry,
+format, output, or warning differences, and the focused mux, daemon, Control, and CLI suites pass.
+The alias group itself reuses the existing `CommandInvocation` representation. Final review advances
+the wire to protocol v85 so `Attached` carries the daemon's effective reconnect flags and callback
+failures preserve exact post-admission provenance for Control EOF status.
+
+The review registered `hooks.shutdown-window-unlinked-order` rather than hiding a remaining edge.
+Pinned tmux repeatedly removes the root of each session's winlink red-black tree during forced
+shutdown; zz stores the visible index map but not that history-dependent tree shape. One-window
+shutdown and the tested session-name grouping are exact, while complete multi-window
+`window-unlinked` hook order stays open until the mux retains enough structural history. Closing one
+group and registering this residual leaves 84 active groups and 586 items, with 42 open, 20 blocked,
+22 accepted, and 123 closed records. The secondary ledger is 145 of 207 groups (70.0%); unresolved
+work remains 62.
 
 ## Validation and closure gates
 

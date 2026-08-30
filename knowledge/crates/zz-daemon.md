@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-08-27T00:00:00-03:00
+timestamp: 2026-08-30T00:00:00-03:00
 ---
 
 # Overview
@@ -39,7 +39,7 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | Own each agent pane's ACP adapter child | `Shared.agent: Mutex<Option<Arc<AgentRuntime>>>` → `agent::host::AgentHost`, one thread per pane |
 | Bind + guard the owner-only endpoint | `Daemon::run_foreground`, `LocalListener`, `SocketGuard`, `restrict_socket_permissions` |
 | Accept connections, one thread per client | `run_foreground` accept loop → `handle_connection` |
-| Prepare + execute commands | `Shared::prepare_command_list` / `execute_command_request_with_prepared` / `Shared::execute` (mux engine under one lock) |
+| Prepare + execute commands | `Shared::prepare_command_list` / `execute_command_request_with_prepared` / `Shared::execute` (mux engine under one lock); opaque multi-command alias groups enter the same daemon command queue as sourced and callback command lists |
 | Fan terminal frames + persist live pane titles | `watch_terminal` → `synchronize_pane_title` / `publish_terminal_for_pane` → mux snapshots + per-client `OutboundMailbox` |
 | Route interactive input + `send-keys` | `input` / `input_text` / `input_key`, `execute_key_commands`, `resolve_input_sinks`, `send_tokens`; stored bindings keep their commands, except a vi numeric-count path may inject `-N <count>` into the first qualifying copy action |
 | Attach/detach interactive clients | `attach` / `attach_target` / `detach`, `register` / `unregister`, `evict_other_clients` for `attach-session -d` |
@@ -92,7 +92,9 @@ same socket through an ssh forward, so the daemon cannot tell a remote attach fr
 
 ## When the daemon stops
 
-`Shared::request_shutdown` sets `stopping` and unwinds the accept loop. Three things call it:
+`Shared::request_shutdown` records a forced shutdown and starts the shutdown phase. `stopping` flips
+after any admitted shutdown blockers finish, then the accept loop unwinds. Three things can request a
+stop:
 
 | Trigger | Condition |
 |---------|-----------|
@@ -120,6 +122,37 @@ arms the guard before its effects are processed; a fresh never-had-session daemo
 actual disconnect funnels through `unregister` via `ClientRegistrationGuard::Drop` (EOF/reset,
 protocol error, or panic), so that is the one place that can notice the last subscriber leaving.
 `ProtocolMessage::Detach` stays inside the connection loop and does not run `unregister`.
+
+Command queues keep shutdown intent in `CommandQueueExecution::deferred_shutdown`. `kill-server`
+records `Force`; an `exit-empty` or `exit-unattached` policy transition records `Recheck`, and force
+wins if the queue sees both. The outer queue evaluates a recheck against the final daemon state.
+This lets an alias remove the last session and create its replacement without stopping during the
+transient empty state. A successful recheck takes the quiet path, which retains session structure
+and does not synthesize shutdown hooks. Force freezes response admissions and marks the queue as
+draining. At the outer queue boundary, or when a draining source enters its own shutdown phase, the
+daemon tears down current session and pane resources. The initiating Control client receives a
+targeted clean exit after the actual `kill-server` child guard; generic `ServerStopping` remains
+behind every admitted Command and Control response.
+
+`ShutdownBlocker` covers admitted foreground `run-shell` and `if-shell` jobs plus a command queue
+that has observed force. `shutdown_pending` rejects new registrations while those blockers finish;
+the final blocker drop resumes the recorded forced or quiet cause. A zero-delay detached command-mode
+callback holds a detached blocker, so it can finish after an alias requests shutdown. In that case
+the daemon drops the forced structural-hook batch instead of starting more detached work. A
+non-detached delayed job checks `stopping` before it launches, so forced shutdown cancels delayed
+hook work that has not started.
+
+Each queue buffers `PendingHookEvent`s until its outer boundary. Normal completion runs the buffered
+events after every child. Force discards events collected before `kill-server`, destroys the
+remaining sessions, and derives a fresh `session-closed` / `window-unlinked` batch from that final
+structure. Source replay queues set `wait_yields`, so wait-like work and nested sources stop the
+draining source at its queue boundary. Hook command lists use a local yield boundary: a draining hook
+can stop its own tail and the remaining event batch without replaying the enclosing command's
+automatic after-hook. These queue rules cover the alias shutdown cases exercised by the pinned
+oracle. Exact multi-window `window-unlinked` order remains under
+`hooks.shutdown-window-unlinked-order`: tmux removes the root of its retained winlink red-black tree
+until the tree is empty. Its shape depends on mutation history, while zz retains windows by index and
+cannot recover that history from the final map.
 
 ## Reaching a remote daemon over ssh
 
@@ -462,7 +495,7 @@ interactive clients as the user has devices. Per-client maps carry the rest:
 | `FocusSidebar{pane}` | Validate the invoking interactive attachment, retire competing native surfaces, and publish `EventPayload::FocusSidebar` to that client |
 | `Attach { session, detach_others }` / `Detach` | `attach` / `detach` for the interactive client; detach clears per-client attachment state without closing the connection or removing its subscriber, and the same connection can attach again. A command-only client cannot attach but still runs `evict_other_clients` when `detach_others` is set |
 | `AggressiveResizeChanged { window }` | Recompute the target window, or every window for a global change, through the existing measurement write-back and queue matching PTY resizes |
-| `KillServer` | `request_shutdown` . set `stopping` and unwind the accept loop, unconditionally. Emitted by the `kill-server` command, which the GUI sends on quit only when `quit-daemon-on-exit = true` |
+| `KillServer` | Record forced shutdown, freeze response admission, tear down live session resources, then wait for queue and job blockers before `stopping` unwinds the accept loop. Emitted by `kill-server`, which the GUI sends on quit when `quit-daemon-on-exit = true` |
 | `SnapshotChanged` | `publish_snapshot` + refresh visibility/choose-tree/choose-buffer/display-panes overlays |
 
 `InputMessage::{Key, Text}` from any pane kind resolves the key tables first: one `KeyEngine`
@@ -531,6 +564,20 @@ connection; an attaching command carries the immutable vector into the TUI's sec
 Remote `--host` intentionally skips this round trip until discovery can inspect an existing remote
 daemon without starting SSH.
 
+A single-command alias still prepares as that expanded command. A multi-command or empty body
+prepares as one opaque command-group invocation with `alias_matched = true`,
+`canonical_name = None`, and `PreparedCommandResult::Ready`. Static validation walks every child,
+and read-only authorization checks the complete group before the first effect. Execution reparses
+the frozen group and sends each child through ordinary mux, daemon-owned, config, binding, hook, and
+Control paths. The group itself has no daemon effect or Control guard. Caller arguments already
+belong to the final child when preparation starts. Client-side attach and new-session routing scan
+every child, while stdin routing inspects only the final child. Execution sends one opaque
+invocation back to the daemon, and stdin capture adds its payload to that final child. `Attached`
+carries the effective read-only and mutable client flags after each actual attachment; a TUI reconnect
+therefore follows daemon state instead of correlating static alias children with attachment events.
+Bare `kill-server` recovery
+remains restricted to an exact unaliased request. An empty group succeeds without effects or output.
+
 The cold local path adds an alias-free pass before that RPC. Before routing, stdin capture, TUI
 handoff, daemon spawn, startup config, or effects, the CLI validates the complete raw vector against
 all 83 implemented and nine parked upstream command specifications. Canonical names, built-in
@@ -543,7 +590,8 @@ can still reach a startup-config alias that shadows it.
 After the raw pass, the CLI gives the spawned daemon a fresh generation ID and verifies that ID in
 `ServerHello`. It then submits the complete vector for preparation under one post-config alias
 snapshot. The daemon expands one alias layer, constructs callbacks recursively, validates static
-syntax in alias expansions, and returns every result before the CLI executes the first command.
+syntax in alias expansions and every opaque group child, and returns every result before the CLI
+executes the first command.
 Only a daemon started with that generation arms `ColdBootstrapLease`. Startup reentry does not claim
 the lease. The first external client owns it; a failed marked preparation moves it to pending abort,
 and the owner's disconnect stops that newly spawned empty daemon after the error response. A
@@ -642,8 +690,11 @@ differential prove that a three-level replay publishes the root missing-path gua
 missing-path guard, and the leaf output guard in that order, each once. No production change was
 required for that closure. The Control front end combines direct runtime errors, source guards,
 v78 source-read errors, and a nonzero outer `source-file` success into the pin's retval.
-A Return captured while a preceding non-detach command waits keeps its arrival-time snapshot ahead
-of later queued stdin. The daemon sends `Detached` only to actual victims, so nonself and no-victim
+A direct error from the admitted input updates its captured Return to 1. A Return captured while
+another non-detach command waits keeps its arrival-time snapshot ahead of later inserted failures
+and queued stdin. Selected foreground `if-shell` branches, `run-shell -C`, and accepted blocking
+`confirm-before` children carry typed post-admission provenance; direct wrapper failures do not. The
+daemon sends `Detached` only to actual victims, so nonself and no-victim
 detach commands leave the caller running. A Return observed while self-detach waits is discarded on
 that event, and self-detach exits 0 after its response frame closes.
 Runtime `source-file` also retains one transcript for Command and Interactive callers. Each invocation
@@ -686,8 +737,12 @@ ID, leaving unrelated output intact. A daemon restart constructs a fresh set.
 
 The v80 startup closure adds a separate checksum-attested seven-case differential against pinned
 tmux `d77c9dc6`; it passes with no skips and does not rewrite the canonical scenario summary.
-Generic config Warning typing, hard-disconnect queue cancellation, config byte input, source stdin
-transport, parser abort semantics, hook cwd selection, and deferred event hooks remain open.
+The multi-body alias closure adds an eight-step zero-difference scenario across CLI, Control,
+binding, empty-body, caller-argument, and option-boundary cases. Generic config Warning typing,
+hard-disconnect queue cancellation, config byte input, source stdin transport, parser abort
+semantics, and hook cwd selection remain open. Deferred event-hook client selection remains under
+`source-file.event-hook-client-cwd`; the alias queue's event buffering and shutdown order are
+closed except for `hooks.shutdown-window-unlinked-order`.
 
 # Examples
 

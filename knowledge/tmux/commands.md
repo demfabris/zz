@@ -5,7 +5,7 @@ description: "MuxEngine, the tmux-style command executor: canonical names + alia
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, commands, mux-engine, targets, effects]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 last_updated_by: Codex
 ---
 
@@ -421,10 +421,14 @@ show that `client_*` facts and `session_active` use the same selected client.
 
 # Command aliases
 
-The mux resolves one exact `command-alias[]` layer and appends caller arguments without recursion.
-An empty, multi-command, or unparsable matched body fails as `unknown command: <typed name>` instead
-of falling through to the canonical or catalog alias it shadows. Actual empty and multi-command
-execution remains tracked under `aliases.command-bodies`.
+The mux resolves one exact `command-alias[]` layer before canonical lookup. It parses the complete
+matched body, appends caller arguments only to its final command, and freezes the result without
+recursing into another user alias. A one-command body remains one invocation. The mux wraps a
+multi-command body in one opaque typed group whose children retain option boundaries, empty
+arguments, nested typed blocks, and physical source groups. It treats an empty body as a successful
+no-op, including when the caller supplied arguments. For an unparsable matched body, the mux reports
+`unknown command: <typed name>` instead of falling through to the canonical or catalog alias it
+shadows.
 
 Construction, not execution, owns user-alias observation. Stored `bind-key` and `set-hook` command
 lists execute their constructed commands without another user-alias lookup. Read-only clients
@@ -465,6 +469,22 @@ stays unaliasable. Remote
 `--host` routing remains under `aliases.remote-client-preflight` because classification must not
 start SSH. Command alias shadowing is not an authorization control: every prepared command still
 passes the daemon's normal read-only check.
+
+The daemon executes each opaque-group child through the ordinary mux and daemon paths. One shared
+queue boundary encloses the group. Read-only authorization validates the complete frozen chain
+before its first effect. Client-owned stdin attaches only to the final child. Child failures,
+physical source groups, foreground and detached shell work, nested source yields, structural hooks,
+and deferred shutdown keep their queue ordering; a source yield stays local to its owning queue and
+does not replay an already-fired after-hook. The daemon holds structural event hooks until the alias
+children finish. During forced shutdown, it drains admitted work, suppresses event hooks that can no
+longer run, and then stops. `hooks.shutdown-window-unlinked-order` tracks the remaining exact
+multi-window hook-order difference because tmux derives that order from winlink RB-tree history that
+zz does not retain.
+
+Control uses the opaque group as transport structure and emits no synthetic parent `%begin`/`%end`
+frame. Each real child emits its normal guard with the originating flags, and an empty alias emits
+no guard. Local CLI routing scans every child for TUI handoff but only the final child for stdin;
+stored binding display renders all children. Both preserve the prepared group for execution.
 
 # Daemon-side workspace verbs
 

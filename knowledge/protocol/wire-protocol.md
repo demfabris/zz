@@ -1,10 +1,10 @@
 ---
 type: Protocol
-title: zz wire protocol (v84)
+title: zz wire protocol (v85)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
-timestamp: 2026-08-28T00:00:00-03:00
+timestamp: 2026-08-30T00:00:00-03:00
 ---
 
 # Overview
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 84`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 85`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (84) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (85) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -75,10 +75,10 @@ fields in declaration order.
 |---------|--------|---------|
 | `ClientHello(ClientHello)` | `protocol_version: u16`, `client_instance_id: ClientInstanceId`, `kind: ClientKind`, `device_name: Option<String>` (≤256 B), `capabilities: Vec<String>`, `color_scheme: Option<TerminalColorScheme>`, `origin: Option<PaneId>`, `working_directory: Option<PathBuf>` (≤16 KiB), `environment: Vec<String>` (≤4,096 entries, ≤16,367 B each, ≤4 MiB total), `process_id: u32` | Client → daemon handshake. The process-stable instance ID owns recoverable Agent drafts across reconnects; `device_name` labels this device in presence and eviction notices; `$ZZ_PANE` supplies `origin`, so an untargeted CLI command resolves against its invoking pane; eligible local endpoints publish an absolute UTF-8 cwd while SSH, unrepresentable, and oversized paths omit it. Local and SSH-forwarded connections publish a sorted and deduplicated UTF-8 process-environment snapshot; unrepresentable Unix names or values are omitted without substitution. Entries require a nonempty name and `=` separator, forbid NUL, and allow empty values or additional `=` bytes. `process_id` supplies `#{client_pid}` and uses zero when a caller cannot report one. Additive capability strings carry terminal identity and nested intent without changing this struct |
 | `ServerHello(ServerHello)` | `protocol_version: u16`, `server_id: u64`, `client_id: ClientId`, `client_instance_id: ClientInstanceId`, `capabilities: Vec<String>` (≤64 entries, ≤256 B each), `appearance: TerminalAppearance`, `appearance_provenance: AppearanceProvenance`, `mux_options: MuxOptions`, `status: StatusLine`, `key_tables: Vec<KeyTableSnapshot>` | Daemon → client handshake reply; echoes the accepted process identity, while every key table (root, prefix, copy-mode, copy-mode-vi, custom) lets clients label key hints and render binding help and capabilities describe optional behavior |
-| `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation`, `prepared: bool` | tmux-style command from any client. Control sets `prepared` after the daemon freezes one alias layer; the daemon still runs authorization and ordinary dispatch validation |
+| `CommandRequest(CommandRequest)` | `request_id: u64`, `command: CommandInvocation`, `prepared: bool` | tmux-style command from any client. Control and the local CLI set `prepared` after the daemon freezes one alias layer. A prepared multi-command alias travels as one opaque `CommandInvocation`; the daemon still runs authorization and ordinary dispatch validation |
 | `CommandResponse(CommandResponse)` | `Success { request_id, output, exit_code, stderr }` / `Error { request_id, error: ServerError, output }` | Command result. A client prints either output field before it reports an error or returns the exit code. `stderr` (appended at v71) is populated for `source-file` diagnostics issued by a Command client since Wave E (2026-08-22) and stays empty for every other command; `Success` with a nonzero `exit_code` is a COMPLETED command, so `Error` stays reserved for dispatch, transport, and server failures |
 | `Attach { session: String }` | target string | Interactive attach request. An empty target lazily creates the next numeric session when the daemon has none; explicit missing targets and Command-kind attaches do not create. A session holds a set of attached clients, so a second device never collides with the first |
-| `Attached { session: SessionId, snapshot: MuxSnapshot }` | resolved id + full state | Attach acknowledgement |
+| `Attached { session: SessionId, snapshot: MuxSnapshot, read_only: bool, client_flags: String }` | resolved id + full state + effective reconnect options | Attach acknowledgement. The option fields describe the state actually applied by this attachment, so a TUI changing connections does not have to infer which child of an opaque alias attached |
 | `Detach` | . | Interactive detach; drops the sending client's attachment and leaves every other viewer attached. The connection stays open, and the client remains a subscriber that can send another `Attach` |
 | `SetColorScheme(TerminalColorScheme)` | light/dark | Client-driven appearance change |
 | `SetConfigOverrides { entries }` | ordered `Vec<(String, String)>` | Replace the daemon's complete appearance and mux override sets; an empty vector clears both |
@@ -105,7 +105,7 @@ fields in declaration order.
 | `AgentReplay { pane, from_seq: u64 }` | journal cursor | Replay the pane's journal from `from_seq`, then tail it. Sent on attach, after `AgentLagged`, and when a pane enters the visible set |
 | `AgentAcknowledgePromptRestore { pane, reclaim_id }` | one restored draft | Retire one daemon-cached recovered prompt after its owning client has put it back in the composer, preventing a later replay from restoring it again |
 | `PrepareCommandList { request_id, commands }` | request identity plus `Vec<CommandInvocation>` | Client → daemon: freeze one live alias layer for a complete command unit under one mux lock. Preparation performs no command effects, target or format resolution, hook emission, message publication, or authorization |
-| `PreparedCommandList { request_id, commands }` | request identity plus one `PreparedCommand` per input | Daemon → client: return the immutable invocation, optional canonical identity, `alias_matched`, and `Ready` or a typed `ServerError`. The echoed request ID lets a client ignore stale replies while notifications share the stream |
+| `PreparedCommandList { request_id, commands }` | request identity plus one `PreparedCommand` per input | Daemon → client: return the immutable invocation, optional canonical identity, `alias_matched`, and `Ready` or a typed `ServerError`. Multi-command and empty aliases return their opaque invocation with `canonical_name: None`, `alias_matched: true`, and `Ready`. The echoed request ID lets a client ignore stale replies while notifications share the stream |
 
 `CommandInvocation` is `{ name: String, args: Vec<String>, source: Option<SourceSpan>,
 command_blocks: Vec<u32> }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based
@@ -114,6 +114,15 @@ its brace-bearing text. Quoted brace text has no entry and remains a string. Con
 parsers populate the positions; argv-created commands start with an empty vector. Aliases and key
 table snapshots preserve the positions across request, preparation, `ServerHello`, and
 `KeyTablesChanged` frames.
+
+Multi-command and empty aliases reuse this encoding. The mux stores the frozen body as the reserved
+name `__zz-command-alias-group` with one `{ ... }` argument and `command_blocks = [0]`; it does not
+add a child-vector field. Alias expansion appends caller arguments to the final parsed child before
+it renders that body. Clients scan every child for attach and attaching `new-session` TUI routing,
+but only the final leaf for stdin routing. A stdin-reading leaf receives the captured payload inside
+that body; the client then sends one opaque invocation with `CommandRequest.prepared = true`. The
+daemon reparses and validates the children, executes each through its ordinary path, and treats an
+empty body as a successful zero-item queue. This closure changes no postcard shape or protocol tag.
 
 The agent identifiers (`option_id`, `value`, `mode_id`, `method_id`) are bounded to
 `MAX_AGENT_OPTION_BYTES` (4 KiB), and session IDs and list cursors to
@@ -228,7 +237,8 @@ values.
 The overlay and control-mode waves append ten more, in tag order: `Popup { state: Option<PopupState> }`,
 `Menu { state: Option<MenuState> }`, and `Confirm { state: Option<ConfirmState> }` (v63/v64) carry the
 full overlay state on every change, `None` meaning closed; `ControlExit { reason }` (v66) tells a
-control-mode client why the daemon is ending the conversation (its front-end renders `%exit <reason>`);
+control-mode client why the daemon is ending the conversation. A nonempty reason renders
+`%exit <reason>`; an empty reason is the targeted clean-shutdown signal and renders bare `%exit`.
 `HookEvent { name, variables }` (v66) is the hook-bus notification feed — the daemon sends the event
 name plus its format variables and the control front-end alone knows the `%`-line spellings;
 `PaneOutput { pane, bytes }` (v66) is the raw pane-output tap (the same tap `pipe-pane` uses) that
@@ -253,7 +263,23 @@ freezes new response admissions, waits for admitted Command and Control response
 `ServerStopping`, and drains every registered writer before endpoint removal. Control closes the
 flags-1 command guard with `%end` before exactly one `%exit`; ordinary Command clients receive their
 success response before socket teardown. The listener remains held through the bounded drain, so
-the change needs no protocol field or version.
+the change needs no protocol field or version. A Control client that itself executes `kill-server`
+also receives an empty-reason `ControlExit` immediately after that child's guard. This supplies the
+pinned early clean exit without moving the generic `ServerStopping` ahead of admitted responses.
+
+Multi-body alias shutdown also uses existing messages. The daemon records force or a quiet policy
+recheck in queue-local state, holds shutdown behind admitted foreground jobs and zero-delay
+detached command-mode callbacks, and buffers structural hook events until the outer queue settles.
+Force discards structural events queued before `kill-server`, derives shutdown events from the
+sessions that remain, and cancels delayed non-detached hook jobs. Source and hook queues keep their
+own yield boundaries. A Control alias has no synthetic parent frame: its existing
+`ControlCommandGuard` events describe the children with inherited flags, and the existing
+`CommandResponse` settles the request. A clean self-shutdown signal is captured behind the
+`kill-server` child guard, while a generic shutdown observed from another client stays behind the
+in-flight alias. The
+exact history-dependent multi-window `window-unlinked` sequence remains tracked under
+`hooks.shutdown-window-unlinked-order`; no shutdown field or version bump can reconstruct tmux's
+winlink-tree history.
 
 Direct Control config construction still runs before daemon execution. Source, startup, alias, and
 callback parsing therefore see daemon-global `HOME`, while a direct Control line sees the client's
@@ -268,6 +294,11 @@ changes, so exact-version peers reject v76/v77 skew. `error` selects `%error` ra
 `sticky_failure` independently retains Control retval 1, and `flags` carries tmux's command-frame
 state. The pinned states observed here are 1 for parser-owned replay and 0 for fresh immediate-hook
 and background-callback queues.
+
+An opaque alias group emits no wrapper guard. Each child emits its existing guard with the input
+unit's inherited flags, including children reached through a nested source or callback. The final
+group response does not add another frame. An empty group emits no guard, and a dispatch failure
+before the first child guard falls back to one ordinary error frame in the Control front end.
 
 Parser-owned replay, foreground shell-evaluated `if-shell`, immediate `if-shell -F` including `-bF`,
 and foreground `run-shell -C` retain flags 1. Per-client and per-thread capture publishes the
@@ -312,7 +343,9 @@ flags-0 sources share this event path. The daemon reads every matched file befor
 raw read diagnostics precede the first replayed child while the single completion follows all
 descendants. Non-UTF-8 content remains under `config.non-utf8-file-bytes`: the pin's measured
 lone-`0xff` case also consumes an extra invisible empty-command item that zz does not model. Source
-stdin transport, Control sourced-hook cwd, and deferred event hooks retain their separate gaps.
+stdin transport, Control sourced-hook cwd, and deferred event-hook client selection retain their
+separate gaps. The `aliases.command-bodies` closure covers the alias queue's source and hook yield
+boundaries.
 Slice 10z closes config file-unit construction in daemon-local state without a protocol field.
 Config command-name and lexer diagnostics remain generic Warning events on the
 `%config-error` classification path.
@@ -321,11 +354,13 @@ Config command-name and lexer diagnostics remain generic Warning events on the
 `crates/zz/src/control_mode.rs` renders both Control-only events. The daemon preflights every declared
 path for one source command before recursion, so a
 three-level parser replay publishes the root missing-path guard, middle missing-path guard, and leaf
-output guard once each. The Control front end combines guards with existing `CommandResponse` and
-`Detached` messages. Direct runtime errors, parser-owned sourced runtime errors, nonruntime source
-failures, synchronous inserted runtime errors, hook sticky failures, and typed parser-owned OS or path
-read errors set retval 1. Generic nonzero successes and flags-1 parse or preparation failures do not.
-Return and detach precedence remain unchanged.
+output guard once each. The Control front end combines guards with `CommandResponse` and `Detached`
+messages. Direct runtime errors, parser-owned sourced runtime errors, nonruntime source failures,
+synchronous inserted runtime errors, hook sticky failures, and typed parser-owned OS or path read
+errors set retval 1. A `PostAdmissionCallback` error still updates that long-lived value while
+letting a Return captured before the selected callback failure preserve its prior code. Generic
+nonzero successes and flags-1 parse or preparation failures do not. Return and detach precedence
+remain unchanged.
 
 Deferred event hooks clear the Control target and remain separate. Command replay retains the
 caller cwd for sourced hooks; Control hook framing clears the replay client, so sourced-hook cwd is
@@ -341,7 +376,9 @@ viewport from the same transcript, subject to the existing command-output size b
 per-invocation batching, not a claim of physical interleaving.
 At the v78 checkpoint, generic config Warning typing, startup diagnostic delivery, hard-disconnect
 queue cancellation, config byte input, source stdin transport, parser abort semantics, hook cwd
-selection, and deferred event hooks remained open. v80 later closes startup diagnostic delivery.
+selection, and deferred event-hook client selection remained open. v80 later closes startup
+diagnostic delivery; the multi-body alias slice later closes queue-local event buffering and yield
+ordering except for `hooks.shutdown-window-unlinked-order`.
 
 v79 changes the existing `EventPayload::CommandOutput` tag 11 in place to
 `CommandOutput { pane, output_id, viewport }`. The daemon allocates each real command-output actor a
@@ -400,7 +437,10 @@ rows rather than a packed terminal frame, and a lost chunk would leave a hole in
 tmux target-lookup wording and only the normalized component that failed. Protocol v76 appends
 `CommandParse(String)` at tail tag 12. It identifies command-name, flag, arity, and other parse or
 preparation failures. Target lookup and semantic or runtime failures retain their existing variants,
-so callers can abort parse failures before effects without changing runtime queue ordering.
+so callers can abort parse failures before effects without changing runtime queue ordering. Protocol
+v85 appends `PostAdmissionCallback(Box<ServerError>)` at tail tag 13. It preserves the underlying
+error and display text while identifying a selected synchronous callback that may fail after Control
+has already captured a Return, so Control can preserve that Return without matching error prose.
 
 # Attachment, presence, and per-client views
 
@@ -561,9 +601,16 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 84`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 85`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v85 appends `ServerError::PostAdmissionCallback` and the `read_only` / `client_flags` fields on
+  `ProtocolMessage::Attached`. Control can distinguish selected synchronous callback failures from
+  direct wrapper errors without inspecting names or prose, and TUI reconnect uses the attachment
+  state the daemon actually applied.
+- The opaque multi-body alias value itself still reuses `CommandInvocation`, `PreparedCommand`,
+  `CommandRequest.prepared`, `ControlCommandGuard`, and `ServerStopping`; it added no child-vector
+  field at v84.
 - v84 appends `CommandInvocation.command_blocks`. Zero-based positions preserve lexical command
   blocks through Control requests, prepared commands, and key-table snapshots while quoted braces
   remain ordinary strings.
@@ -778,21 +825,21 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 84, client_instance_id: ClientInstanceId(0), kind: Interactive,
+`ClientHello { protocol_version: 85, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
 working_directory: None, environment: [], process_id: 0 }` is 20 bytes on the wire: an 8-byte
 envelope over a 12-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17 18 19
-      10 00 00 00  00     00      54 00         00 54 00 00 00 00 01 01 00 00 00 00
+      10 00 00 00  00     00      55 00         00 55 00 00 00 00 01 01 00 00 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 16  Control        (= 84)
+      length = 16  Control        (= 85)
 ```
 
 - **length `16`** = `ENVELOPE_BYTES` (4) + payload (12); it counts the four envelope bytes, not itself.
-- **payload** `00 54 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x54` (= 84), `client_instance_id` as varint `00`, `kind`
+- **payload** `00 55 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x55` (= 85), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` and `working_directory` as two `Option::None` tags (`00 00`), followed by the empty
@@ -826,11 +873,11 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 84, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 85, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None,
                        working_directory: Some("/home/demo"), environment: ["TERM=xterm-256color"],
                        process_id: 1234 }
-server → ServerHello { protocol_version: 84, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 85, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],
@@ -839,7 +886,8 @@ client → SetConfigOverrides { entries: [("theme", "Catppuccin Mocha"),
                                         ("font-size", "13"),
                                         ("prefix", "C-a"), ("mode-keys", "vi"), ...] }
 client → Attach { session: "" }      // attach current, or lazily create numeric 0 if empty
-server → Attached { session: $0, snapshot: MuxSnapshot { generation, sessions, focused_window } }
+server → Attached { session: $0, snapshot: MuxSnapshot { generation, sessions, focused_window },
+                    read_only: false, client_flags: "" }
 server → Event { sequence: 1, payload: TerminalViewport { pane: %3, viewport } }   // Terminal lane
 server → Event { sequence: 2, payload: MuxOptionsChanged { options } }             // Control lane
 client → HistoryRequest { pane: %3, start: 1_488, count: 512 }

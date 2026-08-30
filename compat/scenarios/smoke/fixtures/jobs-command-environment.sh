@@ -340,7 +340,7 @@ main_client set-environment -t =jobs-delay-destroyed TMUX_PANE scheduled-pane
 main_client set-option -g @job_delay_destroyed scheduled-format
 main_client set-option -g default-terminal jobs-delay-destroyed-scheduled
 destroyed_command="sh \"\$HOME/jobs-command-environment.sh\" positive-destroyed $side '#{@job_delay_destroyed}' '#{1}' '$destroyed_session_numeric' '#{2}'"
-main_client run-shell -b -d 1.2 -c "$removed_cwd" -t =jobs-delay-destroyed: \
+main_client run-shell -b -d 4.0 -c "$removed_cwd" -t =jobs-delay-destroyed: \
     "$destroyed_command" scheduled-argument "$removed_cwd"
 main_client set-environment -t =jobs-delay-destroyed \
     JOB_DELAY_DESTROYED_SESSION before-kill
@@ -374,7 +374,7 @@ main_client set-environment -g TMUX_PANE scheduled-global-pane
 main_client set-option -g @job_delay_missing scheduled-format
 main_client set-option -g default-terminal jobs-delay-missing-scheduled
 missing_command="sh \"\$HOME/jobs-command-environment.sh\" positive-missing $side '#{@job_delay_missing}' '#{1}'"
-main_client run-shell -b -d 1.0 -t =jobs-delay-missing: \
+main_client run-shell -b -d 4.0 -t =jobs-delay-missing: \
     "$missing_command" scheduled-argument
 main_client new-session -d -s jobs-delay-missing
 main_client set-environment -t =jobs-delay-missing \

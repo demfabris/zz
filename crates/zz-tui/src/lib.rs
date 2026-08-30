@@ -29,7 +29,7 @@ use zz_daemon::{
 };
 use zz_protocol::{
     CommandInvocation, CommandResponse, PreparedCommand, PreparedCommandResult, ProtocolMessage,
-    ServerError, canonical_command, command_spec,
+    ServerError,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -203,23 +203,13 @@ fn run_new_session_commands<'a>(
     )?;
     match execute_new_session(&initial, commands)? {
         NewSessionOutcome::Detached => Ok(()),
-        NewSessionOutcome::Attached {
-            session,
-            messages,
-            reconnect,
-        } => {
-            let (read_only, client_flags) = reconnect.into_attach_arguments();
+        NewSessionOutcome::Attached { session, messages } => {
             let browser_provider = request.browser_provider.and_then(|provider| provider());
             app::run(
                 initial,
                 resolved.endpoint,
                 resolved.local_endpoint,
-                app::InitialAttach::AlreadyAttached {
-                    session,
-                    messages,
-                    read_only,
-                    client_flags,
-                },
+                app::InitialAttach::AlreadyAttached { session, messages },
                 resolved.host_label,
                 resolved.local_host_label,
                 resolved.fleet_hosts,
@@ -269,7 +259,6 @@ enum NewSessionOutcome {
     Attached {
         session: zz_protocol::SessionId,
         messages: Vec<ProtocolMessage>,
-        reconnect: ReconnectAttachState,
     },
 }
 
@@ -278,113 +267,20 @@ enum NewSessionCommand {
     Prepared(PreparedCommand),
 }
 
-#[derive(Default)]
-struct ReconnectAttachState {
-    mutations: Vec<String>,
-    read_only: bool,
-}
-
-impl ReconnectAttachState {
-    fn observe(
-        &mut self,
-        invocation: &CommandInvocation,
-        prepared_name: Option<&str>,
-        succeeded: bool,
-        attached: bool,
-    ) {
-        if !succeeded || !attached {
-            return;
-        }
-        let name = prepared_name.unwrap_or_else(|| canonical_command(&invocation.name));
-        if !matches!(name, "attach-session" | "new-session") {
-            return;
-        }
-        let (mutation, read_only) = attaching_options(name, invocation);
-        if let Some(mutation) = mutation {
-            self.mutations.push(mutation);
-        }
-        self.read_only |= read_only;
-    }
-
-    fn into_attach_arguments(self) -> (bool, Option<String>) {
-        (
-            self.read_only,
-            (!self.mutations.is_empty()).then(|| self.mutations.join(",")),
-        )
-    }
-}
-
-fn attaching_options(name: &str, invocation: &CommandInvocation) -> (Option<String>, bool) {
-    let Some(spec) = command_spec(name) else {
-        return (None, false);
-    };
-    let mut mutation = None;
-    let mut read_only = false;
-    let mut index = 0;
-    while let Some(argument) = invocation.args.get(index) {
-        if !argument.starts_with('-') || argument == "-" {
-            break;
-        }
-        index += 1;
-        if argument == "--" {
-            break;
-        }
-        if argument.starts_with("--") {
-            continue;
-        }
-        let mut cluster = argument[1..].chars();
-        while let Some(character) = cluster.next() {
-            let option_name = format!("-{character}");
-            if name == "attach-session" && option_name == "-r" {
-                read_only = true;
-            }
-            let takes_value = spec
-                .option(&option_name)
-                .is_some_and(|option| option.value.is_some());
-            if !takes_value {
-                continue;
-            }
-            let attached = cluster.as_str();
-            let value = if attached.is_empty() {
-                let Some(value) = invocation.args.get(index) else {
-                    return (mutation, read_only);
-                };
-                index += 1;
-                value.clone()
-            } else {
-                attached.to_owned()
-            };
-            if option_name == "-f" {
-                mutation = Some(value);
-            }
-            break;
-        }
-    }
-    (mutation, read_only)
-}
-
 fn execute_new_session(
     client: &InteractiveClient,
     commands: impl IntoIterator<Item = NewSessionCommand>,
 ) -> Result<NewSessionOutcome, Error> {
     let mut attached_session = None;
     let mut messages = Vec::new();
-    let mut reconnect = ReconnectAttachState::default();
     'commands: for command in commands {
-        let (request, invocation, prepared_name) = match command {
-            NewSessionCommand::Raw(invocation) => {
-                (client.execute(invocation.clone()), invocation, None)
-            }
+        let request = match command {
+            NewSessionCommand::Raw(invocation) => client.execute(invocation),
             NewSessionCommand::Prepared(PreparedCommand {
                 invocation,
-                canonical_name,
                 result: PreparedCommandResult::Ready,
                 ..
-            }) => (
-                client.execute_prepared(invocation.clone()),
-                invocation,
-                canonical_name,
-            ),
+            }) => client.execute_prepared(invocation),
             NewSessionCommand::Prepared(PreparedCommand {
                 result: PreparedCommandResult::Error(error),
                 ..
@@ -401,7 +297,6 @@ fn execute_new_session(
             }
         };
         let request_id = request.map_err(|error| Error::message(error.to_string()))?;
-        let mut attached = false;
         loop {
             let message = client
                 .recv()
@@ -419,7 +314,6 @@ fn execute_new_session(
                             "command exited with status {exit_code}"
                         )));
                     }
-                    reconnect.observe(&invocation, prepared_name.as_deref(), true, attached);
                     break;
                 }
                 ProtocolMessage::CommandResponse(CommandResponse::Error {
@@ -439,7 +333,6 @@ fn execute_new_session(
                     break 'commands;
                 }
                 message @ ProtocolMessage::Attached { session, .. } => {
-                    attached = true;
                     attached_session = Some(session);
                     messages.push(message);
                 }
@@ -448,11 +341,7 @@ fn execute_new_session(
         }
     }
     Ok(match attached_session {
-        Some(session) => NewSessionOutcome::Attached {
-            session,
-            messages,
-            reconnect,
-        },
+        Some(session) => NewSessionOutcome::Attached { session, messages },
         None => NewSessionOutcome::Detached,
     })
 }
@@ -785,59 +674,6 @@ mod tests {
         assert_eq!(
             attach_preflight_arguments(Some("work")),
             vec!["-t".to_owned(), "work".to_owned()]
-        );
-    }
-
-    #[test]
-    fn reconnect_replays_the_successful_attach_before_a_missing_target() {
-        let mut reconnect = ReconnectAttachState::default();
-        reconnect.observe(
-            &CommandInvocation::new("new-session", ["-s", "fresh", "-f", "ignore-size"]),
-            None,
-            true,
-            true,
-        );
-        reconnect.observe(
-            &CommandInvocation::new("attach-session", ["-t", "missing", "-f", "!ignore-size"]),
-            None,
-            false,
-            false,
-        );
-        assert_eq!(
-            reconnect.into_attach_arguments(),
-            (false, Some("ignore-size".to_owned()))
-        );
-    }
-
-    #[test]
-    fn reconnect_ignores_a_detached_new_session_a_miss_before_attach() {
-        let mut reconnect = ReconnectAttachState::default();
-        reconnect.observe(
-            &CommandInvocation::new(
-                "new-session",
-                ["-A", "-d", "-s", "missing", "-f", "active-pane"],
-            ),
-            None,
-            true,
-            false,
-        );
-        reconnect.observe(
-            &CommandInvocation::new(
-                "att",
-                [
-                    "-r",
-                    "-f",
-                    "active-pane",
-                    "-fignore-size,no-detach-on-destroy",
-                ],
-            ),
-            Some("attach-session"),
-            true,
-            true,
-        );
-        assert_eq!(
-            reconnect.into_attach_arguments(),
-            (true, Some("ignore-size,no-detach-on-destroy".to_owned()))
         );
     }
 }

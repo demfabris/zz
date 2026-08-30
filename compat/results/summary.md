@@ -4,6 +4,7 @@
 | --- | ---: | :---: | ---: | :---: | :---: | :---: |
 | aggressive-resize | 2 | yes | 0 | yes | yes | yes |
 | alerts | 62 | yes | 0 | yes | yes | yes |
+| aliases-multi-body | 8 | yes | 0 | yes | yes | yes |
 | bare-targets | 8 | yes | 0 | yes | yes | yes |
 | base-index | 11 | yes | 0 | yes | yes | yes |
 | behavior-options | 12 | yes | 0 | yes | yes | yes |

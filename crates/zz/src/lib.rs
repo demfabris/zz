@@ -35,6 +35,7 @@ mod workspace;
 
 #[cfg(not(target_os = "ios"))]
 use std::{
+    borrow::Cow,
     io::{self, ErrorKind, Write as _},
     path::PathBuf,
     process::{Command, ExitCode, Stdio},
@@ -62,7 +63,7 @@ use zz_daemon::{
 };
 use zz_daemon::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
-use zz_mux::MuxEngine;
+use zz_mux::{MuxEngine, format_command};
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, MAX_AGENT_SEND_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES, PROTOCOL_VERSION,
@@ -993,14 +994,12 @@ fn run_command_mode(
     if reads_stdin {
         match read_stdin_payload() {
             Ok(payload) => {
-                let arguments = prepared.as_mut().map_or_else(
-                    || &mut command_chain[0].args,
-                    |prepared| &mut prepared.commands[0].invocation.args,
-                );
-                if !arguments.iter().any(|argument| argument == "--") {
-                    arguments.push("--".to_owned());
+                if let Some(prepared) = prepared.as_mut() {
+                    append_prepared_command_stdin_payload(&mut prepared.commands[0], payload);
+                } else {
+                    let canonical_name = canonical_command(&command_chain[0].name).to_owned();
+                    append_stdin_payload(&canonical_name, &mut command_chain[0].args, payload);
                 }
-                arguments.push(payload);
             }
             Err(error) => {
                 eprintln!("zz: {error}");
@@ -1238,6 +1237,44 @@ fn prepared_command_is(command: &PreparedCommand, canonical_name: &str) -> bool 
 }
 
 #[cfg(not(target_os = "ios"))]
+fn prepared_command_invocations(command: &PreparedCommand) -> Option<Cow<'_, [CommandInvocation]>> {
+    if command.result != PreparedCommandResult::Ready {
+        return None;
+    }
+    if command.canonical_name.is_some() {
+        return Some(Cow::Borrowed(std::slice::from_ref(&command.invocation)));
+    }
+    MuxEngine::command_alias_group_commands(&command.invocation)
+        .ok()
+        .flatten()
+        .map(Cow::Owned)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_command_tail(command: &PreparedCommand) -> Option<Cow<'_, CommandInvocation>> {
+    match prepared_command_invocations(command)? {
+        Cow::Borrowed(commands) => commands.last().map(Cow::Borrowed),
+        Cow::Owned(mut commands) => commands.pop().map(Cow::Owned),
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn prepared_command_any(
+    command: &PreparedCommand,
+    mut matches: impl FnMut(&CommandInvocation, &str) -> bool,
+) -> bool {
+    prepared_command_invocations(command).is_some_and(|commands| {
+        commands.iter().any(|invocation| {
+            let canonical_name = command
+                .canonical_name
+                .as_deref()
+                .unwrap_or_else(|| canonical_command(&invocation.name));
+            matches(invocation, canonical_name)
+        })
+    })
+}
+
+#[cfg(not(target_os = "ios"))]
 fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> {
     commands.iter().find_map(|command| match &command.result {
         PreparedCommandResult::Ready => None,
@@ -1247,10 +1284,71 @@ fn prepared_command_error(commands: &[PreparedCommand]) -> Option<&ServerError> 
 
 #[cfg(not(target_os = "ios"))]
 fn prepared_command_reads_stdin(command: &PreparedCommand) -> bool {
-    (prepared_command_is(command, "agent-send")
-        && zz_daemon::agent_send_reads_stdin(&command.invocation.args))
-        || (prepared_command_is(command, "send-text")
-            && zz_daemon::send_text_reads_stdin(&command.invocation.args))
+    let Some(tail) = prepared_command_tail(command) else {
+        return false;
+    };
+    let canonical_name = command
+        .canonical_name
+        .as_deref()
+        .unwrap_or_else(|| canonical_command(&tail.name));
+    match canonical_name {
+        "agent-send" => zz_daemon::agent_send_reads_stdin(&tail.args),
+        "send-text" => zz_daemon::send_text_reads_stdin(&tail.args),
+        _ => false,
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn stdin_payload_has_argument_boundary(canonical_name: &str, arguments: &[String]) -> bool {
+    let Some(spec) = catalog_command_spec(canonical_name) else {
+        return false;
+    };
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        if argument == "--" {
+            return true;
+        }
+        if !argument.starts_with('-') || argument == "-" {
+            return false;
+        }
+        let consumes_next = spec
+            .option(argument)
+            .is_some_and(|option| option.value.is_some());
+        index += if consumes_next { 2 } else { 1 };
+    }
+    false
+}
+
+#[cfg(not(target_os = "ios"))]
+fn append_stdin_payload(canonical_name: &str, arguments: &mut Vec<String>, payload: String) {
+    if !stdin_payload_has_argument_boundary(canonical_name, arguments) {
+        arguments.push("--".to_owned());
+    }
+    arguments.push(payload);
+}
+
+#[cfg(not(target_os = "ios"))]
+fn append_prepared_command_stdin_payload(command: &mut PreparedCommand, payload: String) {
+    if let Some(canonical_name) = command.canonical_name.clone() {
+        append_stdin_payload(&canonical_name, &mut command.invocation.args, payload);
+        return;
+    }
+    let has_argument_boundary = prepared_command_tail(command).is_some_and(|tail| {
+        stdin_payload_has_argument_boundary(canonical_command(&tail.name), &tail.args)
+    });
+    let body = MuxEngine::command_alias_group_body(&command.invocation)
+        .expect("stdin-reading prepared command must be an alias group");
+    let marker = "__zz-stdin-payload";
+    let mut suffix_arguments = Vec::with_capacity(2);
+    if !has_argument_boundary {
+        suffix_arguments.push("--".to_owned());
+    }
+    suffix_arguments.push(payload);
+    let suffix = format_command(&CommandInvocation::new(marker, suffix_arguments));
+    let suffix = suffix
+        .strip_prefix(marker)
+        .expect("stdin payload formatter must preserve an unknown command name");
+    command.invocation.args[0] = format!("{{ {body}{suffix} }}");
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1260,15 +1358,19 @@ fn prepared_command_chain_uses_tui(
 ) -> bool {
     typed.iter().zip(prepared).any(|(typed, prepared)| {
         !matches!(typed.name.as_str(), "attach" | "attach-session")
-            && prepared_command_is(prepared, "new-session")
-            && MuxEngine::new_session_attaches(&prepared.invocation.args).unwrap_or(false)
+            && prepared_command_any(prepared, |command, canonical_name| {
+                canonical_name == "new-session"
+                    && MuxEngine::new_session_attaches(&command.args).unwrap_or(false)
+            })
     })
 }
 
 #[cfg(not(target_os = "ios"))]
 fn prepared_attach_uses_tui(typed_name: &str, prepared: &PreparedCommand) -> bool {
     !matches!(typed_name, "attach" | "attach-session")
-        && prepared_command_is(prepared, "attach-session")
+        && prepared_command_any(prepared, |_, canonical_name| {
+            canonical_name == "attach-session"
+        })
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1682,6 +1784,11 @@ fn format_local_daemon_error(error: DaemonError) -> String {
 #[cfg(not(target_os = "ios"))]
 fn format_local_command_error(path: &Path, error: DaemonError) -> String {
     match error {
+        DaemonError::Server(ServerError::InvalidCommand(message))
+            if message == "server exited unexpectedly" =>
+        {
+            message
+        }
         DaemonError::Io(error) if error.kind() == ErrorKind::ConnectionRefused => {
             format!("no server running on {}", path.display())
         }
@@ -2514,18 +2621,20 @@ mod tests {
     use super::{
         ApplicationArgumentError, CommandOutcome, DaemonBootstrapArgumentError,
         DaemonBootstrapArguments, NativeAttachArgumentError, TMUX_USAGE, TMUX_VERSION_OUTPUT,
-        application_arguments, application_working_directory, attach_prefix_uses_tui,
-        command_chain_uses_tui, command_error_message, command_reads_stdin, daemon_is_missing,
-        daemon_transport_failure, execute_command_chain, implicit_tmux_endpoint_conflict,
-        native_attach_command, new_session_uses_tui, parse_daemon_bootstrap_arguments,
-        parse_native_attach_arguments, prepared_attach_uses_tui, prepared_command_chain_uses_tui,
-        prepared_command_reads_stdin, prepared_kill_server_recovery, prepared_native_attach,
-        protocol_version_output, run_command_mode, split_command_chain, terminal_color_scheme,
-        tmux_command_starts_server, validated_bootstrap_client_working_directory,
+        append_prepared_command_stdin_payload, append_stdin_payload, application_arguments,
+        application_working_directory, attach_prefix_uses_tui, command_chain_uses_tui,
+        command_error_message, command_reads_stdin, daemon_is_missing, daemon_transport_failure,
+        execute_command_chain, implicit_tmux_endpoint_conflict, native_attach_command,
+        new_session_uses_tui, parse_daemon_bootstrap_arguments, parse_native_attach_arguments,
+        prepared_attach_uses_tui, prepared_command_chain_uses_tui, prepared_command_reads_stdin,
+        prepared_kill_server_recovery, prepared_native_attach, protocol_version_output,
+        run_command_mode, split_command_chain, terminal_color_scheme, tmux_command_starts_server,
+        validated_bootstrap_client_working_directory,
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
     use zz_daemon::DaemonError;
+    use zz_mux::{CommandAliasResolution, ExecutionContext, MuxEngine};
     use zz_protocol::{CommandInvocation, PreparedCommand, PreparedCommandResult, ServerError};
 
     #[test]
@@ -2783,6 +2892,21 @@ mod tests {
     }
 
     #[test]
+    fn stdin_payload_boundary_distinguishes_terminators_from_option_values() {
+        let mut send_text = ["-t", "--"].map(str::to_owned).to_vec();
+        append_stdin_payload("send-text", &mut send_text, "--no-enter".to_owned());
+        assert_eq!(send_text, ["-t", "--", "--", "--no-enter"]);
+
+        let mut agent_send = ["--context", "--"].map(str::to_owned).to_vec();
+        append_stdin_payload("agent-send", &mut agent_send, "--submit".to_owned());
+        assert_eq!(agent_send, ["--context", "--", "--", "--submit"]);
+
+        let mut bounded = ["-t", "%1", "--"].map(str::to_owned).to_vec();
+        append_stdin_payload("send-text", &mut bounded, "--no-enter".to_owned());
+        assert_eq!(bounded, ["-t", "%1", "--", "--no-enter"]);
+    }
+
+    #[test]
     fn prepared_cli_routing_uses_canonical_identity_and_alias_match() {
         let prepared =
             |typed: &str, canonical: &str, alias_matched: bool, args: &[&str]| PreparedCommand {
@@ -2814,6 +2938,141 @@ mod tests {
         let aliased_kill = prepared("kill-server", "kill-server", true, &[]);
         assert!(prepared_kill_server_recovery("kill-server", &plain_kill));
         assert!(!prepared_kill_server_recovery("kill-server", &aliased_kill));
+    }
+
+    #[test]
+    fn prepared_cli_routing_scans_alias_groups_but_stdin_uses_the_final_command() {
+        let prepared_alias = |body: &str, args: &[&str]| {
+            let mut engine = MuxEngine::default();
+            let mut context = ExecutionContext::default();
+            engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        [
+                            "-s".to_owned(),
+                            "command-alias[90]".to_owned(),
+                            format!("route={body}"),
+                        ],
+                    ),
+                )
+                .expect("set command alias");
+            let CommandAliasResolution::Expanded(invocation) = engine
+                .resolve_command_alias(&CommandInvocation::new("route", args.iter().copied()))
+            else {
+                panic!("command alias must expand");
+            };
+            PreparedCommand {
+                invocation,
+                canonical_name: None,
+                alias_matched: true,
+                result: PreparedCommandResult::Ready,
+            }
+        };
+
+        let attach = prepared_alias("display-message -p before ; attach-session -t work", &[]);
+        assert!(prepared_attach_uses_tui("route", &attach));
+        let attach_first = prepared_alias("attach-session -t work ; display-message -p after", &[]);
+        assert!(prepared_attach_uses_tui("route", &attach_first));
+        let group_name = attach.invocation.name.clone();
+        let nested = prepared_alias(
+            &format!(
+                "display-message -p outer ; {group_name} {{ display-message -p inner ; attach-session -t work }}"
+            ),
+            &[],
+        );
+        let nested_commands = MuxEngine::command_alias_group_commands(&nested.invocation)
+            .expect("parse nested alias group")
+            .expect("prepared command is an alias group");
+        assert_eq!(nested_commands.len(), 3);
+        assert_eq!(nested_commands[2].name, "attach-session");
+        assert!(prepared_attach_uses_tui("route", &nested));
+
+        let new_session = prepared_alias("display-message -p before ; new-session -s work", &[]);
+        assert!(prepared_command_chain_uses_tui(
+            &[CommandInvocation::new("route", [] as [&str; 0])],
+            &[new_session]
+        ));
+        let new_session_first =
+            prepared_alias("new-session -s work ; display-message -p after", &[]);
+        assert!(prepared_command_chain_uses_tui(
+            &[CommandInvocation::new("route", [] as [&str; 0])],
+            &[new_session_first]
+        ));
+        let detached = prepared_alias("display-message -p before ; new-session -d -s work", &[]);
+        assert!(!prepared_command_chain_uses_tui(
+            &[CommandInvocation::new("route", [] as [&str; 0])],
+            &[detached]
+        ));
+        let detached_first =
+            prepared_alias("new-session -d -s work ; display-message -p after", &[]);
+        assert!(!prepared_command_chain_uses_tui(
+            &[CommandInvocation::new("route", [] as [&str; 0])],
+            &[detached_first]
+        ));
+
+        for payload in [
+            "",
+            "a 'quoted' \"value\" $x ; { y } \\",
+            "first\nsecond",
+            "--no-enter",
+        ] {
+            let mut send_text =
+                prepared_alias("display-message -p before ; send-text", &["-t", "%1"]);
+            assert!(prepared_command_reads_stdin(&send_text));
+            append_prepared_command_stdin_payload(&mut send_text, payload.to_owned());
+            let commands = MuxEngine::command_alias_group_commands(&send_text.invocation)
+                .expect("parse prepared alias group")
+                .expect("prepared command is an alias group");
+            assert_eq!(commands[0].name, "display-message");
+            assert_eq!(commands[1].name, "send-text");
+            assert_eq!(&commands[1].args[..3], ["-t", "%1", "--"]);
+            assert_eq!(commands[1].args[3], payload);
+        }
+
+        let mut bounded = prepared_alias("display-message -p before ; send-text -t %1 --", &[]);
+        assert!(prepared_command_reads_stdin(&bounded));
+        append_prepared_command_stdin_payload(&mut bounded, "piped".to_owned());
+        let commands = MuxEngine::command_alias_group_commands(&bounded.invocation)
+            .expect("parse prepared alias group")
+            .expect("prepared command is an alias group");
+        assert_eq!(commands[1].args, ["-t", "%1", "--", "piped"]);
+
+        for (body, payload, expected) in [
+            (
+                "display-message -p before ; send-text -t --",
+                "--no-enter",
+                vec!["-t", "--", "--", "--no-enter"],
+            ),
+            (
+                "display-message -p before ; agent-send --context --",
+                "--submit",
+                vec!["--context", "--", "--", "--submit"],
+            ),
+        ] {
+            let mut prepared = prepared_alias(body, &[]);
+            assert!(prepared_command_reads_stdin(&prepared));
+            append_prepared_command_stdin_payload(&mut prepared, payload.to_owned());
+            let commands = MuxEngine::command_alias_group_commands(&prepared.invocation)
+                .expect("parse prepared alias group")
+                .expect("prepared command is an alias group");
+            assert_eq!(commands[1].args, expected);
+        }
+
+        let agent_send = prepared_alias("display-message -p before ; agent-send --submit", &[]);
+        assert!(prepared_command_reads_stdin(&agent_send));
+        let nonfinal_agent_send =
+            prepared_alias("agent-send --submit ; display-message -p after", &[]);
+        assert!(!prepared_command_reads_stdin(&nonfinal_agent_send));
+
+        let empty = prepared_alias("", &["agent-send", "--submit"]);
+        assert!(!prepared_attach_uses_tui("route", &empty));
+        assert!(!prepared_command_chain_uses_tui(
+            &[CommandInvocation::new("route", [] as [&str; 0])],
+            std::slice::from_ref(&empty)
+        ));
+        assert!(!prepared_command_reads_stdin(&empty));
     }
 
     #[test]

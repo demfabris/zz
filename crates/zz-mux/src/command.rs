@@ -3719,7 +3719,7 @@ impl MuxEngine {
         if commands.len() == 1 {
             return CommandAliasResolution::Expanded(commands.remove(0));
         }
-        let body = format_callback_commands(&commands);
+        let body = format_callback_commands_round_trip(&commands);
         let mut expanded =
             CommandInvocation::new(COMMAND_ALIAS_GROUP_NAME, [format!("{{ {body} }}")])
                 .with_command_blocks([0]);
@@ -3736,6 +3736,11 @@ impl MuxEngine {
         command: &CommandInvocation,
     ) -> Result<Option<Vec<CommandInvocation>>, ServerError> {
         parse_command_alias_group(command)
+    }
+
+    #[must_use]
+    pub fn command_alias_group_body(command: &CommandInvocation) -> Option<&str> {
+        command_alias_group_body(command)
     }
 
     pub fn execute_with_shell_validator(
@@ -14382,7 +14387,7 @@ fn prepare_expanded_callback_invocation(
     if let Some(body) = command_alias_group_body(command) {
         let commands =
             prepare_callback_commands_with_aliases(engine, body, true, owner, false, false)?;
-        command.args[0] = format!("{{ {} }}", format_callback_commands(&commands));
+        command.args[0] = format!("{{ {} }}", format_callback_commands_round_trip(&commands));
         return validate_static_command_chain(&commands);
     }
     for index in 0..command.args.len() {
@@ -14399,7 +14404,7 @@ fn prepare_expanded_callback_invocation(
             aliases_available,
             aliases_available,
         )?;
-        let body = format_callback_commands(&commands);
+        let body = format_callback_commands_round_trip(&commands);
         command.args[index] = format!("{{ {body} }}");
     }
     validate_bound_command(command, owner)
@@ -14424,7 +14429,7 @@ fn substitute_command_prompt_invocations(
             }
             let mut nested = parsed.commands;
             substitute_command_prompt_invocations(&mut nested, input)?;
-            command.args[index] = format!("{{ {} }}", format_callback_commands(&nested));
+            command.args[index] = format!("{{ {} }}", format_callback_commands_round_trip(&nested));
         }
     }
     Ok(())
@@ -14693,6 +14698,17 @@ fn validate_bound_command(command: &CommandInvocation, owner: &str) -> Result<()
 }
 
 fn format_callback_commands(commands: &[CommandInvocation]) -> String {
+    format_callback_commands_with(commands, format_command)
+}
+
+fn format_callback_commands_round_trip(commands: &[CommandInvocation]) -> String {
+    format_callback_commands_with(commands, command_round_trip_print)
+}
+
+fn format_callback_commands_with(
+    commands: &[CommandInvocation],
+    render: impl Fn(&CommandInvocation) -> String,
+) -> String {
     let mut output = String::new();
     let mut previous_group = None;
     for command in commands {
@@ -14710,8 +14726,34 @@ fn format_callback_commands(commands: &[CommandInvocation]) -> String {
                 output.push_str(" ; ");
             }
         }
-        output.push_str(&format_command(command));
+        output.push_str(&render(command));
         previous_group = group;
+    }
+    output
+}
+
+fn command_round_trip_print(command: &CommandInvocation) -> String {
+    if let Some(body) = command_alias_group_body(command) {
+        return body.to_owned();
+    }
+    let mut output = tmux_args_escape(canonical_command(&command.name));
+    if !command.args.is_empty() {
+        output.push(' ');
+        output.push_str(
+            &command
+                .args
+                .iter()
+                .enumerate()
+                .map(|(index, argument)| {
+                    if command.argument_is_command_block(index) {
+                        argument.clone()
+                    } else {
+                        tmux_args_escape(argument)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
     }
     output
 }
@@ -33050,6 +33092,127 @@ mod tests {
             Execution::default()
         );
         assert_eq!(engine.state.generation(), generation);
+    }
+
+    #[test]
+    fn command_alias_group_round_trips_option_boundaries_empty_args_and_blocks() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[40]",
+                        "dash=display-message -p -- -literal ; display-message -p ok",
+                    ],
+                ),
+            )
+            .expect("dash alias write");
+
+        let CommandAliasResolution::Expanded(expanded) =
+            engine.resolve_command_alias(&command("dash", &[]))
+        else {
+            panic!("dash alias must expand");
+        };
+        assert_eq!(
+            MuxEngine::command_alias_group_body(&expanded),
+            Some("display-message -p -- -literal ; display-message -p ok")
+        );
+        let commands = MuxEngine::command_alias_group_commands(&expanded)
+            .unwrap()
+            .unwrap();
+        assert_eq!(commands[0].args, ["-p", "--", "-literal"]);
+        assert_eq!(commands[1].args, ["-p", "ok"]);
+        assert_eq!(
+            engine
+                .execute(&mut context, &command("dash", &[]))
+                .expect("dash alias execution")
+                .output,
+            "-literal\nok"
+        );
+
+        engine
+            .execute(&mut context, &command("bind-key", &["F10", "dash"]))
+            .expect("dash alias binding");
+        assert_eq!(
+            format_key_command(engine.keys.get("prefix", "F10").expect("dash binding")),
+            "display-message -p -literal \\; display-message -p ok"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[41]",
+                        "typed=display-message -p first ; if-shell -F 1",
+                    ],
+                ),
+            )
+            .expect("typed alias write");
+        let block = "{ if-shell -F 1 { display-message -p -- -literal ; kill-session -t missing ; set-environment -g ALIAS_SAME yes\nset-environment -g ALIAS_NEXT yes } }";
+        let invocation = CommandInvocation::new("typed", ["", block]).with_command_blocks([1]);
+        let CommandAliasResolution::Expanded(mut expanded) =
+            engine.resolve_command_alias(&invocation)
+        else {
+            panic!("typed alias must expand");
+        };
+        let commands = MuxEngine::command_alias_group_commands(&expanded)
+            .unwrap()
+            .unwrap();
+        assert_eq!(commands[1].args, ["-F", "1", "", block]);
+        assert!(commands[1].argument_is_command_block(3));
+        let body = MuxEngine::command_alias_group_body(&expanded).expect("typed alias body");
+        assert!(body.contains('\n'));
+        assert!(!body.contains(" ;; "));
+        engine
+            .prepare_expanded_callback_command(&mut expanded, "typed", true)
+            .expect("prepare typed alias");
+        let commands = MuxEngine::command_alias_group_commands(&expanded)
+            .unwrap()
+            .unwrap();
+        let outer_body =
+            crate::parser::command_block_body(&commands[1].args[3]).expect("outer callback block");
+        let outer = MuxEngine::parse_config_without_variable_expansion("<outer>", outer_body);
+        assert!(outer.diagnostics.is_empty());
+        let inner_body = crate::parser::command_block_body(&outer.commands[0].args[2])
+            .expect("inner callback block");
+        let inner = MuxEngine::parse_config_without_variable_expansion("<inner>", inner_body);
+        assert!(inner.diagnostics.is_empty());
+        assert_eq!(inner.commands[0].args, ["-p", "--", "-literal"]);
+        assert_eq!(
+            inner.commands[1].source.as_ref().map(|source| source.line),
+            inner.commands[2].source.as_ref().map(|source| source.line),
+        );
+        assert_ne!(
+            inner.commands[2].source.as_ref().map(|source| source.line),
+            inner.commands[3].source.as_ref().map(|source| source.line),
+        );
+
+        let nested = CommandInvocation::new(
+            COMMAND_ALIAS_GROUP_NAME,
+            ["{ display-message -p -- -nested ; display-message -p done }"],
+        )
+        .with_command_blocks([0]);
+        let body = format_callback_commands_round_trip(&[
+            command("display-message", &["-p", "before"]),
+            nested,
+        ]);
+        assert_eq!(
+            body,
+            "display-message -p before ; display-message -p -- -nested ; display-message -p done"
+        );
+        let parsed = MuxEngine::parse_config_without_variable_expansion("<nested-alias>", &body);
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(parsed.commands[1].args, ["-p", "--", "-nested"]);
     }
 
     #[test]

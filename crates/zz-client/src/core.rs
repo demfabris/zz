@@ -251,6 +251,8 @@ pub struct ClientCore {
     status: StatusLine,
     snapshot: Arc<MuxSnapshot>,
     attached_session: Option<SessionId>,
+    attached_read_only: bool,
+    attached_client_flags: String,
     last_detach_reason: Option<CoreDetachReason>,
     viewports: HashMap<PaneId, TerminalViewport>,
     agent_states: HashMap<PaneId, AgentPaneWire>,
@@ -280,8 +282,15 @@ impl ClientCore {
     pub fn handle_message(&mut self, message: ProtocolMessage) {
         match message {
             ProtocolMessage::ServerHello(hello) => self.reset_connection(hello),
-            ProtocolMessage::Attached { session, snapshot } => {
+            ProtocolMessage::Attached {
+                session,
+                snapshot,
+                read_only,
+                client_flags,
+            } => {
                 self.attached_session = Some(session);
+                self.attached_read_only = read_only;
+                self.attached_client_flags = client_flags;
                 self.snapshot = Arc::new(snapshot);
                 self.viewports.clear();
                 self.agent_states.clear();
@@ -368,6 +377,16 @@ impl ClientCore {
     #[must_use]
     pub const fn attached_session(&self) -> Option<SessionId> {
         self.attached_session
+    }
+
+    #[must_use]
+    pub const fn attached_read_only(&self) -> bool {
+        self.attached_read_only
+    }
+
+    #[must_use]
+    pub fn attached_client_flags(&self) -> &str {
+        &self.attached_client_flags
     }
 
     #[must_use]
@@ -515,6 +534,8 @@ impl ClientCore {
     /// [`Self::reset_session`].
     pub fn clear_attachment(&mut self) {
         self.attached_session = None;
+        self.attached_read_only = false;
+        self.attached_client_flags.clear();
         self.last_detach_reason = None;
         self.snapshot = Arc::new(MuxSnapshot::default());
         self.viewports.clear();
@@ -1122,6 +1143,37 @@ mod tests {
     }
 
     #[test]
+    fn attachment_options_track_the_daemon_and_survive_detach_for_reconnect() {
+        let session = SessionId(7);
+        let mut core = ClientCore::new();
+        core.handle_message(ProtocolMessage::Attached {
+            session,
+            snapshot: snapshot_with(&[]),
+            read_only: false,
+            client_flags: "active-pane".to_owned(),
+        });
+        assert!(!core.attached_read_only());
+        assert_eq!(core.attached_client_flags(), "active-pane");
+
+        core.handle_message(ProtocolMessage::Attached {
+            session,
+            snapshot: snapshot_with(&[]),
+            read_only: true,
+            client_flags: "ignore-size,active-pane".to_owned(),
+        });
+        assert!(core.attached_read_only());
+        assert_eq!(core.attached_client_flags(), "ignore-size,active-pane");
+
+        core.handle_message(event(EventPayload::detached_requested(session, None)));
+        assert!(core.attached_read_only());
+        assert_eq!(core.attached_client_flags(), "ignore-size,active-pane");
+
+        core.clear_attachment();
+        assert!(!core.attached_read_only());
+        assert_eq!(core.attached_client_flags(), "");
+    }
+
+    #[test]
     fn agent_state_is_stored_and_notified() {
         let pane = PaneId(7);
         let mut core = ClientCore::new();
@@ -1299,6 +1351,8 @@ mod tests {
         core.handle_message(ProtocolMessage::Attached {
             session: SessionId(0),
             snapshot: snapshot_with(&[pane]),
+            read_only: false,
+            client_flags: String::new(),
         });
         assert_eq!(core.agent_state(pane), None);
     }
@@ -1550,6 +1604,8 @@ mod tests {
         core.handle_message(ProtocolMessage::Attached {
             session: SessionId(0),
             snapshot: snapshot_with(&[]),
+            read_only: false,
+            client_flags: String::new(),
         });
         assert_eq!(core.menu(), None);
         assert_eq!(core.confirm(), None);

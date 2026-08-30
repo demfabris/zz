@@ -116,6 +116,24 @@ physical groups. Control emits one located `%config-error` without a failed-comm
 construction warnings until sibling replay finishes. The two-step
 `smoke/config-chain-parse-abort` row provides the pinned differential proof.
 
+For the 2026-08-30 `aliases.command-bodies` closure, the mux expands one immutable user-alias layer
+into an opaque prepared group. Valid multi-command bodies execute every child, append caller
+arguments and client-owned stdin only to the final child, and preserve option boundaries, empty
+arguments, typed blocks, and physical source groups. Empty bodies succeed without effects. Control
+emits no wrapper guard for the opaque group: each child keeps the originating flags, while an empty
+body emits no guard. The daemon preserves ordinary failure, source-yield, structural-hook,
+foreground and detached job, and deferred-shutdown ordering across the queue boundary. The focused
+eight-step `aliases-multi-body` run reports zero differences in every channel; focused mux, daemon,
+Control, CLI, and binary regressions back it. Exact forced-shutdown multi-window
+`window-unlinked` hook order remains open under `hooks.shutdown-window-unlinked-order`: tmux derives
+it from retained winlink RB-tree history, while zz retains only the final index-ordered map. The
+alias group itself reuses protocol v84's `CommandInvocation` shape. Closure review advanced v85 for
+typed callback provenance and daemon-authoritative `Attached` reconnect state; no alias child-vector
+field or snapshot field is added.
+The persisted aggregate now covers 106 scenarios and 1,683 steps with attached-client `PASS`,
+exactly two approved GEO rows, every other channel clean, and SHA-256
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
+
 The remaining `w` modifier needs a wider proof than the earlier forecast recorded. Pinned
 `format_width` handles leading hashes, `#[...]` style spans, malformed markup, controls,
 `codepoint-widths[]`, a 162-entry default cache, and the host `wcwidth` policy selected by the
@@ -218,15 +236,19 @@ literal `break-pane` name pipeline. `formats.creation-name-edges` closed the pin
 `buffer-path-format` scenario covers one-pass expansion, format-before-home ordering, canonical,
 alias, unique-prefix, and user-alias command identity, and load/save file effects.
 `native-prefix-isolation` covers the 25 unique tmux prefixes that native names had changed, plus
-exact alias and user `command-alias` precedence. Matched empty, multi-command, and unparsable alias
-shadows are unit-tested at the mux and daemon dispatch seams instead: their expected zz result is a
-loud `unknown command: <typed name>`, so they are not a differential claim while
-`aliases.command-bodies` remains open.
+exact alias and user `command-alias` precedence. The eight-step `aliases-multi-body` scenario adds
+the valid body contract: caller arguments reach only the last command of a multiline alias, stored
+binding readback preserves the group, an empty body ignores caller arguments and succeeds, and an
+earlier child's `--` boundary survives the opaque round trip. Matched unparsable alias bodies remain
+unit-tested at the mux and daemon dispatch seams; they fail loudly as
+`unknown command: <typed name>` and never fall through to a shadowed command.
 Protocol v74 closes Control's former static unknown-name precheck through focused daemon and CLI
 tests. The client prepares the entire initial argv unit or complete LF line before opening execution
 frames, observes one daemon alias snapshot for that unit, preserves command numbering and
-notifications, and executes the prepared invocation with ordinary read-only authorization. These
-tests do not claim tmux-compatible empty or multi-command alias bodies. The strict
+notifications, and executes the prepared invocation with ordinary read-only authorization. At that
+checkpoint these tests did not claim tmux-compatible empty or multi-command bodies. The daemon now
+prepares those forms through the same boundary and emits only their normal per-child Control guards,
+with no synthetic parent frame. The strict
 `smoke/control-alias-prepare` fixture adds pinned proof for one whole-line alias snapshot and a
 whole-line preparation error that aborts before either surrounding effect. The strict
 `smoke/cli-chain-parse-abort` fixture proves that a local CLI preparation failure aborts before an
@@ -248,9 +270,10 @@ alias snapshot before execution. A failed preparation and owner disconnect stop 
 exclusively owned new daemon. Startup reentry cannot claim or contest the lease; another external
 client or any command commits it.
 
-Only the unknown-name error shape is pinned here; malformed alias-body text remains zz-defined while
-`aliases.command-bodies` is open. Focused binary coverage also exercises routing-sensitive
-new-session and attach forms, `-N`, startup shadows, arbitrary startup aliases, invalid nested alias
+Only the unknown-name error shape is pinned here; zz still defines malformed alias-body text and
+reports it loudly after valid empty and multi-command bodies closed. Focused binary coverage also
+exercises routing-sensitive new-session and attach forms, `-N`, startup shadows, arbitrary startup
+aliases, invalid nested alias
 bodies, contender and pipeline races, and parked syntax. Slice 10u closes warm ordinary argument
 preflight under `mux.command-group-argument-parse-abort`. The daemon applies the existing static
 grammar to ordinary invocations with no user-alias match for a registered `ClientKind::Command`.
@@ -357,7 +380,9 @@ alias-produced subtrees disable further user aliases, self-recursion fails unkno
 the daemon, and siblings stay independent. Nested `if-shell`, `run-shell`, set-option, and confirm
 blocks print canonical names; empty readback is `{  }`, and physical internal group newlines print
 as ` ;; `. Exact Control comparisons prove nested bind and confirm failures are preflight parse
-errors. The typed confirm callback executes its constructed list without another user-alias lookup;
+errors. Each Control probe waits for that error frame before sending `detach-client`, so immediate
+EOF cannot race the expected successful detach status. The typed confirm callback executes its
+constructed list without another user-alias lookup;
 stored `bind-key` and `set-hook` lists have the same frozen execution boundary. `set-hook` and
 command-valued native set-option deliberately construct again. Built-in hook values flatten
 physical groups during that second pass, while custom `@` typed values retain textual ` ;; `
@@ -431,10 +456,10 @@ Use the registry vocabulary consistently:
 
 ## Coverage freshness
 
-`compat/results/summary.md` is the persisted slice 10ag acceptance artifact. It records 103 scenarios
-and 1,630 steps against pinned tmux `d77c9dc6`. Every ordinary row is clean, the attached-client
+`compat/results/summary.md` is the persisted acceptance artifact. It records 106 scenarios and 1,683
+steps against pinned tmux `d77c9dc6`. Every ordinary row is clean, the attached-client
 fixture is `PASS`, and exactly two approved rows carry GEO differences. Its SHA-256 is
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`.
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
 
 Slice 10ag extends `compat/startup-diagnostics.sh` to eight cases. Its startup-client-cwd case builds
 distinct initial-client, top-level-config, containing-directory, runtime-client, and glob-decoy
@@ -492,8 +517,8 @@ later-line invocations use the alias table captured before replay, top-level mat
 construction before batch replay, and a nested source obtains a fresh snapshot when its parent
 command runs. Focused daemon tests cover startup-root timing, file environment assignments,
 parse-only behavior, deferred preparation errors, source and physical-group retention, and frozen
-Control diagnostic classification. Empty or multi-command alias execution stays under
-`aliases.command-bodies`. At the 10y checkpoint, eager name, flag, arity, callback, and nested-child
+Control diagnostic classification. At the 10y checkpoint, empty and multi-command alias execution
+remained under `aliases.command-bodies`, while eager name, flag, arity, callback, and nested-child
 construction, including `source-file -n` validation, remained under `mux.chain-parse-abort`. The accepted
 artifact now has 100 scenarios and 1,538 steps with attached-client `PASS` and SHA-256
 `8d53288c8050e5c8cf7f19e6c81687f91544877d32ea4de9f7d40ea2934736b7`.
@@ -503,6 +528,8 @@ top-level sibling and startup units, nested-child isolation, Control warning ord
 alias traces, and the runtime-error contrast. The accepted artifact now has 101 scenarios and 1,540
 steps with attached-client `PASS` and SHA-256
 `afd1fdf9a79e06f449e8c43abd63b14a2a4968338110223750d4171889c34aaf`.
+The later 2026-08-30 command-body closure adds the focused eight-step `aliases-multi-body` scenario
+without changing either historical checkpoint above.
 
 Slice 10aa extends `formats-values` from 26 to 28 steps without adding a scenario. The row proves
 that a target-aware `display-message` and `list-keys` receive an attached format client, while
@@ -554,7 +581,9 @@ creation, and launch after startup completion. It also freezes formats, numeric 
 identity, and cwd at scheduling while reading global state, original-session state,
 `default-terminal`, and the startup TERM gate at launch. The row reports zero topology, geometry,
 format, output, or warning differences. Foreground behavior stays in deterministic daemon coverage
-that waits for `active_shell_jobs` before mutating state. The full 103-scenario, 1,630-step corpus
+that waits for `active_shell_jobs` before mutating state. The destroyed and initially missing target
+cases use a four-second launch delay so their separate CLI mutation chains finish before launch-time
+sampling. The full 103-scenario, 1,630-step corpus
 and attached-client fixture pass on the final 10af runtime. The two registered GEO rows retain their
 exact tuples, every other channel is clean, and the accepted SHA-256 remains
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`.
@@ -688,9 +717,10 @@ The checked-in summary includes the current focused counts: `smoke/source-file-d
 `source-file-format`, and `smoke/source-file-control` contain 12, 40, and 12 steps,
 `resize-directions` and `formats` contain 16, `formats-values` contains 45, and `new-session-cwd`
 contains 10. `smoke/config-alias-parse-unit` and `smoke/config-chain-parse-abort` contain 2 each,
-`smoke/jobs-command-environment` contains 3, and `option-name-formats` contains 60.
+`smoke/jobs-command-environment` contains 3, `aliases-multi-body` contains 8, and
+`option-name-formats` contains 60.
 The summary SHA-256 is
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`.
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
 The historical 10r and 10s checkpoints remain 98 scenarios and 1,517 steps at SHA-256
 `9c147eb5caa78ca51e068275b28836ab2647d3d959d047c5fafbcb5c0bf86832`.
 The combined chooser row contributes three harness steps and 26 internal checks with zero TOPO,

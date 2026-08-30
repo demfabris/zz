@@ -1,0 +1,107 @@
+shim:
+stage: pane-border-span-owner.txt ~/pane-border-span-owner.txt
+# PY: import os
+# PY: import pathlib
+# PY: import re
+# PY: import shlex
+# PY: import subprocess
+# PY: import time
+# PY: home = pathlib.Path(os.environ["HOME"])
+# PY: client_env = os.environ.copy()
+# PY: for key in ["TMUX", "TMUX_PANE", "ZZ_SOCKET", "ZZ_SESSION", "ZZ_PANE"]:
+# PY:     client_env.pop(key, None)
+# PY: is_zz = bool(os.environ.get("ZZ_SMOKE_ZZ_BIN"))
+# PY: if is_zz:
+# PY:     client = [os.environ["ZZ_SMOKE_ZZ_BIN"], "--socket", os.environ["ZZ_SMOKE_ZZ_SOCKET"]]
+# PY: else:
+# PY:     client = [os.environ["ZZ_SMOKE_TMUX_BIN"], "-u", "-L", os.environ["ZZ_SMOKE_TMUX_LABEL"]]
+# PY: tmux_bin = os.environ["ZZ_SMOKE_TMUX_BIN"]
+# PY: outer_label = "zzc-border-{}-{}".format("zz" if is_zz else "tmux", os.getpid())
+# PY: outer = [tmux_bin, "-L", outer_label]
+# PY: outer_socket = pathlib.Path(client_env.get("TMUX_TMPDIR", "/tmp")) / ("tmux-{}".format(os.getuid())) / outer_label
+# PY: attach = home / (".pane-border-attach-{}".format(os.getpid()))
+# PY: command = client + ["attach-session", "-t", "w"]
+# PY: attach.write_text("#!/bin/sh\nexec env -u TMUX -u TMUX_PANE " + " ".join(shlex.quote(value) for value in command) + "\n")
+# PY: attach.chmod(0o700)
+# PY: sgr = re.compile("\\x1b\\[([0-9;]*)m")
+# PY: vertical = set("│├┤┼┬┴")
+# PY: def rgb(r, g, b):
+# PY:     if r >= 150 and g < 80 and b < 80:
+# PY:         return "red"
+# PY:     if g >= 150 and r < 80 and b < 80:
+# PY:         return "green"
+# PY:     return "other"
+# PY: def apply_sgr(fg, raw):
+# PY:     values = [int(value or 0) for value in raw.split(";")] if raw else [0]
+# PY:     index = 0
+# PY:     while index < len(values):
+# PY:         value = values[index]
+# PY:         if value == 0 or value == 39:
+# PY:             fg = None
+# PY:         elif value in [31, 91]:
+# PY:             fg = "red"
+# PY:         elif value in [32, 92]:
+# PY:             fg = "green"
+# PY:         elif value == 38 and index + 4 < len(values) and values[index + 1] == 2:
+# PY:             fg = rgb(*values[index + 2:index + 5])
+# PY:             index += 4
+# PY:         elif value == 38 and index + 2 < len(values) and values[index + 1] == 5:
+# PY:             fg = "red" if values[index + 2] in [1, 9] else "green" if values[index + 2] in [2, 10] else "other"
+# PY:             index += 2
+# PY:         elif value == 48 and index + 4 < len(values) and values[index + 1] == 2:
+# PY:             index += 4
+# PY:         elif value == 48 and index + 2 < len(values) and values[index + 1] == 5:
+# PY:             index += 2
+# PY:         index += 1
+# PY:     return fg
+# PY: def cells(line):
+# PY:     result = []
+# PY:     fg = None
+# PY:     offset = 0
+# PY:     for match in sgr.finditer(line):
+# PY:         result.extend((character, fg) for character in line[offset:match.start()])
+# PY:         fg = apply_sgr(fg, match.group(1))
+# PY:         offset = match.end()
+# PY:     result.extend((character, fg) for character in line[offset:])
+# PY:     return result
+# PY: def border_transition(screen):
+# PY:     rows = [cells(line) for line in screen.splitlines()]
+# PY:     for row_index in range(3, len(rows) - 2):
+# PY:         row = rows[row_index]
+# PY:         for column in range(len(row) - 1):
+# PY:             if row[column][0] not in vertical or row[column][1] != "green":
+# PY:                 continue
+# PY:             if row[column + 1] != ("─", "green"):
+# PY:                 continue
+# PY:             above = [rows[row_index - distance] for distance in [1, 2, 3]]
+# PY:             below = [rows[row_index + distance] for distance in [1, 2]]
+# PY:             if all(column < len(candidate) and candidate[column][0] in vertical and candidate[column][1] == "red" for candidate in above) and all(column < len(candidate) and candidate[column][0] in vertical and candidate[column][1] == "green" for candidate in below):
+# PY:                 return True
+# PY:     return False
+# PY: ok = False
+# PY: try:
+# PY:     created = subprocess.run(outer + ["-f", "/dev/null", "new-session", "-d", "-x", "80", "-y", "24", "-s", "outer", str(attach)], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:     if created.returncode == 0:
+# PY:         for attempt in range(200):
+# PY:             capture = subprocess.run(outer + ["capture-pane", "-p", "-e", "-t", "outer:0.0"], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:             if capture.returncode == 0 and border_transition(capture.stdout.decode("utf-8", "replace")):
+# PY:                 ok = True
+# PY:                 break
+# PY:             time.sleep(0.05)
+# PY: finally:
+# PY:     subprocess.run(outer + ["kill-server"], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# PY:     outer_socket.unlink(missing_ok=True)
+# PY:     attach.unlink(missing_ok=True)
+# PY: subprocess.run(client + ["resize-window", "-t", "w:0", "-x", "80", "-y", "24"], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+# PY: marker = "clean" if ok else "zz-broken" if is_zz else "tmux-broken"
+# PY: subprocess.run(client + ["set-environment", "-g", "PANE_BORDER_SPAN_OWNER", marker], env=client_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+set-option -g status off
+set-option -g pane-border-style fg=red
+set-option -g pane-active-border-style fg=green
+split-window -h -t w:0.0
+split-window -v -t w:0.1
+set-option -p -t w:0.1 pane-border-style fg=blue
+select-pane -t w:0.2
+out: list-panes -t w:0 -F #{pane_index}:#{pane_left},#{pane_top},#{pane_width}x#{pane_height}:#{pane_active}:#{pane-border-style}:#{pane-active-border-style}
+run-shell 'python3 -c "exec(\"\".join(line[6:] for line in open(__import__(\"os\").environ[\"HOME\"]+\"/pane-border-span-owner.txt\") if line.startswith(\"# PY: \")))"'
+out: show-environment -g PANE_BORDER_SPAN_OWNER

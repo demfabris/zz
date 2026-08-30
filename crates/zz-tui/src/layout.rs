@@ -98,6 +98,45 @@ pub(crate) struct Divider {
     pub style_pane: Option<PaneId>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BorderSide {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct BorderOwners {
+    top: Option<PaneId>,
+    bottom: Option<PaneId>,
+    left: Option<PaneId>,
+    right: Option<PaneId>,
+}
+
+impl BorderOwners {
+    fn mark(&mut self, side: BorderSide, pane: PaneId) {
+        let owner = match side {
+            BorderSide::Top => &mut self.top,
+            BorderSide::Bottom => &mut self.bottom,
+            BorderSide::Left => &mut self.left,
+            BorderSide::Right => &mut self.right,
+        };
+        *owner = Some(owner.map_or(pane, |current| current.min(pane)));
+    }
+
+    fn contains(self, pane: PaneId) -> bool {
+        self.top == Some(pane)
+            || self.bottom == Some(pane)
+            || self.left == Some(pane)
+            || self.right == Some(pane)
+    }
+
+    fn first(self) -> Option<PaneId> {
+        self.top.or(self.bottom).or(self.left).or(self.right)
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ResolvedLayout {
     pub panes: Vec<PaneRect>,
@@ -107,7 +146,104 @@ pub(crate) struct ResolvedLayout {
 pub(crate) fn resolve(node: &LayoutNode, rect: Rect, active_pane: PaneId) -> ResolvedLayout {
     let mut resolved = ResolvedLayout::default();
     collect(node, rect, active_pane, &mut resolved);
+    resolved.dividers = resolved
+        .dividers
+        .iter()
+        .flat_map(|divider| partition_divider(*divider, &resolved.panes, active_pane))
+        .collect();
     resolved
+}
+
+fn partition_divider(divider: Divider, panes: &[PaneRect], active: PaneId) -> Vec<Divider> {
+    let (length, thickness) = match divider.axis {
+        Axis::Horizontal => (divider.rect.height, divider.rect.width),
+        Axis::Vertical => (divider.rect.width, divider.rect.height),
+    };
+    if length == 0 || thickness == 0 {
+        return vec![divider];
+    }
+
+    let mut spans: Vec<Divider> = Vec::new();
+    for offset in 0..length {
+        let position = match divider.axis {
+            Axis::Horizontal => divider.rect.y.saturating_add(offset),
+            Axis::Vertical => divider.rect.x.saturating_add(offset),
+        };
+        let owners = border_owners(panes, divider, position);
+        let highlighted = owners.contains(active);
+        let style_pane = highlighted
+            .then_some(active)
+            .or_else(|| owners.first())
+            .or(divider.style_pane);
+        let cell = Divider {
+            rect: match divider.axis {
+                Axis::Horizontal => Rect {
+                    y: position,
+                    height: 1,
+                    ..divider.rect
+                },
+                Axis::Vertical => Rect {
+                    x: position,
+                    width: 1,
+                    ..divider.rect
+                },
+            },
+            axis: divider.axis,
+            highlighted,
+            style_pane,
+        };
+
+        if let Some(span) = spans.last_mut()
+            && span.highlighted == cell.highlighted
+            && span.style_pane == cell.style_pane
+        {
+            match divider.axis {
+                Axis::Horizontal => {
+                    span.rect.height = span.rect.height.saturating_add(1);
+                }
+                Axis::Vertical => {
+                    span.rect.width = span.rect.width.saturating_add(1);
+                }
+            }
+            continue;
+        }
+        spans.push(cell);
+    }
+    spans
+}
+
+fn border_owners(panes: &[PaneRect], divider: Divider, position: u16) -> BorderOwners {
+    let (column, row) = match divider.axis {
+        Axis::Horizontal => (divider.rect.x, position),
+        Axis::Vertical => (position, divider.rect.y),
+    };
+    let mut owners = BorderOwners::default();
+    for pane in panes {
+        mark_pane_owners(&mut owners, *pane, column, row);
+    }
+    owners
+}
+
+fn mark_pane_owners(owners: &mut BorderOwners, pane: PaneRect, column: u16, row: u16) {
+    let left = pane.rect.x.saturating_sub(1);
+    let right = pane.rect.x.saturating_add(pane.rect.width);
+    let top = pane.rect.y.saturating_sub(1);
+    let bottom = pane.rect.y.saturating_add(pane.rect.height);
+    let within_columns = column >= left && column <= right;
+    let within_rows = row >= top && row <= bottom;
+
+    if row == bottom && within_columns {
+        owners.mark(BorderSide::Top, pane.pane);
+    }
+    if pane.rect.y > 0 && row == top && within_columns {
+        owners.mark(BorderSide::Bottom, pane.pane);
+    }
+    if column == right && within_rows {
+        owners.mark(BorderSide::Left, pane.pane);
+    }
+    if pane.rect.x > 0 && column == left && within_rows {
+        owners.mark(BorderSide::Right, pane.pane);
+    }
 }
 
 fn collect(node: &LayoutNode, rect: Rect, active: PaneId, output: &mut ResolvedLayout) {
@@ -222,12 +358,22 @@ mod tests {
     }
 
     fn split(axis: Axis, ratio: f32) -> LayoutNode {
+        split_nodes(1, axis, ratio, pane(1), pane(2))
+    }
+
+    fn split_nodes(
+        id: u64,
+        axis: Axis,
+        ratio: f32,
+        first: LayoutNode,
+        second: LayoutNode,
+    ) -> LayoutNode {
         LayoutNode::Split {
-            id: SplitId(1),
+            id: SplitId(id),
             axis,
             ratio,
-            first: Box::new(pane(1)),
-            second: Box::new(pane(2)),
+            first: Box::new(first),
+            second: Box::new(second),
         }
     }
 
@@ -305,6 +451,30 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_active_pane_keeps_its_visible_divider() {
+        let resolved = resolve(
+            &split(Axis::Horizontal, 0.5),
+            Rect {
+                width: 2,
+                height: 2,
+                ..Rect::default()
+            },
+            PaneId(1),
+        );
+
+        assert_eq!(
+            (resolved.panes[0].rect.width, resolved.panes[1].rect.width),
+            (0, 1)
+        );
+        assert_eq!(
+            (resolved.dividers[0].rect.x, resolved.dividers[0].rect.width),
+            (0, 1)
+        );
+        assert!(resolved.dividers[0].highlighted);
+        assert_eq!(resolved.dividers[0].style_pane, Some(PaneId(1)));
+    }
+
+    #[test]
     fn divider_style_pane_prefers_an_active_pane_in_either_subtree() {
         let rect = Rect {
             x: 0,
@@ -319,6 +489,151 @@ mod tests {
         let elsewhere = resolve(&split(Axis::Horizontal, 0.5), rect, PaneId(9));
         assert!(!elsewhere.dividers[0].highlighted);
         assert_eq!(elsewhere.dividers[0].style_pane, Some(PaneId(1)));
+    }
+
+    #[test]
+    fn perpendicular_split_partitions_outer_divider_and_gives_junction_to_active_pane() {
+        let layout = split_nodes(
+            1,
+            Axis::Horizontal,
+            0.5,
+            pane(1),
+            split_nodes(2, Axis::Vertical, 0.5, pane(2), pane(3)),
+        );
+
+        let resolved = resolve(
+            &layout,
+            Rect {
+                width: 11,
+                height: 9,
+                ..Rect::default()
+            },
+            PaneId(3),
+        );
+
+        assert_eq!(
+            resolved.dividers,
+            vec![
+                Divider {
+                    rect: Rect {
+                        x: 5,
+                        width: 1,
+                        height: 4,
+                        ..Rect::default()
+                    },
+                    axis: Axis::Horizontal,
+                    highlighted: false,
+                    style_pane: Some(PaneId(1)),
+                },
+                Divider {
+                    rect: Rect {
+                        x: 5,
+                        y: 4,
+                        width: 1,
+                        height: 5,
+                    },
+                    axis: Axis::Horizontal,
+                    highlighted: true,
+                    style_pane: Some(PaneId(3)),
+                },
+                Divider {
+                    rect: Rect {
+                        x: 6,
+                        y: 4,
+                        width: 5,
+                        height: 1,
+                    },
+                    axis: Axis::Vertical,
+                    highlighted: true,
+                    style_pane: Some(PaneId(3)),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn same_axis_hidden_active_pane_does_not_own_ancestor_divider() {
+        let layout = split_nodes(
+            1,
+            Axis::Horizontal,
+            0.7,
+            split_nodes(2, Axis::Horizontal, 0.5, pane(1), pane(2)),
+            pane(3),
+        );
+
+        let resolved = resolve(
+            &layout,
+            Rect {
+                width: 15,
+                height: 5,
+                ..Rect::default()
+            },
+            PaneId(1),
+        );
+
+        assert_eq!(resolved.dividers[0].rect.x, 9);
+        assert_eq!(resolved.dividers[0].rect.height, 5);
+        assert!(!resolved.dividers[0].highlighted);
+        assert_eq!(resolved.dividers[0].style_pane, Some(PaneId(2)));
+    }
+
+    #[test]
+    fn inactive_junction_uses_directional_owner_priority() {
+        let layout = split_nodes(
+            1,
+            Axis::Horizontal,
+            0.5,
+            pane(1),
+            split_nodes(2, Axis::Vertical, 0.5, pane(2), pane(3)),
+        );
+
+        let resolved = resolve(
+            &layout,
+            Rect {
+                width: 11,
+                height: 9,
+                ..Rect::default()
+            },
+            PaneId(9),
+        );
+
+        assert_eq!(resolved.dividers[0].style_pane, Some(PaneId(1)));
+        assert_eq!(resolved.dividers[0].rect.height, 4);
+        assert_eq!(resolved.dividers[1].style_pane, Some(PaneId(2)));
+        assert_eq!(resolved.dividers[1].rect.y, 4);
+        assert_eq!(resolved.dividers[1].rect.height, 1);
+        assert_eq!(resolved.dividers[2].style_pane, Some(PaneId(1)));
+        assert_eq!(resolved.dividers[2].rect.y, 5);
+        assert_eq!(resolved.dividers[2].rect.height, 4);
+        assert!(resolved.dividers.iter().all(|divider| !divider.highlighted));
+    }
+
+    #[test]
+    fn split_only_cross_uses_creation_order_for_direction_ties() {
+        let layout = split_nodes(
+            1,
+            Axis::Vertical,
+            0.5,
+            split_nodes(2, Axis::Horizontal, 0.5, pane(3), pane(1)),
+            split_nodes(3, Axis::Horizontal, 0.5, pane(4), pane(2)),
+        );
+
+        let resolved = resolve(
+            &layout,
+            Rect {
+                width: 11,
+                height: 9,
+                ..Rect::default()
+            },
+            PaneId(9),
+        );
+
+        assert_eq!(resolved.dividers[0].rect.width, 5);
+        assert_eq!(resolved.dividers[0].style_pane, Some(PaneId(3)));
+        assert_eq!(resolved.dividers[1].rect.x, 5);
+        assert_eq!(resolved.dividers[1].rect.width, 6);
+        assert_eq!(resolved.dividers[1].style_pane, Some(PaneId(1)));
+        assert!(resolved.dividers.iter().all(|divider| !divider.highlighted));
     }
 
     #[test]

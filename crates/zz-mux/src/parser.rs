@@ -17,11 +17,258 @@ pub struct ParsedConfig {
     pub diagnostics: Vec<ConfigDiagnostic>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParsedConfigBytes {
+    pub commands: Vec<ConfigCommandBytes>,
+    pub environment: Vec<ConfigEnvironmentAssignmentBytes>,
+    pub diagnostics: Vec<ConfigDiagnostic>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigCommandBytes {
+    pub name: Vec<u8>,
+    pub args: Vec<Vec<u8>>,
+    pub source: Option<SourceSpan>,
+    command_blocks: Vec<usize>,
+}
+
+impl ConfigCommandBytes {
+    pub fn argument_is_command_block(&self, index: usize) -> bool {
+        self.command_blocks.contains(&index)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigEnvironmentAssignment {
     pub name: String,
     pub value: String,
     pub hidden: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigEnvironmentAssignmentBytes {
+    pub name: Vec<u8>,
+    pub value: Vec<u8>,
+    pub hidden: bool,
+}
+
+impl ParsedConfig {
+    pub fn parse_file_bytes(source: impl Into<String>, input: &[u8]) -> ParsedConfigBytes {
+        let mut context = (|_: &str| None::<String>, |_: &str| false);
+        parse_config_file_bytes_with_assignment_overlay(source, input, &mut context, true)
+    }
+
+    pub fn parse_buffer_bytes(source: impl Into<String>, input: &[u8]) -> ParsedConfigBytes {
+        let mut context = (|_: &str| None::<String>, |_: &str| false);
+        parse_config_buffer_bytes_with_assignment_overlay(source, input, &mut context, true)
+    }
+}
+
+impl ParsedConfigBytes {
+    fn from_encoded(parsed: ParsedConfig) -> Self {
+        Self {
+            commands: parsed
+                .commands
+                .into_iter()
+                .map(|command| {
+                    let command_blocks = (0..command.args.len())
+                        .filter(|index| command.argument_is_command_block(*index))
+                        .collect();
+                    ConfigCommandBytes {
+                        name: decode_config_bytes(&command.name),
+                        args: command
+                            .args
+                            .iter()
+                            .map(|argument| decode_config_bytes(argument))
+                            .collect(),
+                        source: command.source,
+                        command_blocks,
+                    }
+                })
+                .collect(),
+            environment: parsed
+                .environment
+                .into_iter()
+                .map(|assignment| ConfigEnvironmentAssignmentBytes {
+                    name: decode_config_bytes(&assignment.name),
+                    value: decode_config_bytes(&assignment.value),
+                    hidden: assignment.hidden,
+                })
+                .collect(),
+            diagnostics: parsed.diagnostics,
+        }
+    }
+}
+
+const CONFIG_BYTE_BASE: u32 = 0xf0000;
+const CONFIG_BYTE_EOF: char = '\u{f0101}';
+const CONFIG_BYTE_LITERAL: char = '\u{f0100}';
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfigByteInput {
+    File,
+    SignedBuffer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfigInputKind {
+    String,
+    Bytes,
+}
+
+impl ConfigInputKind {
+    fn is_word_whitespace(self, character: char) -> bool {
+        match self {
+            Self::String => character.is_whitespace(),
+            Self::Bytes => matches!(character, ' ' | '\t'),
+        }
+    }
+
+    fn is_word_start_whitespace(self, character: char) -> bool {
+        match self {
+            Self::String => character.is_whitespace(),
+            Self::Bytes => matches!(character, ' ' | '\t' | '\n'),
+        }
+    }
+
+    fn is_eof(self, character: char) -> bool {
+        self == Self::Bytes && character == CONFIG_BYTE_EOF
+    }
+
+    fn character_len(self, character: char) -> usize {
+        match self {
+            Self::String => character.len_utf8(),
+            Self::Bytes => 1,
+        }
+    }
+
+    fn encoded_len(self, value: &str) -> usize {
+        match self {
+            Self::String => value.len(),
+            Self::Bytes => decode_config_bytes(value).len(),
+        }
+    }
+}
+
+struct ConfigCharacters {
+    characters: Vec<char>,
+    offset: usize,
+    escapes: usize,
+    skipped_lines: u32,
+    input_kind: ConfigInputKind,
+}
+
+impl ConfigCharacters {
+    fn new(characters: impl Iterator<Item = char>, input_kind: ConfigInputKind) -> Self {
+        Self {
+            characters: characters.collect(),
+            offset: 0,
+            escapes: 0,
+            skipped_lines: 0,
+            input_kind,
+        }
+    }
+
+    fn getc(&mut self) -> Option<char> {
+        if self.input_kind == ConfigInputKind::String {
+            let character = self.characters.get(self.offset).copied()?;
+            self.offset += 1;
+            return Some(character);
+        }
+        if self.escapes != 0 {
+            self.escapes -= 1;
+            return Some('\\');
+        }
+        loop {
+            let character = if let Some(character) = self.characters.get(self.offset).copied() {
+                self.offset += 1;
+                character
+            } else {
+                CONFIG_BYTE_EOF
+            };
+            if character == '\\' {
+                self.escapes += 1;
+                continue;
+            }
+            if character == '\n' && self.escapes % 2 == 1 {
+                self.skipped_lines = self.skipped_lines.saturating_add(1);
+                self.escapes -= 1;
+                continue;
+            }
+            if self.escapes != 0 {
+                self.ungetc(character);
+                self.escapes -= 1;
+                return Some('\\');
+            }
+            return Some(character);
+        }
+    }
+
+    fn ungetc(&mut self, character: char) {
+        if !self.input_kind.is_eof(character) && self.offset != 0 {
+            self.offset -= 1;
+        }
+    }
+
+    fn take_skipped_lines(&mut self) -> u32 {
+        std::mem::take(&mut self.skipped_lines)
+    }
+}
+
+fn encode_config_byte(byte: u8, input: ConfigByteInput) -> char {
+    match (input, byte) {
+        (_, 0..=0x7f) => char::from(byte),
+        (ConfigByteInput::SignedBuffer, 0xff) => CONFIG_BYTE_EOF,
+        (_, byte) => encode_stored_config_byte(byte),
+    }
+}
+
+fn encode_stored_config_byte(byte: u8) -> char {
+    match byte {
+        0..=0x7f => char::from(byte),
+        _ => char::from_u32(CONFIG_BYTE_BASE + u32::from(byte))
+            .expect("stored config byte is a valid scalar"),
+    }
+}
+
+fn stored_config_byte(character: char) -> Option<u8> {
+    let value = character as u32;
+    (CONFIG_BYTE_BASE + 0x80..=CONFIG_BYTE_BASE + 0xff)
+        .contains(&value)
+        .then(|| (value - CONFIG_BYTE_BASE) as u8)
+}
+
+fn push_config_text_character(value: &mut String, character: char, input_kind: ConfigInputKind) {
+    if input_kind == ConfigInputKind::Bytes
+        && (character == CONFIG_BYTE_LITERAL || stored_config_byte(character).is_some())
+    {
+        value.push(CONFIG_BYTE_LITERAL);
+    }
+    value.push(character);
+}
+
+fn push_config_text(value: &mut String, text: &str, input_kind: ConfigInputKind) {
+    for character in text.chars() {
+        push_config_text_character(value, character, input_kind);
+    }
+}
+
+fn decode_config_bytes(value: &str) -> Vec<u8> {
+    let mut decoded = Vec::with_capacity(value.len());
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        if character == CONFIG_BYTE_LITERAL {
+            let character = characters.next().unwrap_or(CONFIG_BYTE_LITERAL);
+            let mut encoded = [0; 4];
+            decoded.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+        } else if let Some(byte) = stored_config_byte(character) {
+            decoded.push(byte);
+        } else {
+            let mut encoded = [0; 4];
+            decoded.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+        }
+    }
+    decoded
 }
 
 pub(crate) trait ConfigContext {
@@ -64,9 +311,39 @@ struct ConfigBuilder<'a, C> {
     parsed: ParsedConfig,
     overlay: BTreeMap<String, String>,
     assignment_overlay: bool,
+    input_kind: ConfigInputKind,
     conditionals: Vec<ConditionalScope>,
     context: &'a mut C,
     aborted: bool,
+}
+
+struct ConfigExpansion {
+    value: String,
+    encoded: bool,
+}
+
+impl ConfigExpansion {
+    fn encoded(value: String) -> Self {
+        Self {
+            value,
+            encoded: true,
+        }
+    }
+
+    fn text(value: String) -> Self {
+        Self {
+            value,
+            encoded: false,
+        }
+    }
+
+    fn push_into(self, output: &mut String, input_kind: ConfigInputKind) {
+        if self.encoded {
+            output.push_str(&self.value);
+        } else {
+            push_config_text(output, &self.value, input_kind);
+        }
+    }
 }
 
 impl<C: ConfigContext> ConfigBuilder<'_, C> {
@@ -74,25 +351,29 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         self.conditionals.last().is_none_or(|scope| scope.active)
     }
 
-    fn variable(&mut self, name: &str) -> Option<String> {
+    fn variable(&mut self, name: &str) -> Option<ConfigExpansion> {
         self.overlay
             .get(name)
             .cloned()
-            .or_else(|| self.context.variable(name))
+            .map(ConfigExpansion::encoded)
+            .or_else(|| self.context.variable(name).map(ConfigExpansion::text))
     }
 
     fn expand_variables(&self) -> bool {
         self.context.expand_variables()
     }
 
-    fn home_directory(&mut self, name: &str) -> Option<String> {
+    fn home_directory(&mut self, name: &str) -> Option<ConfigExpansion> {
         if !name.is_empty() {
-            return self.context.user_home(Some(name));
+            return self
+                .context
+                .user_home(Some(name))
+                .map(ConfigExpansion::text);
         }
-        if let Some(home) = self.variable("HOME").filter(|home| !home.is_empty()) {
+        if let Some(home) = self.variable("HOME").filter(|home| !home.value.is_empty()) {
             return Some(home);
         }
-        self.context.user_home(None)
+        self.context.user_home(None).map(ConfigExpansion::text)
     }
 
     fn aborted(&self) -> bool {
@@ -127,6 +408,12 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         if !*word_started {
             return;
         }
+        if self.input_kind == ConfigInputKind::Bytes
+            && !*word_is_command_block
+            && let Some(index) = word.find('\0')
+        {
+            word.truncate(index);
+        }
         if *word_is_command_block {
             command_block_words.push(words.len());
         }
@@ -136,7 +423,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         if words.len() != 1 {
             return;
         }
-        match parse_assignment(&words[0]) {
+        match parse_assignment(&words[0], self.input_kind) {
             Ok(Some((name, value))) => {
                 self.push_assignment(name, value, false);
                 *eager_assignment = true;
@@ -235,7 +522,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
             self.diagnostic(line, column, "syntax error");
             return;
         }
-        let (name, value) = match parse_assignment(&tokens[1]) {
+        let (name, value) = match parse_assignment(&tokens[1], self.input_kind) {
             Ok(Some(assignment)) => assignment,
             Ok(None) => {
                 self.diagnostic(line, column, "syntax error");
@@ -319,7 +606,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         let mut command_name = tokens.next().expect("command has a name");
         let mut command_args = tokens.collect::<Vec<_>>();
         let mut argument_start = 1;
-        match parse_assignment(&command_name) {
+        match parse_assignment(&command_name, self.input_kind) {
             Ok(Some((name, value))) => {
                 if !assignment_recorded {
                     self.push_assignment(name, value, false);
@@ -329,7 +616,11 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
                 }
                 command_name = command_args.remove(0);
                 argument_start = 2;
-                if parse_assignment(&command_name).ok().flatten().is_some() {
+                if parse_assignment(&command_name, self.input_kind)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
                     self.diagnostic(line, column, "syntax error");
                     return;
                 }
@@ -410,6 +701,7 @@ enum Quote {
 #[derive(Debug)]
 struct Tilde {
     name: String,
+    encoded_len: usize,
     line: u32,
     column: u32,
     quote: Quote,
@@ -421,6 +713,8 @@ struct Block {
     quote: Quote,
     escaped: bool,
     in_comment: bool,
+    comment_start: usize,
+    saw_byte_eof: bool,
     word_start: bool,
     line: u32,
     column: u32,
@@ -433,13 +727,15 @@ impl Block {
             quote: Quote::None,
             escaped: false,
             in_comment: false,
+            comment_start: 0,
+            saw_byte_eof: false,
             word_start: true,
             line,
             column,
         }
     }
 
-    fn feed(&mut self, character: char) -> bool {
+    fn feed(&mut self, character: char, input_kind: ConfigInputKind, word_len: usize) -> bool {
         if self.in_comment {
             if character == '\n' {
                 self.in_comment = false;
@@ -463,7 +759,10 @@ impl Block {
             Quote::None => match character {
                 '\'' => self.quote = Quote::Single,
                 '"' => self.quote = Quote::Double,
-                '#' if self.word_start => self.in_comment = true,
+                '#' if self.word_start => {
+                    self.in_comment = true;
+                    self.comment_start = word_len.saturating_sub(1);
+                }
                 '{' => self.depth = self.depth.saturating_add(1),
                 '}' => {
                     self.depth = self.depth.saturating_sub(1);
@@ -474,7 +773,7 @@ impl Block {
                 _ => {}
             },
         }
-        self.word_start = character.is_whitespace();
+        self.word_start = input_kind.is_word_start_whitespace(character);
         false
     }
 }
@@ -519,12 +818,82 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
     context: &mut C,
     assignment_overlay: bool,
 ) -> ParsedConfig {
+    parse_config_characters(
+        source,
+        input.chars(),
+        context,
+        assignment_overlay,
+        ConfigInputKind::String,
+    )
+}
+
+pub(crate) fn parse_config_file_bytes_with_assignment_overlay<C: ConfigContext>(
+    source: impl Into<String>,
+    input: &[u8],
+    context: &mut C,
+    assignment_overlay: bool,
+) -> ParsedConfigBytes {
+    parse_config_bytes_with_assignment_overlay(
+        source,
+        input,
+        context,
+        assignment_overlay,
+        ConfigByteInput::File,
+    )
+}
+
+pub(crate) fn parse_config_buffer_bytes_with_assignment_overlay<C: ConfigContext>(
+    source: impl Into<String>,
+    input: &[u8],
+    context: &mut C,
+    assignment_overlay: bool,
+) -> ParsedConfigBytes {
+    parse_config_bytes_with_assignment_overlay(
+        source,
+        input,
+        context,
+        assignment_overlay,
+        ConfigByteInput::SignedBuffer,
+    )
+}
+
+fn parse_config_bytes_with_assignment_overlay<C: ConfigContext>(
+    source: impl Into<String>,
+    input: &[u8],
+    context: &mut C,
+    assignment_overlay: bool,
+    byte_input: ConfigByteInput,
+) -> ParsedConfigBytes {
+    ParsedConfigBytes::from_encoded(parse_config_characters(
+        source,
+        input
+            .iter()
+            .copied()
+            .map(|byte| encode_config_byte(byte, byte_input)),
+        context,
+        assignment_overlay,
+        ConfigInputKind::Bytes,
+    ))
+}
+
+fn parse_config_characters<C, I>(
+    source: impl Into<String>,
+    characters: I,
+    context: &mut C,
+    assignment_overlay: bool,
+    input_kind: ConfigInputKind,
+) -> ParsedConfig
+where
+    C: ConfigContext,
+    I: Iterator<Item = char>,
+{
     let source = source.into();
     let mut builder = ConfigBuilder {
         source,
         parsed: ParsedConfig::default(),
         overlay: BTreeMap::new(),
         assignment_overlay,
+        input_kind,
         conditionals: Vec::new(),
         context,
         aborted: false,
@@ -533,6 +902,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
     let mut command_block_words = Vec::new();
     let mut word = String::new();
     let mut word_started = false;
+    let mut percent_word = false;
     let mut word_is_command_block = false;
     let mut quote = Quote::None;
     let mut in_comment = false;
@@ -543,10 +913,12 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
     let mut command_line = 1_u32;
     let mut command_column = 1_u32;
 
-    let mut characters = input.chars().peekable();
+    let mut characters = ConfigCharacters::new(characters, input_kind);
     let mut reprocess: Option<char> = None;
     let mut tilde: Option<Tilde> = None;
     let mut last_state: Option<Quote> = None;
+    let mut byte_eof_seen = false;
+    let mut byte_hard_eof = false;
     loop {
         if builder.aborted() {
             break;
@@ -554,14 +926,23 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
         let character = if let Some(character) = reprocess.take() {
             character
         } else {
-            let Some(character) = characters.next() else {
+            let Some(character) = take_character(&mut characters, &mut line, &mut column) else {
                 break;
             };
-            column = column.saturating_add(1);
             character
         };
         if let Some(state) = tilde.as_mut() {
-            if matches!(character, '/' | ' ' | '\t' | '\n' | '"' | '\'') {
+            if input_kind.is_eof(character) {
+                let state = tilde.take().expect("tilde state exists");
+                expand_tilde(
+                    &mut builder,
+                    &mut word,
+                    &state.name,
+                    state.line,
+                    state.column,
+                );
+                last_state = Some(state.quote);
+            } else if matches!(character, '/' | ' ' | '\t' | '\n' | '"' | '\'') {
                 let state = tilde.take().expect("tilde state exists");
                 expand_tilde(
                     &mut builder,
@@ -572,20 +953,52 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                 );
                 last_state = Some(state.quote);
                 reprocess = Some(character);
-            } else if state.name.len().saturating_add(character.len_utf8()) > 1022 {
+            } else if state
+                .encoded_len
+                .saturating_add(input_kind.character_len(character))
+                > 1022
+            {
                 builder.diagnostic(state.line, state.column, "user name is too long");
             } else {
                 state.name.push(character);
+                state.encoded_len = state
+                    .encoded_len
+                    .saturating_add(input_kind.character_len(character));
             }
             continue;
         }
         if let Some(state) = block.as_mut() {
+            if input_kind.is_eof(character) {
+                state.saw_byte_eof = true;
+                if state.in_comment {
+                    word.truncate(state.comment_start);
+                    state.in_comment = false;
+                    state.word_start = true;
+                    continue;
+                }
+                if state.escaped {
+                    continue;
+                }
+                if !state.word_start || state.quote != Quote::None {
+                    word.push(' ');
+                    state.quote = Quote::None;
+                    state.word_start = true;
+                } else if byte_eof_seen {
+                    byte_hard_eof = true;
+                    break;
+                } else {
+                    word.push('\n');
+                    state.word_start = true;
+                    byte_eof_seen = true;
+                }
+                continue;
+            }
             word.push(character);
             if character == '\n' {
                 line = line.saturating_add(1);
                 column = 0;
             }
-            if state.feed(character) {
+            if state.feed(character, input_kind, word.len()) {
                 block = None;
                 finish_word(
                     &mut word,
@@ -599,6 +1012,10 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
             continue;
         }
         if in_comment {
+            if input_kind.is_eof(character) {
+                in_comment = false;
+                continue;
+            }
             if character == '\n' {
                 builder.finish_statement(
                     command_line,
@@ -620,6 +1037,51 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
             }
             continue;
         }
+        if input_kind == ConfigInputKind::Bytes
+            && quote == Quote::None
+            && !(word_started && percent_word)
+            && character == '\r'
+            && peek_character(&mut characters, &mut line, &mut column) == Some('\n')
+        {
+            continue;
+        }
+        if input_kind.is_eof(character) {
+            if word_started {
+                builder.finish_word(
+                    command_line,
+                    command_column,
+                    &mut word,
+                    &mut word_started,
+                    &mut word_is_command_block,
+                    &mut words,
+                    &mut command_block_words,
+                    &mut eager_assignment,
+                );
+                quote = Quote::None;
+                last_state = None;
+                continue;
+            }
+            if byte_eof_seen {
+                byte_hard_eof = true;
+                break;
+            }
+            builder.finish_statement(
+                command_line,
+                command_column,
+                line,
+                &mut word,
+                &mut word_started,
+                &mut word_is_command_block,
+                &mut words,
+                &mut command_block_words,
+                &mut eager_assignment,
+            );
+            byte_eof_seen = true;
+            command_line = line;
+            command_column = column.saturating_add(1);
+            last_state = None;
+            continue;
+        }
         if character == '\\' && quote != Quote::Single {
             let escape_line = line;
             let escape_column = column;
@@ -627,10 +1089,17 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                 command_line = line;
                 command_column = column;
             }
+            if !word_started {
+                percent_word = false;
+            }
             word_started = true;
-            match parse_escape(&mut characters, &mut line, &mut column) {
-                Ok(Some(value)) => {
-                    word.push(value);
+            match parse_escape(&mut characters, &mut line, &mut column, input_kind) {
+                Ok(Some(ConfigEscape::Text(value))) => {
+                    push_config_text_character(&mut word, value, input_kind);
+                    last_state = Some(quote);
+                }
+                Ok(Some(ConfigEscape::RawByte(value))) => {
+                    word.push(encode_stored_config_byte(value));
                     last_state = Some(quote);
                 }
                 Ok(None) => {}
@@ -640,8 +1109,12 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
             }
             continue;
         }
-        if character == '\\' && quote == Quote::Single && characters.peek() == Some(&'\n') {
-            take_character(&mut characters, &mut column);
+        if input_kind == ConfigInputKind::String
+            && character == '\\'
+            && quote == Quote::Single
+            && peek_character(&mut characters, &mut line, &mut column) == Some('\n')
+        {
+            take_character(&mut characters, &mut line, &mut column);
             line = line.saturating_add(1);
             column = 0;
             continue;
@@ -651,9 +1124,18 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                 command_line = line;
                 command_column = column;
             }
+            if !word_started {
+                percent_word = false;
+            }
             word_started = true;
-            match expand_variable(&mut characters, &mut column, &mut builder) {
-                Ok(value) => word.push_str(&value),
+            match expand_variable(
+                &mut characters,
+                &mut line,
+                &mut column,
+                &mut builder,
+                input_kind,
+            ) {
+                Ok(value) => value.push_into(&mut word, input_kind),
                 Err(message) => {
                     builder.diagnostic(line, column, message);
                 }
@@ -666,9 +1148,13 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                 command_line = line;
                 command_column = column;
             }
+            if !word_started {
+                percent_word = false;
+            }
             word_started = true;
             tilde = Some(Tilde {
                 name: String::new(),
+                encoded_len: 0,
                 line,
                 column,
                 quote,
@@ -687,6 +1173,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         &mut characters,
                         &mut reprocess,
                         &mut word,
+                        &mut line,
                         &mut column,
                     );
                 } else {
@@ -699,6 +1186,9 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         command_line = line;
                         command_column = column;
                     }
+                    if !word_started {
+                        percent_word = false;
+                    }
                     word_started = true;
                     quote = Quote::Single;
                 }
@@ -707,6 +1197,9 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         command_line = line;
                         command_column = column;
                     }
+                    if !word_started {
+                        percent_word = false;
+                    }
                     word_started = true;
                     quote = Quote::Double;
                 }
@@ -714,14 +1207,19 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     && words
                         .last()
                         .is_some_and(|word| matches!(word.as_str(), "%if" | "%elif"))
-                    && characters.peek() == Some(&'{') =>
+                    && peek_character(&mut characters, &mut line, &mut column) == Some('{') =>
                 {
                     let format_line = line;
                     let format_column = column;
+                    percent_word = false;
                     word_started = true;
-                    if let Err(message) =
-                        scan_condition_format(&mut characters, &mut word, &mut line, &mut column)
-                    {
+                    if let Err(message) = scan_condition_format(
+                        &mut characters,
+                        &mut word,
+                        &mut line,
+                        &mut column,
+                        input_kind,
+                    ) {
                         builder.diagnostic(format_line, format_column, message);
                     }
                 }
@@ -729,7 +1227,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     && words
                         .last()
                         .is_some_and(|word| matches!(word.as_str(), "%else" | "%endif"))
-                    && characters.peek() == Some(&'{') =>
+                    && peek_character(&mut characters, &mut line, &mut column) == Some('{') =>
                 {
                     builder.diagnostic(line, column, "syntax error");
                 }
@@ -739,6 +1237,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         command_line = line;
                         command_column = column;
                     }
+                    percent_word = false;
                     word_started = true;
                     word_is_command_block = true;
                     word.push('{');
@@ -764,7 +1263,7 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                     command_column = column.saturating_add(1);
                     last_state = None;
                 }
-                value if value.is_whitespace() => {
+                value if input_kind.is_word_whitespace(value) => {
                     builder.finish_word(
                         command_line,
                         command_column,
@@ -782,6 +1281,9 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
                         command_line = line;
                         command_column = column;
                     }
+                    if !word_started {
+                        percent_word = value == '%';
+                    }
                     word_started = true;
                     word.push(value);
                     last_state = Some(quote);
@@ -790,30 +1292,46 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
         }
     }
     if !builder.aborted() {
-        if let Some(state) = tilde.take() {
-            expand_tilde(
-                &mut builder,
-                &mut word,
-                &state.name,
-                state.line,
-                state.column,
-            );
-        }
-        if !builder.aborted() {
+        if byte_hard_eof {
             if let Some(state) = block {
-                builder.diagnostic(state.line, state.column, "unterminated command block");
-            } else {
-                builder.finish_statement(
-                    command_line,
-                    command_column,
-                    line,
+                if state.saw_byte_eof {
+                    builder.diagnostic(line, column, "syntax error");
+                } else {
+                    builder.diagnostic(state.line, state.column, "syntax error");
+                }
+            } else if word_started || !words.is_empty() || tilde.is_some() {
+                builder.diagnostic(line, column, "syntax error");
+            }
+        } else {
+            if let Some(state) = tilde.take() {
+                expand_tilde(
+                    &mut builder,
                     &mut word,
-                    &mut word_started,
-                    &mut word_is_command_block,
-                    &mut words,
-                    &mut command_block_words,
-                    &mut eager_assignment,
+                    &state.name,
+                    state.line,
+                    state.column,
                 );
+            }
+            if !builder.aborted() {
+                if let Some(state) = block {
+                    if input_kind == ConfigInputKind::Bytes && state.saw_byte_eof {
+                        builder.diagnostic(line, column, "syntax error");
+                    } else {
+                        builder.diagnostic(state.line, state.column, "unterminated command block");
+                    }
+                } else {
+                    builder.finish_statement(
+                        command_line,
+                        command_column,
+                        line,
+                        &mut word,
+                        &mut word_started,
+                        &mut word_is_command_block,
+                        &mut words,
+                        &mut command_block_words,
+                        &mut eager_assignment,
+                    );
+                }
             }
         }
     }
@@ -831,7 +1349,7 @@ fn expand_tilde<C: ConfigContext>(
         builder.diagnostic(line, column, "syntax error");
         return;
     };
-    word.push_str(&home);
+    home.push_into(word, builder.input_kind);
 }
 
 #[cfg(unix)]
@@ -875,25 +1393,29 @@ fn finish_word(
     }
 }
 
-fn scan_condition_format<I>(
-    characters: &mut std::iter::Peekable<I>,
+fn scan_condition_format(
+    characters: &mut ConfigCharacters,
     word: &mut String,
     line: &mut u32,
     column: &mut u32,
-) -> Result<(), String>
-where
-    I: Iterator<Item = char>,
-{
+    input_kind: ConfigInputKind,
+) -> Result<(), String> {
     word.push('#');
-    let Some(open) = take_character(characters, column) else {
+    let Some(open) = take_character(characters, line, column) else {
         return Err("syntax error".to_owned());
     };
+    if input_kind.is_eof(open) {
+        return Err("syntax error".to_owned());
+    }
     word.push(open);
     let mut depth = 1_u32;
     loop {
-        let Some(character) = take_character(characters, column) else {
+        let Some(character) = take_character(characters, line, column) else {
             return Err("syntax error".to_owned());
         };
+        if input_kind.is_eof(character) {
+            return Err("syntax error".to_owned());
+        }
         if character == '\n' {
             *line = line.saturating_add(1);
             *column = 0;
@@ -901,9 +1423,12 @@ where
         }
         word.push(character);
         if character == '#' {
-            let Some(next) = take_character(characters, column) else {
+            let Some(next) = take_character(characters, line, column) else {
                 return Err("syntax error".to_owned());
             };
+            if input_kind.is_eof(next) {
+                return Err("syntax error".to_owned());
+            }
             if next == '\n' {
                 *line = line.saturating_add(1);
                 *column = 0;
@@ -922,7 +1447,10 @@ where
     }
 }
 
-fn parse_assignment(token: &str) -> Result<Option<(String, String)>, ()> {
+fn parse_assignment(
+    token: &str,
+    input_kind: ConfigInputKind,
+) -> Result<Option<(String, String)>, ()> {
     let Some((name, value)) = token.split_once('=') else {
         return Ok(None);
     };
@@ -935,7 +1463,7 @@ fn parse_assignment(token: &str) -> Result<Option<(String, String)>, ()> {
     {
         return Ok(None);
     }
-    if token.len() > 16_384 {
+    if input_kind.encoded_len(token) > 16_384 {
         return Err(());
     }
     Ok(Some((name.to_owned(), value.to_owned())))
@@ -958,17 +1486,23 @@ fn is_variable_character(character: char, first: bool) -> bool {
         && (character.is_ascii_alphanumeric() || character == '_')
 }
 
-fn parse_escape<I>(
-    characters: &mut std::iter::Peekable<I>,
+enum ConfigEscape {
+    Text(char),
+    RawByte(u8),
+}
+
+fn parse_escape(
+    characters: &mut ConfigCharacters,
     line: &mut u32,
     column: &mut u32,
-) -> Result<Option<char>, String>
-where
-    I: Iterator<Item = char>,
-{
-    let Some(character) = take_character(characters, column) else {
+    input_kind: ConfigInputKind,
+) -> Result<Option<ConfigEscape>, String> {
+    let Some(character) = take_character(characters, line, column) else {
         return Err("syntax error".to_owned());
     };
+    if input_kind.is_eof(character) {
+        return Err("syntax error".to_owned());
+    }
     if character == '\n' {
         *line = line.saturating_add(1);
         *column = 0;
@@ -978,10 +1512,10 @@ where
         return Err("invalid octal escape".to_owned());
     }
     if matches!(character, '0'..='3') {
-        let second = take_character(characters, column);
+        let second = take_character(characters, line, column);
         let third = second
             .filter(|value| matches!(value, '0'..='7'))
-            .and_then(|_| take_character(characters, column));
+            .and_then(|_| take_character(characters, line, column));
         let (Some(second), Some(third)) = (second, third) else {
             return Err("invalid octal escape".to_owned());
         };
@@ -991,7 +1525,16 @@ where
         let value = 64 * (character as u32 - '0' as u32)
             + 8 * (second as u32 - '0' as u32)
             + (third as u32 - '0' as u32);
-        return Ok(char::from_u32(value));
+        let value = u8::try_from(value).expect("octal config escape fits in one byte");
+        return Ok(Some(match input_kind {
+            ConfigInputKind::String => ConfigEscape::Text(char::from(value)),
+            ConfigInputKind::Bytes => ConfigEscape::RawByte(value),
+        }));
+    }
+    if input_kind == ConfigInputKind::Bytes
+        && let Some(value) = stored_config_byte(character)
+    {
+        return Ok(Some(ConfigEscape::RawByte(value)));
     }
     let value = match character {
         'a' => '\u{7}',
@@ -1007,9 +1550,12 @@ where
             let digits = if character == 'u' { 4 } else { 8 };
             let mut encoded = String::with_capacity(digits);
             for _ in 0..digits {
-                let Some(digit) = take_character(characters, column) else {
+                let Some(digit) = take_character(characters, line, column) else {
                     return Err("syntax error".to_owned());
                 };
+                if input_kind.is_eof(digit) {
+                    return Err("syntax error".to_owned());
+                }
                 if digit == '\n' {
                     *line = line.saturating_add(1);
                     *column = 0;
@@ -1024,47 +1570,57 @@ where
                 .ok()
                 .and_then(char::from_u32)
                 .ok_or_else(|| format!("invalid \\{character} argument"))?;
-            return Ok(Some(value));
+            return Ok(Some(ConfigEscape::Text(value)));
         }
         other => other,
     };
-    Ok(Some(value))
+    Ok(Some(ConfigEscape::Text(value)))
 }
 
-fn expand_variable<I, C>(
-    characters: &mut std::iter::Peekable<I>,
+fn expand_variable<C>(
+    characters: &mut ConfigCharacters,
+    line: &mut u32,
     column: &mut u32,
     builder: &mut ConfigBuilder<'_, C>,
-) -> Result<String, String>
+    input_kind: ConfigInputKind,
+) -> Result<ConfigExpansion, String>
 where
-    I: Iterator<Item = char>,
     C: ConfigContext,
 {
-    let Some(&next) = characters.peek() else {
+    let Some(next) = peek_character(characters, line, column) else {
         return Err("syntax error".to_owned());
     };
+    if input_kind.is_eof(next) {
+        return Err("syntax error".to_owned());
+    }
     let braced = next == '{';
     if braced {
-        take_character(characters, column);
+        take_character(characters, line, column);
     } else if !is_variable_character(next, true) {
-        return Ok("$".to_owned());
+        return Ok(ConfigExpansion::text("$".to_owned()));
     }
 
     let mut name = String::new();
     loop {
-        let Some(&next) = characters.peek() else {
+        let Some(next) = peek_character(characters, line, column) else {
             if braced {
                 return Err("invalid environment variable".to_owned());
             }
             break;
         };
+        if input_kind.is_eof(next) {
+            if braced {
+                return Err("invalid environment variable".to_owned());
+            }
+            break;
+        }
         if braced && next == '}' {
-            take_character(characters, column);
+            take_character(characters, line, column);
             break;
         }
         if !is_variable_character(next, false) {
             if braced {
-                take_character(characters, column);
+                take_character(characters, line, column);
                 return Err("invalid environment variable".to_owned());
             }
             break;
@@ -1073,33 +1629,55 @@ where
             return Err("environment variable is too long".to_owned());
         }
         name.push(next);
-        take_character(characters, column);
+        take_character(characters, line, column);
     }
-    Ok(builder.variable(&name).unwrap_or_default())
+    Ok(builder
+        .variable(&name)
+        .unwrap_or_else(|| ConfigExpansion::text(String::new())))
 }
 
-fn take_character<I>(characters: &mut std::iter::Peekable<I>, column: &mut u32) -> Option<char>
-where
-    I: Iterator<Item = char>,
-{
-    let character = characters.next()?;
+fn take_character(
+    characters: &mut ConfigCharacters,
+    line: &mut u32,
+    column: &mut u32,
+) -> Option<char> {
+    let character = characters.getc()?;
+    let skipped_lines = characters.take_skipped_lines();
+    if skipped_lines != 0 {
+        *line = line.saturating_add(skipped_lines);
+        *column = 0;
+    }
     *column = column.saturating_add(1);
     Some(character)
 }
 
-fn strip_quoted_line_prefix<I>(
-    characters: &mut std::iter::Peekable<I>,
+fn peek_character(
+    characters: &mut ConfigCharacters,
+    line: &mut u32,
+    column: &mut u32,
+) -> Option<char> {
+    let character = characters.getc()?;
+    let skipped_lines = characters.take_skipped_lines();
+    if skipped_lines != 0 {
+        *line = line.saturating_add(skipped_lines);
+        *column = 0;
+    }
+    characters.ungetc(character);
+    Some(character)
+}
+
+fn strip_quoted_line_prefix(
+    characters: &mut ConfigCharacters,
     reprocess: &mut Option<char>,
     word: &mut String,
+    line: &mut u32,
     column: &mut u32,
-) where
-    I: Iterator<Item = char>,
-{
-    let Some(mut character) = take_character(characters, column) else {
+) {
+    let Some(mut character) = take_character(characters, line, column) else {
         return;
     };
     while matches!(character, ' ' | '\t') {
-        let Some(next) = take_character(characters, column) else {
+        let Some(next) = take_character(characters, line, column) else {
             return;
         };
         character = next;
@@ -1108,7 +1686,7 @@ fn strip_quoted_line_prefix<I>(
         *reprocess = Some(character);
         return;
     }
-    let Some(next) = take_character(characters, column) else {
+    let Some(next) = take_character(characters, line, column) else {
         return;
     };
     if matches!(next, ',' | '#' | '{' | '}' | ':') {
@@ -1120,7 +1698,7 @@ fn strip_quoted_line_prefix<I>(
         *reprocess = Some(next);
         return;
     }
-    while let Some(next) = take_character(characters, column) {
+    while let Some(next) = take_character(characters, line, column) {
         if next == '\n' {
             *reprocess = Some(next);
             return;

@@ -714,6 +714,22 @@ Integrate the Control front first. The config and key candidates may finish whil
 coordinator reranks the remaining registry before accepting either candidate. Slice 10ai stays
 behind 10ah because it uses the same Control paths.
 
+## Wave 2 fronts
+
+Wave 2 starts on 2026-08-30 with three frozen chunks and 65 unresolved groups. Two fronts edit at
+once. The third handles pin research and review, then rotates into editing when one candidate
+finishes.
+
+| Front | Starting role | Worktree | Branch | Chunk | Exclusive production and proof zone |
+| --- | --- | --- | --- | --- | --- |
+| Control output | Editor | `/Users/demfabris/dev/zz-tmux-control-output` | `codex/tmux-control-10ai` | `control-mode.exit-pane-output` | Control client exit drain and focused Control CLI proof; daemon source stays evidence-only |
+| Shell-job cwd | Editor | `/Users/demfabris/dev/zz-tmux-job-cwd` | `codex/tmux-job-cwd` | `jobs.shell-job-cwd` | Daemon command-job and status-job cwd selection plus a unique scenario |
+| DEL identity | Oracle and reviewer, then editor | `/Users/demfabris/dev/zz-tmux-key-del` | `codex/tmux-key-del` | `keys.literal-delete-identity` | Mux key identity and the strict-key differential |
+
+Integrate Control output first and rerank before each later acceptance. The coordinator owns every
+shared campaign artifact and runs aggregate gates. A front stops when its implementation needs
+another front's file zone.
+
 ## Ownership and handoff
 
 The coordinator alone edits `TMUX_COMPAT_TRACKER.md`, `compat/tmux-gaps.json`, the generated gap

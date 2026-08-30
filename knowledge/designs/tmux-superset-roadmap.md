@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; three-front trial closed 3 of 3; Control output discard follows
+status: In Progress; parallel wave 2 frozen at 0 of 3
 tags:
 - tmux
 - compatibility
@@ -65,6 +65,9 @@ The three-front trial is positive: all three bounded chunks reached `main`, thei
 not intersect, and integration had no merge conflicts. Six independent review repairs were needed,
 so the next wave uses two active editors, one permanent oracle and reviewer, and the root as
 coordinator. Full corpus and workspace gates remain centralized in one warm integration lane.
+Wave 2 freezes Control exit pane-output discard, shell-job cwd, and literal DEL identity as three
+independent chunks. The first two start with editors. The DEL front probes and reviews before it
+rotates into editing.
 The final workspace run passed every non-daemon package. Three daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake
 class. Strict workspace clippy, formatting, tracker, stored-summary, and OKF validation pass.

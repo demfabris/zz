@@ -1,6 +1,6 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **THREE-FRONT TRIAL 3/3 CLOSED; 3 RESIDUAL GROUPS REGISTERED**
+> Campaign delivery: **PARALLEL WAVE 2 FROZEN AT 0/3; LAST WAVE 3/3 CLOSED**
 >
 > Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED); SLICE 10AI NEXT**
 >
@@ -74,11 +74,12 @@ percentage is a ledger health metric, not a compatibility claim.
 | Published branch | `origin/main` |
 | Integrated campaign base | `fde87af317c4317e9b5176f7e79d4e8765e397cd` |
 | Delivery | Local `main` contains the trial workflow and all three committed closures; remote `main` remains at `562b950c` through slice 10ag |
-| Campaign worktrees | Three retained trial worktrees branch from the original trial base; the table below records their paths and file zones |
+| Campaign worktrees | Wave 2 uses three new worktrees from its freeze commit; the retained trial worktrees remain untouched |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Last fixed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | The practical exit gate remains open; 10ai is the sole `next` group |
+| Active fixed cohort | Wave 2: 0 of 3 frozen chunks closed, 0 residual groups registered, 65 unresolved at freeze |
+| Last completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
+| Campaign point | Two editors start 10ai and shell-job cwd; the DEL front starts as oracle and reviewer |
 | Live registry | 87 active groups, 590 active items, 119 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
@@ -98,15 +99,17 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Fixed cohort completion | Three-front trial: 3 of 3 frozen chunks closed |
-| New residual groups | 3: two from Config, one from Key |
-| Unresolved movement | 65 before the trial, 65 after the trial |
+| Active fixed cohort | Wave 2: 0 of 3 frozen chunks closed |
+| Last completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
+| New residual groups | Wave 2: 0 at freeze; prior trial: 3 |
+| Unresolved movement | Wave 2: 65 at freeze, 65 current |
 | Live unresolved | 45 open + 20 blocked = 65 |
 | Practical exit gate | Open; slice 10ai is the sole `next` group |
 | Accepted differential | 104 scenarios, 1,672 steps, attached-client `PASS`, 2 registered GEO rows |
 | Ledger settlement | 141 of 206 known groups = 68.4% |
 
-Use the first six rows as the campaign headline. Keep ledger settlement as a secondary diagnostic.
+Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
+secondary diagnostic.
 After each frozen wave, record its closed chunk count, discoveries, unresolved delta, practical
 exit-gate evidence, and the recomputed live ledger.
 
@@ -1104,6 +1107,27 @@ Final validation passes the accepted 104-scenario corpus, attached-client fixtur
 suite, strict workspace clippy, formatting, tracker, stored-summary, and OKF checks. The full
 workspace run passed every non-daemon package. Three daemon tests failed under parallel load and
 each passed when rerun alone, matching the repository's documented load-flake class.
+
+## Parallel wave 2, 2026-08-30
+
+Wave 2 freezes three independent groups with 65 unresolved groups at the start. Two editors work at
+once. The third front owns pin research and independent review, then takes its DEL slice when an
+editor slot opens.
+
+| Front | Starting role | Worktree and branch | Tracker contract | Exclusive production and proof zone |
+| --- | --- | --- | --- | --- |
+| Control output | Editor | `$HOME/dev/zz-tmux-control-output`, `codex/tmux-control-10ai` | Slice 10ai: `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` | `crates/zz/src/control_mode.rs`, focused tests in that file, Control sections of `crates/zz/tests/cli_binary.rs`, and one unique Control scenario or fixture |
+| Shell-job cwd | Editor | `$HOME/dev/zz-tmux-job-cwd`, `codex/tmux-job-cwd` | `jobs.shell-job-cwd/semantic:command-shell-job-cwd` and `semantic:status-shell-job-cwd` | `crates/zz-daemon/src/daemon.rs`, `crates/zz-daemon/src/status.rs`, focused daemon tests, and one unique shell-job-cwd scenario or fixture |
+| DEL identity | Oracle and reviewer, then editor | `$HOME/dev/zz-tmux-key-del`, `codex/tmux-key-del` | `keys.literal-delete-identity/semantic:literal-delete-key-identity` | `crates/zz-mux/src/command.rs`, the strict-key scenario and fixture, and focused mux tests |
+
+The Control front treats `crates/zz-daemon/src/daemon.rs` as evidence only. It stops if the fix needs
+that file because the shell-job front owns it. The coordinator keeps exclusive ownership of the
+registry, generated report, tracker, shared OKF pages, accepted result summary, attached-client
+fixture, and startup diagnostic script.
+
+Integrate 10ai first, rerank the live registry, then consider shell-job cwd. The DEL front may begin
+editing after either candidate enters review. Each candidate needs its focused proof and an
+independent review before the coordinator updates shared artifacts and creates one closure commit.
 
 ## Validation and closure gates
 

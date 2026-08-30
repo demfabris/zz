@@ -1,6 +1,7 @@
 # Update Log
 
 ## 2026-08-30
+* **Planning**: Froze parallel wave 2 at 0 of 3 chunks and 65 unresolved groups. The two starting editors own Control exit pane-output discard and shell-job cwd in separate source zones. A third front owns pin research and independent review before rotating into literal DEL identity. The coordinator retains the registry, generated report, tracker, shared OKF pages, accepted results, and aggregate validation. Integration starts with slice 10ai and reranks the registry before each later acceptance.
 * **Planning**: Replaced the tmux campaign's headline ledger percentage with a fixed-cohort dashboard. The three-front trial closed 3 of 3 frozen chunks and registered three residual groups, so unresolved work stayed at 65 while ledger settlement moved from 138 of 203 to 141 of 206 known groups. Future waves report cohort completion, discoveries, unresolved movement, practical exit-gate evidence, and ledger settlement in that order. The ledger percentage remains available as a secondary registry diagnostic.
 
 ## 2026-08-29

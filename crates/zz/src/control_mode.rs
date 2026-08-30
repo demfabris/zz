@@ -177,12 +177,7 @@ fn drive<W: Write>(
     }
 
     retain_first_initial_stdin_before_eof(&mut state.pending_return, &mut pending_stdin);
-    if state
-        .pending_return
-        .as_ref()
-        .is_some_and(|pending_return| !pending_return.has_preceding_input())
-        && let Some(pending_return) = state.pending_return.take()
-    {
+    if let Some(pending_return) = take_ready_pending_return(&mut state.pending_return) {
         return finish_control_return(
             client.as_ref(),
             pending_return,
@@ -251,7 +246,10 @@ fn drive<W: Write>(
                     }
                     if let Some(error) = prepared_error(&prepared.commands) {
                         output.parse_error(&format!("parse error: {}", error.tmux_message()))?;
-                        if let Some(pending_return) = prepared.pending_return.take() {
+                        if let Some(pending_return) = settle_preparation_error_return(
+                            &mut prepared.pending_return,
+                            &mut state.pending_return,
+                        ) {
                             return finish_control_return(
                                 client.as_ref(),
                                 pending_return,
@@ -308,11 +306,8 @@ fn drive<W: Write>(
                             break;
                         }
                     }
-                    if state
-                        .pending_return
-                        .as_ref()
-                        .is_some_and(|pending_return| !pending_return.has_preceding_input())
-                        && let Some(pending_return) = state.pending_return.take()
+                    if let Some(pending_return) =
+                        take_ready_pending_return(&mut state.pending_return)
                     {
                         return finish_control_return(
                             client.as_ref(),
@@ -1068,6 +1063,27 @@ fn retain_first_initial_stdin_before_eof(
         pending_stdin.truncate(1);
         *preceding_input = pending_stdin.len();
     }
+}
+
+fn take_ready_pending_return(pending_return: &mut Option<PendingReturn>) -> Option<PendingReturn> {
+    if pending_return
+        .as_ref()
+        .is_some_and(|pending_return| !pending_return.has_preceding_input())
+    {
+        pending_return.take()
+    } else {
+        None
+    }
+}
+
+fn settle_preparation_error_return(
+    prepared_return: &mut Option<PendingReturn>,
+    state_return: &mut Option<PendingReturn>,
+) -> Option<PendingReturn> {
+    if state_return.is_none() {
+        *state_return = prepared_return.take();
+    }
+    take_ready_pending_return(state_return)
 }
 
 fn settle_deferred_return(
@@ -2251,6 +2267,75 @@ mod tests {
         let pending_return = pending_return.as_mut().expect("pending return");
         pending_return.consume_preceding_input();
         assert!(!pending_return.has_preceding_input());
+    }
+
+    #[test]
+    fn preparation_error_releases_eof_after_the_retained_input() {
+        let invalid = "bind-key -T { set-environment -g BIND_CONTROL_REJECT_FORBIDDEN yes } F11 display-message -p forbidden";
+        let mut pending_stdin = VecDeque::from([
+            StdinEvent::Line(invalid.to_owned()),
+            StdinEvent::Line("detach-client".to_owned()),
+        ]);
+        let mut state = ControlState {
+            pending_return: Some(PendingReturn::Eof {
+                code: 0,
+                preceding_input: 2,
+            }),
+            ..ControlState::default()
+        };
+        retain_first_initial_stdin_before_eof(&mut state.pending_return, &mut pending_stdin);
+
+        let Some(StdinEvent::Line(line)) = pending_stdin.pop_front() else {
+            panic!("missing retained input");
+        };
+        state
+            .pending_return
+            .as_mut()
+            .expect("pending EOF")
+            .consume_preceding_input();
+        let ParsedLine::Commands(mut commands) = parse_line(&line) else {
+            panic!("invalid bind-key did not parse for preparation");
+        };
+        let prepared = PreparedCommand {
+            invocation: commands.remove(0),
+            canonical_name: Some("bind-key".to_owned()),
+            alias_matched: false,
+            result: PreparedCommandResult::Error(ServerError::CommandParse(
+                "command bind-key: -T argument must be a string".to_owned(),
+            )),
+        };
+
+        assert!(prepared_error(std::slice::from_ref(&prepared)).is_some());
+        assert!(pending_stdin.is_empty());
+        let mut prepared_return = None;
+        assert!(matches!(
+            settle_preparation_error_return(&mut prepared_return, &mut state.pending_return),
+            Some(PendingReturn::Eof { code: 0, .. })
+        ));
+        assert!(state.pending_return.is_none());
+
+        let mut prepared_return = Some(PendingReturn::Blank {
+            code: 1,
+            preceding_input: 1,
+        });
+        assert!(
+            settle_preparation_error_return(&mut prepared_return, &mut state.pending_return)
+                .is_none()
+        );
+        assert!(prepared_return.is_none());
+        assert!(
+            state
+                .pending_return
+                .as_ref()
+                .is_some_and(PendingReturn::has_preceding_input)
+        );
+
+        state.pending_return = None;
+        assert!(
+            settle_preparation_error_return(&mut prepared_return, &mut state.pending_return)
+                .is_none()
+        );
+        assert!(state.pending_return.is_none());
     }
 
     #[test]

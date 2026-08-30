@@ -101,7 +101,7 @@ literal `None` value also reads as unset). Resolution in `KeyEngine::handle`:
 
 # Key encoding (`canonical_key`)
 
-Every key is normalized before lookup, bind, unbind, and prefix comparison:
+Native client keys are normalized before lookup and prefix comparison:
 
 | Input | Canonical form |
 | --- | --- |
@@ -110,10 +110,18 @@ Every key is normalized before lookup, bind, unbind, and prefix comparison:
 | `Alt-x` | `M-x` |
 | otherwise | trimmed as-is (e.g. `C-b`, `M-Right`, `F2`, `PPage`) |
 
-`bind`/`unbind`/`get` all canonicalize their key, so `Ctrl-a` and `C-a` are the same binding.
-That long `Ctrl-`/`Alt-` spelling is a zz overacceptance, not tmux syntax: the pin accepts the
-case-insensitive short forms such as `c-a`/`m-a` and rejects the long aliases. Strict parser parity
-remains tracked under `keys.strict-validation`.
+The tmux command layer now validates key arguments before they reach the shared tables. It accepts
+case-insensitive short modifiers, caret forms, the pinned named-key aliases, exactly `F1` through
+`F12`, and the pin's prefix-consuming 32-bit `User` and `0x` number grammar. It rejects long
+`Ctrl-` and `Alt-` aliases before changing bindings or options; native clients may continue to use
+those aliases through the shared native parser.
+
+Caret followed by a literal control byte from 1 through 31 works across bind, list, filter, unbind,
+`prefix`, `prefix2`, and `backspace`. Printable ASCII hex keys keep identity separate from their
+literal forms while displaying the same character, so `A` and `0x41`, or `Space` and `0x20`, may
+coexist and be filtered or removed independently. Literal DEL, caret plus DEL, and `0x7f` remain
+tracked under `keys.literal-delete-identity` because their identities and rendered forms are not yet
+fully distinct.
 
 # bind / unbind semantics
 

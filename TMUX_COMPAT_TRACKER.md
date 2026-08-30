@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **SLICE 10AH AND CONFIG FRONT CLOSED LOCALLY; THREE-FRONT TRIAL ACTIVE**
+> Campaign state: **THREE-FRONT CLOSURES COMPLETE LOCALLY; TRIAL REVIEW PENDING**
 >
-> Tracker resolution progress: **68.3% (140 of 205 known groups)**
+> Tracker resolution progress: **68.4% (141 of 206 known groups)**
 >
-> Integrated campaign base: **2026-08-29** at `4800255d7f7b8bf69acfec14b78e68b7440627f1`
+> Integrated campaign base: **2026-08-29** at `d2df284d41acba3dc8c1d4da2bdfee6377c340e7`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -38,11 +38,11 @@ can close a client mailbox before its successful response is admitted. That resp
 the only `next` group; pane-output discard is frozen as slice 10ai. Slice 10ah now closes that race
 without a wire change: shutdown freezes admissions, waits for active responses, drains all client
 writers while retaining the listener, then removes the endpoint. Pane-output discard becomes the
-sole `next` group. The persisted accepted slice
-10ag artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two approved
-GEO rows, every other channel clean, and SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Commit `562b950c`
-contains slices 10w through 10ag.
+sole `next` group. The three-front trial also closes UTF-8 config tilde parsing and strict tmux key
+grammar while retaining separate residuals for parser environment provenance, non-UTF-8 home
+paths, and DEL key identity. The persisted accepted artifact covers 104 scenarios and 1,672 steps,
+with attached-client `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
+`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -68,13 +68,13 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Integrated campaign base | `4800255d7f7b8bf69acfec14b78e68b7440627f1` |
-| Delivery | Local `main` contains the trial workflow, slice 10ah, and the Config front; remote `main` remains through slice 10ag |
-| Campaign worktrees | Three short-lived trial worktrees branch from the integrated base; the table below owns their paths and file zones |
+| Integrated campaign base | `d2df284d41acba3dc8c1d4da2bdfee6377c340e7` |
+| Delivery | Local `main` contains the trial workflow, slice 10ah, the Config front, and the integrated Key front; remote `main` remains through slice 10ag |
+| Campaign worktrees | Three retained trial worktrees branch from the original trial base; the table below records their paths and file zones |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10ah and the Config front are closed; strict key grammar remains under final review, and 10ai is the sole `next` group |
-| Live registry | 87 active groups, 592 active items, 118 closed records |
+| Campaign point | All three trial chunks are closed locally; the trial review is pending, and 10ai is the sole `next` group |
+| Live registry | 87 active groups, 590 active items, 119 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
@@ -91,7 +91,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(118 + 22) / (118 + 87) = 140 / 205 = 68.3%
+(119 + 22) / (119 + 87) = 141 / 206 = 68.4%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -934,8 +934,8 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 87 active groups, 592 active items, and 118 closed records: 45 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 140 of 205 groups (68.3%).
+The live registry now has 87 active groups, 590 active items, and 119 closed records: 45 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 141 of 206 groups (68.4%).
 Priority has one `next`, 64 `later`, and 22 `none` groups.
 
 Slice 10ah closes
@@ -965,12 +965,18 @@ differing channel. Direct Control environment provenance and non-UTF-8 passwd ho
 honestly split under `control-mode.local-parser-environment` and
 `config.tilde-home-path-encoding`.
 
-The rerank places kill-server response order first because a successful administrative command can
-currently lose its response on both Control and ordinary Command paths, and a deterministic daemon
-test can close the race without waiting on shell timing. Exit pane-output discard remains the next
-independently closable Control slice and is frozen as 10ai. `jobs.shell-job-cwd` follows as a
-separate process-launch producer fix. Immediate background `run-shell` ordering stays later and hard
-because it must prove absent-delay and `-d 0` queue order without timer races.
+The Key front closes `keys.strict-validation`. The tmux command parser now rejects long modifier
+aliases and malformed function, User, and hex names before state changes while accepting the pin's
+short modifiers, named keys, caret forms, numeric prefix parsing, and 32-bit wrap behavior. Literal
+controls 1 through 31 work across binding and key options. Printable ASCII hex keys retain identity
+separate from their literal forms across list, filter, unbind, option readback, and send-prefix. The
+40-step differential and 161 fixture checks pass on both engines. Literal DEL, caret plus DEL, and
+`0x7f` remain under `keys.literal-delete-identity`.
+
+Kill-server response order is closed. Exit pane-output discard remains the next independently
+closable Control slice and is frozen as 10ai. `jobs.shell-job-cwd` follows as a separate
+process-launch producer fix. Immediate background `run-shell` ordering stays later and hard because
+it must prove absent-delay and `-d 0` queue order without timer races.
 
 `jobs.run-shell-immediate-background-environment` no longer depends on 10af, but it remains later
 and hard. It owns absent-delay and `-d 0` foreground blocking plus same-group background ordering

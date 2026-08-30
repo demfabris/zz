@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; slice 10ag closed locally; kill-server response order follows
+status: In Progress; three-front trial closures complete; Control output discard follows
 tags:
 - tmux
 - compatibility
@@ -38,24 +38,28 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-29
 
-Slices 10w through 10ah plus the Config front form the local 2026-08-29 checkpoint. The tracker has
-87 active groups, 592 classified active items, and 118 closed groups: 45 open, 20 blocked, and 22
-accepted. Accepted active groups plus closed history resolve 140 of 205 known groups (68.3%). The persisted accepted
-slice 10ag artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two
-approved GEO rows, every other channel clean, and SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Slice 10af closes
+Slices 10w through 10ah plus the Config and Key fronts form the local 2026-08-29 checkpoint. The
+tracker has 87 active groups, 590 classified active items, and 119 closed groups: 45 open, 20
+blocked, and 22 accepted. Accepted active groups plus closed history resolve 141 of 206 known groups
+(68.4%). The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client
+`PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
+`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
 Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`
-without a public protocol change. Full zz validation passes 653 unit tests plus 113 CLI binary
-tests. Serialized daemon validation passes 736 unit tests plus two active agent integrations, with
-one soak ignored. The full workspace excluding the daemon, full workspace clippy, and
-`cargo fmt --check` pass. Slice 10ah closes
+without a public protocol change. The integrated mux suite passes 531 tests, the focused strict-key
+run passes 40 steps plus 161 fixture checks on both engines, and formatting and mux clippy pass.
+Slice 10ah closes
 `control-mode.kill-server-response-order`; slice 10ai is now the sole `next` group under
 `control-mode.exit-pane-output`.
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
 matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
 named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
 and non-UTF-8 passwd home paths remain in separate active groups.
+The Key front closes `keys.strict-validation`. Its tmux command parser matches short modifiers,
+named and caret forms, exact function-key bounds, and the pin's prefix-consuming User and hex number
+grammar. It rejects invalid names before state changes and keeps printable ASCII hex keys distinct
+from literal keys. Literal DEL, caret plus DEL, and `0x7f` remain under
+`keys.literal-delete-identity`.
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -70,13 +74,13 @@ zero-duration persistence and input dismissal on zz and pinned tmux. Ordinary pu
 requests, resync, and popup viewports remain frozen until the message clears. The pin's stale-timer
 bug remains a deliberate correctness divergence because zz cancels and identity-checks old timers.
 
-The accepted runtime artifact for the authorized 2026-08-29 checkpoint through slice 10ag contains
-103 scenarios and 1,630 steps.
+The accepted runtime artifact for the authorized 2026-08-29 checkpoint through the three-front
+closures contains 104 scenarios and 1,672 steps.
 Every ordinary row is clean. `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain their one approved GEO divergence with every other channel
 clean. The expanded attached-client fixture and `compat/run.sh --check-summary` both pass. The
 persisted summary SHA-256 is
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Requested flags, attached
+`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Requested flags, attached
 sizing, and client environments extend the attached fixture, while the daemon invalid-flag closure
 and both positional-bound closures each add one fail-closed three-step canonical scenario. The
 three-step shared flag scenario passes 516 focused probes on zz and the pin inside that full run.
@@ -338,14 +342,14 @@ then drops it. Deterministic tests cover the old race, late Control and Command 
 disconnected writers, replacement binding during cleanup, and immediate fresh-daemon startup.
 Pane-output discard follows as slice 10ai.
 
-The registry now has 87 active groups and 592 active items, with 118 closed records: 45 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 140 of 205 groups (68.3%).
-Slices 10w through 10ah plus the Config front form the local 2026-08-29 checkpoint. The persisted accepted slice 10ag
-artifact covers 103 scenarios and 1,630 steps with attached-client `PASS`, exactly two approved GEO
-rows, every other channel clean, and SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Full zz and serialized
-daemon validation pass. The full workspace excluding the daemon, full workspace clippy, and
-`cargo fmt --check` pass.
+The registry now has 87 active groups and 590 active items, with 119 closed records: 45 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 141 of 206 groups (68.4%).
+Slices 10w through 10ah plus the Config and Key fronts form the local 2026-08-29 checkpoint. The
+persisted accepted artifact covers 104 scenarios and 1,672 steps with attached-client `PASS`,
+exactly two approved GEO rows, every other channel clean, and SHA-256
+`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Focused mux,
+compatibility, formatting, and mux clippy gates pass; trial-wide workspace gates follow the final
+review.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256

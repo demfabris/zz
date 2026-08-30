@@ -1707,6 +1707,33 @@
       "reason": "Picker and sidebar bindings are part of the zz GUI experience."
     },
     {
+      "id": "keys.literal-delete-identity",
+      "title": "Separate literal and hex DEL key identities",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "scripts",
+        "daily"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:literal-delete-key-identity"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/key-tables.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Literal DEL, caret plus DEL, and hex 0x7f retain distinct identities and pinned rendering across bind, list and filter, unbind, prefix, prefix2, and backspace."
+      ],
+      "depends_on": [],
+      "reason": "The completed strict-key slice covers literal controls 1 through 31 and printable ASCII hex keys, but zz may still collapse or misrender the pin's three DEL spellings."
+    },
+    {
       "id": "keys.move-table",
       "title": "Replace the floating-pane move table natively",
       "decision": "native",
@@ -1882,33 +1909,6 @@
       ],
       "depends_on": [],
       "reason": "Root-table mouse commands draw terminal client UI that native clients own directly."
-    },
-    {
-      "id": "keys.strict-validation",
-      "title": "Match tmux key-name validation",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "daily"
-      ],
-      "owner": "protocol",
-      "items": [
-        "semantic:bind-key-template-validation",
-        "semantic:key-long-modifier-alias-overacceptance",
-        "semantic:prefix-key-validation"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:knowledge/tmux/key-tables.md"
-      ],
-      "acceptance": [
-        "The shared key parser accepts the pin's vocabulary and rejects invalid modified names before storing bindings."
-      ],
-      "depends_on": [],
-      "reason": "zz also accepts long Ctrl- and Alt- modifier aliases that the pin rejects; partial tightening must preserve pin-valid caret, back-tab, and keypad names."
     },
     {
       "id": "layout.main-horizontal-upstream-bug",
@@ -3911,6 +3911,20 @@
         "resource:knowledge/tmux/copy-mode.md"
       ],
       "resolution": "Added the pin's 13 previously absent emacs navigation keys with exact send-keys -X command shapes and nonrepeat metadata: C-Down, C-M-Down, C-M-Up, C-M-f, C-Up, End, Home, M-<, M->, M-Down, M-R, M-Up, and Space. Their existing typed actions cover line scrolling, semantic-prompt navigation, matching brackets, line endpoints, history endpoints, half pages, top-line positioning, and page-down without a new terminal action or UI flow. KeyEngine and mux effect tests cover every key and action, and shifted Alt input reaches M-R, M-<, and M->. At this historical closure 23 stock keys remained: six supported non-navigation defaults, ten prompt-backed defaults, and seven keys behind unsupported actions. The later keys.copy-mode-defaults closure reduced the current residual to 17."
+    },
+    {
+      "id": "keys.strict-validation",
+      "title": "Match tmux key-name validation",
+      "closed_on": "2026-08-29",
+      "evidence": [
+        "resource:crates/zz-mux/src/command.rs",
+        "scenario:compat/scenarios/strict-key-validation.txt",
+        "file:compat/scenarios/smoke/fixtures/strict-key-literal-controls.sh",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/key-tables.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "The tmux command parser now accepts the pin's key vocabulary while rejecting long Ctrl- and Alt- aliases, malformed function-key names, out-of-range User keys, and invalid hex forms before any binding or option state changes. F1 through F12 use the pin's exact grammar; User and hex numbers follow its signed, whitespace-tolerant, prefix-consuming, 32-bit wrapping rules. Caret followed by a literal control byte from 1 through 31 works across bind, list, filter, unbind, prefix, prefix2, and backspace. Printable ASCII hex keys retain identity distinct from their literal forms while rendering like the pin, including independent bind, list, filter, unbind, option readback, and send-prefix behavior. The shared native key parser remains permissive outside tmux commands. A 40-step differential and 161 fixture checks pass on both engines. Literal DEL, caret plus DEL, and hex 0x7f remain split into keys.literal-delete-identity."
     },
     {
       "id": "list-keys.remaining",

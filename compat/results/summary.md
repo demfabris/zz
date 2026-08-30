@@ -62,6 +62,7 @@
 | split-window-zoom | 11 | yes | 0 | yes | yes | yes |
 | splits-sized | 5 | yes | 0 | yes | yes | yes |
 | status-options | 79 | yes | 0 | yes | yes | yes |
+| strict-key-validation | 40 | yes | 0 | yes | yes | yes |
 | switch-client | 6 | yes | 0 | yes | yes | yes |
 | targets | 16 | yes | 0 | yes | yes | yes |
 | update-environment | 6 | yes | 0 | yes | yes | yes |

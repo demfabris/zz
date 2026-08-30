@@ -6853,9 +6853,9 @@ impl MuxEngine {
             let Some(prefix2) = self.keys.prefix2() else {
                 return Ok(Execution::default());
             };
-            prefix2.to_owned()
+            tmux_key_display(prefix2)
         } else {
-            self.keys.prefix().to_owned()
+            tmux_key_display(self.keys.prefix())
         };
         Ok(Execution::effect(MuxEffect::SendKeys {
             pane,
@@ -7439,14 +7439,17 @@ impl MuxEngine {
             .max()
             .unwrap_or_default();
         let format = options.value("-F").unwrap_or(DEFAULT_LIST_KEYS_FORMAT);
-        let prefix = options.value("-P").unwrap_or_else(|| {
-            let prefix = self.keys.prefix();
-            if prefix.eq_ignore_ascii_case("none") {
-                ""
-            } else {
-                prefix
-            }
-        });
+        let prefix = options.value("-P").map_or_else(
+            || {
+                let prefix = self.keys.prefix();
+                if prefix.eq_ignore_ascii_case("none") {
+                    String::new()
+                } else {
+                    tmux_key_display(prefix)
+                }
+            },
+            str::to_owned,
+        );
         let had_binding = !bindings.is_empty();
         let mut output = Vec::new();
         for listed in bindings {
@@ -7455,7 +7458,7 @@ impl MuxEngine {
                 table: listed.table,
                 key: &listed.key,
                 binding: listed.binding,
-                prefix,
+                prefix: &prefix,
                 notes_only,
                 has_repeat,
                 key_width,
@@ -7910,7 +7913,7 @@ impl MuxEngine {
             .scalar_table(target)
             .and_then(|options| options.get(name))
         {
-            return Some((value.clone(), false));
+            return Some((tmux_option_key_display(name, value), false));
         }
         if matches!(
             target,
@@ -7918,12 +7921,13 @@ impl MuxEngine {
                 | TmuxOptionTarget::GlobalSession
                 | TmuxOptionTarget::GlobalWindow
         ) {
-            return tmux_stored_scalar(name).map(|metadata| (metadata.default.to_owned(), false));
+            return tmux_stored_scalar(name)
+                .map(|metadata| (tmux_option_key_display(name, metadata.default), false));
         }
         include_inherited
             .then(|| self.scalar_option_effective(target, name))
             .flatten()
-            .map(|value| (value.to_owned(), true))
+            .map(|value| (tmux_option_key_display(name, value), true))
     }
 
     fn set_stored_scalar_option(
@@ -9443,7 +9447,12 @@ impl MuxEngine {
 
     fn global_tmux_option_value(&self, name: &str) -> Option<String> {
         if let Some(option) = ServerOption::from_name(name) {
-            return Some(self.server_options.value(option));
+            let value = self.server_options.value(option);
+            return Some(if option == ServerOption::Backspace {
+                tmux_key_display(&value)
+            } else {
+                value
+            });
         }
         if let Some(option) = SessionOption::from_name(name) {
             return Some(self.global_session_options.value(option));
@@ -9478,7 +9487,7 @@ impl MuxEngine {
             "mode-keys" => self.global_mode_keys.as_str().to_owned(),
             "mouse" => tmux_flag(self.global_mouse).to_owned(),
             "pane-base-index" => self.global_pane_base_index.to_string(),
-            "prefix" => self.mux_option_value(MuxOptionKey::Prefix),
+            "prefix" => tmux_key_display(self.keys.prefix()),
             "renumber-windows" => tmux_flag(self.global_renumber_windows).to_owned(),
             "repeat-time" => self.global_repeat_time_ms.to_string(),
             "set-clipboard" => self.set_clipboard.as_str().to_owned(),
@@ -12661,6 +12670,9 @@ fn parse_tmux_key_details(value: &str) -> Option<ParsedTmuxKey> {
 }
 
 fn tmux_key_display(canonical: &str) -> String {
+    if let Some(code) = tmux_hex_ascii_code(canonical) {
+        return char::from(code).to_string();
+    }
     canonical.strip_suffix(' ').map_or_else(
         || canonical.to_owned(),
         |modifiers| format!("{modifiers}Space"),
@@ -12698,6 +12710,10 @@ fn tmux_key_identity(canonical: &str) -> Option<TmuxKeyIdentity> {
 }
 
 fn tmux_key_base_identity(base: &str) -> Option<(u32, u8, u8)> {
+    if let Some(code) = tmux_hex_ascii_code(base) {
+        let packed = u32::from(code) | (1 << 24) | (2 << 29);
+        return Some((packed, 0, 0));
+    }
     let mut characters = base.chars();
     if let (Some(character), None) = (characters.next(), characters.next()) {
         if character.is_ascii() {
@@ -12849,6 +12865,9 @@ fn parse_tmux_key(value: &str) -> Option<String> {
         if code < 32 {
             return Some(TMUX_CONTROL_KEY_NAMES[code as usize].to_owned());
         }
+        if code <= 126 {
+            return Some(format!("0x{code:x}"));
+        }
         return char::from_u32(code).map(|character| character.to_string());
     }
 
@@ -12927,6 +12946,21 @@ const TMUX_CONTROL_KEY_NAMES: [&str; 32] = [
     "[VT]", "[FF]", "Enter", "[SO]", "[SI]", "[DLE]", "[DC1]", "[DC2]", "[DC3]", "[DC4]", "[NAK]",
     "[SYN]", "[ETB]", "[CAN]", "[EM]", "[SUB]", "Escape", "[FS]", "[GS]", "[RS]", "[US]",
 ];
+
+fn tmux_hex_ascii_code(value: &str) -> Option<u8> {
+    let code = parse_scanf_unsigned_prefix(value.strip_prefix("0x")?, 16)?;
+    u8::try_from(code)
+        .ok()
+        .filter(|code| (32..=126).contains(code))
+}
+
+fn tmux_option_key_display(name: &str, value: &str) -> String {
+    if name == "prefix2" {
+        tmux_key_display(value)
+    } else {
+        value.to_owned()
+    }
+}
 
 fn strip_prefix_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
     value
@@ -24527,6 +24561,12 @@ mod tests {
         assert_eq!(tmux_key_identity("é").unwrap().base, 0x4200_a9c3);
         assert_eq!(tmux_key_identity("界").unwrap().base, 0x638c_95e7);
         assert_eq!(tmux_key_identity("😀").unwrap().base, u32::from('😀'));
+        assert_eq!(tmux_key_identity("0x41").unwrap().base, 0x4100_0041);
+        assert!(
+            !tmux_key_identity("0x41")
+                .unwrap()
+                .masked_eq(&tmux_key_identity("A").unwrap())
+        );
 
         let space = tmux_key_identity("Space").unwrap();
         let mut equivalent = tmux_key_identity(" ").unwrap();
@@ -33706,10 +33746,10 @@ mod tests {
             ("kp/", "KP/"),
             ("^A", "C-a"),
             ("c-b", "C-b"),
-            ("0x41", "A"),
-            ("0x41junk", "A"),
+            ("0x41", "0x41"),
+            ("0x41junk", "0x41"),
             ("0x1g", "[SOH]"),
-            ("0x100000041", "A"),
+            ("0x100000041", "0x41"),
             ("User0", "User0"),
             ("User+1", "User1"),
             ("User 1", "User1"),
@@ -33786,16 +33826,16 @@ mod tests {
             ("User4294968296", "User1000"),
             ("User-4294967295", "User1"),
             ("User-18446744073709551615", "User1"),
-            ("0x041", "A"),
-            ("0x+41", "A"),
-            ("0x41junk", "A"),
+            ("0x041", "0x41"),
+            ("0x+41", "0x41"),
+            ("0x41junk", "0x41"),
             ("0x1g", "[SOH]"),
-            ("0x 41", "A"),
-            ("0x\t41", "A"),
-            ("0x0x41", "A"),
+            ("0x 41", "0x41"),
+            ("0x\t41", "0x41"),
+            ("0x0x41", "0x41"),
             ("0x0x", "[NUL]"),
             ("0x-ffffffff", "[SOH]"),
-            ("0x100000041", "A"),
+            ("0x100000041", "0x41"),
             ("0xffffffff00000000", "[NUL]"),
         ] {
             assert_eq!(parse_tmux_key(key).as_deref(), Some(canonical), "{key}");
@@ -33841,6 +33881,153 @@ mod tests {
         }
         assert_eq!(parse_tmux_key("\u{1}"), None);
         assert_eq!(parse_tmux_key("C-\u{1}"), None);
+    }
+
+    #[test]
+    fn hex_ascii_keys_keep_distinct_tmux_identity_and_render_like_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "hex-ascii"]),
+            )
+            .unwrap();
+        for (key, label) in [
+            ("A", "literal-a"),
+            ("0x41", "hex-a"),
+            ("Space", "literal-space"),
+            ("0x20", "hex-space"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "bind-key",
+                        &["-T", "hex-ascii", key, "display-message", label],
+                    ),
+                )
+                .unwrap();
+        }
+        assert!(engine.keys.get("hex-ascii", "A").is_some());
+        assert!(engine.keys.get("hex-ascii", "0x41").is_some());
+        assert!(engine.keys.get("hex-ascii", "Space").is_some());
+        assert!(engine.keys.get("hex-ascii", "0x20").is_some());
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "hex-ascii", "-F", "#{key_string}|#{key_command}",],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "Space|display-message literal-space\nA|display-message literal-a\n |display-message hex-space\nA|display-message hex-a"
+        );
+        for (filter, expected) in [
+            ("A", "A|display-message literal-a"),
+            ("0x41", "A|display-message hex-a"),
+            ("Space", "Space|display-message literal-space"),
+            ("0x20", " |display-message hex-space"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command(
+                            "list-keys",
+                            &[
+                                "-T",
+                                "hex-ascii",
+                                "-F",
+                                "#{key_string}|#{key_command}",
+                                filter,
+                            ],
+                        ),
+                    )
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("unbind-key", &["-T", "hex-ascii", "0x41"]),
+            )
+            .unwrap();
+        assert!(engine.keys.get("hex-ascii", "A").is_some());
+        assert!(engine.keys.get("hex-ascii", "0x41").is_none());
+        engine
+            .execute(
+                &mut context,
+                &command("unbind-key", &["-T", "hex-ascii", "Space"]),
+            )
+            .unwrap();
+        assert!(engine.keys.get("hex-ascii", "0x20").is_some());
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "prefix", "0x41"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "prefix2", "0x20"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", "0x41"]),
+            )
+            .unwrap();
+        assert_eq!(engine.keys.prefix(), "0x41");
+        assert_eq!(engine.keys.prefix2(), Some("0x20"));
+        assert_eq!(engine.server_options.backspace, "0x41");
+        assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix), "0x41");
+        assert_eq!(engine.mux_option_value(MuxOptionKey::Prefix2), "0x20");
+        for (args, expected) in [
+            (&["-gv", "prefix"] as &[&str], "A"),
+            (&["-gv", "prefix2"], " "),
+            (&["-sv", "backspace"], "A"),
+        ] {
+            assert_eq!(
+                engine
+                    .execute(&mut context, &command("show-options", args))
+                    .unwrap()
+                    .output,
+                expected
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "list-keys",
+                        &["-T", "hex-ascii", "-F", "#{key_prefix}", "A"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "A"
+        );
+        for (args, expected) in [(&[] as &[&str], "A"), (&["-2"], " ")] {
+            let sent = engine
+                .execute(&mut context, &command("send-prefix", args))
+                .unwrap();
+            assert!(matches!(
+                sent.effects.as_slice(),
+                [MuxEffect::SendKeys { keys, .. }]
+                    if matches!(keys.as_slice(), [KeyToken::Named(key)] if key == expected)
+            ));
+        }
     }
 
     #[test]
@@ -34099,8 +34286,8 @@ mod tests {
             ("^A", "C-a"),
             ("c-b", "C-b"),
             ("pageup", "PPage"),
-            ("0x41", "A"),
-            ("0x41junk", "A"),
+            ("0x41", "0x41"),
+            ("0x41junk", "0x41"),
             ("0x1g", "[SOH]"),
             ("User0", "User0"),
             ("User+1", "User1"),

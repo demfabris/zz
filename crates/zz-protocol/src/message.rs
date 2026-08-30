@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 85;
+pub const PROTOCOL_VERSION: u16 = 86;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -2199,6 +2199,7 @@ impl DetachReason {
 pub enum ControlSourceFileEvent {
     ReadError(String),
     Complete,
+    ConfigDiagnostic(String),
 }
 
 struct BoundedStartupConfigCause(String);
@@ -3653,9 +3654,18 @@ mod tests {
 
     #[test]
     fn control_source_file_holds_wire_tag_forty_eight_and_round_trips_events() {
-        for source_event in [
-            super::ControlSourceFileEvent::ReadError("Is a directory: source.conf".to_owned()),
-            super::ControlSourceFileEvent::Complete,
+        for (source_event, tag) in [
+            (
+                super::ControlSourceFileEvent::ReadError("Is a directory: source.conf".to_owned()),
+                0,
+            ),
+            (super::ControlSourceFileEvent::Complete, 1),
+            (
+                super::ControlSourceFileEvent::ConfigDiagnostic(
+                    "future localized diagnostic".to_owned(),
+                ),
+                2,
+            ),
         ] {
             let event = super::Event {
                 sequence: 8,
@@ -3665,6 +3675,7 @@ mod tests {
             };
             let bytes = postcard::to_stdvec(&event).expect("control source-file event encodes");
             assert_eq!(bytes[1], 48);
+            assert_eq!(bytes[2], tag);
             assert_eq!(
                 postcard::from_bytes::<super::Event>(&bytes)
                     .expect("control source-file event decodes"),
@@ -3820,7 +3831,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 85);
+        assert_eq!(super::PROTOCOL_VERSION, 86);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

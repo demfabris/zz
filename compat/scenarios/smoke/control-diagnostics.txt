@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/control-diagnostics.sh ~/control-diagnostics.sh
+out: set-environment -gu CONTROL_DIAGNOSTICS
+run-shell 'sh ~/control-diagnostics.sh'
+out: show-environment -g CONTROL_DIAGNOSTICS

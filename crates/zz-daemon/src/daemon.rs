@@ -8028,14 +8028,18 @@ impl Shared {
                     report.message()
                 };
                 if let Some(summary) = summary {
-                    self.publish_to_client(
-                        control_client.unwrap_or(source_client),
-                        EventPayload::ClientMessage {
-                            pane: context.pane,
-                            kind: ClientMessageKind::Warning,
-                            text: summary,
-                        },
-                    );
+                    if let Some(client) = control_client {
+                        self.publish_control_config_diagnostic(client, summary);
+                    } else {
+                        self.publish_to_client(
+                            source_client,
+                            EventPayload::ClientMessage {
+                                pane: context.pane,
+                                kind: ClientMessageKind::Warning,
+                                text: summary,
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -18403,22 +18407,23 @@ impl Shared {
         }
     }
 
+    fn publish_control_config_diagnostic(&self, client: ClientId, text: String) {
+        self.publish_to_client(
+            client,
+            EventPayload::ControlSourceFile {
+                event: ControlSourceFileEvent::ConfigDiagnostic(text),
+            },
+        );
+    }
+
     fn publish_sourced_config_warning(
         &self,
         client: Option<ClientId>,
-        pane: Option<PaneId>,
         command: &CommandInvocation,
         message: &str,
     ) {
         if let Some(client) = client {
-            self.publish_to_client(
-                client,
-                EventPayload::ClientMessage {
-                    pane,
-                    kind: ClientMessageKind::Warning,
-                    text: config_command_error(command, message),
-                },
-            );
+            self.publish_control_config_diagnostic(client, config_command_error(command, message));
         }
     }
 
@@ -18427,14 +18432,7 @@ impl Shared {
         warnings: Vec<DeferredControlConfigWarning>,
     ) {
         for warning in warnings {
-            self.publish_to_client(
-                warning.client,
-                EventPayload::ClientMessage {
-                    pane: warning.pane,
-                    kind: ClientMessageKind::Warning,
-                    text: warning.text,
-                },
-            );
+            self.publish_control_config_diagnostic(warning.client, warning.text);
         }
     }
 
@@ -19746,14 +19744,7 @@ impl Shared {
         self.route_config_replay_errors(client, kind, context.pane, &mut report);
         if kind == ClientKind::Control && report.control_guarded {
             if let Some(text) = report.skipped_summary() {
-                self.publish_to_client(
-                    client,
-                    EventPayload::ClientMessage {
-                        pane: context.pane,
-                        kind: ClientMessageKind::Warning,
-                        text,
-                    },
-                );
+                self.publish_control_config_diagnostic(client, text);
             }
         } else {
             let (kind, text) = match report.summary() {
@@ -20141,7 +20132,6 @@ impl Shared {
                 {
                     deferred_control_config_warnings.push(DeferredControlConfigWarning {
                         client,
-                        pane: context.pane,
                         text: config_command_error(&failure.original, &failure.message),
                     });
                 }
@@ -20479,7 +20469,6 @@ impl Shared {
                     report.note_invalid_command(&command, &name_error);
                     self.publish_sourced_config_warning(
                         options.control_target.map(|(client, _)| client),
-                        context.pane,
                         &command,
                         &name_error,
                     );
@@ -21352,7 +21341,6 @@ struct PreparedConfigFailure {
 
 struct DeferredControlConfigWarning {
     client: ClientId,
-    pane: Option<PaneId>,
     text: String,
 }
 
@@ -42937,20 +42925,18 @@ mod tests {
                 }) => Some("guard".to_owned()),
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ConfigDiagnostic(text),
                         },
                     ..
-                }) => Some(format!("warning:{text}")),
+                }) => Some(format!("diagnostic:{text}")),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(
             events,
             [format!(
-                "warning:{}:1: command set-environment: too few arguments (need at least 1)",
+                "diagnostic:{}:1: command set-environment: too few arguments (need at least 1)",
                 source.display()
             )]
         );
@@ -43024,7 +43010,7 @@ mod tests {
             [
                 "guard:1:false:false:TOP_GOOD".to_owned(),
                 "guard:1:false:false:TOP_LATER".to_owned(),
-                format!("warning:{}:2: unknown command: wibble", bad.display()),
+                format!("diagnostic:{}:2: unknown command: wibble", bad.display()),
                 "complete".to_owned(),
             ]
         );
@@ -43100,7 +43086,7 @@ mod tests {
                 "guard:1:false:false:".to_owned(),
                 "guard:1:false:false:NESTED_GOOD".to_owned(),
                 "guard:1:false:false:NESTED_LATER".to_owned(),
-                format!("warning:{}:1: unknown command: wibble", bad.display()),
+                format!("diagnostic:{}:1: unknown command: wibble", bad.display()),
                 "complete".to_owned(),
                 "guard:1:false:false:ROOT_AFTER".to_owned(),
                 "complete".to_owned(),
@@ -43175,20 +43161,18 @@ mod tests {
                 }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ConfigDiagnostic(text),
                         },
                     ..
-                }) => Some(format!("warning:{text}")),
+                }) => Some(format!("diagnostic:{text}")),
                 _ => None,
             })
             .collect::<Vec<_>>();
         let source = source.display();
         assert_eq!(
             events,
-            [format!("warning:{source}:1: unknown command: source")]
+            [format!("diagnostic:{source}:1: unknown command: source")]
         );
         assert!(read_global_option(&shared, "@after-name-errors").is_empty());
     }
@@ -43262,13 +43246,11 @@ mod tests {
                 }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ConfigDiagnostic(text),
                         },
                     ..
-                }) => Some(format!("warning:{text}")),
+                }) => Some(format!("diagnostic:{text}")),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -43277,7 +43259,7 @@ mod tests {
             events,
             [
                 "guard:false:false:".to_owned(),
-                format!("warning:{failing}:1: unknown command: badname"),
+                format!("diagnostic:{failing}:1: unknown command: badname"),
             ]
         );
         assert!(read_global_option(&shared, "@after-frozen-control-alias").is_empty());
@@ -43346,20 +43328,18 @@ mod tests {
                 }) => Some("guard".to_owned()),
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ConfigDiagnostic(text),
                         },
                     ..
-                }) => Some(format!("warning:{text}")),
+                }) => Some(format!("diagnostic:{text}")),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(
             events,
             [format!(
-                "warning:{}:1: unknown command: wibble",
+                "diagnostic:{}:1: unknown command: wibble",
                 source.display()
             )]
         );
@@ -44453,7 +44433,10 @@ mod tests {
                 vec![
                     "guard:false:false:".to_owned(),
                     "guard:false:false:".to_owned(),
-                    format!("warning:{}:1: unknown command: wibble", unknown.display()),
+                    format!(
+                        "diagnostic:{}:1: unknown command: wibble",
+                        unknown.display()
+                    ),
                     "guard:false:false:AFTER_UNKNOWN".to_owned(),
                 ],
             ),
@@ -44502,13 +44485,11 @@ mod tests {
                     }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                     ProtocolMessage::Event(Event {
                         payload:
-                            EventPayload::ClientMessage {
-                                kind: ClientMessageKind::Warning,
-                                text,
-                                ..
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::ConfigDiagnostic(text),
                             },
                         ..
-                    }) => Some(format!("warning:{text}")),
+                    }) => Some(format!("diagnostic:{text}")),
                     ProtocolMessage::Event(Event {
                         payload:
                             EventPayload::ClientMessage {
@@ -44832,13 +44813,11 @@ mod tests {
                 }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ConfigDiagnostic(text),
                         },
                     ..
-                }) => Some(format!("warning:{text}")),
+                }) => Some(format!("diagnostic:{text}")),
                 ProtocolMessage::Event(
                     Event {
                         payload:
@@ -44871,7 +44850,10 @@ mod tests {
                 "guard:0:false:false:".to_owned(),
                 "guard:0:false:false:HOOK_LEAF".to_owned(),
                 "guard:0:false:false:".to_owned(),
-                format!("warning:{}:1: unknown command: wibble", unknown.display()),
+                format!(
+                    "diagnostic:{}:1: unknown command: wibble",
+                    unknown.display()
+                ),
                 "guard:0:false:false:".to_owned(),
                 format!("error:{unreadable_error}"),
                 "guard:0:true:true:can't find session: hook-source-runtime".to_owned(),
@@ -45697,13 +45679,11 @@ mod tests {
                 }) => Some(("guard", output, error, sticky_failure)),
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ConfigDiagnostic(text),
                         },
                     ..
-                }) => Some(("warning", text, false, false)),
+                }) => Some(("diagnostic", text, false, false)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -45711,7 +45691,7 @@ mod tests {
             events,
             [
                 ("guard", String::new(), false, false),
-                ("warning", invalid, false, false),
+                ("diagnostic", invalid, false, false),
             ]
         );
     }
@@ -46665,7 +46645,7 @@ mod tests {
     }
 
     #[test]
-    fn config_diagnostics_pin_the_control_mode_sniffer_wording() {
+    fn config_diagnostic_reports_retain_their_display_text() {
         let mut report = ConfigLoadReport::default();
         report.note_invalid_at("/tmp/mux.conf", 1, "unknown command: wibble");
         assert_eq!(
@@ -82584,13 +82564,11 @@ bind - split-window -v -c "#{pane_current_path}"
                 }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
                     payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ConfigDiagnostic(text),
                         },
                     ..
-                }) => Some(format!("warning:{text}")),
+                }) => Some(format!("diagnostic:{text}")),
                 ProtocolMessage::Event(Event {
                     payload:
                         EventPayload::ControlSourceFile {

@@ -14,8 +14,8 @@ fn payload(frame: &[u8]) -> &[u8] {
 }
 
 #[test]
-fn protocol_version_on_this_commit_is_eighty_five() {
-    assert_eq!(PROTOCOL_VERSION, 85);
+fn protocol_version_on_this_commit_is_eighty_six() {
+    assert_eq!(PROTOCOL_VERSION, 86);
 }
 
 #[test]
@@ -153,9 +153,16 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
             event
         );
     }
-    for source_event in [
-        ControlSourceFileEvent::ReadError("Is a directory: source.conf".to_owned()),
-        ControlSourceFileEvent::Complete,
+    for (source_event, tag) in [
+        (
+            ControlSourceFileEvent::ReadError("Is a directory: source.conf".to_owned()),
+            0,
+        ),
+        (ControlSourceFileEvent::Complete, 1),
+        (
+            ControlSourceFileEvent::ConfigDiagnostic("future localized diagnostic".to_owned()),
+            2,
+        ),
     ] {
         let event = Event {
             sequence: 0,
@@ -165,6 +172,7 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         };
         let bytes = postcard::to_stdvec(&event).expect("encode control source-file event");
         assert_eq!(bytes[1], 48);
+        assert_eq!(bytes[2], tag);
         assert_eq!(
             postcard::from_bytes::<Event>(&bytes).expect("decode control source-file event"),
             event
@@ -263,7 +271,7 @@ fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     assert_eq!(
         frame,
         [
-            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0x00, 0x00, 0x55, 0x00, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x56, 0x00, 0x00, 0x56, 0x00, 0x00, 0x00, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x00, 0x07,
         ]
     );

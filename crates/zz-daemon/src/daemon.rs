@@ -8617,7 +8617,12 @@ impl Shared {
                     ))
                 }
             });
-            let cwd = job_working_directory(&inner, &command_context, parsed.cwd.as_deref());
+            let cwd = shell_job_working_directory(
+                &inner,
+                client,
+                &command_context,
+                parsed.cwd.as_deref(),
+            );
             let tmux = tmux_environment(&self.socket_path, command_context.session);
             let environment_timing = if parsed.positive_delay
                 && matches!(&command, Some(InsertedCommandSource::Shell(_)))
@@ -8883,7 +8888,7 @@ impl Shared {
             .with_command_item(command_name);
             let condition =
                 expand_format_values(&parsed.positional[0], &format_context, &mut hooks);
-            let cwd = job_working_directory(&inner, &command_context, None);
+            let cwd = shell_job_working_directory(&inner, client, &command_context, None);
             let tmux = tmux_environment(&self.socket_path, command_context.session);
             let environment = inner.engine.job_environment(command_context.session);
             let default_terminal = inner.engine.default_terminal_for_spawn().to_owned();
@@ -27180,6 +27185,48 @@ fn job_working_directory(
         .filter(|path| path.is_dir())
         .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
         .unwrap_or_else(fallback_job_working_directory)
+}
+
+fn shell_job_working_directory(
+    inner: &ServerState,
+    invoking_client: ClientId,
+    context: &ExecutionContext,
+    requested: Option<&str>,
+) -> PathBuf {
+    if let Some(requested) = requested {
+        return PathBuf::from(requested);
+    }
+    let client = (!context.has_no_client())
+        .then(|| format_provenance_client(context, invoking_client))
+        .flatten();
+    let attached_session = client.and_then(|client| client_attached_session(inner, client));
+    inner
+        .startup_source_client_working_directory
+        .clone()
+        .or_else(|| {
+            attached_session
+                .is_none()
+                .then(|| {
+                    client.and_then(|client| inner.client_working_directories.get(&client).cloned())
+                })
+                .flatten()
+        })
+        .or_else(|| {
+            context
+                .session
+                .and_then(|session| inner.engine.state.session_working_directory(session))
+                .map(Path::to_owned)
+        })
+        .or_else(|| {
+            attached_session
+                .and_then(|session| inner.engine.state.session_working_directory(session))
+                .map(Path::to_owned)
+        })
+        .unwrap_or_else(default_job_working_directory)
+}
+
+fn default_job_working_directory() -> PathBuf {
+    home_directory().unwrap_or_else(|| PathBuf::from("/"))
 }
 
 fn fallback_job_working_directory() -> PathBuf {
@@ -51742,6 +51789,148 @@ mod tests {
             .expect("environment-backed if-shell body");
 
         assert_eq!(output.output, "hello");
+    }
+
+    #[test]
+    fn shell_job_working_directory_follows_tmux_precedence() {
+        let mut inner = ServerState::default();
+        let (target, target_window, target_pane) = inner
+            .engine
+            .state
+            .create_session("job-target")
+            .expect("target session");
+        let (attached, _, _) = inner
+            .engine
+            .state
+            .create_session("job-attached")
+            .expect("attached session");
+        let target_cwd = PathBuf::from("/job-target-cwd");
+        let attached_cwd = PathBuf::from("/job-attached-cwd");
+        inner
+            .engine
+            .state
+            .set_session_working_directory(target, target_cwd.clone())
+            .expect("target working directory");
+        inner
+            .engine
+            .state
+            .set_session_working_directory(attached, attached_cwd.clone())
+            .expect("attached working directory");
+
+        let invoking_client = ClientId(11);
+        let attached_client = ClientId(12);
+        let invoking_cwd = PathBuf::from("/job-invoking-cwd");
+        inner
+            .client_working_directories
+            .insert(invoking_client, invoking_cwd.clone());
+        inner
+            .client_working_directories
+            .insert(attached_client, PathBuf::from("/job-attached-client-decoy"));
+        inner
+            .attached
+            .entry(attached)
+            .or_default()
+            .insert(attached_client);
+
+        let target_context =
+            ExecutionContext::new(Some(target), Some(target_window), Some(target_pane));
+        assert_eq!(
+            shell_job_working_directory(
+                &inner,
+                invoking_client,
+                &target_context,
+                Some("/job-explicit-cwd")
+            ),
+            PathBuf::from("/job-explicit-cwd")
+        );
+
+        inner.startup_source_client_working_directory = Some(PathBuf::from("/job-startup-cwd"));
+        assert_eq!(
+            shell_job_working_directory(&inner, invoking_client, &target_context, None),
+            PathBuf::from("/job-startup-cwd")
+        );
+        inner.startup_source_client_working_directory = None;
+
+        assert_eq!(
+            shell_job_working_directory(&inner, invoking_client, &target_context, None),
+            invoking_cwd
+        );
+        assert_eq!(
+            shell_job_working_directory(&inner, attached_client, &target_context, None),
+            target_cwd
+        );
+
+        let missing_target = ExecutionContext::default();
+        assert_eq!(
+            shell_job_working_directory(&inner, attached_client, &missing_target, None),
+            attached_cwd
+        );
+
+        let mut clientless_target = target_context.clone();
+        clientless_target.set_no_client();
+        assert_eq!(
+            shell_job_working_directory(&inner, invoking_client, &clientless_target, None),
+            PathBuf::from("/job-target-cwd")
+        );
+        let mut clientless_missing = ExecutionContext::default();
+        clientless_missing.set_no_client();
+        assert_eq!(
+            shell_job_working_directory(&inner, invoking_client, &clientless_missing, None),
+            default_job_working_directory()
+        );
+
+        let mut replay = target_context;
+        replay.set_replay_client(Some(invoking_client));
+        assert_eq!(
+            shell_job_working_directory(&inner, ClientId(u64::MAX), &replay, None),
+            PathBuf::from("/job-invoking-cwd")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn positive_delay_shell_job_freezes_selected_client_working_directory() {
+        let shared = Arc::new(Shared::new(1));
+        let directory = tempfile::tempdir().expect("working directory fixture");
+        let scheduled_cwd = directory.path().join("scheduled");
+        let replacement_cwd = directory.path().join("replacement");
+        fs::create_dir(&scheduled_cwd).expect("scheduled cwd");
+        fs::create_dir(&replacement_cwd).expect("replacement cwd");
+        let output = directory.path().join("output");
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared
+            .inner
+            .lock()
+            .client_working_directories
+            .insert(client, scheduled_cwd.clone());
+        let command = format!("pwd -P > {}", shell_quote(&output));
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("run-shell", ["-bd", "0.2", &command]),
+            )
+            .expect("schedule shell job");
+        shared
+            .inner
+            .lock()
+            .client_working_directories
+            .insert(client, replacement_cwd);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !output.is_file() {
+            assert!(Instant::now() < deadline, "delayed cwd job did not finish");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            fs::read_to_string(output).expect("delayed cwd output"),
+            format!(
+                "{}\n",
+                fs::canonicalize(scheduled_cwd).unwrap().to_string_lossy()
+            )
+        );
     }
 
     #[cfg(unix)]

@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
     io::Read as _,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Stdio},
     sync::{Arc, OnceLock},
     thread,
@@ -24,18 +24,19 @@ use zz_protocol::{
 };
 use zz_terminal::{CellWidth, TerminalSession, TerminalViewport};
 
-use crate::{configure_shell_job_environment, shell_process};
+use crate::{configure_shell_job_environment, paths::home_directory, shell_process};
 
 const SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 const SHELL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_SHELL_OUTPUT_BYTES: u64 = 4 * 1024;
+type ShellCacheKey = (ClientId, String);
 pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
 pub(crate) const SHOW_MESSAGES_CONTEXT_FORMATS: [&str; 3] =
     ["message_number", "message_text", "message_time"];
 
 #[derive(Default)]
 pub(crate) struct StatusRenderer {
-    shell_cache: BTreeMap<String, String>,
+    shell_cache: BTreeMap<ShellCacheKey, String>,
     published: BTreeMap<ClientId, StatusLine>,
     tmux_shim: Option<PathBuf>,
     zz_executable: Option<PathBuf>,
@@ -159,6 +160,8 @@ impl StatusRenderer {
 
     pub(crate) fn forget(&mut self, client: ClientId) {
         self.published.remove(&client);
+        self.shell_cache
+            .retain(|(cached_client, _), _| *cached_client != client);
     }
 
     pub(crate) fn set_tmux_shim(&mut self, directory: PathBuf, executable: PathBuf) {
@@ -245,8 +248,8 @@ pub(crate) fn host_names() -> &'static (String, String) {
 }
 
 fn render(
-    cache: &mut BTreeMap<String, String>,
-    touched: &mut BTreeSet<String>,
+    cache: &mut BTreeMap<ShellCacheKey, String>,
+    touched: &mut BTreeSet<ShellCacheKey>,
     request: &StatusRequest,
     refresh: bool,
     tmux_shim: Option<&std::path::Path>,
@@ -258,6 +261,7 @@ fn render(
         .as_ref()
         .map_or_else(String::new, |format| {
             let mut hooks = DaemonFormatHooks::status(
+                request.client,
                 &request.facts,
                 &request.context,
                 Some(&request.option_snapshot),
@@ -291,6 +295,7 @@ fn render(
     }
     let (left, right) = {
         let mut hooks = DaemonFormatHooks::status(
+            request.client,
             &request.facts,
             &request.context,
             Some(&request.option_snapshot),
@@ -310,6 +315,7 @@ fn render(
         )
     };
     let mut hooks = DaemonFormatHooks::status(
+        request.client,
         &request.facts,
         &request.context,
         Some(&request.option_snapshot),
@@ -523,14 +529,15 @@ fn status_style_end(value: &str, start: usize) -> Option<usize> {
 }
 
 pub(crate) struct DaemonFormatHooks<'a> {
+    status_client: Option<ClientId>,
     facts: &'a FormatHookFacts,
     option_engine: Option<&'a MuxEngine>,
     status_context: Option<&'a StatusContext>,
     variables: Option<&'a BTreeMap<String, String>>,
     command_item: Option<&'a str>,
     option_snapshot: Option<&'a StatusRowVariables>,
-    cache: Option<&'a mut BTreeMap<String, String>>,
-    touched: Option<&'a mut BTreeSet<String>>,
+    cache: Option<&'a mut BTreeMap<ShellCacheKey, String>>,
+    touched: Option<&'a mut BTreeSet<ShellCacheKey>>,
     refresh: bool,
     now: chrono::DateTime<Local>,
     environment: Option<&'a [(String, Option<String>)]>,
@@ -550,6 +557,7 @@ impl<'a> DaemonFormatHooks<'a> {
         variables: Option<&'a BTreeMap<String, String>>,
     ) -> Self {
         Self {
+            status_client: None,
             facts,
             option_engine: None,
             status_context: None,
@@ -586,11 +594,12 @@ impl<'a> DaemonFormatHooks<'a> {
     }
 
     fn status(
+        client: ClientId,
         facts: &'a FormatHookFacts,
         context: &'a StatusContext,
         option_snapshot: Option<&'a StatusRowVariables>,
-        cache: &'a mut BTreeMap<String, String>,
-        touched: &'a mut BTreeSet<String>,
+        cache: &'a mut BTreeMap<ShellCacheKey, String>,
+        touched: &'a mut BTreeSet<ShellCacheKey>,
         refresh: bool,
         now: chrono::DateTime<Local>,
         environment: &'a [(String, Option<String>)],
@@ -600,6 +609,7 @@ impl<'a> DaemonFormatHooks<'a> {
         zz_executable: Option<&'a std::path::Path>,
     ) -> Self {
         Self {
+            status_client: Some(client),
             facts,
             option_engine: None,
             status_context: Some(context),
@@ -673,9 +683,13 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         else {
             return String::new();
         };
-        touched.insert(command.to_owned());
+        let Some(client) = self.status_client else {
+            return String::new();
+        };
+        let key = (client, command.to_owned());
+        touched.insert(key.clone());
         if !self.refresh
-            && let Some(cached) = cache.get(command)
+            && let Some(cached) = cache.get(&key)
         {
             return cached.clone();
         }
@@ -688,7 +702,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             self.tmux_shim,
             self.zz_executable,
         );
-        cache.insert(command.to_owned(), output.clone());
+        cache.insert(key, output.clone());
         output
     }
 
@@ -982,11 +996,13 @@ fn run_shell(
         return String::new();
     };
     let mut process = shell_process(command);
-    let requested_cwd = std::path::Path::new(&context.pane_current_path);
+    let requested_cwd = Path::new(&context.session_path);
     let cwd = if requested_cwd.is_dir() {
         requested_cwd.to_path_buf()
     } else {
-        std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
+        home_directory()
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
     };
     let tmux = format!("{},{},-1", context.socket_path, std::process::id());
     configure_shell_job_environment(
@@ -1824,11 +1840,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn status_command_cache_is_scoped_to_the_attached_client() {
+        let directory = tempfile::tempdir().expect("working directory fixture");
+        let first_cwd = directory.path().join("first");
+        let second_cwd = directory.path().join("second");
+        std::fs::create_dir(&first_cwd).expect("first cwd");
+        std::fs::create_dir(&second_cwd).expect("second cwd");
+        let first_cwd = std::fs::canonicalize(first_cwd).expect("first cwd resolves");
+        let second_cwd = std::fs::canonicalize(second_cwd).expect("second cwd resolves");
+        let mut first = request(1, "#(pwd -P)", "");
+        first.context.session_path = first_cwd.to_string_lossy().into_owned();
+        let mut second = request(2, "#(pwd -P)", "");
+        second.context.session_path = second_cwd.to_string_lossy().into_owned();
+
+        let statuses = StatusRenderer::default().render_changed(&[first, second], false);
+
+        assert_eq!(statuses.len(), 2);
+        assert_eq!(statuses[0].1.left, first_cwd.to_string_lossy());
+        assert_eq!(statuses[1].1.left, second_cwd.to_string_lossy());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn status_commands_receive_tmux_and_working_directory_without_tmux_pane() {
         let directory = tempfile::Builder::new()
             .prefix("zz-status-environment-")
             .tempdir_in(".")
             .expect("the working directory is created");
+        let pane_directory = tempfile::Builder::new()
+            .prefix("zz-status-pane-decoy-")
+            .tempdir_in(".")
+            .expect("the pane working directory is created");
         let socket = "/tmp/zz-status-environment.sock";
         let mut status_request = request(
             1,
@@ -1836,10 +1878,16 @@ mod tests {
             "",
         );
         status_request.context.socket_path = socket.to_owned();
-        status_request.context.pane_current_path = directory
+        status_request.context.session_path = directory
             .path()
             .canonicalize()
             .expect("the working directory resolves")
+            .to_string_lossy()
+            .into_owned();
+        status_request.context.pane_current_path = pane_directory
+            .path()
+            .canonicalize()
+            .expect("the pane working directory resolves")
             .to_string_lossy()
             .into_owned();
 
@@ -1850,7 +1898,7 @@ mod tests {
             format!(
                 "{socket},{},-1|{socket}|{}|unset",
                 std::process::id(),
-                status_request.context.pane_current_path
+                status_request.context.session_path
             )
         );
     }
@@ -1996,7 +2044,11 @@ mod tests {
         assert_eq!(renderer.shell_cache.len(), 2);
         renderer.render_changed(&[request(1, "#(echo kept)", "")], true);
         assert_eq!(
-            renderer.shell_cache.keys().collect::<Vec<_>>(),
+            renderer
+                .shell_cache
+                .keys()
+                .map(|(_, command)| command.as_str())
+                .collect::<Vec<_>>(),
             ["echo kept"]
         );
     }

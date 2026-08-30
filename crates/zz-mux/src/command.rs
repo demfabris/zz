@@ -12723,13 +12723,7 @@ fn tmux_key_base_identity(base: &str) -> Option<(u32, u8, u8)> {
     if base == "Any" {
         return Some((4, 2, 0));
     }
-    const CONTROL_KEYS: [&str; 32] = [
-        "[NUL]", "[SOH]", "[STX]", "[ETX]", "[EOT]", "[ENQ]", "[ASC]", "[BEL]", "[BS]", "Tab",
-        "[LF]", "[VT]", "[FF]", "Enter", "[SO]", "[SI]", "[DLE]", "[DC1]", "[DC2]", "[DC3]",
-        "[DC4]", "[NAK]", "[SYN]", "[ETB]", "[CAN]", "[EM]", "[SUB]", "Escape", "[FS]", "[GS]",
-        "[RS]", "[US]",
-    ];
-    if let Some(index) = CONTROL_KEYS.iter().position(|key| *key == base) {
+    if let Some(index) = TMUX_CONTROL_KEY_NAMES.iter().position(|key| *key == base) {
         return Some((u32::try_from(index).ok()?, 0, 0));
     }
     if base == "Space" {
@@ -12843,16 +12837,17 @@ fn parse_tmux_key(value: &str) -> Option<String> {
     if value.eq_ignore_ascii_case("any") {
         return Some("Any".to_owned());
     }
+    let bytes = value.as_bytes();
+    if bytes.len() == 2 && bytes[0] == b'^' && (1..32).contains(&bytes[1]) {
+        return Some(format!(
+            "C-{}",
+            TMUX_CONTROL_KEY_NAMES[usize::from(bytes[1])]
+        ));
+    }
     if let Some(hex) = value.strip_prefix("0x") {
         let code = parse_scanf_unsigned_prefix(hex, 16)?;
         if code < 32 {
-            const CONTROL_KEYS: [&str; 32] = [
-                "[NUL]", "[SOH]", "[STX]", "[ETX]", "[EOT]", "[ENQ]", "[ASC]", "[BEL]", "[BS]",
-                "Tab", "[LF]", "[VT]", "[FF]", "Enter", "[SO]", "[SI]", "[DLE]", "[DC1]", "[DC2]",
-                "[DC3]", "[DC4]", "[NAK]", "[SYN]", "[ETB]", "[CAN]", "[EM]", "[SUB]", "Escape",
-                "[FS]", "[GS]", "[RS]", "[US]",
-            ];
-            return Some(CONTROL_KEYS[code as usize].to_owned());
+            return Some(TMUX_CONTROL_KEY_NAMES[code as usize].to_owned());
         }
         return char::from_u32(code).map(|character| character.to_string());
     }
@@ -12926,6 +12921,12 @@ fn parse_tmux_key(value: &str) -> Option<String> {
     parsed.push_str(&canonical);
     Some(parsed)
 }
+
+const TMUX_CONTROL_KEY_NAMES: [&str; 32] = [
+    "[NUL]", "[SOH]", "[STX]", "[ETX]", "[EOT]", "[ENQ]", "[ASC]", "[BEL]", "[BS]", "Tab", "[LF]",
+    "[VT]", "[FF]", "Enter", "[SO]", "[SI]", "[DLE]", "[DC1]", "[DC2]", "[DC3]", "[DC4]", "[NAK]",
+    "[SYN]", "[ETB]", "[CAN]", "[EM]", "[SUB]", "Escape", "[FS]", "[GS]", "[RS]", "[US]",
+];
 
 fn strip_prefix_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
     value
@@ -33825,6 +33826,156 @@ mod tests {
         ] {
             assert_eq!(parse_tmux_key(key), None, "{key}");
         }
+    }
+
+    #[test]
+    fn tmux_key_parser_accepts_literal_control_bytes_after_caret() {
+        for code in 1_u8..=31 {
+            let key = format!("^{}", char::from(code));
+            let expected = format!("C-{}", TMUX_CONTROL_KEY_NAMES[usize::from(code)]);
+            assert_eq!(parse_tmux_key(&key).as_deref(), Some(expected.as_str()));
+            assert_eq!(
+                parse_tmux_key_details(&key).map(|parsed| parsed.rendered),
+                Some(expected)
+            );
+        }
+        assert_eq!(parse_tmux_key("\u{1}"), None);
+        assert_eq!(parse_tmux_key("C-\u{1}"), None);
+    }
+
+    #[test]
+    fn literal_control_caret_keys_work_across_key_callers_without_state_drift() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &[
+                        "-T",
+                        "literal-control",
+                        "C-a",
+                        "display-message",
+                        "sentinel",
+                    ],
+                ),
+            )
+            .unwrap();
+        let tables = engine.keys.snapshot();
+        let prefix = engine.keys.prefix().to_owned();
+        let prefix2 = engine.keys.prefix2().map(str::to_owned);
+        let backspace = engine
+            .execute(
+                &mut context,
+                &command("show-options", &["-sv", "backspace"]),
+            )
+            .unwrap()
+            .output;
+        let soh = format!("^{}", char::from(1));
+        let tab = format!("^{}", char::from(9));
+        let enter = format!("^{}", char::from(13));
+        let escape = format!("^{}", char::from(27));
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "bind-key",
+                    &[
+                        "-T",
+                        "literal-control",
+                        soh.as_str(),
+                        "display-message",
+                        "literal",
+                    ],
+                ),
+            )
+            .unwrap();
+        let listed = engine
+            .execute(
+                &mut context,
+                &command(
+                    "list-keys",
+                    &[
+                        "-1",
+                        "-T",
+                        "literal-control",
+                        "-F",
+                        "#{key_string}",
+                        soh.as_str(),
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            listed.effects.as_slice(),
+            [MuxEffect::PrintOrMessage { text, .. }] if text == "C-[SOH]"
+        ));
+        engine
+            .execute(
+                &mut context,
+                &command("unbind-key", &["-T", "literal-control", soh.as_str()]),
+            )
+            .unwrap();
+        assert_eq!(engine.keys.snapshot(), tables);
+
+        for (name, key) in [("prefix", tab.as_str()), ("prefix2", enter.as_str())] {
+            engine
+                .execute(&mut context, &command("set-option", &["-g", name, key]))
+                .unwrap();
+        }
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", escape.as_str()]),
+            )
+            .unwrap();
+        assert_eq!(engine.keys.prefix(), "C-Tab");
+        assert_eq!(engine.keys.prefix2(), Some("C-Enter"));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "backspace"]),
+                )
+                .unwrap()
+                .output,
+            "C-Escape"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-g", "prefix", prefix.as_str()]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-g", "prefix2", prefix2.as_deref().unwrap_or("None")],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-s", "backspace", backspace.as_str()]),
+            )
+            .unwrap();
+        assert_eq!(engine.keys.snapshot(), tables);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-sv", "backspace"]),
+                )
+                .unwrap()
+                .output,
+            backspace
+        );
     }
 
     #[test]

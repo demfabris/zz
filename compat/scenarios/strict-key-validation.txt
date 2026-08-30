@@ -1,3 +1,5 @@
+shim:
+stage: smoke/fixtures/strict-key-literal-controls.sh ~/strict-key-literal-controls.sh
 bind-key -T zzstrict F1 display-message baseline
 bind-key -T zzstrict F01 display-message forbidden-leading-zero
 bind-key -T zzstrict F0012 display-message forbidden-leading-zeros
@@ -36,5 +38,5 @@ out: show-options -gv prefix
 set-option -g prefix 'User+1junk'
 out: show-options -gv prefix
 set-option -g prefix 0x41junk
+run-shell 'sh ~/strict-key-literal-controls.sh'
 out: show-options -gv prefix
-set-option -g prefix C-b

@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "updated_on": "2026-08-29",
+  "updated_on": "2026-08-30",
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "gaps": [
     {
@@ -1367,36 +1367,6 @@
       "reason": "Pinned tmux queues absent-delay and -d 0 callbacks onto the next server turn, so a later command in the same group can mutate the environment before a background child starts. zz launches an OS worker from the command handler and cannot reproduce that ordering by racing a zero-duration sleep."
     },
     {
-      "id": "jobs.shell-job-cwd",
-      "title": "Select pinned working directories for shell jobs",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "remote",
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:command-shell-job-cwd",
-        "semantic:status-shell-job-cwd"
-      ],
-      "evidence": [
-        "resource:knowledge/references/tmux-upstream.md",
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-daemon/src/status.rs"
-      ],
-      "acceptance": [
-        "Command, Control, Interactive, clientless, startup, explicit-target, and missing-target run-shell and if-shell cwd selection matches the pinned client and session precedence, with positive-delay paths frozen before the timer fires.",
-        "Status shell formats use the attached session cwd, and explicit -c keeps its literal path with launch-time existence fallback."
-      ],
-      "depends_on": [],
-      "reason": "Pinned command jobs prefer the startup client, invoking client, target session, attached session, HOME, then root; status jobs use the attached session cwd. zz command jobs currently prefer the selected pane process cwd and status prefers pane_current_path. The required client and retained-session facts already exist."
-    },
-    {
       "id": "keys.copy-mode-binding-fidelity",
       "title": "Match shared copy-mode binding commands",
       "decision": "adopt",
@@ -1680,7 +1650,7 @@
       "title": "Separate literal and hex DEL key identities",
       "decision": "adopt",
       "status": "open",
-      "priority": "later",
+      "priority": "next",
       "ease": "medium",
       "impact": [
         "scripts",
@@ -3836,6 +3806,22 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Shell-form run-shell with an explicit numeric delay greater than zero now retains its command, target identity and numeric session id, expanded text and numeric arguments, and cwd string at scheduling. When the timer fires, it samples current global state, the live original-session overlay or the retained original overlay after destruction, default-terminal, and the startup TERM gate. Same-name session recreation cannot replace the retained original overlay, while a target missing at scheduling stays global-only with a TMUX suffix of -1 even if a matching session appears before launch. Cwd existence fallback runs at child launch against the retained cwd string. Deterministic foreground daemon coverage waits for active_shell_jobs before mutating state. The three-step differential fixture proves the background live, destroyed and recreated, missing and later created, and startup-crossing cases, including frozen formats, numeric arguments, target identity, cwd, launch environment, and default terminal. It reports twelve assertions per engine with zero differences. run-shell -C, if-shell, absent -d, -d 0, immediate background ordering, cwd producer selection, copy-pipe, and popup jobs retain separate owners. No wire protocol or snapshot field changed."
+    },
+    {
+      "id": "jobs.shell-job-cwd",
+      "title": "Select pinned working directories for shell jobs",
+      "closed_on": "2026-08-30",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-daemon/src/status.rs",
+        "scenario:compat/scenarios/smoke/jobs-shell-job-cwd.txt",
+        "file:compat/scenarios/smoke/fixtures/jobs-shell-job-cwd.sh",
+        "file:compat/attached-client.sh",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/status-line.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Shell-form run-shell and if-shell now select cwd in pinned order: literal -c, startup client, unattached provenance client, explicit target session, attached invoking-client session, HOME, then root. Positive-delay jobs freeze that selection before the timer and retain launch-time existence fallback. Status #() uses the attached session path instead of pane_current_path, and its command cache is scoped per client. Focused daemon and status tests pass. The three-step differential completes eight checks per engine. The attached fixture keeps the pane in a distinct command cwd, proves status cwd, and covers 24 real Interactive and Control run-shell and if-shell cases across valid, missing, and omitted targets on zz and pinned tmux. No protocol or snapshot field changed."
     },
     {
       "id": "keys.client-focus-events",

@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/jobs-shell-job-cwd.sh ~/jobs-shell-job-cwd.sh
+out: set-environment -gu JOBS_SHELL_JOB_CWD
+run-shell 'sh ~/jobs-shell-job-cwd.sh'
+out: show-environment -g JOBS_SHELL_JOB_CWD

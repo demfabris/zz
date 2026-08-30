@@ -2719,11 +2719,23 @@ probe_status_job_environment() {
   local expected_version
   local default_terminal
   local command
+  local pane_cwd
+  local expected_pane_cwd
+  local expected_session_cwd
 
   expected_version="$(side_command "$side" display-message -p '#{version}')" ||
     fixture_failure "$side could not read its status job version"
   default_terminal="$(side_command "$side" show-options -gv default-terminal)" ||
     fixture_failure "$side could not read its status job terminal"
+  expected_pane_cwd="$(cd -- "$COMMAND_CWD" && pwd -P)"
+  expected_session_cwd="$(cd -- "$SESSION_CWD" && pwd -P)"
+  pane_cwd="$(side_command "$side" display-message -p -t "$INNER_PANE_TARGET" \
+    '#{pane_current_path}')" ||
+    fixture_failure "$side could not read its status job pane cwd"
+  pane_cwd="${pane_cwd//$'\r'/}"
+  if [ "$pane_cwd" != "$expected_pane_cwd" ]; then
+    fixture_failure "$side status job pane cwd was ${pane_cwd:-<empty>} instead of $expected_pane_cwd"
+  fi
 
   side_command "$side" set-environment -gu ATTACHED_STATUS_LAUNCH_CANARY ||
     fixture_failure "$side could not hide its process-only status canary"
@@ -2738,7 +2750,7 @@ probe_status_job_environment() {
     TMUX_PANE "status-session-pane-$side" ||
     fixture_failure "$side could not set its session status pane value"
 
-  command="#(IFS=,; set -- \$TMUX; test \"\$3\" = -1 && test -z \"\${ATTACHED_STATUS_LAUNCH_CANARY+x}\" && test \"\$ATTACHED_STATUS_JOB_ENV\" = global-$side && test \"\$TMUX_PANE\" = status-global-pane-$side && test \"\$TERM\" = $default_terminal && test \"\$TERM_PROGRAM\" = tmux && test \"\$TERM_PROGRAM_VERSION\" = $expected_version && test \"\$COLORTERM\" = truecolor && echo $marker || echo $bad_marker)"
+  command="#(IFS=,; set -- \$TMUX; test \"\$3\" = -1 && test -z \"\${ATTACHED_STATUS_LAUNCH_CANARY+x}\" && test \"\$ATTACHED_STATUS_JOB_ENV\" = global-$side && test \"\$TMUX_PANE\" = status-global-pane-$side && test \"\$(pwd -P)\" = \"$expected_session_cwd\" && test \"\$TERM\" = $default_terminal && test \"\$TERM_PROGRAM\" = tmux && test \"\$TERM_PROGRAM_VERSION\" = $expected_version && test \"\$COLORTERM\" = truecolor && echo $marker || echo $bad_marker)"
   side_command "$side" set-option -t "=$INNER_SESSION:" status-interval 1 ||
     fixture_failure "$side could not set its status job cadence"
   side_command "$side" set-option -t "=$INNER_SESSION:" status-left-length 80 ||
@@ -2850,6 +2862,119 @@ run_requested_client_command() {
   side_command "$side" bind-key -n F1 "$@" ||
     fixture_failure "$side could not bind its requested-client command"
   tmux_outer_command send-keys -t "=$OUTER_SESSION:$side" F1
+}
+
+run_control_attached_command() {
+  local side="$1"
+  local label="$2"
+  local output="$SCRATCH_DIR/control-shell-job-$side-$label.out"
+  local error="$SCRATCH_DIR/control-shell-job-$side-$label.err"
+  local line
+  local argument
+  shift 2
+
+  printf -v line '%q' "$1"
+  shift
+  for argument in "$@"; do
+    printf -v line '%s %q' "$line" "$argument"
+  done
+  if ! printf '%s\n' "$line" | (
+    cd -- "$COMMAND_CWD"
+    environment_side_command "$side" control -C attach-session \
+      -c "$SESSION_CWD" -t "=$INNER_SESSION"
+  ) >"$output" 2>"$error"; then
+    fixture_failure "$side Control shell-job $label failed: $(tr '\n' ' ' <"$error")"
+  fi
+  wait_for_attached_client_count "$side" 1
+  wait_for_client_state "$side" root
+}
+
+probe_attached_shell_job_cwd() {
+  local side="$1"
+  local target_session="attached-job-cwd-target-$side"
+  local target_cwd="$SCRATCH_DIR/attached-job-cwd-target-$side"
+  local session_cwd
+  local client_kind
+  local command_kind
+  local target_kind
+  local target
+  local expected
+  local marker
+  local result
+  local -a job_args
+
+  mkdir -p "$target_cwd"
+  target_cwd="$(cd -- "$target_cwd" && pwd -P)"
+  session_cwd="$(cd -- "$SESSION_CWD" && pwd -P)"
+  side_command "$side" new-session -d -c "$target_cwd" -s "$target_session" ||
+    fixture_failure "$side could not create its shell-job cwd target"
+
+  for client_kind in interactive control; do
+    for command_kind in run if; do
+      for target_kind in target missing none; do
+        case "$target_kind" in
+        target)
+          target="=$target_session:0.0"
+          expected="$target_cwd"
+          ;;
+        missing)
+          target='=attached-job-cwd-missing:0.0'
+          expected="$session_cwd"
+          ;;
+        none)
+          target=""
+          expected="$session_cwd"
+          ;;
+        esac
+
+        marker="$SCRATCH_DIR/shell-job-cwd-$side-$client_kind-$command_kind-$target_kind"
+        rm -f -- "$marker"
+        if [ "$command_kind" = run ]; then
+          job_args=(run-shell)
+          if [ -n "$target" ]; then
+            job_args+=(-t "$target")
+          fi
+          job_args+=("pwd -P > \"$marker\"")
+        else
+          side_command "$side" set-environment -g ATTACHED_SHELL_CWD_MARKER "$marker" ||
+            fixture_failure "$side could not set its shell-job cwd marker"
+          result="$client_kind-$target_kind"
+          job_args=(if-shell)
+          if [ -n "$target" ]; then
+            job_args+=(-t "$target")
+          fi
+          job_args+=(
+            'pwd -P > "$ATTACHED_SHELL_CWD_MARKER"'
+            "set-option -g @attached_shell_job_if_done $result"
+            'set-option -g @attached_shell_job_if_done broken'
+          )
+        fi
+
+        if [ "$client_kind" = interactive ]; then
+          run_requested_client_command "$side" "${job_args[@]}"
+        else
+          run_control_attached_command "$side" "$command_kind-$target_kind" \
+            "${job_args[@]}"
+        fi
+        wait_for_file_line "$side" "$marker" "$expected" \
+          "$client_kind $command_kind-shell $target_kind cwd"
+        if [ "$command_kind" = if ] && [ "$client_kind" = interactive ]; then
+          wait_for_side_output "$side" "$result" \
+            "$client_kind if-shell $target_kind branch" \
+            show-options -gqv @attached_shell_job_if_done
+        fi
+      done
+    done
+  done
+
+  side_command "$side" set-environment -gu ATTACHED_SHELL_CWD_MARKER ||
+    fixture_failure "$side could not remove its shell-job cwd marker"
+  side_command "$side" set-option -gu @attached_shell_job_if_done ||
+    fixture_failure "$side could not remove its shell-job cwd result"
+  side_command "$side" unbind-key -n F1 ||
+    fixture_failure "$side could not remove its shell-job cwd binding"
+  side_command "$side" kill-session -t "=$target_session" ||
+    fixture_failure "$side could not remove its shell-job cwd target"
 }
 
 respawn_attached_client() {
@@ -3241,6 +3366,8 @@ probe_client_environment zz
 probe_client_environment tmux
 probe_status_job_environment zz
 probe_status_job_environment tmux
+probe_attached_shell_job_cwd zz
+probe_attached_shell_job_cwd tmux
 probe_status_option_name_formats zz
 probe_status_option_name_formats tmux
 probe_requested_client_flags zz

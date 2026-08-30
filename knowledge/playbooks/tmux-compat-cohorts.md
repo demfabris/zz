@@ -393,8 +393,15 @@ while preserving admitted command responses, non-pane Control records, and one f
 
 Slice 10ah closed `control-mode.kill-server-response-order`, and slice 10ai closes the independent
 pane-output discard contract. The 10ai review caught and repaired early EOF admitting a second
-buffered command before integration. Shell-job cwd is next; immediate background `run-shell`
-ordering remains later and hard.
+buffered command before integration. The next Wave 2 chunk closes `jobs.shell-job-cwd`. Shell-form
+`run-shell` and `if-shell` choose cwd from literal `-c`, startup client, unattached provenance
+client, explicit target session, attached invoking-client session, HOME, then root. Positive-delay
+jobs freeze that choice before the timer and retain launch-time existence fallback. Status `#()`
+uses the attached session path. Attached clients keep independent command caches, while unattached
+query clients share entries by effective cwd. The three-step differential
+completes eight checks per engine with no differing channel. The attached fixture proves status cwd
+and covers 24 Interactive and Control `run-shell` and `if-shell` cases across valid, missing, and
+omitted targets. Immediate background `run-shell` ordering remains later and hard.
 
 The post-10ag ledger has 87 active groups with 594 items and 116 closed records: 45 open, 20
 blocked, and 22 accepted, for 68.0% resolution (138 of 203 groups). The persisted accepted slice 10ag
@@ -591,7 +598,8 @@ closure is that exception.
 | 10ah | Control kill-server response order | Closed under `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order` on 2026-08-30 | Committed in `4800255d` | The invoking response is admitted before shutdown closes the Control mailbox |
 | 10ai | Control exit pane-output discard | Closed under `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard` on 2026-08-30 | Complete | EOF or blank Return discards pending and later pane bytes while draining non-pane Control records and one final exit |
 | Pending rerank | Immediate background run-shell ordering | `jobs.run-shell-immediate-background-environment` | Unranked | Match absent-delay and `-d 0` queue ordering without timing races |
-| Wave 2 next | Shell-job cwd | `jobs.shell-job-cwd` | Candidate accepted; coordinator proof pending | Command and status cwd producer selection stays separate from environment sampling |
+| Wave 2 chunk | Shell-job cwd | Closed under `jobs.shell-job-cwd` on 2026-08-30 | Complete | The three-step differential completes eight checks per engine, and the attached fixture covers 24 client, command, and target-mode cases |
+| Wave 2 next | Literal DEL identity | `keys.literal-delete-identity` | Candidate accepted | Preserve raw DEL, caret plus DEL, and textual `0x7f` identities through stored keys and PTY output |
 | Pending rerank | Context producer runtime fidelity | `formats.context-producer-fidelity` (`adopt`, open) | Unranked | Producer value fidelity remains separate from source registration |
 | Pending rerank | Remaining modifier runtime fidelity | `formats.modifier-fidelity` (`adopt`, open) | Unranked | `I`, `L`, `O`, and `V` need their context models; `w` also needs style parsing, live width overrides, the 162-entry cache, host policy, and Unicode proof |
 | Accepted partition | Native typed context producers | `formats.native-typed-context-producers` (`native`, accepted) | Complete | The 54 native literal pairs are registered without pretending they are tmux runtime gaps |
@@ -605,10 +613,11 @@ closure is that exception.
 | Pending rerank | Generic prompt command fidelity | `prompt.command-fidelity` | Unranked | Requires the interactive-refresh decision and remains broader than copy mode |
 | Pending rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Unranked | Ten defaults land only after their generic prompt contract |
 
-Slices 9a through 9f and 10a through 10ai are closed. Commit `562b950c` contains cumulative slices
-10w through 10ag; `4800255d` closes 10ah. The current ledger has 86 active groups with 589 items and
-120 closed records: 44 open, 20 blocked, and 22 accepted, resolving 142 of 206 groups (68.9%).
-Wave 2 is 1 of 3 complete, with shell-job cwd next. Under
+Slices 9a through 9f and 10a through 10ai are closed, along with the Wave 2 shell-job cwd chunk.
+Commit `562b950c` contains cumulative slices 10w through 10ag; `4800255d` closes 10ah. The current
+ledger has 85 active groups with 587 items and 121 closed records: 43 open, 20 blocked, and 22
+accepted, resolving 143 of 206 groups (69.4%). Wave 2 is 2 of 3 complete, with literal DEL identity
+next. Under
 `detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,
 and only flagged clients fall back to the newest attached session when no detached survivor exists.
@@ -713,17 +722,16 @@ behind 10ah because it uses the same Control paths.
 
 ## Wave 2 fronts
 
-Wave 2 started on 2026-08-30 with three frozen chunks and 65 unresolved groups. Slice 10ai is
-integrated locally, leaving 64 unresolved groups and the wave at 1 of 3. The shell-job cwd candidate
-passed independent review and awaits coordinator-owned attached-client proof. The DEL candidate is
-under repair after live PTY review found two transport failures missed by its initial mux-level
-assertions.
+Wave 2 started on 2026-08-30 with three frozen chunks and 65 unresolved groups. Slice 10ai and
+shell-job cwd are closed, leaving 63 unresolved groups and the wave at 2 of 3. Shell-job cwd passed
+its three-step differential and coordinator-owned attached-client proof. The DEL candidate passed
+independent review after repairs for the two transport failures found by live PTY review.
 
 | Front | Starting role | Worktree | Branch | Chunk | Exclusive production and proof zone |
 | --- | --- | --- | --- | --- | --- |
 | Control output | Complete | `/Users/demfabris/dev/zz-tmux-control-output` | `codex/tmux-control-10ai` | `control-mode.exit-pane-output` | Accepted after an early-EOF repair; coordinator integration is slice 10ai |
-| Shell-job cwd | Accepted candidate | `/Users/demfabris/dev/zz-tmux-job-cwd` | `codex/tmux-job-cwd` | `jobs.shell-job-cwd` | Daemon command-job and status-job cwd selection plus a unique scenario; attached-client proof remains |
-| DEL identity | Repair | `/Users/demfabris/dev/zz-tmux-key-del` | `codex/tmux-key-del` | `keys.literal-delete-identity` | Preserve three DEL identities and prove actual PTY bytes for prefix and configured backspace |
+| Shell-job cwd | Complete | `/Users/demfabris/dev/zz-tmux-job-cwd` | `codex/tmux-job-cwd` | `jobs.shell-job-cwd` | Daemon command-job and status-job cwd selection, a clean three-step scenario, and 24 attached-client cases |
+| DEL identity | Accepted candidate | `/Users/demfabris/dev/zz-tmux-key-del` | `codex/tmux-key-del` | `keys.literal-delete-identity` | Preserve three DEL identities and prove PTY bytes for prefix and configured backspace |
 
 Integrate Control output first and rerank before each later acceptance. The coordinator owns every
 shared campaign artifact and runs aggregate gates. A front stops when its implementation needs
@@ -834,10 +842,13 @@ Paste this prompt into the next session:
 ```text
 Continue the tmux compatibility campaign from current local `main`. Wave 2 started at `9a8c8790`
 with three frozen chunks. Slice 10ai closes Control exit pane-output discard after review caught and
-repaired early EOF admitting a second buffered command. The persisted accepted artifact covers 104
-scenarios and 1,672 steps with attached-client `PASS`, exactly two approved GEO rows, every other
+repaired early EOF admitting a second buffered command. The second chunk closes
+`jobs.shell-job-cwd`: its three-step differential completes eight checks per engine with no differing
+channel, and its attached proof covers 24 Interactive and Control `run-shell` and `if-shell` cases
+across valid, missing, and omitted targets. The persisted accepted artifact covers 105
+scenarios and 1,675 steps with attached-client `PASS`, exactly two approved GEO rows, every other
 channel clean, and SHA-256
-`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Preserve unrelated work,
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Preserve unrelated work,
 commit each accepted integration separately, and do not push without explicit authorization.
 
 Verify that the session-cwd, requested-client-flags, retained-client-sizing, client-environment,
@@ -954,9 +965,9 @@ The historical 10aa artifact has 101 scenarios and 1,550 steps with attached-cli
 28-step `formats-values` row, and SHA-256
 `bc0f6ad0fb52d35b6e2e20869d896174ac06b6cb12243e03bcf13e7536134119`.
 
-Confirm the current tracker has 86 active groups and 589 items: 44 open, 20 blocked, and 22
-accepted, plus 120 closed records; 142 of 206 groups are resolved (68.9%). Priority is one next, 63
-later, and 22 none. Wave 2 is 1 of 3 complete, with unresolved work down from 65 to 64. Confirm
+Confirm the current tracker has 85 active groups and 587 items: 43 open, 20 blocked, and 22
+accepted, plus 121 closed records; 143 of 206 groups are resolved (69.4%). Priority is one next, 62
+later, and 22 none. Wave 2 is 2 of 3 complete, with unresolved work down from 65 to 63. Confirm
 slice 10ad moved
 the unchanged 105-name roster to `command::TMUX_OPTION_CONSUMERS`, preserved `BEHAVES`, and added an
 exact guard proving 180 pinned options equal 105 consumers plus 75 live option gaps and the closed
@@ -992,11 +1003,16 @@ cold-launch provenance, a bounded valid UTF-8 cwd, nested relative and literal-m
 startup-only priority and cleanup, later registered-client runtime selection, and the exact isolated
 differential without a public protocol change.
 
-Confirm slices 10ah and 10ai are closed. Take `jobs.shell-job-cwd` next: integrate the accepted
-candidate only after the coordinator-owned attached-client proof covers status `#()` cwd and real
-Interactive and Control `run-shell` and `if-shell` targeting. Keep `keys.literal-delete-identity`
-in review until live PTY capture proves raw DEL, caret-plus-DEL, and textual `0x7f` independently
-for `send-prefix` and configured `BSpace`. Keep `w` later and hard until its proof covers style
+Confirm slices 10ah and 10ai plus `jobs.shell-job-cwd` are closed. Shell-form `run-shell` and
+`if-shell` select cwd in pinned order from literal `-c`, startup client, unattached provenance
+client, explicit target session, attached invoking-client session, HOME, then root. Positive-delay
+jobs freeze that choice before the timer. Status `#()` uses the attached session path and a
+per-attached-client command cache with cwd-shared unattached entries. Require the clean three-step,
+eight-check-per-engine differential and 24
+attached Interactive and Control cases across both commands and all three target modes. Take
+`keys.literal-delete-identity` next from its accepted candidate. Require live PTY capture of raw DEL,
+caret-plus-DEL, and textual `0x7f` independently for `send-prefix` and configured `BSpace`. Keep `w`
+later and hard until its proof covers style
 parsing, malformed markup, controls, live
 `codepoint-widths[]`, tmux's 162-entry cache, host `wcwidth`, and Unicode differences against zz's
 `unicode-width` 0.2.2. The alias snapshot prerequisite is closed.

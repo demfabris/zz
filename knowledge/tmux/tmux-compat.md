@@ -352,14 +352,14 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 86 active groups, 589 items, and 120 closed records: 44 open, 20 blocked, and
-22 accepted. Closed records plus accepted active groups resolve 142 of 206 known groups (68.9%).
-The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client `PASS`, exactly two approved GEO
+The live registry has 85 active groups, 587 items, and 121 closed records: 43 open, 20 blocked, and
+22 accepted. Closed records plus accepted active groups resolve 143 of 206 known groups (69.4%).
+The persisted accepted artifact covers 105 scenarios and 1,675 steps, with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
-`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Slice 10ai starts Control
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Slice 10ai starts Control
 stdin observation before initial preparation, discards queued and future pane-byte records after
 EOF or blank Return, and retains all non-pane Control records plus one final exit. Shell-job cwd is
-the next group, with its candidate awaiting coordinator-owned attached-client proof.
+closed with its full aggregate proof, and literal DEL identity is next.
 
 Protocol v84 closes all six runtime rules
 across the 12 implemented callback commands; no command-specific `args-parse:` item remains.

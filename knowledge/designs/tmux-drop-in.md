@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; slice 10ag closed locally 2026-08-29; kill-server response order follows
+status: Original nine phases shipped 2026-08-20; shell-job cwd closed with aggregate proof 2026-08-30
 tags:
 - tmux
 - compatibility
@@ -11,7 +11,7 @@ tags:
 - control-mode
 - roadmap
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 ---
 
 # Overview
@@ -331,8 +331,8 @@ Foreground daemon coverage waits for `active_shell_jobs` before it mutates state
 three-step differential completes twelve checks per engine across live, destroyed and recreated,
 missing and later-created, and startup-crossing cases, including frozen formats, numeric arguments,
 target identity, and cwd. It reports no differing channel. `run-shell -C`, `if-shell`, absent `-d`,
-`-d 0`, immediate background ordering, cwd producer selection, `copy-pipe`, and popup jobs stay
-outside 10af.
+`-d 0`, immediate background ordering, `copy-pipe`, and popup jobs stay outside 10af. The
+2026-08-30 shell-job cwd closure covers the cwd selector separately.
 
 Slice 10ag closes
 `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`. A cold launcher
@@ -355,9 +355,23 @@ Control must receive its empty flags-1 `%end` before one `%exit`; ordinary Comma
 success before socket teardown. A synchronization-controlled daemon regression must force the old
 race, and stalled or disconnected paths must remain bounded. Pane-output discard follows as 10ai.
 
-The registry has 87 active groups and 594 active items, with 116 closed records: 45 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 138 of 203 groups (68.0%).
-Slices 10w through 10ag form the authorized 2026-08-29 checkpoint. The persisted accepted slice 10ag
+The 2026-08-30 `jobs.shell-job-cwd` front aligns shell-form `run-shell` and `if-shell` cwd
+selection. `run-shell -c` wins first. Both shell forms then use the startup client cwd, an
+unattached provenance client's cwd, the selected target session, or the invoking client's attached
+session before `HOME` and `/`. Positive delays retain the chosen path before the timer and apply
+the launch-time existence fallback. Status `#()` now uses the attached session path instead of
+`pane_current_path`. Attached clients keep independent command caches, while unattached query
+clients share entries by effective cwd. Ten focused daemon shell-job tests and 32 status tests pass.
+The three-step scenario completes eight checks per engine with no
+differing channel. The attached matrix covers 24 real Interactive and Control cases across
+`run-shell`, `if-shell`, and valid, missing, and omitted targets. No protocol or snapshot field
+changed. The full strict and attached aggregate passes at 105 scenarios and 1,675 steps with only
+the two approved GEO rows and SHA-256
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`.
+
+At the 10ag checkpoint, the registry had 87 active groups and 594 active items, with 116 closed
+records: 45 open, 20 blocked, and 22 accepted. Closed history plus accepted groups resolved 138 of
+203 groups (68.0%). Slices 10w through 10ag form the authorized 2026-08-29 checkpoint. The persisted accepted slice 10ag
 artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Full zz validation passes
@@ -517,9 +531,10 @@ closes config and source file-unit construction. Local slice 10aa closes the thr
 source ownership, local slice 10ae closes option-name format lookup, and local slice 10af closes
 positive-delay shell-form `run-shell` environment timing. Local slice 10ag closes cold startup
 initial-client cwd. Slice 10ah takes Control kill-server response order, and slice 10ai follows with
-Control exit pane-output discard. The registry has 87 active groups, 594
-classified active items, and 116 closed records: 45 open, 20 blocked, and 22 accepted; 138 of 203
-groups are resolved (68.0%). The current
+Control exit pane-output discard. The 2026-08-30 shell-job cwd front then closes command and status
+job working-directory selection with focused and attached evidence while its aggregate rerun stays
+pending. The registry has 85 active groups, 587 classified active items, and 121 closed records: 43
+open, 20 blocked, and 22 accepted; 143 of 206 groups are resolved (69.4%). The current
 198-name partition
 has 95 direct mux values, 32 daemon-delegated values, and 71 live gaps. Slice 10x gives existing
 `new-session -A -c` targets the attach cwd path and preserves fresh explicit-empty session state.
@@ -537,8 +552,9 @@ shell-form `run-shell`, shell-form `if-shell`, and status `#()` environment beha
 moves the unchanged option-consumer roster to its command owner and closes the exact inventory
 guard without runtime changes. Slice 10ae closes generic lookup across mux and daemon producers.
 Slice 10af closes positive-delay `run-shell` environment timing. Slice 10ag closes startup
-initial-client cwd without a public protocol change. Status-job cwd, immediate callback ordering,
-`copy-pipe`, popup jobs, and Control exit pane-output discard retain their separate owners.
+initial-client cwd without a public protocol change. The 2026-08-30 `jobs.shell-job-cwd` closure
+aligns command and status working directories without a public protocol change. Immediate callback
+ordering, `copy-pipe`, popup jobs, and Control exit pane-output discard retain their separate owners.
 Client
 targeting and ordinary detach are complete;
 every implemented attached-client selector now shares exact name, full tty, exactly one leading
@@ -2421,9 +2437,9 @@ this list is the campaign-level index of it plus the items that never got a matr
 - Exec-family job divergences (wave 5a-2, reviewer-CONFIRMED, accepted): `-t`
   pane output goes to zz's command-output overlay, not view-mode-in-the-pane, and
   is dropped when no interactive subscriber exists; `-b` no-`-t` output routes to
-  the MRU session's active pane overlay; jobs receive `$TMUX` without `$TMUX_PANE`,
-  but inherit the daemon environment instead of the pin's clean global/session overlay
-  and do not synthesize the TERM family; shell jobs are capped (a runaway
+  the MRU session's active pane overlay. The 2026-08-29 environment closures supersede the old
+  inherited-daemon-environment difference, and the 2026-08-30 cwd closure aligns shell-form
+  command and status working directories. Shell jobs remain capped (a runaway
   backstop the pin does not have — raised from 16 in the 5b fix round; over-cap
   `-b` jobs fail with a background message like the pin's job_run failure);
   Interactive clients cannot park on blocking `wait-for` (they get the pin's

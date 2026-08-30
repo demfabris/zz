@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; parallel wave 2 at 1 of 3; shell-job cwd next
+status: In Progress; parallel wave 2 at 2 of 3; literal DEL identity next
 tags:
 - tmux
 - compatibility
@@ -39,18 +39,19 @@ records the source-anchored baseline used to build this plan.
 # Current checkpoint, 2026-08-30
 
 The three-front trial closed all 3 frozen chunks and registered 3 residual groups. Wave 2 then
-closed slice 10ai as its first of 3 frozen chunks without a new residual. Unresolved work moved from
-65 to 64: 44 open and 20 blocked. The tracker has 86 active groups, 589 classified active items,
-120 closed groups, and 22 accepted active groups. Its secondary ledger settlement is 142 of 206
-known groups (68.9%). The persisted accepted artifact covers 104 scenarios and 1,672 steps, with attached-client
+closed slice 10ai and shell-job cwd as 2 of 3 frozen chunks without a new residual. Unresolved work
+moved from 65 to 63: 43 open and 20 blocked. The tracker has 85 active groups, 587 classified active
+items, 121 closed groups, and 22 accepted active groups. Its secondary ledger settlement is 143 of
+206 known groups (69.4%). The persisted accepted artifact covers 105 scenarios and 1,675 steps, with attached-client
 `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
-`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Slice 10af closes
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
 Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`
 without a public protocol change. The integrated mux suite passes 531 tests, the focused strict-key
 run passes 40 steps plus 161 fixture checks on both engines, and formatting and mux clippy pass.
 Slice 10ah closes `control-mode.kill-server-response-order`. Slice 10ai closes
-`control-mode.exit-pane-output`; shell-job cwd is now the sole `next` group.
+`control-mode.exit-pane-output`. The second Wave 2 chunk closes `jobs.shell-job-cwd`; literal DEL
+identity is now the sole `next` group.
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
 matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
 named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
@@ -65,8 +66,8 @@ not intersect, and integration had no merge conflicts. Six independent review re
 so the next wave uses two active editors, one permanent oracle and reviewer, and the root as
 coordinator. Full corpus and workspace gates remain centralized in one warm integration lane.
 Wave 2 froze Control exit pane-output discard, shell-job cwd, and literal DEL identity as three
-independent chunks. Shell-job cwd has an accepted candidate awaiting coordinator-owned
-attached-client proof. The DEL candidate is under repair after live PTY review found failures in
+independent chunks. Shell-job cwd passed its three-step differential and coordinator-owned
+attached-client proof. The DEL candidate passed independent review after repairs for failures in
 prefix and configured-backspace transport.
 The final workspace run passed every non-daemon package. Three daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake
@@ -353,14 +354,25 @@ then drops it. Deterministic tests cover the old race, late Control and Command 
 disconnected writers, replacement binding during cleanup, and immediate fresh-daemon startup.
 Slice 10ai then closes pane-output discard.
 
-The registry now has 86 active groups and 589 active items, with 120 closed records: 44 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 142 of 206 groups (68.9%). The
-persisted accepted artifact covers 104 scenarios and 1,672 steps with attached-client `PASS`,
+The second Wave 2 chunk closes `jobs.shell-job-cwd`. Shell-form `run-shell` and `if-shell` choose
+cwd from literal `-c`, startup client, unattached provenance client, explicit target session,
+attached invoking-client session, HOME, then root. Positive-delay jobs freeze that choice before
+the timer and retain launch-time existence fallback. Status `#()` uses the attached session path
+and preserves independent caches for attached clients while unattached query clients share entries
+by effective cwd. The three-step differential completes eight checks per
+engine with no differing channel. The attached fixture keeps pane cwd separate from session cwd,
+proves status cwd, and covers 24 Interactive and Control `run-shell` and `if-shell` cases across
+valid, missing, and omitted targets. No protocol or snapshot field changed.
+
+The registry now has 85 active groups and 587 active items, with 121 closed records: 43 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 143 of 206 groups (69.4%). The
+persisted accepted artifact covers 105 scenarios and 1,675 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
-`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Focused mux and
-compatibility gates pass. The final workspace run passed every non-daemon package; three daemon
-tests failed only under parallel load and passed alone. Strict workspace clippy, formatting,
-tracker, stored-summary, and OKF validation pass.
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. Focused mux and
+compatibility gates from the accepted artifact pass. The final workspace run passed every
+non-daemon package; three daemon tests failed only under parallel load and passed alone. Strict
+workspace clippy, formatting, tracker, stored-summary, and OKF validation pass. The coordinator
+has replaced the persisted artifact with the completed aggregate above.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256

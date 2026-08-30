@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-08-29T00:00:00-03:00
+timestamp: 2026-08-30T00:00:00-03:00
 ---
 
 # Overview
@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **86**. Classified items: **589**.
+Tracked gap groups: **85**. Classified items: **587**.
 
-- Status: open: 44, blocked: 20, accepted: 22.
-- Decision: adopt: 49, native: 16, park: 15, never: 6.
-- Priority: next: 1, later: 63, none: 22.
-- Closed history entries: 120.
-- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 71, hook: 3, key: 110, binding: 51, native-key: 58, semantic: 111, presentation: 8, protocol: 2.
+- Status: open: 43, blocked: 20, accepted: 22.
+- Decision: adopt: 48, native: 16, park: 15, never: 6.
+- Priority: next: 1, later: 62, none: 22.
+- Closed history entries: 121.
+- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 71, hook: 3, key: 110, binding: 51, native-key: 58, semantic: 109, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -51,7 +51,7 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `jobs.shell-job-cwd` | Select pinned working directories for shell jobs | adopt | open | medium | daemon | daily, remote, scripts | none |
+| `keys.literal-delete-identity` | Separate literal and hex DEL key identities | adopt | open | medium | mux | scripts, daily | none |
 
 ## Later
 
@@ -68,7 +68,6 @@ structure as proof.
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-prompt-defaults` | Add prompt-backed emacs copy-mode defaults | adopt | open | medium | daemon | daily, remote, scripts | prompt.command-fidelity |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
-| `keys.literal-delete-identity` | Separate literal and hex DEL key identities | adopt | open | medium | mux | scripts, daily | none |
 | `options.pane-chrome` | Consume pane chrome options | adopt | open | medium | client | daily, gui | none |
 | `options.theme-palette` | Map tmux theme palette options | park | blocked | medium | client | gui | none |
 | `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
@@ -999,26 +998,6 @@ Pinned tmux queues absent-delay and -d 0 callbacks onto the next server turn, so
 - Acceptance:
   - `For absent -d and -d 0, foreground blocking order and background same-group order match the pin without timing sleeps; later commands in the group are visible to the background child, while foreground execution still blocks them.`
 
-### `jobs.shell-job-cwd`: Select pinned working directories for shell jobs
-
-Pinned command jobs prefer the startup client, invoking client, target session, attached session, HOME, then root; status jobs use the attached session cwd. zz command jobs currently prefer the selected pane process cwd and status prefers pane_current_path. The required client and retained-session facts already exist.
-
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `next` / `medium`
-- Owner: `daemon`
-- User impact: daily, remote, scripts
-- Items: `semantic:command-shell-job-cwd`, `semantic:status-shell-job-cwd`
-- Depends on: none
-- Evidence:
-  - `resource:knowledge/references/tmux-upstream.md`
-  - `resource:knowledge/tmux/divergences.md`
-  - `resource:crates/zz-daemon/src/daemon.rs`
-  - `resource:crates/zz-daemon/src/status.rs`
-- Acceptance:
-  - `Command, Control, Interactive, clientless, startup, explicit-target, and missing-target run-shell and if-shell cwd selection matches the pinned client and session precedence, with positive-delay paths frozen before the timer fires.`
-  - `Status shell formats use the attached session cwd, and explicit -c keeps its literal path with launch-time existence fallback.`
-
 ### `keys.copy-mode-binding-fidelity`: Match shared copy-mode binding commands
 
 Cursor-word search, prompted search, goto-line, and character jumps retain 15 divergent stored command shapes; this gap does not assume their native behavior is exact.
@@ -1137,7 +1116,7 @@ The completed strict-key slice covers literal controls 1 through 31 and printabl
 
 - Decision: `adopt`
 - Status: `open`
-- Priority and ease: `later` / `medium`
+- Priority and ease: `next` / `medium`
 - Owner: `mux`
 - User impact: scripts, daily
 - Items: `semantic:literal-delete-key-identity`
@@ -1783,6 +1762,7 @@ The mux cannot inspect cursor, history, or terminal mode state.
 | `hooks.queue` | 2026-08-29 | Pinned tmux registers after-queue as a session hook but has no automatic queue-completion producer for it. Ordinary single-command and multi-command queues leave the hook untouched; universal set-hook -R executes the stored hook exactly once. zz already matches both behaviors through its stored hook table and generic RunHook effect, so no runtime implementation was needed. The daemon inventory now partitions the 68 pinned names into 64 automatic producers, explicit-only after-queue, and three active pane-event gaps. The existing three-step args-parse-set-hook differential now proves ordinary queue inactivity, exact explicit execution count, and continued inactivity after manual runs on both engines. The oracle's hook roster describes registered names, not automatic producer paths. No protocol change was needed. | `resource:crates/zz-mux/src/tmux_options.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `file:compat/scenarios/smoke/fixtures/args-parse-set-hook.sh`, `scenario:compat/scenarios/smoke/args-parse-set-hook.txt`, `resource:knowledge/tmux/divergences.md` |
 | `jobs.command-status-environment` | 2026-08-29 | Shell-form run-shell and if-shell now construct each child from an empty environment, then apply server-global values followed by resolved session values. Hidden and unset entries disappear, and an explicit missing target becomes sessionless. During startup they preserve modeled TERM-family values; afterward they force TERM from default-terminal, TERM_PROGRAM=tmux, TERM_PROGRAM_VERSION=3.8-zz, COLORTERM=truecolor, and TMUX with the resolved session id or -1. Status #() follows the same clean construction with global-only state and a TMUX suffix of -1. Visible modeled TMUX_PANE survives but is not synthesized. The private tmux launcher is prepended to modeled PATH, stale private values are rejected, and current zz transport and reentry values are injected only where needed. Focused daemon tests cover overlay precedence, hidden and unset values, startup and post-startup identity, missing targets, status scope, and the private launcher. The three-step differential gives eight assertions per engine, and the attached fixture proves global-only status state. Delayed callback timing, copy-pipe and popup environments, and status cwd remain active separately. No mux or wire protocol changed. | `resource:crates/zz-daemon/src/lib.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-daemon/src/status.rs`, `scenario:compat/scenarios/smoke/jobs-command-environment.txt`, `file:compat/scenarios/smoke/fixtures/jobs-command-environment.sh`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/status-line.md`, `resource:knowledge/tmux/divergences.md` |
 | `jobs.run-shell-positive-delay-environment` | 2026-08-29 | Shell-form run-shell with an explicit numeric delay greater than zero now retains its command, target identity and numeric session id, expanded text and numeric arguments, and cwd string at scheduling. When the timer fires, it samples current global state, the live original-session overlay or the retained original overlay after destruction, default-terminal, and the startup TERM gate. Same-name session recreation cannot replace the retained original overlay, while a target missing at scheduling stays global-only with a TMUX suffix of -1 even if a matching session appears before launch. Cwd existence fallback runs at child launch against the retained cwd string. Deterministic foreground daemon coverage waits for active_shell_jobs before mutating state. The three-step differential fixture proves the background live, destroyed and recreated, missing and later created, and startup-crossing cases, including frozen formats, numeric arguments, target identity, cwd, launch environment, and default terminal. It reports twelve assertions per engine with zero differences. run-shell -C, if-shell, absent -d, -d 0, immediate background ordering, cwd producer selection, copy-pipe, and popup jobs retain separate owners. No wire protocol or snapshot field changed. | `resource:knowledge/references/tmux-upstream.md`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/smoke/jobs-command-environment.txt`, `file:compat/scenarios/smoke/fixtures/jobs-command-environment.sh`, `resource:knowledge/playbooks/compat-harness.md`, `resource:knowledge/tmux/divergences.md` |
+| `jobs.shell-job-cwd` | 2026-08-30 | Shell-form run-shell and if-shell now select cwd in pinned order: literal -c, startup client, unattached provenance client, explicit target session, attached invoking-client session, HOME, then root. Positive-delay jobs freeze that selection before the timer and retain launch-time existence fallback. Status #() uses the attached session path instead of pane_current_path, and its command cache is scoped per client. Focused daemon and status tests pass. The three-step differential completes eight checks per engine. The attached fixture keeps the pane in a distinct command cwd, proves status cwd, and covers 24 real Interactive and Control run-shell and if-shell cases across valid, missing, and omitted targets on zz and pinned tmux. No protocol or snapshot field changed. | `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-daemon/src/status.rs`, `scenario:compat/scenarios/smoke/jobs-shell-job-cwd.txt`, `file:compat/scenarios/smoke/fixtures/jobs-shell-job-cwd.sh`, `file:compat/attached-client.sh`, `resource:knowledge/references/tmux-upstream.md`, `resource:knowledge/tmux/status-line.md`, `resource:knowledge/tmux/divergences.md` |
 | `keys.client-focus-events` | 2026-08-25 | With focus-events enabled, writable ClientFocus runs through the modal prequeue, then session activity and FocusIn-only latest-geometry accounting, then synthetic Any dispatch. The daemon selects transient tables in chooser, copy-mode or command-output, and effective-root order. A transient Any binding wins; an unbound transient table falls back to the effective root without retiring the mode. A root Any binding runs when no transient mode applies. The daemon resolves attachment and pane context again after prompt submission before it dispatches the selected command. Disabled focus bypasses accounting and dispatch. Read-only focus retains its modal bypass, resolves the whole Any binding, authorizes every command before any effect, and rejects a mixed safe and unsafe chain atomically. Exact FocusIn and FocusOut remain invalid key names, and even injected exact bindings do not replace Any. Synthetic ingress preserves pending copy jump capture, numeric prefix state, repeat metadata and deadlines, table fallback and retirement, prefix synchronization, client isolation, and the next real key. The focused daemon cluster passes 9 of 9 tests, and an independent Codex read-only review returned CODE GO. ClientFocus is not CLI-drivable, so this closure makes no differential or canonical-suite claim. | `resource:crates/zz-protocol/src/key.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:knowledge/tmux/key-tables.md`, `resource:knowledge/tmux/status-line.md`, `resource:knowledge/tmux/divergences.md` |
 | `keys.copy-mode-action-and-repeat-fidelity` | 2026-08-25 | The emacs M-f default stores the pin's send-keys -X next-word-end action. Vi numeric capture consumes the buffered count at the first send or send-keys command whose option prefix contains -X. If that command already contains -N, its stored repeat wins; otherwise zz inserts one separate -N count pair immediately before the option argument containing -X. The engine does not scan onward after a stored -N, a command list with no qualifying -X leaves the count armed, and later actions do not inherit it. One exhaustive typed policy carries a u32 count through one flat TerminalViewAction::CopyModeCounted action: movements, jumps, matching brackets, and repeat-search execute count times; other-end swaps only for odd counts; select-line spans count logical lines; copy-end-of-line spans through the end of row N and copies once; other toggles, selection, copy, cancel, and later actions execute once. Counted raw key sends carry one repeat field instead of preallocating N tokens. Terminal delivery stops on the first full input queue. Browser events and both clients cap their native repeat path at MAX_BROWSER_KEY_REPEAT (9,999), because tmux has no browser pane. Direct -N parsing expands the last value, accepts 1 through UINT_MAX, preserves attached and clustered forms plus command abbreviations, and reports the pin's invalid, too-small, and too-large errors. Protocol v75 appends flat counted-copy tag 28 and browser-repeat tag 7; tests reject the removed recursive action tag and nested payloads. The strict send-keys-repeat differential covers separate, attached, clustered, duplicate, formatted, alias, prefix, and error forms. Invalid nonempty -X grammar returns the pin's neutral prefix value 1, represented as no buffered count, so the next digit starts a fresh prefix. Multi-digit vi capture remains bounded at 9,999 per client; bare no-key counts and `-N <n> -X` with no action remain pane-prefix residuals under terminal.key-control. The nine digit bindings retain their native copy-mode-repeat list-keys shape under keys.copy-mode-native-numeric-prefix; unrelated cursor-word, search, goto-line, and jump command shapes remain open under keys.copy-mode-binding-fidelity. | `resource:crates/zz-protocol/src/key.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-terminal/src/interaction.rs`, `resource:crates/zz-terminal/src/session.rs`, `resource:crates/zz-protocol/src/message.rs`, `resource:crates/zz-daemon/src/keys.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz/src/browser/view.rs`, `resource:crates/zz/src/browser/tui.rs`, `resource:knowledge/tmux/key-tables.md`, `resource:knowledge/tmux/copy-mode.md`, `scenario:compat/scenarios/send-keys-repeat.txt` |
 | `keys.copy-mode-defaults` | 2026-08-25 | Added the six remaining stock emacs keys whose typed actions already existed: C-[ runs cancel, C-k runs copy-pipe-end-of-line-and-cancel, C-w runs copy-pipe-and-cancel, N runs search-reverse, R runs rectangle-toggle, and n runs search-again. Each binding stores the pin's single send-keys -X command and carries no repeat bit. KeyEngine tests cover the six bindings and retain the prior Escape, M-w, and C-g bindings; exact equality with the audited stock key set proves that none overwrote another key. Mux tests cover cancel, both copy variants, forward and reverse search repetition, and rectangle toggle as typed terminal effects. The 17 absent stock keys remain under keys.copy-mode-prompt-defaults and keys.copy-mode-unsupported-default-actions. | `resource:crates/zz-protocol/src/key.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `resource:knowledge/tmux/key-tables.md`, `resource:knowledge/tmux/copy-mode.md` |

@@ -5,7 +5,7 @@ description: The daemon expands tmux status formats per client; the TUI draws te
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 last_updated_by: Codex
 ---
 
@@ -42,9 +42,9 @@ recipient's scope. It does not gate GUI status rendering and has no appearance e
 
 The **daemon**. Three reasons, strongest first:
 
-1. `#(command)` must run **once per `status-interval`**, on the host the daemon runs on. A client-side
-   expander would run every user's script once per attached client, and a
-   remotely attached client would run them on the wrong machine.
+1. `#(command)` must run on the daemon's host. Attached clients keep independent cache entries so
+   their session and cwd contexts can differ. Unattached query clients share entries by effective
+   cwd. A client-side expander would run commands on the wrong machine.
 2. A client renders; it does not own mux state. `#S` is a daemon fact.
 3. The wire then carries finished text, so the client needs no format engine.
 
@@ -139,15 +139,15 @@ without leaking literal `R` syntax into either row.
 
 ## Current compatibility checkpoint
 
-At local uncommitted slice 10ae on 2026-08-29, zz implements 31 of the pin's 36 format modifiers.
-Five active tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 87 active groups, 594
-active items, and 114 closed records: 45 open, 20 blocked, and 22 accepted. Closed records plus
-accepted active groups resolve 136 of 201 known groups (67.7%). The accepted full-corpus artifact
-covers 103 scenarios and 1,630 steps through slice 10ae, records attached-client `PASS`, retains the
-two registered GEO rows, and has SHA-256
-`46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. The 45-step
-`formats-values` row passes as part of that artifact. The source partition now contains 95 direct
-mux values, 32 daemon-delegated values, and 71 active gaps.
+At Wave 2 chunk 2 of 3 on 2026-08-30, zz implements 31 of the pin's 36 format modifiers. Five active
+tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 85 active groups, 587 active items,
+and 121 closed records: 43 open, 20 blocked, and 22 accepted. Closed records plus accepted active
+groups resolve 143 of 206 known groups (69.4%). The persisted accepted artifact covers 105
+scenarios and 1,675 steps with attached-client `PASS`, exactly two approved GEO rows, every other
+channel clean, and SHA-256
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`. The 45-step
+`formats-values` row passes as part of that artifact. The source
+partition contains 95 direct mux values, 32 daemon-delegated values, and 71 active gaps.
 
 The historical 10aa checkpoint covered 101 scenarios and 1,550 steps with a 28-step
 `formats-values` row, attached-client `PASS`, and SHA-256
@@ -167,9 +167,21 @@ overlay only. Hidden values and unset markers stay absent. A visible modeled `TM
 but zz does not create one. After startup, status jobs set `TERM` from `default-terminal`,
 `TERM_PROGRAM=tmux`, `TERM_PROGRAM_VERSION=3.8-zz`, `COLORTERM=truecolor`, and
 `TMUX=socket,pid,-1`. The private tmux executable remains first on the modeled PATH. The attached
-fixture proves this global-only path. Delayed `run-shell` environment timing, `copy-pipe` and popup
-job environments, and status `#()` cwd remain active. Pinned status jobs use the attached session
-cwd; zz still uses `pane_current_path`.
+fixture proves this global-only path. Slice 10af later closes positive-delay `run-shell`
+environment sampling. `copy-pipe` and popup job environments retain separate owners.
+
+The 2026-08-30 `jobs.shell-job-cwd` closure aligns cwd selection for shell-form `run-shell`,
+shell-form `if-shell`, and status `#()`. `run-shell -c` wins first. Both command paths then check
+the startup client cwd, an unattached provenance client's cwd, the selected target session, and the
+invoking client's attached session before falling back to `HOME` and then `/`. Positive-delay jobs
+retain the selected path before the timer and apply the existing-path fallback when the child
+starts. Status jobs use the attached session's retained path. Attached clients keep independent
+command caches, while unattached query clients share entries by effective cwd. Ten focused daemon
+shell-job tests and 32 status tests pass. The three-step
+`smoke/jobs-shell-job-cwd` row completes eight checks per engine with no differing channel. The
+attached fixture covers 24 real cases across Interactive and Control clients, `run-shell` and
+`if-shell`, and valid, missing, and omitted targets. The final strict and attached aggregate rerun
+remains pending.
 
 Slice 10ad closes `tracker.semantic-coverage/semantic:tracker-option-consumer-registration`. The
 unchanged 105-name roster now lives in `command::TMUX_OPTION_CONSUMERS`, while `BEHAVES` remains an
@@ -390,13 +402,13 @@ Two format rules preserve the status renderer's contract:
 | Trigger | `#()` commands |
 | --- | --- |
 | `status-interval` tick | re-run |
-| a mux snapshot changes (rename, split, focus, attach) | reused from cache |
-| a `status-*` option changes | reused from cache |
-| a client connects | reused from cache; run once if never cached |
+| a mux snapshot changes (rename, split, focus, attach) | reuse matching scope/cwd/command; run on a miss |
+| a `status-*` option changes | reuse matching scope/cwd/command; run on a miss |
+| a client connects | reuse the unattached scope; run on a miss |
 
-Only the tick spawns processes. Everything else is string expansion over cached output, so pane-title
-traffic cannot turn into a process storm. Between ticks the clock is as stale as `status-interval`
-allows, the same bound tmux has.
+Timer ticks refresh active command keys. Other renders expand strings and start a command only when
+the scope, effective cwd, and command text have no cache entry. Attach and cwd changes can therefore
+run a command before the next tick, while pane-title traffic with unchanged keys stays cached.
 
 `#()` commands are bounded where tmux's are not: 2 seconds, then the child is killed and contributes
 whatever it had already written. A wedged script costs one stale field instead of stalling the
@@ -406,7 +418,8 @@ names any more is dropped on the next tick.
 Each status child starts from the modeled global environment rather than the daemon process
 environment. The daemon removes hidden and unset values, uses the modeled PATH for its private tmux
 executable, and applies the post-startup tmux terminal identity listed above. Status jobs do not
-receive a session overlay. Their cwd difference remains tracked separately.
+receive a session overlay. They run from the attached session's retained cwd, falling back to a
+valid home directory and then `/` when that path does not exist.
 
 # Key files
 

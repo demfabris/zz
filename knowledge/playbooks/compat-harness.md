@@ -5,7 +5,7 @@ description: How to run the pinned tmux differential corpus, read topology, geom
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
 timestamp: 2026-08-26T00:00:00-03:00
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 last_updated_by: Codex
 ---
 
@@ -132,9 +132,9 @@ before selection. Slice 10ac closes
 `run-shell`, shell-form `if-shell`, and status `#()`. It covers clean inherited state, overlay
 order, hidden and unset values, explicit target loss, TERM identity, modeled `TMUX_PANE`, and cold
 versus completed startup. The attached fixture proves status jobs receive global-only state.
-Command-form `-C`, format-condition `-F`, status-job cwd, delayed callbacks, `copy-pipe`, and popup
-jobs remain outside that fixture. Pinned status `#()` uses the attached session cwd; zz uses
-`pane_current_path`, so the cwd difference keeps a separate owner.
+Command-form `-C`, format-condition `-F`, delayed callbacks, `copy-pipe`, and popup jobs remain
+outside that fixture. The 2026-08-30 shell-job cwd closure below handles status and shell-form
+command working directories separately.
 
 Slice 10ad closes
 `tracker.semantic-coverage/semantic:tracker-option-consumer-registration`. The unchanged 105-name
@@ -175,7 +175,21 @@ the child starts.
 Foreground daemon coverage waits for `active_shell_jobs` before it mutates the model. The background
 three-step fixture completes twelve checks per engine across live, destroyed and recreated, missing
 and later-created, and startup-crossing cases. Keep `run-shell -C`, `if-shell`, absent `-d`, `-d 0`,
-immediate background ordering, cwd producer selection, `copy-pipe`, and popup jobs outside 10af.
+immediate background ordering, `copy-pipe`, and popup jobs outside 10af. The 2026-08-30 cwd closure
+handles cwd selection separately.
+
+The 2026-08-30 `jobs.shell-job-cwd` closure selects shell-form command cwd in pinned order:
+`run-shell -c`, startup client cwd, cwd from an unattached provenance client, selected target
+session, invoking client's attached session, `HOME`, then `/`. Positive-delay jobs retain the
+selection before the timer and check path existence when the child starts. Status `#()` uses the
+attached session path. Attached clients keep independent command caches, while unattached query
+clients share entries by effective cwd. Ten focused daemon shell-job tests and 32 status tests
+pass. The three-step `smoke/jobs-shell-job-cwd` row completes eight checks per
+engine with no differing channel. The attached fixture covers 24 real cases across Interactive and
+Control clients, `run-shell` and `if-shell`, and valid, missing, and omitted targets. No protocol or
+snapshot field changed. The full 105-scenario, 1,675-step strict and attached aggregate passes with
+two approved GEO rows, every other channel clean, and SHA-256
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`.
 Slice 10ag closes
 `source-file.startup-client-cwd/semantic:source-file-startup-initial-client-cwd`. Only a cold
 launcher that auto-spawns the daemon passes a bounded valid UTF-8 cwd through private
@@ -287,9 +301,9 @@ and `formats.modifier-fidelity` (`adopt`, open). Native typed producers remain a
 `formats.native-typed-context-producers` (`native`, accepted). Slice 10v changes no protocol,
 snapshot, differential scenario, or accepted artifact. The resumed rerank corrected the stale
 parser-abort ledger item because first-diagnostic whole-file abort was already implemented and
-tested. Commit `562b950c` contains slices 10w through 10ag. The tracker now
-has 87 active groups with 594 items and 116 closed records: 45 open, 20 blocked, and 22 accepted,
-for 138 of 203 groups resolved (68.0%). The persisted accepted slice 10ag artifact covers 103
+tested. Commit `562b950c` contains slices 10w through 10ag. At that checkpoint, the tracker had 87
+active groups with 594 items and 116 closed records: 45 open, 20 blocked, and 22 accepted, for 138
+of 203 groups resolved (68.0%). The persisted accepted slice 10ag artifact covers 103
 scenarios and 1,630 steps with attached-client `PASS`, exactly two approved GEO rows, every other
 channel clean, and SHA-256
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Slice 10ag closes startup
@@ -545,6 +559,12 @@ and attached-client fixture pass on the final 10af runtime. The two registered G
 exact tuples, every other channel is clean, and the accepted SHA-256 remains
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`.
 
+The `jobs.shell-job-cwd` front adds the three-step `smoke/jobs-shell-job-cwd` row with eight
+checks per engine. Its focused daemon and status tests pass, and the attached fixture passes its
+24-case cwd matrix. The full strict and attached aggregate passes at 105 scenarios and 1,675 steps,
+replacing the persisted artifact with SHA-256
+`a1e4ca86326006c5f06c77859219772b97fe7e6ac86dd703b127fced4ca0cd7e`.
+
 `known/known-main-preset-two-panes` and `known/known-spread-mixed` each retain exactly one documented
 GEO divergence with every other channel clean. The accepted 10af attached-client fixture is
 `PASS`. The expanded corpus pins capture routing and ranges, manual window geometry,
@@ -774,6 +794,10 @@ note and does not appear in the typed prompt. The local Control probe runs `-C` 
 requires existing-session refusal for `attach-session` and `new-session -A`, permits a fresh `-A`
 miss, and pipes stdin through a final attach to prove a nonterminal stdin does not publish tty
 identity. The daemon unit matrix covers `new-session -Ad`; the attached fixture does not. The
+shell-job cwd probe keeps the command, attached-session, and target-session paths distinct. For
+each engine it runs Interactive and Control clients through `run-shell` and `if-shell` with a valid,
+missing, or omitted target. The resulting 24 real cases require the target session cwd for a valid
+target and the attached session cwd for missing or omitted targets. The
 command-output probe builds a 96-line local transcript and runs on both sides. It checks line and
 page movement, vi Escape selection clearing without exit, search cancel, search editing and submit,
 `n`/`N`, selection-to-paste-buffer, a live custom `copy-mode-vi` binding, a live switch to the emacs

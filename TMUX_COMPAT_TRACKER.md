@@ -2,9 +2,9 @@
 
 > Campaign delivery: **`F-ALIASES-MULTI-BODY` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED)**
+> Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED)**
 >
-> Ledger settlement: **70.0% (145 of 207 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **69.0% (145 of 210 known groups); SECONDARY DIAGNOSTIC**
 >
 > Exit evidence: **106 SCENARIOS, 1,683 STEPS, ATTACHED-CLIENT PASS**
 >
@@ -83,8 +83,8 @@ percentage is a ledger health metric, not a compatibility claim.
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
 | Campaign point | Multi-command and empty alias bodies are closed; forced-shutdown multi-window hook order is a separate registered residual |
-| Live registry | 84 active groups, 586 active items, 123 closed records |
-| Active status | 42 open, 20 blocked, 22 accepted |
+| Live registry | 87 active groups, 586 active items, 123 closed records |
+| Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
@@ -106,10 +106,10 @@ found during that wave.
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
 | New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
-| Live unresolved | 42 open + 20 blocked = 62 |
+| Live unresolved | 45 open + 20 blocked = 65 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
 | Accepted differential | 106 scenarios, 1,683 steps, attached-client `PASS`, 2 registered GEO rows |
-| Ledger settlement | 145 of 207 known groups = 70.0% |
+| Ledger settlement | 145 of 210 known groups = 69.0% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -123,7 +123,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(123 + 22) / (123 + 84) = 145 / 207 = 70.0%
+(123 + 22) / (123 + 87) = 145 / 210 = 69.0%
 ```
 
 Recompute it from the registry after every tracker change:

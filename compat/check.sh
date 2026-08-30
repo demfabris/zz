@@ -7,6 +7,7 @@ REPO_DIR="$(cd -- "$COMPAT_DIR/.." && pwd)"
 tmux_bin="$("$COMPAT_DIR/fetch-tmux.sh")"
 python3 "$COMPAT_DIR/tmux-oracle.py" --check --tmux "$tmux_bin"
 python3 "$COMPAT_DIR/tmux-tracker.py" check
+python3 "$COMPAT_DIR/board_test.py"
 cd "$REPO_DIR"
 test_list="$(cargo test -p zz-mux --lib -- --list)"
 for required_test in \

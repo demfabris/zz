@@ -2,9 +2,9 @@
 
 > Campaign delivery: **PARALLEL WAVE 2 CLOSED 3/3; WAVE 3 FROZEN AND READY**
 >
-> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED); 2 EDITORS + 1 READ-ONLY REVIEWER**
+> Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED); 2 EDITORS + 1 READ-ONLY REVIEWER**
 >
-> Ledger settlement: **69.9% (144 of 206 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **68.9% (144 of 209 known groups); SECONDARY DIAGNOSTIC**
 >
 > Exit evidence: **105 SCENARIOS, 1,675 STEPS, ATTACHED-CLIENT PASS**
 >
@@ -83,8 +83,8 @@ percentage is a ledger health metric, not a compatibility claim.
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
 | Campaign point | Wave 3 is frozen with two disjoint editor chunks and one read-only format reviewer |
-| Live registry | 84 active groups, 586 active items, 122 closed records |
-| Active status | 42 open, 20 blocked, 22 accepted |
+| Live registry | 87 active groups, 586 active items, 122 closed records |
+| Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
@@ -106,10 +106,10 @@ found during that wave.
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
 | New residual groups | Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
-| Live unresolved | 42 open + 20 blocked = 62 |
+| Live unresolved | 45 open + 20 blocked = 65 |
 | Practical exit gate | Open; Wave 3 has 2 frozen editor chunks and 1 read-only review front |
 | Accepted differential | 105 scenarios, 1,675 steps, attached-client `PASS`, 2 registered GEO rows |
-| Ledger settlement | 144 of 206 known groups = 69.9% |
+| Ledger settlement | 144 of 209 known groups = 68.9% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -123,7 +123,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(122 + 22) / (122 + 84) = 144 / 206 = 69.9%
+(122 + 22) / (122 + 87) = 144 / 209 = 68.9%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -966,9 +966,9 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 84 active groups, 586 active items, and 122 closed records: 42 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 144 of 206 groups (69.9%).
-Priority has 62 `later` and 22 `none` groups. The next wave must freeze its own execution order.
+The live registry now has 87 active groups, 586 active items, and 122 closed records: 45 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 144 of 209 groups (68.9%).
+Priority has 65 `later` and 22 `none` groups. The next wave must freeze its own execution order.
 
 Slice 10ah closes
 `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.

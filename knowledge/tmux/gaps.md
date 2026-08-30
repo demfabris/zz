@@ -414,7 +414,7 @@ The GUI superset needs its own names so tmux spellings can keep frozen tmux mean
 
 ### `config.non-utf8-file-bytes`: Match config-file byte parsing
 
-Pinned tmux treats a measured config containing only byte 0xff as successful input with no visible error and one extra hidden empty-command item beyond the ordinary source completion, while zz reads config through read_to_string and rejects it before parsing. The parser needs an explicit byte-input contract rather than a broader claim based on one platform-dependent byte case.
+The parser now exposes distinct raw-byte entrypoints for startup-file and runtime-buffer semantics and pins isolated and embedded byte placement without lossy conversion. MuxEngine adapters and startup and runtime loaders still accept string input, so direct Command, Control, and synchronous if-shell behavior remains open; source-path encoding remains a separate problem.
 
 - Decision: `adopt`
 - Status: `open`
@@ -426,6 +426,8 @@ Pinned tmux treats a measured config containing only byte 0xff as successful inp
 - Evidence:
   - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-mux/src/parser.rs`
+  - `file:crates/zz-mux/tests/config_non_utf8_bytes.rs`
+  - `scenario:compat/scenarios/smoke/config-non-utf8-byte-matrix.txt`
   - `resource:third_party/tmux-reference/UPSTREAM.md`
   - `resource:knowledge/references/tmux-upstream.md`
   - `resource:knowledge/tmux/conf-parser.md`

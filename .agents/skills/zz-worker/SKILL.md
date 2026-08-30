@@ -29,6 +29,11 @@ your tool copy is `/tmp/zz-board-<name>.py` (the name only: the id's slash
 would make it a bogus path). Write both down in your first message and never
 change them: the board tracks your claims and leases by the exact id string.
 
+If you fan work out to subagents (parallel oracle probes, test shards, code
+mining), they inherit your holder id and never speak on the board: no claims,
+no comments, no work outside your claimed zones and reserved paths. One
+holder, one voice.
+
 Shell state does not persist between your Bash calls, so an `export` is gone by
 the next command. Prefix every board invocation instead:
 
@@ -110,14 +115,34 @@ anything: if someone claimed your front, stop and let them have it.
 - `pick` says a front is `STALE-CANDIDATE`: a previous worker finished the code
   but died before integrating. Claim it, fetch their `campaign/*` branch, and
   finish the integration instead of redoing the work.
-- Gate fails under MAIN: fix under your claim if small, otherwise post
-  `rejected` on your own front, release MAIN, and re-approach.
+- Gate fails under MAIN, or review verdicts demand repair: MAIN is for
+  integrating, not repairing. Fix under your claim only if it is minutes;
+  anything longer means release MAIN (your front and zones stay held), repair
+  under the front claim, and re-claim MAIN when candidate-ready. A held MAIN
+  starves every queued candidate. If the repair is wrong-shaped, post
+  `rejected` on your own front instead and release both.
 - Push of main rejected as non-fast-forward: the lock was violated somewhere.
   Never force; re-rebase, re-gate, push again.
 - `pick` says `NOTHING-CLAIMABLE`: claim TRIAGE, mint fronts from open registry
   groups per the issue's triage section (bounded to one 6h lease each, unique
-  scenario path, deps where needed), release, and continue. If the registry
+  scenario path, deps where needed), release, and continue. Mint for the
+  future, not just for now: a front blocked behind an active claim still
+  counts, because it becomes claimable the moment that claim integrates. Never
+  release TRIAGE with nothing minted while open registry groups remain, and
+  pair every withdrawal of a real contract with a corrected re-mint, or a
+  residual saying exactly what must change before re-minting. If the registry
   itself has nothing left to mint, you are done.
+- `NOTHING-CLAIMABLE` while another worker holds TRIAGE: do not stop and do
+  not camp the lock. Re-check `status` every few minutes; their mints or an
+  integration will free work. Spend the wait on review (below).
+- A front is in `CANDIDATE` and you are idle or blocked: review it. Fetch its
+  `campaign/*` branch, read the diff against the front's contract, and probe
+  the pinned oracle where behavior is in doubt. File each confirmed
+  in-contract failure as a `residual` on that front, then post a `note` with
+  your verdict and the residual comment ids. A MAIN holder weighs standing
+  verdicts before pushing; confirmed failures mean repairing under the
+  existing claim, not integrating past them. Review only what you can verify;
+  a wrong DO-NOT-INTEGRATE wastes more than it saves.
 
 ## Stopping
 

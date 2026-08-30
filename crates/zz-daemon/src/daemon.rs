@@ -1083,7 +1083,7 @@ impl Daemon {
         })?;
         restrict_socket_permissions(&self.socket_path)?;
         listener.set_nonblocking(true)?;
-        let socket_guard = SocketGuard::new(self.socket_path.clone())?;
+        let socket_guard = SocketGuard::new(self.socket_path.clone());
         let identity_guard = DaemonIdentityGuard::install(&self.socket_path)?;
 
         self.run_foreground_listener::<LocalTransport>(
@@ -1102,6 +1102,7 @@ impl Daemon {
     where
         T::Listener: Send + 'static,
     {
+        let (mut socket_guard, identity_guard) = socket_guards;
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -1121,17 +1122,21 @@ impl Daemon {
         #[cfg(unix)]
         let _signal_guard = DaemonSignalGuard::install(&shared)?;
         let accept_shared = Arc::clone(&shared);
-        let accept_thread = thread::Builder::new()
+        let accept_thread = match thread::Builder::new()
             .name("zz-daemon-accept".to_owned())
             .spawn(move || {
                 let result = accept_connections::<T>(&listener, &accept_shared);
-                drop(listener);
                 if result.is_err() {
                     accept_shared.request_shutdown();
                 }
-                result
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
+                (result, listener)
+            }) {
+            Ok(thread) => thread,
+            Err(error) => {
+                socket_guard.disarm();
+                return Err(DaemonError::Thread(error.to_string()));
+            }
+        };
         let startup_result = (|| {
             shared.initialize_with_mux_config_files(
                 self.load_user_config,
@@ -1149,22 +1154,25 @@ impl Daemon {
         } else {
             shared.request_shutdown();
         }
-        let accept_result = accept_thread
-            .join()
-            .map_err(|_| DaemonError::Thread("daemon accept thread panicked".to_owned()))?;
-        startup_result?;
+        let Ok((accept_result, listener)) = accept_thread.join() else {
+            socket_guard.disarm();
+            return Err(DaemonError::Thread(
+                "daemon accept thread panicked".to_owned(),
+            ));
+        };
         if accept_result.is_err() {
             shared.request_shutdown();
         }
-        accept_result?;
+        let shutdown_result = startup_result.and(accept_result);
         shared.request_shutdown();
-        let (mut socket_guard, identity_guard) = socket_guards;
-        socket_guard.release();
-        drop(socket_guard);
         shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
         shared.publish(EventPayload::ServerStopping);
         shared.drain_client_writers_for_shutdown(SHUTDOWN_WRITER_TIMEOUT);
+        socket_guard.release();
+        drop(socket_guard);
+        drop(listener);
         drop(identity_guard);
+        shutdown_result?;
         #[cfg(feature = "agent")]
         shared.shutdown_agents();
         shared.log_diagnostic_snapshot("shutdown");
@@ -1252,16 +1260,8 @@ fn accept_connections<T: Transport>(
 }
 
 #[cfg(unix)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SocketIdentity {
-    device: u64,
-    inode: u64,
-}
-
-#[cfg(unix)]
 struct SocketGuard {
     path: PathBuf,
-    identity: SocketIdentity,
     armed: bool,
 }
 
@@ -1270,19 +1270,14 @@ struct SocketGuard;
 
 impl SocketGuard {
     #[cfg(unix)]
-    fn new(path: PathBuf) -> std::io::Result<Self> {
-        let identity = socket_identity(&path)?;
-        Ok(Self {
-            path,
-            identity,
-            armed: true,
-        })
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
     }
 
     #[cfg(windows)]
-    fn new(path: PathBuf) -> std::io::Result<Self> {
+    fn new(path: PathBuf) -> Self {
         let _ = path;
-        Ok(Self)
+        Self
     }
 
     #[cfg(unix)]
@@ -1290,13 +1285,19 @@ impl SocketGuard {
         if !std::mem::take(&mut self.armed) {
             return;
         }
-        if socket_identity(&self.path).ok() == Some(self.identity) {
-            let _ = fs::remove_file(&self.path);
-        }
+        let _ = fs::remove_file(&self.path);
     }
 
     #[cfg(windows)]
     fn release(&mut self) {}
+
+    #[cfg(unix)]
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    #[cfg(windows)]
+    fn disarm(&mut self) {}
 }
 
 #[cfg(unix)]
@@ -1304,23 +1305,6 @@ impl Drop for SocketGuard {
     fn drop(&mut self) {
         self.release();
     }
-}
-
-#[cfg(unix)]
-fn socket_identity(path: &Path) -> std::io::Result<SocketIdentity> {
-    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
-
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.file_type().is_socket() {
-        return Err(std::io::Error::new(
-            ErrorKind::InvalidData,
-            format!("{} is not a Unix socket", path.display()),
-        ));
-    }
-    Ok(SocketIdentity {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-    })
 }
 
 #[cfg(unix)]
@@ -36206,26 +36190,45 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn replacement_socket_survives_stalled_old_writer_shutdown() {
+    fn replacement_bind_waits_for_listener_held_cleanup() {
         let directory = tempfile::tempdir().expect("temporary socket directory");
         let path = directory.path().join("daemon.sock");
-        let old_listener = std::os::unix::net::UnixListener::bind(&path).expect("old listener");
-        let mut socket_guard = SocketGuard::new(path.clone()).expect("old socket guard");
+        let listener = LocalTransport::bind(&path).expect("old listener");
+        let mut socket_guard = SocketGuard::new(path.clone());
         let shared = Arc::new(Shared::new(1));
         let stalled = OutboundMailbox::new();
         let mut registration =
             ClientWriterRegistrationGuard::new(&shared, ClientId(7), Arc::clone(&stalled));
 
-        drop(old_listener);
-        fs::remove_file(&path).expect("unlink old socket");
-        let replacement =
-            std::os::unix::net::UnixListener::bind(&path).expect("replacement listener");
-        socket_guard.release();
-        assert!(!shared.drain_client_writers_for_shutdown(Duration::ZERO));
-        drop(socket_guard);
+        let shutdown_shared = Arc::clone(&shared);
+        let shutdown = thread::spawn(move || {
+            assert!(shutdown_shared.freeze_response_admissions_and_wait(Duration::ZERO));
+            shutdown_shared.publish(EventPayload::ServerStopping);
+            assert!(shutdown_shared.drain_client_writers_for_shutdown(Duration::from_secs(2)));
+            socket_guard.release();
+            drop(socket_guard);
+            drop(listener);
+        });
 
-        let client = std::os::unix::net::UnixStream::connect(&path).expect("connect replacement");
-        let (server, _) = replacement.accept().expect("accept replacement client");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut state = stalled.state.lock();
+        while !state.closed {
+            assert!(
+                !stalled.ready.wait_until(&mut state, deadline).timed_out(),
+                "writer drain did not start"
+            );
+        }
+        drop(state);
+        let Err(replacement_error) = LocalTransport::bind(&path) else {
+            panic!("replacement bound early");
+        };
+        assert_eq!(replacement_error.kind(), ErrorKind::AddrInUse);
+        stalled.mark_writer_finished();
+        shutdown.join().expect("old shutdown");
+
+        let replacement = LocalTransport::bind(&path).expect("replacement listener");
+        let client = LocalTransport::connect(&path).expect("connect replacement");
+        let server = replacement.accept().expect("accept replacement client");
         drop(client);
         drop(server);
         registration.unregister();

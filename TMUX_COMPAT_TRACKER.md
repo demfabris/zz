@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **CHECKPOINT COMMITTED THROUGH SLICE 10AG; THREE-FRONT TRIAL ACTIVE**
+> Campaign state: **SLICE 10AH CLOSED LOCALLY; THREE-FRONT TRIAL ACTIVE**
 >
-> Tracker resolution progress: **68.0% (138 of 203 known groups)**
+> Tracker resolution progress: **68.5% (139 of 203 known groups)**
 >
-> Integrated campaign base: **2026-08-29** at `562b950c617100031cd2159d0e1f5b6a1ba34c40`
+> Integrated campaign base: **2026-08-29** at `01d540758909ab33eb22bdb074f5bf3db18d755f`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -35,7 +35,10 @@ exactly on both engines. The full eight-case startup diagnostic reaches a separa
 exit difference: zz may drain queued shell-prompt `%output` after the flags-0 guard, while pinned
 tmux discards it before `%exit`. A rerank then exposed a higher-priority shutdown race: `kill-server`
 can close a client mailbox before its successful response is admitted. That response-order item is
-the only `next` group; pane-output discard is frozen as slice 10ai. The persisted accepted slice
+the only `next` group; pane-output discard is frozen as slice 10ai. Slice 10ah now closes that race
+without a wire change: shutdown freezes admissions, waits for active responses, drains all client
+writers while retaining the listener, then removes the endpoint. Pane-output discard becomes the
+sole `next` group. The persisted accepted slice
 10ag artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two approved
 GEO rows, every other channel clean, and SHA-256
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Commit `562b950c`
@@ -65,14 +68,14 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Integrated campaign base | `562b950c617100031cd2159d0e1f5b6a1ba34c40` |
-| Delivery | Local and remote `main` contain slices 10w through 10ag plus the hook reclassification in `562b950c` |
+| Integrated campaign base | `01d540758909ab33eb22bdb074f5bf3db18d755f` |
+| Delivery | Local `main` contains the trial workflow plus slice 10ah; remote `main` remains through slice 10ag |
 | Campaign worktrees | Three short-lived trial worktrees branch from the integrated base; the table below owns their paths and file zones |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | Slice 10ah runs on the Control front; config parser edges and strict key grammar run as disjoint trial chunks; 10ai stays behind 10ah on the Control file zone |
-| Live registry | 87 active groups, 594 active items, 116 closed records |
-| Active status | 45 open, 20 blocked, 22 accepted |
+| Campaign point | Slice 10ah is closed; config parser edges are accepted for the next integration, strict key grammar remains under final review, and 10ai is the sole `next` group |
+| Live registry | 86 active groups, 593 active items, 117 closed records |
+| Active status | 44 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
 Commit `562b950c` is the campaign code base for this trial. Resolve the commit containing the latest
@@ -88,7 +91,7 @@ Progress counts a group as resolved when it is either in closed history or has a
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(116 + 22) / (116 + 87) = 138 / 203 = 68.0%
+(117 + 22) / (117 + 86) = 139 / 203 = 68.5%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -931,18 +934,18 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 87 active groups, 594 active items, and 116 closed records: 45 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 138 of 203 groups (68.0%).
-Priority has one `next`, 64 `later`, and 22 `none` groups.
+The live registry now has 86 active groups, 593 active items, and 117 closed records: 44 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 139 of 203 groups (68.5%).
+Priority has one `next`, 63 `later`, and 22 `none` groups.
 
-Slice 10ah is frozen under
+Slice 10ah closes
 `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.
-`kill-server` currently requests shutdown before its client handler admits `CommandResponse`, so
-the daemon can publish `ServerStopping` and close the mailbox first. A successful Control command
-must receive its empty flags-1 `%end`, then exactly one `%exit`, with rc 0 and no unexpected-exit
-text. A successful Command client must also receive its response before connection and socket
-teardown. A synchronization-controlled daemon test must force the old ordering, while stalled,
-disconnected, and genuine-loss paths stay bounded and retain their correct failure results.
+Response admission now freezes atomically before `ServerStopping`, every registered writer joins the
+bounded drain, and the foreground thread keeps the listener until responses and writers finish.
+It removes the endpoint before dropping that listener. Controlled tests cover the former admission
+race, late Control and Command requests, stalled and disconnected writers, and replacement binding
+during cleanup. CLI tests prove the empty successful response, one final Control `%exit`, and an
+immediate fresh-daemon launch.
 
 Slice 10ai is frozen under
 `control-mode.exit-pane-output/semantic:control-mode-exit-pane-output-discard`. On EOF or a blank

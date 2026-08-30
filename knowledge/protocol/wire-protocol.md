@@ -248,11 +248,12 @@ Return, the front-end must stop rendering pending and later `PaneOutput` and `Pa
 while it drains guards, diagnostics, command output, flow notifications, retained status, and one
 final exit. The active `control-mode.exit-pane-output` item requires no protocol field or version.
 
-The active `control-mode.kill-server-response-order` item also uses existing messages. A successful
-`kill-server` response must enter the Command or Control mailbox before shutdown publishes
-`ServerStopping` and closes the connection. Control then closes the flags-1 command guard with
-`%end` before exactly one `%exit`; ordinary Command clients receive their success response before
-socket teardown. Slice 10ah changes admission and drain order, not the wire format.
+Slice 10ah closed `control-mode.kill-server-response-order` with existing messages. Shutdown now
+freezes new response admissions, waits for admitted Command and Control responses, publishes
+`ServerStopping`, and drains every registered writer before endpoint removal. Control closes the
+flags-1 command guard with `%end` before exactly one `%exit`; ordinary Command clients receive their
+success response before socket teardown. The listener remains held through the bounded drain, so
+the change needs no protocol field or version.
 
 v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
 It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command

@@ -150,6 +150,8 @@ const MAX_CONCURRENT_PASTE_UPLOADS: usize = 2;
 const PASTE_UPLOAD_RETENTION: usize = 8;
 const MAX_PASTED_IMAGES_PER_PANE: usize = 8;
 const MAX_PASTED_IMAGE_BYTES_PER_PANE: usize = 24 * 1024 * 1024;
+const SHUTDOWN_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const SHUTDOWN_WRITER_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(unix)]
 static TMUX_SHIM_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -1100,6 +1102,7 @@ impl Daemon {
     where
         T::Listener: Send + 'static,
     {
+        let (mut socket_guard, identity_guard) = socket_guards;
         let color_scheme = daemon_color_scheme();
         let load = AppearanceLoad::defaults_for(color_scheme);
         log_appearance_load("startup", &load);
@@ -1119,17 +1122,21 @@ impl Daemon {
         #[cfg(unix)]
         let _signal_guard = DaemonSignalGuard::install(&shared)?;
         let accept_shared = Arc::clone(&shared);
-        let accept_thread = thread::Builder::new()
+        let accept_thread = match thread::Builder::new()
             .name("zz-daemon-accept".to_owned())
             .spawn(move || {
                 let result = accept_connections::<T>(&listener, &accept_shared);
-                drop(listener);
                 if result.is_err() {
                     accept_shared.request_shutdown();
                 }
-                result
-            })
-            .map_err(|error| DaemonError::Thread(error.to_string()))?;
+                (result, listener)
+            }) {
+            Ok(thread) => thread,
+            Err(error) => {
+                socket_guard.disarm();
+                return Err(DaemonError::Thread(error.to_string()));
+            }
+        };
         let startup_result = (|| {
             shared.initialize_with_mux_config_files(
                 self.load_user_config,
@@ -1147,20 +1154,25 @@ impl Daemon {
         } else {
             shared.request_shutdown();
         }
-        let accept_result = accept_thread
-            .join()
-            .map_err(|_| DaemonError::Thread("daemon accept thread panicked".to_owned()))?;
-        drop(socket_guards);
-        startup_result?;
+        let Ok((accept_result, listener)) = accept_thread.join() else {
+            socket_guard.disarm();
+            return Err(DaemonError::Thread(
+                "daemon accept thread panicked".to_owned(),
+            ));
+        };
         if accept_result.is_err() {
             shared.request_shutdown();
         }
-        accept_result?;
+        let shutdown_result = startup_result.and(accept_result);
         shared.request_shutdown();
+        shared.freeze_response_admissions_and_wait(SHUTDOWN_RESPONSE_TIMEOUT);
         shared.publish(EventPayload::ServerStopping);
-        shared.drain_subscribers_for_shutdown(Duration::from_secs(2));
-        // The adapter children are told to close and joined before the socket
-        // goes; what refuses to settle is the acp crate's problem, not ours.
+        shared.drain_client_writers_for_shutdown(SHUTDOWN_WRITER_TIMEOUT);
+        socket_guard.release();
+        drop(socket_guard);
+        drop(listener);
+        drop(identity_guard);
+        shutdown_result?;
         #[cfg(feature = "agent")]
         shared.shutdown_agents();
         shared.log_diagnostic_snapshot("shutdown");
@@ -1248,29 +1260,50 @@ fn accept_connections<T: Transport>(
 }
 
 #[cfg(unix)]
-struct SocketGuard(PathBuf);
+struct SocketGuard {
+    path: PathBuf,
+    armed: bool,
+}
 
 #[cfg(windows)]
 struct SocketGuard;
 
 impl SocketGuard {
+    #[cfg(unix)]
     fn new(path: PathBuf) -> Self {
-        #[cfg(unix)]
-        {
-            Self(path)
-        }
-        #[cfg(windows)]
-        {
-            let _ = path;
-            Self
-        }
+        Self { path, armed: true }
     }
+
+    #[cfg(windows)]
+    fn new(path: PathBuf) -> Self {
+        let _ = path;
+        Self
+    }
+
+    #[cfg(unix)]
+    fn release(&mut self) {
+        if !std::mem::take(&mut self.armed) {
+            return;
+        }
+        let _ = fs::remove_file(&self.path);
+    }
+
+    #[cfg(windows)]
+    fn release(&mut self) {}
+
+    #[cfg(unix)]
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    #[cfg(windows)]
+    fn disarm(&mut self) {}
 }
 
 #[cfg(unix)]
 impl Drop for SocketGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        self.release();
     }
 }
 
@@ -2425,6 +2458,9 @@ fn daemon_command_dispatch(name: &str) -> Option<DaemonCommandDispatch> {
 
 struct Shared {
     inner: Mutex<ServerState>,
+    client_writers: Mutex<BTreeMap<ClientId, Arc<OutboundMailbox>>>,
+    response_admissions: Mutex<ResponseAdmissionState>,
+    response_admissions_changed: Condvar,
     default_attach_effects: Mutex<()>,
     pipe_effects: Mutex<()>,
     prompt_history_effects: Mutex<()>,
@@ -2458,6 +2494,8 @@ struct Shared {
     socket_path: PathBuf,
     #[cfg(test)]
     delivered_wrap_search_commands: Mutex<Vec<bool>>,
+    #[cfg(test)]
+    response_admission_hook: Mutex<Option<ResponseAdmissionHook>>,
     #[cfg(unix)]
     tmux_shim: Mutex<Option<TmuxShimGuard>>,
 }
@@ -3207,6 +3245,29 @@ struct ClientRegistrationGuard {
     armed: bool,
 }
 
+struct ClientWriterRegistrationGuard {
+    shared: Arc<Shared>,
+    client: ClientId,
+    armed: bool,
+}
+
+struct ResponseAdmissionGuard {
+    shared: Arc<Shared>,
+    armed: bool,
+}
+
+#[derive(Default)]
+struct ResponseAdmissionState {
+    active: usize,
+    frozen: bool,
+}
+
+#[cfg(test)]
+struct ResponseAdmissionHook {
+    reached: crossbeam_channel::Sender<()>,
+    release: crossbeam_channel::Receiver<()>,
+}
+
 impl ClientRegistrationGuard {
     fn new(shared: &Arc<Shared>, client: ClientId) -> Self {
         Self {
@@ -3226,6 +3287,69 @@ impl ClientRegistrationGuard {
 impl Drop for ClientRegistrationGuard {
     fn drop(&mut self) {
         self.unregister();
+    }
+}
+
+impl ClientWriterRegistrationGuard {
+    fn new(shared: &Arc<Shared>, client: ClientId, outbound: Arc<OutboundMailbox>) -> Self {
+        shared.client_writers.lock().insert(client, outbound);
+        Self {
+            shared: Arc::clone(shared),
+            client,
+            armed: true,
+        }
+    }
+
+    fn unregister(&mut self) {
+        if std::mem::take(&mut self.armed) {
+            self.shared.client_writers.lock().remove(&self.client);
+        }
+    }
+}
+
+impl Drop for ClientWriterRegistrationGuard {
+    fn drop(&mut self) {
+        self.unregister();
+    }
+}
+
+impl ResponseAdmissionGuard {
+    fn new(shared: &Arc<Shared>) -> Option<Self> {
+        let mut state = shared.response_admissions.lock();
+        if state.frozen {
+            return None;
+        }
+        state.active = state
+            .active
+            .checked_add(1)
+            .expect("response admission overflow");
+        drop(state);
+        Some(Self {
+            shared: Arc::clone(shared),
+            armed: true,
+        })
+    }
+
+    fn finish(&mut self) {
+        if !std::mem::take(&mut self.armed) {
+            return;
+        }
+        let mut state = self.shared.response_admissions.lock();
+        state.active = state
+            .active
+            .checked_sub(1)
+            .expect("response admission underflow");
+        let notify = state.active == 0;
+        drop(state);
+        if notify {
+            self.shared.response_admissions_changed.notify_all();
+        }
+    }
+}
+
+impl Drop for ResponseAdmissionGuard {
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 
@@ -3380,6 +3504,9 @@ impl Shared {
             crossbeam_channel::unbounded();
         Self {
             inner: Mutex::new(state),
+            client_writers: Mutex::new(BTreeMap::new()),
+            response_admissions: Mutex::new(ResponseAdmissionState::default()),
+            response_admissions_changed: Condvar::new(),
             default_attach_effects: Mutex::new(()),
             pipe_effects: Mutex::new(()),
             prompt_history_effects: Mutex::new(()),
@@ -3409,6 +3536,8 @@ impl Shared {
             socket_path,
             #[cfg(test)]
             delivered_wrap_search_commands: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            response_admission_hook: Mutex::new(None),
             #[cfg(unix)]
             tmux_shim: Mutex::new(None),
         }
@@ -3757,24 +3886,45 @@ impl Shared {
             .map_err(|error| DaemonError::Thread(error.to_string()))
     }
 
-    /// Bounded wait for every subscriber's writer to flush its queue to the
-    /// socket before the process exits, so a stopping server's final events
-    /// (the `kill-server` response, `ServerStopping`) reach clients instead
-    /// of dying in mailboxes — the contract tmux calls `control_all_done`.
-    fn drain_subscribers_for_shutdown(&self, timeout: Duration) {
-        let mailboxes = {
-            let inner = self.inner.lock();
-            inner.subscribers.values().cloned().collect::<Vec<_>>()
-        };
+    fn freeze_response_admissions_and_wait(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut state = self.response_admissions.lock();
+        state.frozen = true;
+        while state.active != 0 {
+            if self
+                .response_admissions_changed
+                .wait_until(&mut state, deadline)
+                .timed_out()
+            {
+                log::warn!(
+                    "shutdown proceeding before {} command responses were admitted",
+                    state.active
+                );
+                return false;
+            }
+        }
+        true
+    }
+
+    fn drain_client_writers_for_shutdown(&self, timeout: Duration) -> bool {
+        let mailboxes = self
+            .client_writers
+            .lock()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
         let deadline = Instant::now() + timeout;
         for mailbox in &mailboxes {
             mailbox.close_after_flush();
         }
+        let mut drained = true;
         for mailbox in &mailboxes {
             if !mailbox.wait_writer_finished(deadline) {
                 log::warn!("shutdown proceeding before a client writer drained");
+                drained = false;
             }
         }
+        drained
     }
 
     fn request_shutdown(&self) {
@@ -4636,6 +4786,32 @@ impl Shared {
             );
         }
         response
+    }
+
+    fn execute_command_request_with_prepared_into(
+        self: &Arc<Self>,
+        outbound: &OutboundMailbox,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+        request_id: u64,
+        command: &CommandInvocation,
+        prepared: bool,
+    ) -> bool {
+        let Some(mut admission) = ResponseAdmissionGuard::new(self) else {
+            return false;
+        };
+        let response = self.execute_command_request_with_prepared(
+            client, kind, context, request_id, command, prepared,
+        );
+        #[cfg(test)]
+        if let Some(hook) = self.response_admission_hook.lock().take() {
+            let _ = hook.reached.send(());
+            let _ = hook.release.recv();
+        }
+        let admitted = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
+        admission.finish();
+        admitted
     }
 
     fn prepare_command_request(
@@ -28765,6 +28941,8 @@ fn handle_connection<S: TransportStream>(
         .name(format!("zz-client-writer-{}", client.0))
         .spawn(move || write_outbound(&mut writer, &writer_mailbox))
         .map_err(|error| DaemonError::Thread(error.to_string()))?;
+    let mut writer_registration =
+        ClientWriterRegistrationGuard::new(shared, client, Arc::clone(&outbound));
     let _ = outbound.enqueue_reliable(&ProtocolMessage::ServerHello(server_hello));
     if matches!(hello.kind, ClientKind::Interactive | ClientKind::Control) {
         shared.subscribe(client, Arc::clone(&outbound));
@@ -28809,7 +28987,8 @@ fn handle_connection<S: TransportStream>(
                     prepared,
                 }) = receiver.recv()
                 {
-                    let response = worker_shared.execute_command_request_with_prepared(
+                    let _ = worker_shared.execute_command_request_with_prepared_into(
+                        &worker_outbound,
                         client,
                         ClientKind::Command,
                         &mut context,
@@ -28817,8 +28996,6 @@ fn handle_connection<S: TransportStream>(
                         &command,
                         prepared,
                     );
-                    let _ = worker_outbound
-                        .enqueue_reliable(&ProtocolMessage::CommandResponse(response));
                 }
             }) {
             Ok(worker) => worker,
@@ -28877,7 +29054,8 @@ fn handle_connection<S: TransportStream>(
                         ));
                     }
                 } else {
-                    let response = shared.execute_command_request_with_prepared(
+                    let _ = shared.execute_command_request_with_prepared_into(
+                        &outbound,
                         client,
                         hello.kind,
                         context.as_mut().expect("interactive client owns context"),
@@ -28885,7 +29063,6 @@ fn handle_connection<S: TransportStream>(
                         &command,
                         prepared,
                     );
-                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(response));
                 }
             }
             ProtocolMessage::PrepareCommandList {
@@ -29086,6 +29263,7 @@ fn handle_connection<S: TransportStream>(
             "writer thread panicked for client={client}",
         );
     }
+    writer_registration.unregister();
     log::debug!(
         target: "zz_daemon::diagnostics::connection",
         "unregistered client={client} success={} connection_elapsed_us={}",
@@ -35842,6 +36020,218 @@ mod tests {
             drop(client);
             connection.join().unwrap().unwrap();
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_server_waits_for_response_admission_before_stopping_client_writers() {
+        for (index, kind) in [ClientKind::Control, ClientKind::Command]
+            .into_iter()
+            .enumerate()
+        {
+            let shared = Arc::new(Shared::new(index as u64 + 1));
+            let (reached_tx, reached_rx) = crossbeam_channel::bounded(1);
+            let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+            *shared.response_admission_hook.lock() = Some(ResponseAdmissionHook {
+                reached: reached_tx,
+                release: release_rx,
+            });
+
+            let (mut client, server) = std::os::unix::net::UnixStream::pair().expect("pair");
+            client
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("read timeout");
+            let server_shared = Arc::clone(&shared);
+            let connection = thread::spawn(move || handle_connection(server, &server_shared));
+            zz_protocol::write_protocol_message(
+                &mut client,
+                &ProtocolMessage::ClientHello(ClientHello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_instance_id: ClientInstanceId(index as u64 + 1),
+                    kind,
+                    device_name: None,
+                    capabilities: Vec::new(),
+                    color_scheme: None,
+                    origin: None,
+                    environment: Vec::new(),
+                    working_directory: None,
+                    process_id: 0,
+                }),
+            )
+            .expect("hello");
+            assert!(matches!(
+                zz_protocol::read_protocol_message(&mut client).expect("server hello"),
+                ProtocolMessage::ServerHello(_)
+            ));
+
+            zz_protocol::write_protocol_message(
+                &mut client,
+                &ProtocolMessage::CommandRequest(CommandRequest {
+                    request_id: 41,
+                    command: CommandInvocation::new("kill-server", [] as [&str; 0]),
+                    prepared: false,
+                }),
+            )
+            .expect("kill-server request");
+            reached_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("response reached admission hook");
+            assert!(shared.stopping.load(Ordering::Acquire));
+            assert_eq!(shared.response_admissions.lock().active, 1);
+            assert!(!shared.freeze_response_admissions_and_wait(Duration::ZERO));
+
+            let shutdown_shared = Arc::clone(&shared);
+            let shutdown = thread::spawn(move || {
+                assert!(
+                    shutdown_shared.freeze_response_admissions_and_wait(Duration::from_secs(2))
+                );
+                shutdown_shared.publish(EventPayload::ServerStopping);
+                assert!(shutdown_shared.drain_client_writers_for_shutdown(Duration::from_secs(2)));
+            });
+            release_tx.send(()).expect("release response admission");
+
+            loop {
+                let response =
+                    zz_protocol::read_protocol_message(&mut client).expect("kill-server response");
+                assert!(!matches!(
+                    &response,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ServerStopping,
+                        ..
+                    })
+                ));
+                if matches!(
+                    &response,
+                    ProtocolMessage::CommandResponse(CommandResponse::Success {
+                        request_id: 41,
+                        output,
+                        exit_code: 0,
+                        stderr,
+                    }) if output.is_empty() && stderr.is_empty()
+                ) {
+                    break;
+                }
+            }
+            if kind == ClientKind::Control {
+                loop {
+                    if matches!(
+                        zz_protocol::read_protocol_message(&mut client).expect("server stopping"),
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ServerStopping,
+                            ..
+                        })
+                    ) {
+                        break;
+                    }
+                }
+            }
+            let mut byte = [0_u8; 1];
+            assert_eq!(client.read(&mut byte).expect("connection close"), 0);
+
+            shutdown.join().expect("shutdown phase");
+            connection
+                .join()
+                .expect("connection thread")
+                .expect("connection result");
+            assert!(shared.client_writers.lock().is_empty());
+        }
+    }
+
+    #[test]
+    fn stalled_writer_and_failed_response_admission_remain_bounded() {
+        let shared = Arc::new(Shared::new(1));
+        let stalled = OutboundMailbox::new();
+        let mut registration =
+            ClientWriterRegistrationGuard::new(&shared, ClientId(7), Arc::clone(&stalled));
+        assert!(!shared.drain_client_writers_for_shutdown(Duration::ZERO));
+        assert!(!stalled.is_open());
+        registration.unregister();
+
+        let disconnected = OutboundMailbox::new();
+        disconnected.close();
+        let admitted = shared.execute_command_request_with_prepared_into(
+            &disconnected,
+            ClientId(8),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            9,
+            &CommandInvocation::new("kill-server", [] as [&str; 0]),
+            false,
+        );
+        assert!(!admitted);
+        assert!(shared.freeze_response_admissions_and_wait(Duration::ZERO));
+    }
+
+    #[test]
+    fn frozen_response_admission_rejects_late_control_and_command_execution() {
+        for (index, kind) in [ClientKind::Control, ClientKind::Command]
+            .into_iter()
+            .enumerate()
+        {
+            let shared = Arc::new(Shared::new(index as u64 + 1));
+            assert!(shared.freeze_response_admissions_and_wait(Duration::ZERO));
+            let outbound = OutboundMailbox::new();
+            assert!(!shared.execute_command_request_with_prepared_into(
+                &outbound,
+                ClientId(index as u64 + 1),
+                kind,
+                &mut ExecutionContext::default(),
+                41,
+                &CommandInvocation::new("kill-server", [] as [&str; 0]),
+                false,
+            ));
+            assert!(!shared.stopping.load(Ordering::Acquire));
+            assert_eq!(outbound.queued_reliable(), Some((0, 0)));
+            let state = shared.response_admissions.lock();
+            assert!(state.frozen);
+            assert_eq!(state.active, 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_bind_waits_for_listener_held_cleanup() {
+        let directory = tempfile::tempdir().expect("temporary socket directory");
+        let path = directory.path().join("daemon.sock");
+        let listener = LocalTransport::bind(&path).expect("old listener");
+        let mut socket_guard = SocketGuard::new(path.clone());
+        let shared = Arc::new(Shared::new(1));
+        let stalled = OutboundMailbox::new();
+        let mut registration =
+            ClientWriterRegistrationGuard::new(&shared, ClientId(7), Arc::clone(&stalled));
+
+        let shutdown_shared = Arc::clone(&shared);
+        let shutdown = thread::spawn(move || {
+            assert!(shutdown_shared.freeze_response_admissions_and_wait(Duration::ZERO));
+            shutdown_shared.publish(EventPayload::ServerStopping);
+            assert!(shutdown_shared.drain_client_writers_for_shutdown(Duration::from_secs(2)));
+            socket_guard.release();
+            drop(socket_guard);
+            drop(listener);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut state = stalled.state.lock();
+        while !state.closed {
+            assert!(
+                !stalled.ready.wait_until(&mut state, deadline).timed_out(),
+                "writer drain did not start"
+            );
+        }
+        drop(state);
+        let Err(replacement_error) = LocalTransport::bind(&path) else {
+            panic!("replacement bound early");
+        };
+        assert_eq!(replacement_error.kind(), ErrorKind::AddrInUse);
+        stalled.mark_writer_finished();
+        shutdown.join().expect("old shutdown");
+
+        let replacement = LocalTransport::bind(&path).expect("replacement listener");
+        let client = LocalTransport::connect(&path).expect("connect replacement");
+        let server = replacement.accept().expect("accept replacement client");
+        drop(client);
+        drop(server);
+        registration.unregister();
     }
 
     #[cfg(unix)]

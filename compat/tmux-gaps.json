@@ -580,7 +580,7 @@
       "title": "Discard pending pane output when Control exits",
       "decision": "adopt",
       "status": "open",
-      "priority": "later",
+      "priority": "next",
       "ease": "medium",
       "impact": [
         "scripts"
@@ -605,40 +605,6 @@
       ],
       "depends_on": [],
       "reason": "On EOF or a blank line, pinned tmux marks the client exiting, removes queued pane-byte blocks, rejects later pane bytes, and drains only the remaining control stream before exit. zz sends Detach and renders queued PaneOutput events during the exit drain, allowing a newly created shell prompt to appear between the command guard and %exit."
-    },
-    {
-      "id": "control-mode.kill-server-response-order",
-      "title": "Order kill-server replies before daemon shutdown",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "medium",
-      "impact": [
-        "scripts",
-        "admin"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:control-mode-kill-server-response-order"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz/src/control_mode.rs",
-        "file:crates/zz/tests/cli_binary.rs",
-        "resource:knowledge/protocol/wire-protocol.md",
-        "resource:knowledge/designs/tmux-drop-in.md",
-        "resource:third_party/tmux-reference/UPSTREAM.md",
-        "resource:knowledge/references/tmux-upstream.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "A Control client whose kill-server command succeeds receives the matching empty success response, closes the command's flags-1 guard with %end, then emits exactly one %exit; stdout contains no server exited unexpectedly text, stderr is empty, and the process exits zero.",
-        "An ordinary Command client whose kill-server command succeeds receives its matching success response and exits zero with empty stderr before the daemon closes its connection and removes the socket.",
-        "A synchronization-controlled daemon regression forces the shutdown request to win the old race against response admission and proves that shutdown waits for the response without sleeps or probabilistic retry loops, then delivers ServerStopping and closes the connection.",
-        "Response admission and writer draining remain bounded when a client stalls or disconnects, while a genuine connection loss before a completed response remains an error rather than being reclassified as a successful kill-server."
-      ],
-      "depends_on": [],
-      "reason": "KillServer requests shutdown before the client handler has constructed and admitted its CommandResponse. The foreground daemon joins only the accept thread, so it can publish ServerStopping and close a subscribed Control mailbox while that handler is still returning; the closed mailbox rejects the later response. Control then retains the clean ServerStopping signal but writes server exited unexpectedly into its open command guard on disconnect. The existing shutdown drain flushes only frames already admitted and does not include ordinary Command mailboxes. Cargo launch timing exposed the race in the existing black-box regression, while the same executable also passes under other schedules. The earlier phase repair claimed this ordering closed in project history, but no active or closed registry item owns it."
     },
     {
       "id": "copy-mode.action-fidelity",
@@ -3427,6 +3393,20 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Synchronous inserted command lists reached during parser-owned Control replay now retain the original Control recipient. This covers foreground shell-evaluated if-shell without -b, immediate if-shell -F including -bF, and foreground run-shell -C. The daemon captures nested guard and diagnostic events per client and thread, then publishes one flags-1 frame for the triggering replay command, each inserted command, an inserted source command, and each sourced child in parent-before-child order. Output, source-command errors, runtime client_failure, retained status, unsupported-command continuation, and nested success or failure remain command-scoped without folding, duplication, cross-thread interception, or leakage into the next input command. An unsupported zz-only inserted command emits an empty success guard and later inserted siblings continue, but it does not join ConfigLoadReport's skipped summary; the existing command and semantic coverage still owns that reporting gap. An unknown command inside the child file matches the pin's parent success, source success, then `%config-error` Warning without its own guard, so it creates no new gap. The implementation reuses protocol v76 SourcedCommandGuard and does not bump the protocol. At this checkpoint immediate-hook and background-callback flags-0 framing remained open under control-mode.hook-command-frames and control-mode.background-inserted-command-frames. Later closures closed both groups. Ordinary run-shell -b output remains under control-mode.async-command-output. Focused matrix and cross-thread tests pass; the focused source_file set passes 6 of 6 and the replayed set passes 5 of 5. A fresh debug build, strict daemon clippy, formatting, shell syntax, and scoped and global diff checks pass. The strict nine-step smoke/source-file-control and 12-step source-file-output differentials have zero differences and no skips. The stored canonical source-file-control row remains unchanged at three steps."
+    },
+    {
+      "id": "control-mode.kill-server-response-order",
+      "title": "Order kill-server replies before daemon shutdown",
+      "closed_on": "2026-08-29",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "file:crates/zz/tests/cli_binary.rs",
+        "resource:knowledge/protocol/wire-protocol.md",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Shutdown now freezes new response admissions under the same lock that counts active requests, waits a bounded interval for admitted Control and Command responses to enter their mailboxes, publishes ServerStopping, and drains every registered client writer through one bounded deadline. Late requests cannot execute after the freeze. The foreground thread regains and holds the actual listener through admission and writer drain, then removes the endpoint before dropping the listener, so a replacement cannot bind while the old path guard remains armed. Controlled regressions cover an active response, zero-to-late Control and Command requests, a stalled writer, a disconnected mailbox, and replacement binding during cleanup. Command and Control CLI tests prove empty successful kill-server replies, one final Control exit, no unexpected-exit text, and immediate fresh-daemon startup."
     },
     {
       "id": "control-mode.source-diagnostic-typing",

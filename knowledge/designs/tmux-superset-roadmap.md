@@ -38,9 +38,9 @@ records the source-anchored baseline used to build this plan.
 
 # Current checkpoint, 2026-08-29
 
-Slices 10w through 10ag form the authorized 2026-08-29 checkpoint. The tracker has 87 active groups,
-594 classified active items, and 116 closed groups: 45 open, 20 blocked, and 22 accepted. Accepted
-active groups plus closed history resolve 138 of 203 known groups (68.0%). The persisted accepted
+Slices 10w through 10ah form the authorized 2026-08-29 checkpoint. The tracker has 86 active groups,
+593 classified active items, and 117 closed groups: 44 open, 20 blocked, and 22 accepted. Accepted
+active groups plus closed history resolve 139 of 203 known groups (68.5%). The persisted accepted
 slice 10ag artifact covers 103 scenarios and 1,630 steps, with attached-client `PASS`, exactly two
 approved GEO rows, every other channel clean, and SHA-256
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Slice 10af closes
@@ -49,8 +49,8 @@ Slice 10ag closes `source-file.startup-client-cwd/semantic:source-file-startup-i
 without a public protocol change. Full zz validation passes 653 unit tests plus 113 CLI binary
 tests. Serialized daemon validation passes 736 unit tests plus two active agent integrations, with
 one soak ignored. The full workspace excluding the daemon, full workspace clippy, and
-`cargo fmt --check` pass. Slice 10ah takes
-`control-mode.kill-server-response-order`; slice 10ai follows under
+`cargo fmt --check` pass. Slice 10ah closes
+`control-mode.kill-server-response-order`; slice 10ai is now the sole `next` group under
 `control-mode.exit-pane-output`.
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
@@ -325,16 +325,17 @@ equivalent pinned-tmux probes emitted none. Slice 10ai owns pending and later pa
 EOF or blank Return. Hard-disconnect cancellation, command output, retained status, and flow control
 remain outside that slice.
 
-The rerank freezes `control-mode.kill-server-response-order` as slice 10ah. Shutdown can publish
-`ServerStopping` and close a mailbox before the handler admits the successful response. Control
-must receive its empty flags-1 `%end` before one `%exit`; ordinary Command must receive success
-before socket teardown. A synchronization-controlled daemon regression must force the old race,
-while stalled, disconnected, and genuine-loss paths remain bounded. Pane-output discard follows as
-slice 10ai.
+Slice 10ah closes `control-mode.kill-server-response-order`. Shutdown freezes response admission
+under the active-request lock, waits a bounded interval for admitted replies, publishes
+`ServerStopping`, and drains every registered writer through one deadline. The foreground thread
+retains the listener through that drain, removes the endpoint while it still owns the listener, and
+then drops it. Deterministic tests cover the old race, late Control and Command requests, stalled and
+disconnected writers, replacement binding during cleanup, and immediate fresh-daemon startup.
+Pane-output discard follows as slice 10ai.
 
-The registry now has 87 active groups and 594 active items, with 116 closed records: 45 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 138 of 203 groups (68.0%).
-Slices 10w through 10ag form the authorized 2026-08-29 checkpoint. The persisted accepted slice 10ag
+The registry now has 86 active groups and 593 active items, with 117 closed records: 44 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 139 of 203 groups (68.5%).
+Slices 10w through 10ah form the authorized 2026-08-29 checkpoint. The persisted accepted slice 10ag
 artifact covers 103 scenarios and 1,630 steps with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
 `46fdd592366fe2b500fd2031fe82b87df3e4f3fda17f9a6d1a98595ad5da5313`. Full zz and serialized

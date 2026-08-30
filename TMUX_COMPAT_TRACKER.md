@@ -76,16 +76,16 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | `F-ALIASES-MULTI-BODY` closes `aliases.command-bodies`; the next worker claims the dispatch-board front from published `origin/main` |
+| Delivery | `F-CONFIG-BYTE-LEXER` adds raw-byte parser entrypoints for startup-file and signed-buffer semantics plus the two-step byte matrix; `F-CONFIG-BYTE-ENGINE` and `F-CONFIG-BYTE-LOADERS` remain queued |
 | Campaign worktrees | Each editor creates a dedicated worktree after claiming its front; shared campaign artifacts remain coordinator-owned |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Multi-command and empty alias bodies are closed; forced-shutdown multi-window hook order is a separate registered residual |
+| Campaign point | Config parsing preserves raw input bytes under separate startup-file and signed-buffer modes; MuxEngine adapters, filesystem loaders, Command, Control, if-shell, and source-path encoding remain open |
 | Live registry | 87 active groups, 586 active items, 123 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
-| Known differentials | 2 registered geometry cases |
+| Known differentials | 2 registered geometry cases plus 2 clean-main source-replay output and warning regressions under issue comment `5471998427` |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
 `fde87af3`. Resolve the commit containing the latest tracker update with
@@ -108,7 +108,8 @@ found during that wave.
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
 | Live unresolved | 45 open + 20 blocked = 65 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Accepted differential | 106 scenarios, 1,683 steps, attached-client `PASS`, 2 registered GEO rows |
+| Latest differential | 107 scenarios, 1,685 steps, attached-client `PASS`, 2 registered GEO rows, and 2 clean-main source-replay OUT/WARN rows |
+| Differential SHA-256 | `b7236c220735d917649fd4ce9e1ad0480479a3242779b0a38b98bdd90160afc8` |
 | Ledger settlement | 145 of 210 known groups = 69.0% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
@@ -136,6 +137,18 @@ Each group has equal weight even though effort and item count differ. Closed rec
 their former item lists, so schema 3 cannot support an honest historical item-weighted percentage.
 New discoveries can lower this number. The practical exit gate and fixed-cohort delivery carry the
 campaign decision.
+
+### F-CONFIG-BYTE-LEXER integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Parser package | 540 tests passed, including 7 byte-matrix integration tests |
+| Workspace clippy | Passed with all targets, all features, and warnings denied |
+| Differential | 107 scenarios and 1,685 steps; the byte matrix passed both steps; attached-client passed |
+| Registered differences | The two named known rows retained one GEO cell each |
+| Clean-main gate defects | `daemon::tests::direct_shutdown_runs_session_close_hooks` failed alone on `origin/main` `4146340d`; `smoke/args-parse-if-shell` and `smoke/args-parse-run-shell` reproduced their single OUT/WARN rows on the same clean base |
+| Summary SHA-256 | `b7236c220735d917649fd4ce9e1ad0480479a3242779b0a38b98bdd90160afc8` |
+| Remaining config-byte work | `F-CONFIG-BYTE-ENGINE` owns MuxEngine adapters; `F-CONFIG-BYTE-LOADERS` owns startup and runtime filesystem reads plus Command, Control, and synchronous if-shell behavior; source-path encoding stays separate |
 
 ## Source-of-truth order
 

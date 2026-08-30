@@ -64,6 +64,7 @@ ZONES = {
     ],
     "protocol-key": ["crates/zz-protocol/src/key.rs"],
     "protocol-catalog": ["crates/zz-protocol/src/catalog.rs"],
+    "desktop-gpui": ["crates/zz/src/ (control_mode.rs belongs to control-client)"],
     "main-lock": [],
     "triage-lock": [],
 }
@@ -175,6 +176,7 @@ class Board:
     def __init__(self):
         self.fronts = {}
         self.residuals = []
+        self.notes_log = []
         self.warnings = []
 
     def expire(self, asof):
@@ -207,6 +209,13 @@ class Board:
             for d in front.deps
         )
 
+    def deps_broken(self, front):
+        return [
+            d
+            for d in front.deps
+            if self.fronts.get(d) is None or self.fronts[d].state == "WITHDRAWN"
+        ]
+
     def apply(self, comment):
         cid = comment["id"]
         created = parse_time(comment["created_at"])
@@ -221,10 +230,23 @@ class Board:
         self.expire(created)
 
         if verb == "NOTE":
+            self.notes_log.append(
+                {
+                    "comment": cid,
+                    "front": arg or "none",
+                    "holder": fields.get("holder", "unattributed"),
+                    "note": fields.get("note", ""),
+                }
+            )
             return
         if verb == "RESIDUAL":
             self.residuals.append(
-                {"comment": cid, "front": fields.get("front", arg or "none"), "note": fields.get("note", "")}
+                {
+                    "comment": cid,
+                    "front": fields.get("front", arg or "none"),
+                    "holder": fields.get("holder", "unattributed"),
+                    "note": fields.get("note", ""),
+                }
             )
             return
 
@@ -423,7 +445,14 @@ def front_row(board, front, asof):
     else:
         who = "-"
     busy = board.zones_busy(front, asof) if front.state in ("READY", "STALE-CANDIDATE") else []
-    deps = "" if board.deps_met(front) else f" deps-wait:{','.join(front.deps)}"
+    deps = ""
+    if not board.deps_met(front):
+        broken = board.deps_broken(front)
+        waiting = [d for d in front.deps if d not in broken]
+        if broken:
+            deps += f" deps-broken:{','.join(broken)}"
+        if waiting:
+            deps += f" deps-wait:{','.join(waiting)}"
     blocked = f" zones-busy:{','.join(c[0] for c in busy)}" if busy else ""
     return f"{front.state:<16} p{front.priority} {front.id:<28} {who:<40} [{zones}]{deps}{blocked}"
 
@@ -467,6 +496,7 @@ def cmd_status(args):
                 for f in board.fronts.values()
             },
             "residuals": board.residuals,
+            "notes": board.notes_log,
             "warnings": board.warnings,
         }
         print(json.dumps(payload, indent=2))
@@ -478,7 +508,11 @@ def cmd_status(args):
     if board.residuals:
         print("\nresiduals:")
         for r in board.residuals:
-            print(f"- [{r['front']}] {r['note']} (comment {r['comment']})")
+            print(f"- [{r['front']}] {r['note']} ({r.get('holder', 'unattributed')}, comment {r['comment']})")
+    if board.notes_log:
+        print("\nnotes:")
+        for n in board.notes_log:
+            print(f"- [{n['front']}] {n['note']} ({n['holder']}, comment {n['comment']})")
     if args.verbose and board.warnings:
         print("\nfold notes:")
         for w in board.warnings:
@@ -584,8 +618,24 @@ def cmd_front(args):
 
 
 def cmd_residual(args):
-    cid = post(args, block("RESIDUAL", None, [("front", args.front or "none"), ("note", args.note)]))
+    holder = args.holder or os.environ.get("ZZ_BOARD_HOLDER")
+    cid = post(
+        args,
+        block("RESIDUAL", None, [("front", args.front or "none"), ("holder", holder), ("note", args.note)]),
+    )
     print(f"posted RESIDUAL (comment {cid})")
+
+
+def cmd_note(args):
+    holder = holder_or_die(args)
+    cid = post(args, block("NOTE", args.front, [("holder", holder), ("note", args.note)]))
+    print(f"posted NOTE {args.front} (comment {cid})")
+
+
+def cmd_withdraw(args):
+    holder = holder_or_die(args)
+    cid = post(args, block("WITHDRAW", args.front, [("holder", holder), ("reason", args.reason)]))
+    print(f"posted WITHDRAW {args.front} (comment {cid})")
 
 
 def cmd_zones(args):
@@ -666,6 +716,16 @@ def main():
     p.add_argument("--front", default=None)
     p.add_argument("--note", required=True)
     p.set_defaults(fn=cmd_residual)
+
+    p = sub.add_parser("note", help="annotate a front, e.g. a candidate review verdict")
+    p.add_argument("front")
+    p.add_argument("--note", required=True)
+    p.set_defaults(fn=cmd_note)
+
+    p = sub.add_parser("withdraw", help="dissolve a READY front that stopped making sense (hold TRIAGE first)")
+    p.add_argument("front")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(fn=cmd_withdraw)
 
     p = sub.add_parser("zones", help="print the zone to path map")
     p.set_defaults(fn=cmd_zones)

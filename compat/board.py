@@ -270,6 +270,11 @@ class Board:
         holder = fields.get("holder", "")
 
         if verb == "WITHDRAW":
+            triage = self.fronts.get("TRIAGE")
+            triage_holder = triage.holder if triage is not None and triage.active(created) else None
+            if not holder or holder != triage_holder:
+                self.warnings.append(f"comment {cid}: WITHDRAW on {arg} ignored (poster does not hold TRIAGE)")
+                return
             if front.state in ("READY", "STALE-CANDIDATE"):
                 front.state = "WITHDRAWN"
             else:

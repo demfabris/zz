@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; three-front trial closures complete; Control output discard follows
+status: In Progress; three-front trial validated; Control output discard follows
 tags:
 - tmux
 - compatibility
@@ -60,6 +60,13 @@ named and caret forms, exact function-key bounds, and the pin's prefix-consuming
 grammar. It rejects invalid names before state changes and keeps printable ASCII hex keys distinct
 from literal keys. Literal DEL, caret plus DEL, and `0x7f` remain under
 `keys.literal-delete-identity`.
+The three-front trial is positive: all three bounded chunks reached `main`, their changed paths did
+not intersect, and integration had no merge conflicts. Six independent review repairs were needed,
+so the next wave uses two active editors, one permanent oracle and reviewer, and the root as
+coordinator. Full corpus and workspace gates remain centralized in one warm integration lane.
+The final workspace run passed every non-daemon package. Three daemon tests failed only under the
+parallel load and each passed when rerun alone, matching the repository's documented load-flake
+class. Strict workspace clippy, formatting, tracker, stored-summary, and OKF validation pass.
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -347,9 +354,10 @@ blocked, and 22 accepted. Closed history plus accepted groups resolve 141 of 206
 Slices 10w through 10ah plus the Config and Key fronts form the local 2026-08-29 checkpoint. The
 persisted accepted artifact covers 104 scenarios and 1,672 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
-`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Focused mux,
-compatibility, formatting, and mux clippy gates pass; trial-wide workspace gates follow the final
-review.
+`8365f95b9297641a7f4462d7b337d4a711a9edf34c41fc7ab4d8ec4818700a5c`. Focused mux and
+compatibility gates pass. The final workspace run passed every non-daemon package; three daemon
+tests failed only under parallel load and passed alone. Strict workspace clippy, formatting,
+tracker, stored-summary, and OKF validation pass.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256

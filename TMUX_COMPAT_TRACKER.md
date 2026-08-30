@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign state: **THREE-FRONT CLOSURES COMPLETE LOCALLY; TRIAL REVIEW PENDING**
+> Campaign state: **THREE-FRONT TRIAL VALIDATED; SLICE 10AI NEXT**
 >
 > Tracker resolution progress: **68.4% (141 of 206 known groups)**
 >
-> Integrated campaign base: **2026-08-29** at `d2df284d41acba3dc8c1d4da2bdfee6377c340e7`
+> Integrated campaign base: **2026-08-29** at `fde87af317c4317e9b5176f7e79d4e8765e397cd`
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -68,18 +68,19 @@ percentage is a ledger health metric, not a compatibility claim.
 | --- | --- |
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
-| Integrated campaign base | `d2df284d41acba3dc8c1d4da2bdfee6377c340e7` |
-| Delivery | Local `main` contains the trial workflow, slice 10ah, the Config front, and the integrated Key front; remote `main` remains through slice 10ag |
+| Integrated campaign base | `fde87af317c4317e9b5176f7e79d4e8765e397cd` |
+| Delivery | Local `main` contains the trial workflow and all three committed closures; remote `main` remains at `562b950c` through slice 10ag |
 | Campaign worktrees | Three retained trial worktrees branch from the original trial base; the table below records their paths and file zones |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7), open |
-| Campaign point | All three trial chunks are closed locally; the trial review is pending, and 10ai is the sole `next` group |
+| Campaign point | The three-front trial is positive and complete; 10ai is the sole `next` group |
 | Live registry | 87 active groups, 590 active items, 119 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
-Commit `562b950c` is the campaign code base for this trial. Resolve the commit containing the latest
-tracker update with `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
+The trial branched from commit `562b950c`; its three closures reach local `main` through
+`fde87af3`. Resolve the commit containing the latest tracker update with
+`git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
 before acting because other agents may share it.
@@ -1039,10 +1040,45 @@ attached-client runs, full workspace tests, and strict clippy run through the in
 coordinator. Full corpus runs also touch `/tmp/zz-c1-history`, so two worktrees must not run them at
 the same time.
 
-After all three chunks reach a candidate result, review the trial itself. Record merge conflicts,
-cross-front file requests, test interference, review fixes, abandoned work, and the number of
-closures that reached `main`. Keep the model when it reduces idle time without weakening the
-per-slice proof or creating cleanup work.
+### Trial outcome, 2026-08-29
+
+The verdict is positive. All three fronts count as successful, and each reached `main` as its own
+closure commit. Parallel work reduced idle time without weakening the acceptance gate. Independent
+review was essential because every initial candidate needed at least one repair.
+
+| Measure | Result |
+| --- | --- |
+| Initial candidate elapsed time | 10 minutes 23 seconds for all three |
+| Accepted fronts | 3 of 3 |
+| Branch commits | 9: three initial candidates plus six review repairs |
+| Repair rounds | Control 2, Config 1, Key 3 |
+| Changed-path intersections | 0 |
+| Git merge conflicts | 0 |
+| Ownership corrections | 2: Key moved to `command.rs`; Config added its manifest and lockfile |
+| Abandoned chunks | 0 |
+| Discarded approaches | 1 Control endpoint-cleanup approach |
+| Explicit residuals registered | 3: Control parser environment, non-UTF-8 home paths, and DEL identity |
+| Shared-output or corpus interference | 0 |
+| Isolated target footprint | Approximately 28 GB across three worktrees |
+| Accepted gate | 104 scenarios, 1,672 steps, attached-client `PASS`, two registered GEO rows only |
+| Registry movement | 138 of 203 resolved to 141 of 206: three closures and three discoveries |
+
+For the next wave, keep the three domain worktrees but use only two active editors. Reserve one slot
+for a permanent oracle and adversarial reviewer while the root coordinates. Before editing, every
+front declares its exact production and test files, dependency changes, pin cases, scenario path,
+and focused commands. Review the initial candidate and every repair independently. Focused proof
+runs in each worktree; the root alone owns the full corpus, attached-client, workspace, and clippy
+gates in one warm integration lane.
+
+Reuse a domain worktree and its target directory for adjacent slices when ownership stays stable.
+Integrate accepted fronts one at a time in dependency order, with one closure commit each. Continue
+splitting newly found behavior into explicit residual groups. Do not add a third active editor while
+every initial candidate still requires repair.
+
+Final validation passes the accepted 104-scenario corpus, attached-client fixture, focused mux
+suite, strict workspace clippy, formatting, tracker, stored-summary, and OKF checks. The full
+workspace run passed every non-daemon package. Three daemon tests failed under parallel load and
+each passed when rerun alone, matching the repository's documented load-flake class.
 
 ## Validation and closure gates
 

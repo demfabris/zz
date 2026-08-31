@@ -435,6 +435,7 @@ private struct IPadWorkspace: View {
             IPadPaneWorkspace(showSettings: showSettings)
         }
         .navigationSplitViewStyle(.balanced)
+        .coordinateSpace(name: IPadPanoramaCoordinateSpace.name)
     }
 }
 
@@ -782,17 +783,33 @@ private enum IPadPanoramaMotionPhase: Equatable {
     case exiting
 }
 
+private enum IPadPanoramaCoordinateSpace {
+    static let name = "ipad-panorama-workspace"
+}
+
 private struct IPadPaneWorkspace: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ZZClientSettings.self) private var settings
     @EnvironmentObject private var store: ZZStore
-    @Namespace private var panoramaNamespace
     let showSettings: () -> Void
     @State private var showsPanorama = true
     @State private var panoramaPhase = IPadPanoramaMotionPhase.entering
+    @State private var panoramaOpacity = 1.0
     @State private var panoramaTransitionWindow: IPadSidebarWindowKey?
     @State private var panoramaWindowAtOverview = true
+    @State private var panoramaNavigationBarVisible = false
     @State private var panoramaMotionRevision = 0
+    @State private var panoramaWorkspaceFrame = CGRect.zero
+    @State private var panoramaTransitionWorkspaceFrame = CGRect.zero
+    @State private var panoramaTransitionTargetFrame: CGRect?
+    @State private var panoramaTransitionTargetLocked = false
+    @State private var panoramaTransitionSession: ZZSession?
+    @State private var panoramaTransitionWindowSnapshot: ZZWindow?
+    @State private var panoramaTransitionFrames: [UInt64: TerminalFrame] = [:]
+    @State private var panoramaTransitionAgentStates: [UInt64: ZZAgentState] = [:]
+
+    private static let entranceDuration = 0.36
+    private static let exitDuration = 0.24
 
     var body: some View {
         Group {
@@ -800,31 +817,54 @@ private struct IPadPaneWorkspace: View {
                 ZStack {
                     IPadPanorama(
                         phase: panoramaPhase,
-                        transitionNamespace: panoramaNamespace,
                         transitionWindow: panoramaTransitionWindow,
-                        windowAtOverview: panoramaWindowAtOverview,
+                        onTransitionFrameChange: updateTransitionTargetFrame,
                         onClose: {
                             dismissPanorama(toward: selectedWindowKey)
                         }
                     )
                     .ignoresSafeArea(
                         .container,
-                        edges: panoramaPhase == .exiting ? .top : []
+                        edges: panoramaNavigationBarVisible ? .top : []
                     )
 
-                    if let key = panoramaTransitionWindow,
-                       let session = session(for: key),
-                       let window = session.windows.first(where: { $0.id == key.window }) {
-                        IPadPanoramaWorkspaceSnapshot(session: session, window: window)
-                            .matchedGeometryEffect(
-                                id: key,
-                                in: panoramaNamespace,
-                                isSource: !panoramaWindowAtOverview
+                    if let session = panoramaTransitionSession,
+                       let window = panoramaTransitionWindowSnapshot,
+                       let targetFrame = panoramaTransitionTargetFrame,
+                       panoramaTransitionWorkspaceFrame.width > 1,
+                       panoramaTransitionWorkspaceFrame.height > 1 {
+                        IPadPanoramaWorkspaceSnapshot(
+                            session: session,
+                            window: window,
+                            frames: panoramaTransitionFrames,
+                            agentStates: panoramaTransitionAgentStates
+                        )
+                            .frame(
+                                width: panoramaTransitionWorkspaceFrame.width,
+                                height: panoramaTransitionWorkspaceFrame.height
                             )
-                            .opacity(panoramaWindowAtOverview ? 0 : 1)
+                            .scaleEffect(
+                                x: panoramaWindowAtOverview
+                                    ? targetFrame.width / panoramaTransitionWorkspaceFrame.width
+                                    : 1,
+                                y: panoramaWindowAtOverview
+                                    ? targetFrame.height / panoramaTransitionWorkspaceFrame.height
+                                    : 1
+                            )
+                            .position(
+                                x: panoramaWindowAtOverview
+                                    ? targetFrame.midX - panoramaWorkspaceFrame.minX
+                                    : panoramaTransitionWorkspaceFrame.midX
+                                        - panoramaWorkspaceFrame.minX,
+                                y: panoramaWindowAtOverview
+                                    ? targetFrame.midY - panoramaWorkspaceFrame.minY
+                                    : panoramaTransitionWorkspaceFrame.midY
+                                        - panoramaWorkspaceFrame.minY
+                            )
                             .zIndex(3)
                     }
                 }
+                .opacity(panoramaOpacity)
             } else if let session = store.selectedSession,
                let window = session.activeWindow,
                !window.visiblePanes.isEmpty {
@@ -920,13 +960,30 @@ private struct IPadPaneWorkspace: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarVisibility(
-            showsPanorama && panoramaPhase != .exiting ? .hidden : .automatic,
+            showsPanorama && !panoramaNavigationBarVisible ? .hidden : .automatic,
             for: .navigationBar
+        )
+        .onGeometryChange(
+            for: CGRect.self,
+            of: { geometry in
+                geometry.frame(in: .named(IPadPanoramaCoordinateSpace.name))
+            },
+            action: { frame in
+                guard frame.width > 1,
+                      frame.height > 1,
+                      frame != panoramaWorkspaceFrame else {
+                    return
+                }
+                panoramaWorkspaceFrame = frame
+            }
         )
         .onAppear {
             if showsPanorama {
                 presentPanorama()
             }
+        }
+        .onDisappear {
+            store.setTerminalPreview(false)
         }
         .onChange(of: panoramaWindowKeys) { previous, current in
             guard showsPanorama, previous.isEmpty, !current.isEmpty else {
@@ -944,10 +1001,14 @@ private struct IPadPaneWorkspace: View {
 
     private func presentPanorama() {
         let origin = selectedWindowKey
+        store.setTerminalPreview(true)
+        prepareTransition(toward: origin)
+        panoramaTransitionWorkspaceFrame = panoramaWorkspaceFrame
+        panoramaNavigationBarVisible = false
+        panoramaOpacity = 1
         store.showOverview()
         guard !panoramaWindowKeys.isEmpty else {
             panoramaPhase = .entering
-            panoramaTransitionWindow = nil
             panoramaWindowAtOverview = false
             showsPanorama = true
             return
@@ -958,35 +1019,63 @@ private struct IPadPaneWorkspace: View {
     private func startPanoramaEntrance(from window: IPadSidebarWindowKey?) {
         panoramaMotionRevision += 1
         let revision = panoramaMotionRevision
-        panoramaTransitionWindow = window
+        if panoramaTransitionWindow != window {
+            prepareTransition(toward: window)
+        }
         panoramaWindowAtOverview = false
+        panoramaNavigationBarVisible = false
 
         if reduceMotion {
             panoramaPhase = .visible
             panoramaWindowAtOverview = true
-            withAnimation(.easeOut(duration: 0.15)) {
+            panoramaOpacity = 0
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
                 showsPanorama = true
             }
-            panoramaTransitionWindow = nil
+            clearTransition()
+            Task { @MainActor in
+                await Task.yield()
+                guard showsPanorama, panoramaMotionRevision == revision else {
+                    return
+                }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    panoramaOpacity = 1
+                }
+            }
             return
         }
 
         panoramaPhase = .entering
         showsPanorama = true
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(45))
-            guard showsPanorama, panoramaMotionRevision == revision else {
-                return
+            for _ in 0..<12 {
+                if panoramaTransitionWindow == nil
+                    || (panoramaTransitionTargetFrame != nil
+                        && panoramaWorkspaceFrame.width > 1
+                        && panoramaWorkspaceFrame.height > 1) {
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+                guard showsPanorama, panoramaMotionRevision == revision else {
+                    return
+                }
             }
-            withAnimation(.snappy(duration: 0.62, extraBounce: 0.08)) {
+            if panoramaTransitionWorkspaceFrame.width <= 1
+                || panoramaTransitionWorkspaceFrame.height <= 1 {
+                panoramaTransitionWorkspaceFrame = panoramaWorkspaceFrame
+            }
+            panoramaTransitionTargetLocked = true
+            withAnimation(.smooth(duration: Self.entranceDuration)) {
                 panoramaPhase = .visible
                 panoramaWindowAtOverview = true
             }
-            try? await Task.sleep(for: .milliseconds(900))
+            try? await Task.sleep(for: .seconds(Self.entranceDuration))
             guard showsPanorama, panoramaMotionRevision == revision else {
                 return
             }
-            panoramaTransitionWindow = nil
+            clearTransition()
         }
     }
 
@@ -1005,17 +1094,30 @@ private struct IPadPaneWorkspace: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             panoramaPhase = .visible
-            panoramaTransitionWindow = target
             panoramaWindowAtOverview = true
+            panoramaNavigationBarVisible = true
+            prepareTransition(toward: target)
         }
 
         guard !reduceMotion else {
-            withAnimation(.easeOut(duration: 0.15)) {
-                showsPanorama = false
+            panoramaPhase = .exiting
+            Task { @MainActor in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    panoramaOpacity = 0
+                }
+                try? await Task.sleep(for: .milliseconds(150))
+                guard showsPanorama, panoramaMotionRevision == revision else {
+                    return
+                }
+                withTransaction(transaction) {
+                    showsPanorama = false
+                    panoramaOpacity = 1
+                    panoramaPhase = .entering
+                    panoramaWindowAtOverview = true
+                    clearTransition()
+                }
+                store.setTerminalPreview(false)
             }
-            panoramaPhase = .entering
-            panoramaTransitionWindow = nil
-            panoramaWindowAtOverview = true
             return
         }
 
@@ -1024,21 +1126,100 @@ private struct IPadPaneWorkspace: View {
             guard showsPanorama, panoramaMotionRevision == revision else {
                 return
             }
-            withAnimation(.smooth(duration: 0.46)) {
+            for _ in 0..<12 {
+                if panoramaTransitionWindow == nil
+                    || (panoramaTransitionTargetFrame != nil
+                        && panoramaWorkspaceFrame.width > 1
+                        && panoramaWorkspaceFrame.height > 1) {
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+                guard showsPanorama, panoramaMotionRevision == revision else {
+                    return
+                }
+            }
+            panoramaTransitionWorkspaceFrame = panoramaWorkspaceFrame
+            panoramaTransitionTargetLocked = true
+            try? await Task.sleep(for: .milliseconds(16))
+            guard showsPanorama, panoramaMotionRevision == revision else {
+                return
+            }
+            withAnimation(.smooth(duration: Self.exitDuration)) {
                 panoramaPhase = .exiting
                 panoramaWindowAtOverview = false
             }
-            try? await Task.sleep(for: .milliseconds(460))
+            try? await Task.sleep(for: .seconds(Self.exitDuration))
             guard showsPanorama, panoramaMotionRevision == revision else {
                 return
             }
             withTransaction(transaction) {
                 showsPanorama = false
                 panoramaPhase = .entering
-                panoramaTransitionWindow = nil
                 panoramaWindowAtOverview = true
+                clearTransition()
             }
+            store.setTerminalPreview(false)
         }
+    }
+
+    private func prepareTransition(toward key: IPadSidebarWindowKey?) {
+        panoramaTransitionWindow = key
+        panoramaTransitionTargetFrame = nil
+        panoramaTransitionTargetLocked = false
+        panoramaTransitionFrames = [:]
+        panoramaTransitionAgentStates = [:]
+        panoramaTransitionSession = nil
+        panoramaTransitionWindowSnapshot = nil
+
+        guard let key,
+              let session = store.sessions.first(where: { $0.id == key.session }),
+              let window = session.windows.first(where: { $0.id == key.window }) else {
+            return
+        }
+
+        panoramaTransitionSession = session
+        panoramaTransitionWindowSnapshot = window
+        panoramaTransitionFrames = Dictionary(
+            uniqueKeysWithValues: window.visiblePanes.compactMap { pane in
+                store.frame(for: pane.id).map { (pane.id, $0) }
+            }
+        )
+        panoramaTransitionAgentStates = Dictionary(
+            uniqueKeysWithValues: window.visiblePanes.compactMap { pane in
+                store.agentState(for: pane.id).map { (pane.id, $0) }
+            }
+        )
+    }
+
+    private func clearTransition() {
+        panoramaTransitionWindow = nil
+        panoramaTransitionTargetFrame = nil
+        panoramaTransitionTargetLocked = false
+        panoramaTransitionWorkspaceFrame = .zero
+        panoramaTransitionSession = nil
+        panoramaTransitionWindowSnapshot = nil
+        panoramaTransitionFrames = [:]
+        panoramaTransitionAgentStates = [:]
+    }
+
+    private func updateTransitionTargetFrame(
+        _ key: IPadSidebarWindowKey,
+        _ frame: CGRect
+    ) {
+        guard !panoramaTransitionTargetLocked,
+              key == panoramaTransitionWindow,
+              frame.width > 1,
+              frame.height > 1 else {
+            return
+        }
+        if let current = panoramaTransitionTargetFrame,
+           abs(current.minX - frame.minX) < 0.5,
+           abs(current.minY - frame.minY) < 0.5,
+           abs(current.width - frame.width) < 0.5,
+           abs(current.height - frame.height) < 0.5 {
+            return
+        }
+        panoramaTransitionTargetFrame = frame
     }
 
     private func windowKey(containing paneID: UInt64) -> IPadSidebarWindowKey? {
@@ -1065,10 +1246,6 @@ private struct IPadPaneWorkspace: View {
                 IPadSidebarWindowKey(session: session.id, window: window.id)
             }
         }
-    }
-
-    private func session(for key: IPadSidebarWindowKey) -> ZZSession? {
-        store.sessions.first(where: { $0.id == key.session })
     }
 
     private static let fullLayout = ZZPaneLayout(x: 0, y: 0, width: 1, height: 1)
@@ -1208,10 +1385,9 @@ private struct IPadPaneTile: View {
     @ViewBuilder
     private var paneContent: some View {
         if pane.kind == .terminal {
-            TerminalSurface(
+            LiveTerminalSurface(
                 store: store,
                 pane: pane.id,
-                frame: store.frame(for: pane.id),
                 interactive: store.isConnected,
                 preview: false
             )
@@ -1271,9 +1447,8 @@ private struct IPadPanorama: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var store: ZZStore
     let phase: IPadPanoramaMotionPhase
-    let transitionNamespace: Namespace.ID
     let transitionWindow: IPadSidebarWindowKey?
-    let windowAtOverview: Bool
+    let onTransitionFrameChange: (IPadSidebarWindowKey, CGRect) -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -1297,9 +1472,8 @@ private struct IPadPanorama: View {
                                 session: session,
                                 sessionOrder: sessionOrder(for: session),
                                 phase: phase,
-                                transitionNamespace: transitionNamespace,
                                 transitionWindow: transitionWindow,
-                                windowAtOverview: windowAtOverview
+                                onTransitionFrameChange: onTransitionFrameChange
                             )
                             .containerRelativeFrame(.horizontal) { length, _ in
                                 min(max(length * 0.84, 340), 480)
@@ -1357,7 +1531,7 @@ private struct IPadPanorama: View {
             .accessibilityLabel("Close Panorama")
             .accessibilityIdentifier("ipad-panorama-close")
         }
-        .allowsHitTesting(phase != .exiting)
+        .allowsHitTesting(phase == .visible && transitionWindow == nil)
     }
 
     private func sessionOrder(for session: ZZSession) -> Int {
@@ -1370,9 +1544,8 @@ private struct IPadPanoramaSessionColumn: View {
     let session: ZZSession
     let sessionOrder: Int
     let phase: IPadPanoramaMotionPhase
-    let transitionNamespace: Namespace.ID
     let transitionWindow: IPadSidebarWindowKey?
-    let windowAtOverview: Bool
+    let onTransitionFrameChange: (IPadSidebarWindowKey, CGRect) -> Void
 
     var body: some View {
         let prefersReducedMotion = reduceMotion
@@ -1416,9 +1589,8 @@ private struct IPadPanoramaSessionColumn: View {
                                 sessionOrder: sessionOrder,
                                 windowOrder: windowOrder(for: window),
                                 phase: phase,
-                                transitionNamespace: transitionNamespace,
                                 transitionWindow: transitionWindow,
-                                windowAtOverview: windowAtOverview
+                                onTransitionFrameChange: onTransitionFrameChange
                             )
                             .scrollTransition(.interactive, axis: .vertical) { content, scrollPhase in
                                 content
@@ -1480,11 +1652,12 @@ private struct IPadPanoramaWindowCard: View {
     let sessionOrder: Int
     let windowOrder: Int
     let phase: IPadPanoramaMotionPhase
-    let transitionNamespace: Namespace.ID
     let transitionWindow: IPadSidebarWindowKey?
-    let windowAtOverview: Bool
+    let onTransitionFrameChange: (IPadSidebarWindowKey, CGRect) -> Void
 
     var body: some View {
+        let reportsTransitionFrame = isTransitionTarget
+
         VStack(alignment: .leading, spacing: 8) {
             Text(windowTitle)
                 .font(.subheadline.weight(.semibold))
@@ -1498,8 +1671,8 @@ private struct IPadPanoramaWindowCard: View {
                 session: session,
                 window: window
             )
+            .opacity(isTransitionTarget ? 0 : 1)
             .background(Color(uiColor: .secondarySystemBackground))
-            .compositingGroup()
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1510,19 +1683,25 @@ private struct IPadPanoramaWindowCard: View {
                         lineWidth: 1
                     )
             }
-            .matchedGeometryEffect(
-                id: windowKey,
-                in: transitionNamespace,
-                isSource: !isTransitionTarget || windowAtOverview
+            .onGeometryChange(
+                for: CGRect?.self,
+                of: { geometry in
+                    reportsTransitionFrame
+                        ? geometry.frame(in: .named(IPadPanoramaCoordinateSpace.name))
+                        : nil
+                },
+                action: { frame in
+                    if let frame {
+                        onTransitionFrameChange(windowKey, frame)
+                    }
+                }
             )
         }
         .scaleEffect(motionScale)
         .offset(y: motionOffset)
-        .blur(radius: motionBlur)
         .opacity(motionOpacity)
         .zIndex(isTransitionTarget ? 1 : 0)
         .animation(motionAnimation, value: phase)
-        .animation(motionAnimation, value: windowAtOverview)
     }
 
     private var windowTitle: String {
@@ -1558,11 +1737,11 @@ private struct IPadPanoramaWindowCard: View {
     private var motionScale: CGFloat {
         switch phase {
         case .entering:
-            isTransitionTarget ? 1 : 1.55
+            isTransitionTarget ? 1 : 1.04
         case .visible:
             1
         case .exiting:
-            isExitTarget ? 1 : 0.86
+            isExitTarget ? 1 : 0.96
         }
     }
 
@@ -1577,25 +1756,14 @@ private struct IPadPanoramaWindowCard: View {
         }
     }
 
-    private var motionBlur: CGFloat {
-        switch phase {
-        case .entering:
-            isTransitionTarget ? 0 : 5
-        case .visible:
-            0
-        case .exiting:
-            isExitTarget ? 0 : 5
-        }
-    }
-
     private var motionOpacity: Double {
         switch phase {
         case .entering:
-            isTransitionTarget ? (windowAtOverview ? 1 : 0) : 0.28
+            isTransitionTarget ? 1 : 0.28
         case .visible:
             1
         case .exiting:
-            isExitTarget ? (windowAtOverview ? 1 : 0) : 0
+            isExitTarget ? 1 : 0
         }
     }
 
@@ -1605,15 +1773,17 @@ private struct IPadPanoramaWindowCard: View {
         }
         if phase == .visible {
             let delay = Double(sessionOrder) * 0.04 + Double(windowOrder) * 0.055
-            return .snappy(duration: 0.62, extraBounce: 0.08).delay(delay)
+            return .smooth(duration: 0.36).delay(delay)
         }
-        return .smooth(duration: 0.46)
+        return .smooth(duration: 0.24)
     }
 }
 
 private struct IPadPanoramaWorkspaceSnapshot: View {
     let session: ZZSession
     let window: ZZWindow
+    let frames: [UInt64: TerminalFrame]
+    let agentStates: [UInt64: ZZAgentState]
 
     var body: some View {
         Group {
@@ -1625,11 +1795,20 @@ private struct IPadPanoramaWorkspaceSnapshot: View {
             } else {
                 IPadPaneSplitLayout(spacing: 5) {
                     ForEach(window.visiblePanes) { pane in
-                        IPadPanoramaPanePreview(
+                        IPadPanoramaFrozenPaneContent(
                             session: session,
                             window: window,
-                            pane: pane
+                            pane: pane,
+                            frame: frames[pane.id],
+                            agentState: agentStates[pane.id]
                         )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.38))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        }
                         .layoutValue(
                             key: IPadPaneLayoutValueKey.self,
                             value: pane.layout ?? Self.fullLayout
@@ -1726,7 +1905,6 @@ private struct IPadPanoramaPanePreview: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(false)
             .background(Color.black.opacity(0.38))
-            .compositingGroup()
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1780,44 +1958,121 @@ private struct IPadPanoramaPaneContent: View {
     let pane: ZZPane
 
     var body: some View {
-        if pane.kind == .terminal, let frame = store.frame(for: pane.id) {
-            TerminalSurface(
-                store: store,
-                pane: pane.id,
-                frame: frame,
-                interactive: false,
-                preview: true
-            )
+        if pane.kind == .terminal, session.isAttached {
+            IPadPanoramaLiveTerminalContent(store: store, pane: pane.id)
         } else if pane.kind == .agent, store.agentState(for: pane.id) != nil {
             AgentPaneSummary(pane: pane)
         } else {
-            VStack(spacing: 7) {
-                if pane.kind == .terminal, session.isAttached, window.isCurrent {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: pane.kind.symbol)
-                        .font(.title3)
-                }
-                Text(placeholderLabel)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            IPadPanoramaPanePlaceholder(
+                symbol: pane.kind.symbol,
+                label: placeholderLabel,
+                waitsForFrame: false
+            )
         }
     }
 
     private var placeholderLabel: String {
-        if pane.kind == .terminal, session.isAttached, window.isCurrent {
+        if pane.kind == .terminal, session.isAttached {
             return "Waiting for frame"
         }
         if pane.kind == .browser || pane.kind == .editor || pane.kind == .picker {
             return "Open on desktop"
         }
         return "Tap to attach"
+    }
+}
+
+private struct IPadPanoramaLiveTerminalContent: View {
+    @ObservedObject private var frameSlot: TerminalFrameSlot
+    private let store: ZZStore
+    private let pane: UInt64
+
+    init(store: ZZStore, pane: UInt64) {
+        self.store = store
+        self.pane = pane
+        _frameSlot = ObservedObject(wrappedValue: store.frameSlot(for: pane))
+    }
+
+    var body: some View {
+        if let frame = frameSlot.frame {
+            TerminalSurface(
+                store: store,
+                pane: pane,
+                frame: frame,
+                interactive: false,
+                preview: true
+            )
+        } else {
+            IPadPanoramaPanePlaceholder(
+                symbol: ZZPaneKind.terminal.symbol,
+                label: "Waiting for frame",
+                waitsForFrame: true
+            )
+        }
+    }
+}
+
+private struct IPadPanoramaFrozenPaneContent: View {
+    @EnvironmentObject private var store: ZZStore
+    let session: ZZSession
+    let window: ZZWindow
+    let pane: ZZPane
+    let frame: TerminalFrame?
+    let agentState: ZZAgentState?
+
+    var body: some View {
+        if pane.kind == .terminal, let frame {
+            TerminalSurface(
+                store: store,
+                pane: pane.id,
+                frame: frame,
+                interactive: false,
+                preview: false
+            )
+        } else if pane.kind == .agent, let agentState {
+            AgentPaneSummaryContent(pane: pane, state: agentState)
+        } else {
+            IPadPanoramaPanePlaceholder(
+                symbol: pane.kind.symbol,
+                label: placeholderLabel,
+                waitsForFrame: pane.kind == .terminal && session.isAttached
+            )
+        }
+    }
+
+    private var placeholderLabel: String {
+        if pane.kind == .terminal, session.isAttached {
+            return "Waiting for frame"
+        }
+        if pane.kind == .browser || pane.kind == .editor || pane.kind == .picker {
+            return "Open on desktop"
+        }
+        return "Tap to attach"
+    }
+}
+
+private struct IPadPanoramaPanePlaceholder: View {
+    let symbol: String
+    let label: String
+    let waitsForFrame: Bool
+
+    var body: some View {
+        VStack(spacing: 7) {
+            if waitsForFrame {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: symbol)
+                    .font(.title3)
+            }
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -1859,7 +2114,6 @@ private struct PaneOverview: View {
                         ForEach(session.panes) { pane in
                             PaneCard(
                                 pane: pane,
-                                frame: store.frame(for: pane.id),
                                 namespace: namespace,
                                 onOpen: {
                                     withAnimation(.snappy(duration: 0.32)) {
@@ -1972,7 +2226,6 @@ private struct AgentAttentionStrip: View {
 private struct PaneCard: View {
     @EnvironmentObject private var store: ZZStore
     let pane: ZZPane
-    let frame: TerminalFrame?
     let namespace: Namespace.ID
     let onOpen: () -> Void
     let onClose: () -> Void
@@ -1983,10 +2236,9 @@ private struct PaneCard: View {
                 Button(action: onOpen) {
                     Group {
                         if pane.kind == .terminal {
-                            TerminalSurface(
+                            LiveTerminalSurface(
                                 store: store,
                                 pane: pane.id,
-                                frame: frame,
                                 interactive: false,
                                 preview: true
                             )
@@ -2075,6 +2327,15 @@ private struct AgentPaneSummary: View {
     let pane: ZZPane
 
     var body: some View {
+        AgentPaneSummaryContent(pane: pane, state: store.agentState(for: pane.id))
+    }
+}
+
+private struct AgentPaneSummaryContent: View {
+    let pane: ZZPane
+    let state: ZZAgentState?
+
+    var body: some View {
         VStack(spacing: 12) {
             Image(systemName: state?.status == .needsInput ? "hand.raised.fill" : "sparkles")
                 .font(.system(size: 34, weight: .medium))
@@ -2096,10 +2357,6 @@ private struct AgentPaneSummary: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var state: ZZAgentState? {
-        store.agentState(for: pane.id)
     }
 }
 
@@ -2671,10 +2928,9 @@ private struct FullscreenPane: View {
         ZStack(alignment: .bottom) {
             Group {
                 if pane.kind == .terminal {
-                    TerminalSurface(
+                    LiveTerminalSurface(
                         store: store,
                         pane: pane.id,
-                        frame: store.frame(for: pane.id),
                         interactive: store.isConnected,
                         preview: false
                     )
@@ -2692,7 +2948,15 @@ private struct FullscreenPane: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 8)
         }
-        .background(paneBackground.ignoresSafeArea())
+        .background {
+            if pane.kind == .terminal {
+                LiveTerminalBackground(store: store, pane: pane.id)
+                    .ignoresSafeArea()
+            } else {
+                Color.zzCard
+                    .ignoresSafeArea()
+            }
+        }
         .onAppear {
             visiblePaneID = pane.id
         }
@@ -2894,11 +3158,21 @@ private struct FullscreenPane: View {
         store.selectedSession?.panes ?? [pane]
     }
 
-    private var paneBackground: Color {
-        guard pane.kind == .terminal, let frame = store.frame(for: pane.id) else {
-            return .zzCard
+}
+
+private struct LiveTerminalBackground: View {
+    @ObservedObject private var frameSlot: TerminalFrameSlot
+
+    init(store: ZZStore, pane: UInt64) {
+        _frameSlot = ObservedObject(wrappedValue: store.frameSlot(for: pane))
+    }
+
+    var body: some View {
+        if let frame = frameSlot.frame {
+            Color(terminalColor: frame.background)
+        } else {
+            Color.zzCard
         }
-        return Color(terminalColor: frame.background)
     }
 }
 

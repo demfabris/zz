@@ -1,4 +1,21 @@
+import Combine
 import Foundation
+
+@MainActor
+final class TerminalFrameSlot: ObservableObject {
+    @Published private(set) var frame: TerminalFrame?
+
+    init(frame: TerminalFrame? = nil) {
+        self.frame = frame
+    }
+
+    func update(_ frame: TerminalFrame?) {
+        guard self.frame !== frame else {
+            return
+        }
+        self.frame = frame
+    }
+}
 
 final class TerminalFrame {
     let pane: UInt64

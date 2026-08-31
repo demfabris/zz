@@ -2,7 +2,7 @@
 type: Design Plan
 title: Native Apple client
 description: Adaptive SwiftUI and UIKit iPhone and iPad client over zz-client-ffi, with SSH attach, Agent supervision and prompting, mobile navigation, a native session tree, and live split terminal panes.
-status: Native phone slice, adaptive iPad workspace, centered window status rail, Agent creation and composer, passive all-session panorama, and persisted client settings implemented; native Browser and Editor panes remain future work
+status: Native phone slice, adaptive iPad workspace, centered window status rail, Agent creation and composer, all-session Panorama with attached-session live previews, and persisted client settings implemented; native Browser and Editor panes remain future work
 tags:
 - ios
 - iphone
@@ -12,7 +12,7 @@ tags:
 - uikit
 - client
 - ffi
-timestamp: 2026-08-30T00:00:00-03:00
+timestamp: 2026-08-31T00:00:00-03:00
 ---
 
 # Overview
@@ -105,9 +105,11 @@ siblings remain in the sidebar without being mounted. This keeps split semantics
 lets continuously resized iPad windows drive terminal geometry from each UIKit surface's actual
 bounds.
 
-Every visible terminal has its own retained `TerminalSurface`, frame, damage path, and resize report.
-The store still owns exactly one terminal input target. Tapping a terminal selects the mux pane,
-transfers first responder and terminal focus, and leaves the other panes live but non-keyboard-owning.
+Every visible terminal has its own retained `TerminalSurface`, stable pane-local frame slot, damage
+path, and resize report. A viewport event publishes only through that pane's slot instead of
+invalidating every view that observes `ZZStore`. The store still owns exactly one terminal input
+target. Tapping a terminal selects the mux pane, transfers first responder and terminal focus, and
+leaves the other panes live but non-keyboard-owning.
 Standard toolbars provide New Session, New Pane, reconnect, and host actions. The iPad New Pane menu
 offers Terminal and Agent. Agent creation sends one daemon command list that splits a pending picker
 and materializes it while that picker remains the active command target. The connected daemon must
@@ -149,22 +151,31 @@ the daemon rather than inventing a Swift-only grid.
 The outer scroller and each window stack use view-aligned targets with one-target paging. During a
 drag, nearby columns and cards recede by four percent, then return to full size at rest. Entering
 Panorama waits for the first real window snapshot instead of completing while the app is still
-connecting. The active window then uses matched geometry to travel from a full-detail passive
-snapshot into its exact overview rectangle while the other windows spring into place from a larger,
-blurred state. Leaving reverses the same geometry: the chosen or current window grows back into the
-live workspace while the remaining windows fall away. The detail navigation bar returns before that
-movement, while only the overview layer continues beneath it, so the passive destination and live
-pane share the same top safe-area inset at handoff. Pane and window insertions, removals, and rectangle
-changes use a shorter snappy animation. Reduce Motion keeps target alignment and uses a short
-crossfade without transforms.
+connecting. The active window is captured as one fixed-size passive workspace surface at the detail
+column's settled bounds. SwiftUI animates only that surface's position and horizontal and vertical
+scale into the measured window-card rectangle. Other windows use short opacity, offset, and small
+scale changes. Leaving reverses the same fixed surface after the detail navigation bar returns and
+the destination geometry settles. The target rectangle is locked before movement starts, and the
+live workspace is mounted only after the 240-millisecond exit completes. Reduce Motion fades the
+Panorama layer before swapping view branches and performs no transform animation.
 
-Panorama creates no additional interactive terminals. A terminal card uses
-`TerminalSurface(interactive: false, preview: true)` only when the store already retains a frame for
-the attached session's visible window. The preview scales that immutable viewport, ignores input,
-and cannot report a resize. The temporary full-detail transition snapshot uses the same passive
-surface, so matched geometry cannot claim keyboard ownership or resize a PTY. The daemon sends frames
-to the attached visible window, so inactive windows and sessions show stable pane-kind placeholders.
-Agent previews show retained state when the store has it.
+Panorama creates no additional interactive terminals. While it is open, the app enables the v87
+terminal preview stream and retains a stable pane-local frame slot for every terminal across every
+window of the attached session. Each steady card observes only its own slot and uses
+`TerminalSurface(interactive: false, preview: true)`, which scales the retained viewport, ignores
+input, and cannot report a resize. The daemon keeps `visible_terminals` as the foreground window's
+geometry and input authority; the extra panes travel through a separate bounded, low-priority stream.
+Preview delivery does not resize a PTY or enqueue Kitty image payloads, and pending preview frames
+yield to foreground and reliable traffic under backpressure. Session columns that are not attached
+continue to show stable pane-kind placeholders until navigation attaches them.
+
+The app sends `SetTerminalPreview { enabled: true }` when Panorama opens, repeats the request after a
+new `Attached` event, and disables it after the exit transition or when the workspace disappears. The
+store then releases inactive-window frame handles. At transition start it captures the terminal
+viewport handles and Agent states for the selected window.
+Its fixed-size terminal surfaces use `interactive: false, preview: false`, so they preserve detail
+geometry while remaining unable to claim keyboard ownership or resize a PTY. The live workspace can
+report its final settled geometry only after it replaces the transition surface.
 
 Each pane cell is an accessible button. A tap uses the existing exact-pane navigation path, attaches
 another session or selects another window as needed, then returns to the live split workspace. The

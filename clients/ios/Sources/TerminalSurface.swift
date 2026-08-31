@@ -795,6 +795,37 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 }
 
+struct LiveTerminalSurface: View {
+    @ObservedObject private var frameSlot: TerminalFrameSlot
+    private let store: ZZStore
+    private let pane: UInt64
+    private let interactive: Bool
+    private let preview: Bool
+
+    init(
+        store: ZZStore,
+        pane: UInt64,
+        interactive: Bool,
+        preview: Bool
+    ) {
+        self.store = store
+        self.pane = pane
+        self.interactive = interactive
+        self.preview = preview
+        _frameSlot = ObservedObject(wrappedValue: store.frameSlot(for: pane))
+    }
+
+    var body: some View {
+        TerminalSurface(
+            store: store,
+            pane: pane,
+            frame: frameSlot.frame,
+            interactive: interactive,
+            preview: preview
+        )
+    }
+}
+
 struct TerminalSurface: UIViewRepresentable {
     @Environment(\.zzTerminalPresentation) private var terminalPresentation
     @ObservedObject var store: ZZStore

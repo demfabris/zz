@@ -19,7 +19,6 @@ private struct ZZClientConnectionResult: @unchecked Sendable {
 final class ZZStore: ObservableObject {
     @Published private(set) var connectionState: ZZConnectionState = .idle
     @Published private(set) var sessions: [ZZSession] = []
-    @Published private(set) var frames: [UInt64: TerminalFrame] = [:]
     @Published private(set) var terminalFontSizeSteps: [UInt64: Int] = [:]
     @Published var selectedSessionID: UInt64?
     @Published var selectedPaneID: UInt64?
@@ -35,6 +34,7 @@ final class ZZStore: ObservableObject {
 
     private var client: OpaquePointer?
     private var eventSource: DispatchSourceRead?
+    private var frameSlots: [UInt64: TerminalFrameSlot] = [:]
     private var terminalGeometries: [UInt64: TerminalGeometryState] = [:]
     private var pendingSessionIDs: Set<UInt64>?
     private var attachedSessionID: UInt64?
@@ -54,6 +54,7 @@ final class ZZStore: ObservableObject {
     private var rememberedPaneID: UInt64?
     private var pendingNavigation: ZZNavigationTarget?
     private var navigationCommandSent = false
+    private var terminalPreviewRequested = false
     private var unseenAgentCompletions: Set<UInt64> = []
     private var agentDrafts = ZZAgentDrafts()
     private var clipboardRequestID: UInt64 = 1
@@ -355,7 +356,7 @@ final class ZZStore: ObservableObject {
             invalidateSentGeometries()
         } else {
             sessions = []
-            frames = [:]
+            clearFrameSlots()
             agentStates = [:]
             agentDrafts = ZZAgentDrafts()
             unseenAgentCompletions = []
@@ -695,6 +696,28 @@ final class ZZStore: ObservableObject {
         terminalModifierState.reset()
     }
 
+    func setTerminalPreview(_ enabled: Bool) {
+        guard terminalPreviewRequested != enabled else {
+            return
+        }
+        terminalPreviewRequested = enabled
+        if let client, attachedSessionID != nil {
+            _ = zz_client_set_terminal_preview(client, enabled)
+        }
+        if !enabled {
+            let foregroundPanes = Set(
+                sessions
+                    .first(where: \.isAttached)?
+                    .panes
+                    .filter { $0.kind == .terminal && $0.layout != nil }
+                    .map(\.id) ?? []
+            )
+            for (pane, slot) in frameSlots where !foregroundPanes.contains(pane) {
+                slot.update(nil)
+            }
+        }
+    }
+
     func requestKeyboard(for paneID: UInt64) {
         guard let session = selectedSession,
               let pane = session.panes.first(where: {
@@ -706,7 +729,16 @@ final class ZZStore: ObservableObject {
     }
 
     func frame(for pane: UInt64) -> TerminalFrame? {
-        frames[pane]
+        frameSlots[pane]?.frame
+    }
+
+    func frameSlot(for pane: UInt64) -> TerminalFrameSlot {
+        if let slot = frameSlots[pane] {
+            return slot
+        }
+        let slot = TerminalFrameSlot()
+        frameSlots[pane] = slot
+        return slot
     }
 
     func terminalFontSizeStep(for pane: UInt64) -> Int {
@@ -1050,6 +1082,9 @@ final class ZZStore: ObservableObject {
                 connectionState = .connected
             case ZZ_EVENT_ATTACHED:
                 _ = zz_client_set_focused(client, sceneIsActive)
+                if terminalPreviewRequested {
+                    _ = zz_client_set_terminal_preview(client, true)
+                }
                 agentStates = [:]
                 unseenAgentCompletions = []
                 navigationCommandSent = false
@@ -1064,7 +1099,7 @@ final class ZZStore: ObservableObject {
                 )
                 refreshFrame(pane: event.pane, damage: damage)
             case ZZ_EVENT_PANE_REMOVED:
-                frames.removeValue(forKey: event.pane)
+                removeFrameSlot(for: event.pane)
                 terminalGeometries.removeValue(forKey: event.pane)
                 terminalFontSizeSteps.removeValue(forKey: event.pane)
                 agentStates.removeValue(forKey: event.pane)
@@ -1247,13 +1282,21 @@ final class ZZStore: ObservableObject {
             }
         }
 
-        let attachedPanes = Set(
+        let foregroundPanes = Set(
             nextSessions
                 .first(where: \.isAttached)?
                 .panes
                 .filter { $0.kind == .terminal && $0.layout != nil }
                 .map(\.id) ?? []
         )
+        let previewPanes = terminalPreviewRequested
+            ? Set(
+                attached?.allPanes
+                    .filter { $0.kind == .terminal }
+                    .map(\.id) ?? []
+            )
+            : []
+        let retainedPanes = foregroundPanes.union(previewPanes)
         let knownTerminalPanes = Set(
             nextSessions
                 .flatMap(\.allPanes)
@@ -1262,9 +1305,14 @@ final class ZZStore: ObservableObject {
         )
         terminalGeometries = terminalGeometries.filter { knownTerminalPanes.contains($0.key) }
         terminalFontSizeSteps = terminalFontSizeSteps.filter { knownTerminalPanes.contains($0.key) }
-        frames = frames.filter { attachedPanes.contains($0.key) }
-        for pane in attachedPanes {
+        pruneFrameSlots(
+            keepingFramesFor: retainedPanes,
+            keepingSlotsFor: knownTerminalPanes
+        )
+        for pane in foregroundPanes {
             restoreStableGeometry(for: pane, client: client)
+        }
+        for pane in retainedPanes {
             refreshFrame(pane: pane, damage: .full)
         }
         if attached == nil,
@@ -1446,7 +1494,26 @@ final class ZZStore: ObservableObject {
         guard let client, let frame = TerminalFrame(client: client, pane: pane, damage: damage) else {
             return
         }
-        frames[pane] = frame
+        frameSlot(for: pane).update(frame)
+    }
+
+    private func pruneFrameSlots(
+        keepingFramesFor attachedPanes: Set<UInt64>,
+        keepingSlotsFor knownTerminalPanes: Set<UInt64>
+    ) {
+        for (pane, slot) in frameSlots where !attachedPanes.contains(pane) {
+            slot.update(nil)
+        }
+        frameSlots = frameSlots.filter { knownTerminalPanes.contains($0.key) }
+    }
+
+    private func removeFrameSlot(for pane: UInt64) {
+        frameSlots.removeValue(forKey: pane)?.update(nil)
+    }
+
+    private func clearFrameSlots() {
+        frameSlots.values.forEach { $0.update(nil) }
+        frameSlots.removeAll()
     }
 
     private func acquireTerminalInput(_ pane: UInt64) {

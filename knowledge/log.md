@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-08-15
+* **Update**: Updated the GTK client architecture for adaptive sidebar preferences, modal-safe global chrome handling with live config overrides, paired terminal key events, live shortcut help, and native `GtkAccessibleText` terminal contents, caret, and selection exposure.
+
 ## 2026-08-14
 * **Creation**: Added the zz-gtk crate concept; GTK client landed on branch gtk-client.
 * **Update**: Client-core follow-ups: zz-tui's reader and Model now reduce through ClientCore (hand-rolled retention, patch damage, and the main-loop reducer deleted; FrameDamage is the core's ViewportDamage); the desktop MuxClient delegates all non-frame reduction to a core (ten state fields deleted, terminal frame path deliberately intercepted before the core so the painter's RetainedTerminalViewport and hot-path costs are byte-identical; ClientCore's reset split into adopt_hello/clear_attachment/reset_session so a reconnect keeps the frozen frame); and the desktop chrome chords resolve from ChromeKeymap - per-profile default tables, a chrome-only D-/S- grammar extension, gpui bindings built from the tables and rebuilt on config reload, and repeatable chrome-keybind/chrome-unbind zz/config keys. gpui keymaps only grow, so cross-surface live rebinds need a restart.

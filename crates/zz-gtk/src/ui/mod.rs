@@ -10,6 +10,7 @@ mod picker;
 pub mod prefix;
 mod search;
 mod settings;
+mod shortcuts;
 mod sidebar;
 mod ssh_prompt;
 mod terminal;
@@ -37,6 +38,7 @@ pub fn run(launch: Launch) -> glib::ExitCode {
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
+    app.set_accels_for_action("win.shortcuts", &["<Primary>question"]);
     glib::set_application_name("zz");
     app.connect_startup(|_| gtk::Window::set_default_icon_name(APP_ID));
     app.connect_activate(move |app| activate(app, &launch));

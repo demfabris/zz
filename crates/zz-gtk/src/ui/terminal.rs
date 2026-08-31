@@ -1,4 +1,5 @@
 use std::{
+    ops::Range,
     rc::Rc,
     sync::{
         Arc,
@@ -8,13 +9,14 @@ use std::{
 };
 
 use gtk::{gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
+use unicode_segmentation::UnicodeSegmentation;
 use zz_client::{ChromeAction, ChromeKeymap, ViewportDamage};
 use zz_protocol::{InputMessage, PaneId};
 use zz_terminal::{
     CellWidth, ClipboardTarget, Cursor, CursorStyle, GRAPHEME_TABLE_BIT, Glyph, KeyAction,
-    KeyInput, OverlayKind, PackedCell, PackedStyle, PointerCellEvent, ScrollbarState,
-    TerminalAppearance, TerminalDictionary, TerminalMouseButton, TerminalMouseInput,
-    TerminalMousePhase, TerminalViewAction, TerminalViewport, UnderlineStyle,
+    KeyInput, OVERLAY_RECTANGLE, OverlayKind, PackedCell, PackedStyle, PointerCellEvent,
+    ScrollbarState, TerminalAppearance, TerminalDictionary, TerminalMouseButton,
+    TerminalMouseInput, TerminalMousePhase, TerminalViewAction, TerminalViewport, UnderlineStyle,
 };
 
 use crate::{
@@ -47,9 +49,111 @@ enum ImOutcome {
     Text(Option<String>),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyRoute {
+    InputMethod,
+    Chrome,
+    Daemon,
+}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+struct AccessibleTerminalText {
+    characters: Vec<char>,
+    lines: Vec<Range<u32>>,
+    caret: u32,
+    selections: Vec<Range<u32>>,
+}
+
+impl AccessibleTerminalText {
+    fn bytes(&self, range: Range<usize>) -> glib::Bytes {
+        let text: String = self.characters[range].iter().collect();
+        glib::Bytes::from_owned(text.into_bytes())
+    }
+
+    fn contents(&self, start: u32, end: u32) -> Option<glib::Bytes> {
+        let len = self.characters.len();
+        let start = usize::try_from(start).ok()?.min(len);
+        let end = if end == u32::MAX {
+            len
+        } else {
+            usize::try_from(end).ok()?.min(len)
+        };
+        Some(self.bytes(start.min(end)..end))
+    }
+
+    fn contents_at(
+        &self,
+        offset: u32,
+        granularity: gtk::AccessibleTextGranularity,
+    ) -> Option<(u32, u32, glib::Bytes)> {
+        let offset = usize::try_from(offset).ok()?.min(self.characters.len());
+        if offset == self.characters.len() {
+            let end = u32::try_from(offset).unwrap_or(u32::MAX);
+            return Some((end, end, self.bytes(offset..offset)));
+        }
+        let range = match granularity {
+            gtk::AccessibleTextGranularity::Character => offset..offset + 1,
+            gtk::AccessibleTextGranularity::Word => self.word_at(offset),
+            gtk::AccessibleTextGranularity::Sentence => self.sentence_at(offset),
+            gtk::AccessibleTextGranularity::Line | gtk::AccessibleTextGranularity::Paragraph => {
+                self.line_at(offset)?
+            }
+            _ => return None,
+        };
+        Some((
+            u32::try_from(range.start).unwrap_or(u32::MAX),
+            u32::try_from(range.end).unwrap_or(u32::MAX),
+            self.bytes(range),
+        ))
+    }
+
+    fn word_at(&self, offset: usize) -> Range<usize> {
+        let text: String = self.characters.iter().collect();
+        let starts = text.unicode_word_indices().map(|(byte, _)| byte);
+        self.range_between_starts(&text, offset, starts)
+    }
+
+    fn sentence_at(&self, offset: usize) -> Range<usize> {
+        let text: String = self.characters.iter().collect();
+        let starts = text.split_sentence_bound_indices().map(|(byte, _)| byte);
+        self.range_between_starts(&text, offset, starts)
+    }
+
+    fn range_between_starts(
+        &self,
+        text: &str,
+        offset: usize,
+        starts: impl IntoIterator<Item = usize>,
+    ) -> Range<usize> {
+        let mut start = 0;
+        for byte in starts {
+            let boundary = text[..byte].chars().count();
+            if boundary > offset {
+                return start..boundary;
+            }
+            start = boundary;
+        }
+        start..self.characters.len()
+    }
+
+    fn line_at(&self, offset: usize) -> Option<Range<usize>> {
+        self.lines
+            .iter()
+            .find(|line| {
+                usize::try_from(line.start).is_ok_and(|start| start <= offset)
+                    && usize::try_from(line.end).is_ok_and(|end| offset < end)
+            })
+            .map(|line| {
+                usize::try_from(line.start).unwrap_or_default()
+                    ..usize::try_from(line.end).unwrap_or(self.characters.len())
+            })
+    }
+}
+
 mod imp {
     use std::{
         cell::{Cell, RefCell},
+        collections::HashMap,
         rc::Rc,
         sync::Arc,
     };
@@ -59,7 +163,7 @@ mod imp {
     use zz_protocol::PaneId;
     use zz_terminal::{PointerCellEvent, TerminalAppearance, TerminalViewport};
 
-    use super::{CellMetrics, DEFAULT_COLUMNS, DEFAULT_ROWS, LocalScroll};
+    use super::{AccessibleTerminalText, CellMetrics, DEFAULT_COLUMNS, DEFAULT_ROWS, LocalScroll};
     use crate::engine::Engine;
 
     #[derive(Default)]
@@ -78,6 +182,7 @@ mod imp {
         pub pending_commit: RefCell<Option<String>>,
         pub in_key_press: Cell<bool>,
         pub composing: Cell<bool>,
+        pub(super) key_routes: RefCell<HashMap<u32, super::KeyRoute>>,
         pub dragging: Cell<bool>,
         pub anchor: Cell<Option<PointerCellEvent>>,
         pub extent: Cell<bool>,
@@ -91,6 +196,8 @@ mod imp {
         pub scrollbar_dragging: Cell<bool>,
         pub hover: RefCell<Option<String>>,
         pub popup: RefCell<Option<gtk::Popover>>,
+        pub(super) accessible_active: Cell<bool>,
+        pub(super) accessible_text: RefCell<Option<AccessibleTerminalText>>,
     }
 
     #[glib::object_subclass]
@@ -98,6 +205,11 @@ mod imp {
         const NAME: &'static str = "ZzTerminalView";
         type Type = super::TerminalView;
         type ParentType = gtk::Widget;
+        type Interfaces = (gtk::AccessibleText,);
+
+        fn class_init(klass: &mut Self::Class) {
+            klass.set_accessible_role(gtk::AccessibleRole::Terminal);
+        }
     }
 
     impl ObjectImpl for TerminalView {
@@ -143,6 +255,77 @@ mod imp {
                 Some(viewport) => widget.paint(snapshot, viewport, bounds),
                 None => snapshot.append_color(&gdk::RGBA::BLACK, &bounds),
             }
+        }
+    }
+
+    impl gtk::subclass::prelude::AccessibleTextImpl for TerminalView {
+        fn attributes(
+            &self,
+            _offset: u32,
+        ) -> Vec<(gtk::AccessibleTextRange, glib::GString, glib::GString)> {
+            Vec::new()
+        }
+
+        fn caret_position(&self) -> u32 {
+            self.with_accessible_text(|text| text.caret)
+        }
+
+        fn contents(&self, start: u32, end: u32) -> Option<glib::Bytes> {
+            self.with_accessible_text(|text| text.contents(start, end))
+        }
+
+        fn contents_at(
+            &self,
+            offset: u32,
+            granularity: gtk::AccessibleTextGranularity,
+        ) -> Option<(u32, u32, glib::Bytes)> {
+            self.with_accessible_text(|text| text.contents_at(offset, granularity))
+        }
+
+        fn default_attributes(&self) -> Vec<(glib::GString, glib::GString)> {
+            Vec::new()
+        }
+
+        fn extents(&self, _start: u32, _end: u32) -> Option<graphene::Rect> {
+            None
+        }
+
+        fn offset(&self, _point: &graphene::Point) -> Option<u32> {
+            None
+        }
+
+        fn selection(&self) -> Vec<gtk::AccessibleTextRange> {
+            self.with_accessible_text(|text| {
+                text.selections
+                    .iter()
+                    .map(|range| {
+                        gtk::AccessibleTextRange::new(
+                            range.start as usize,
+                            range.end.saturating_sub(range.start) as usize,
+                        )
+                    })
+                    .collect()
+            })
+        }
+
+        fn set_caret_position(&self, _position: u32) -> bool {
+            false
+        }
+
+        fn set_selection(&self, _selection: usize, _range: gtk::AccessibleTextRange) -> bool {
+            false
+        }
+    }
+
+    impl TerminalView {
+        fn with_accessible_text<T>(&self, read: impl FnOnce(&AccessibleTerminalText) -> T) -> T {
+            self.accessible_active.set(true);
+            if self.accessible_text.borrow().is_none() {
+                self.accessible_text
+                    .replace(Some(self.obj().build_accessible_text()));
+            }
+            let held = self.accessible_text.borrow();
+            read(held.as_ref().expect("accessible text was initialized"))
         }
     }
 }
@@ -193,7 +376,7 @@ pub struct LocalScroll {
 glib::wrapper! {
     pub struct TerminalView(ObjectSubclass<imp::TerminalView>)
         @extends gtk::Widget,
-        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::AccessibleText, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl TerminalView {
@@ -209,6 +392,11 @@ impl TerminalView {
         view.imp().pane.set(pane);
         view.imp().engine.replace(Some(engine));
         view.imp().chrome.replace(Some(chrome));
+        view.update_property(&[
+            gtk::accessible::Property::Label("Terminal"),
+            gtk::accessible::Property::MultiLine(true),
+            gtk::accessible::Property::ReadOnly(true),
+        ]);
         view.set_appearance(appearance);
         view
     }
@@ -225,6 +413,7 @@ impl TerminalView {
     ) -> Self {
         let view = Self::new(engine, pane, appearance, chrome);
         view.imp().frozen.set(true);
+        view.update_property(&[gtk::accessible::Property::Label("Command Output")]);
         view
     }
 
@@ -285,7 +474,67 @@ impl TerminalView {
                 }
             }
         }
+        self.refresh_accessible_text();
         self.queue_draw();
+    }
+
+    fn build_accessible_text(&self) -> AccessibleTerminalText {
+        let imp = self.imp();
+        let viewport = imp.viewport.borrow();
+        let Some(viewport) = viewport.as_ref() else {
+            return AccessibleTerminalText::default();
+        };
+        let scroll = imp.scroll.borrow();
+        accessible_text(viewport, scroll.as_ref())
+    }
+
+    fn refresh_accessible_text(&self) {
+        let imp = self.imp();
+        if !imp.accessible_active.get() {
+            return;
+        }
+        let next = self.build_accessible_text();
+        let Some(previous) = imp.accessible_text.borrow().clone() else {
+            imp.accessible_text.replace(Some(next));
+            return;
+        };
+        let prefix = previous
+            .characters
+            .iter()
+            .zip(&next.characters)
+            .take_while(|(left, right)| left == right)
+            .count();
+        let suffix = previous.characters[prefix..]
+            .iter()
+            .rev()
+            .zip(next.characters[prefix..].iter().rev())
+            .take_while(|(left, right)| left == right)
+            .count();
+        let previous_end = previous.characters.len().saturating_sub(suffix);
+        let next_end = next.characters.len().saturating_sub(suffix);
+        if previous_end > prefix {
+            self.update_contents(
+                gtk::AccessibleTextContentChange::Remove,
+                u32::try_from(prefix).unwrap_or(u32::MAX),
+                u32::try_from(previous_end).unwrap_or(u32::MAX),
+            );
+        }
+        let caret_changed = previous.caret != next.caret;
+        let selection_changed = previous.selections != next.selections;
+        imp.accessible_text.replace(Some(next));
+        if next_end > prefix {
+            self.update_contents(
+                gtk::AccessibleTextContentChange::Insert,
+                u32::try_from(prefix).unwrap_or(u32::MAX),
+                u32::try_from(next_end).unwrap_or(u32::MAX),
+            );
+        }
+        if caret_changed {
+            self.update_caret_position();
+        }
+        if selection_changed {
+            self.update_selection_bound();
+        }
     }
 
     fn invalidate_all(&self) {
@@ -359,6 +608,7 @@ impl TerminalView {
     fn install_controllers(&self) {
         let im = gtk::IMMulticontext::new();
         im.set_client_widget(Some(self));
+        im.set_input_purpose(gtk::InputPurpose::Terminal);
         let commit_target = self.downgrade();
         im.connect_commit(move |_, text| {
             let Some(view) = commit_target.upgrade() else {
@@ -384,19 +634,12 @@ impl TerminalView {
         });
         self.imp().im.replace(Some(im));
 
-        let keyboard = gtk::EventControllerKey::new();
-        let pressed_target = self.downgrade();
-        keyboard.connect_key_pressed(move |controller, keyval, _keycode, state| {
-            let Some(view) = pressed_target.upgrade() else {
-                return glib::Propagation::Proceed;
-            };
-            view.on_key(controller, KeyAction::Press, keyval, state)
-        });
-        let released_target = self.downgrade();
-        keyboard.connect_key_released(move |_, keyval, _keycode, state| {
-            if let Some(view) = released_target.upgrade() {
-                view.on_key_released(keyval, state);
-            }
+        let keyboard = gtk::EventControllerLegacy::new();
+        let target = self.downgrade();
+        keyboard.connect_event(move |_, event| {
+            target
+                .upgrade()
+                .map_or(glib::Propagation::Proceed, |view| view.on_key_event(event))
         });
         self.add_controller(keyboard);
 
@@ -675,6 +918,7 @@ impl TerminalView {
             } else {
                 im.focus_out();
                 im.reset();
+                self.imp().key_routes.borrow_mut().clear();
             }
         }
         self.view_action(TerminalViewAction::Focus(focused));
@@ -684,13 +928,24 @@ impl TerminalView {
     /// Chrome first, input method second, the pane last. Chrome chords are
     /// resolved client-side and never reach the wire; the wire grammar cannot
     /// even spell them.
-    fn on_key(
+    fn on_key_event(&self, event: &gdk::Event) -> glib::Propagation {
+        let Some(key) = event.downcast_ref::<gdk::KeyEvent>() else {
+            return glib::Propagation::Proceed;
+        };
+        match event.event_type() {
+            gdk::EventType::KeyPress => self.on_key_pressed(key, event.modifier_state(), event),
+            gdk::EventType::KeyRelease => self.on_key_released(key, event.modifier_state()),
+            _ => glib::Propagation::Proceed,
+        }
+    }
+
+    fn on_key_pressed(
         &self,
-        controller: &gtk::EventControllerKey,
-        action: KeyAction,
-        keyval: gdk::Key,
+        key: &gdk::KeyEvent,
         state: gdk::ModifierType,
+        event: &gdk::Event,
     ) -> glib::Propagation {
+        let keyval = key.keyval();
         if keys::is_modifier(keyval) {
             // The daemon only recomputes a hover from pointer motion, so a
             // modifier pressed over a stationary pointer needs one made up.
@@ -710,30 +965,56 @@ impl TerminalView {
         let Some(engine) = self.engine() else {
             return glib::Propagation::Proceed;
         };
-        self.flush_local_scroll();
-        let probe = keys::key_input(action, keyval, state, None);
-        if let Some(chrome) = resolve_chrome(engine.chrome(), &probe) {
-            self.perform(&engine, chrome);
+        let action = match self.imp().key_routes.borrow_mut().entry(key.keycode()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(KeyRoute::InputMethod);
+                KeyAction::Press
+            }
+            std::collections::hash_map::Entry::Occupied(_) => KeyAction::Repeat,
+        };
+        if action == KeyAction::Repeat
+            && self.imp().key_routes.borrow().get(&key.keycode()) == Some(&KeyRoute::Chrome)
+        {
             return glib::Propagation::Stop;
         }
-        let text = match self.filter_input_method(controller) {
+        self.flush_local_scroll();
+        if action == KeyAction::Press {
+            let probe = keys::key_input(action, keyval, state, None);
+            if let Some(chrome) = resolve_chrome(&engine.chrome(), &probe) {
+                self.imp()
+                    .key_routes
+                    .borrow_mut()
+                    .insert(key.keycode(), KeyRoute::Chrome);
+                self.perform(&engine, chrome);
+                return glib::Propagation::Stop;
+            }
+        }
+        let text = match self.filter_input_method(event) {
             ImOutcome::Composing => return glib::Propagation::Stop,
             ImOutcome::Text(text) => text,
         };
         let input = keys::key_input(action, keyval, state, text.as_deref());
+        self.imp()
+            .key_routes
+            .borrow_mut()
+            .insert(key.keycode(), KeyRoute::Daemon);
         engine.send_key(self.pane(), input, false);
         glib::Propagation::Stop
     }
 
-    fn on_key_released(&self, keyval: gdk::Key, state: gdk::ModifierType) {
+    fn on_key_released(&self, key: &gdk::KeyEvent, state: gdk::ModifierType) -> glib::Propagation {
+        let keyval = key.keyval();
         if keys::is_modifier(keyval) {
             if self.imp().hover.borrow().is_some() {
                 self.view_action(TerminalViewAction::ClearLinkHover);
             }
-            return;
+            return glib::Propagation::Proceed;
         }
+        let Some(route) = self.imp().key_routes.borrow_mut().remove(&key.keycode()) else {
+            return glib::Propagation::Proceed;
+        };
         let Some(engine) = self.engine() else {
-            return;
+            return glib::Propagation::Stop;
         };
         let kitty = self
             .imp()
@@ -741,33 +1022,30 @@ impl TerminalView {
             .borrow()
             .as_ref()
             .is_some_and(|viewport| viewport.kitty_keyboard);
-        if !kitty {
-            return;
+        if route == KeyRoute::Daemon && kitty {
+            let input = keys::key_input(KeyAction::Release, keyval, state, None);
+            engine.send_key(self.pane(), input, false);
         }
-        let input = keys::key_input(KeyAction::Release, keyval, state, None);
-        engine.send_key(self.pane(), input, false);
+        glib::Propagation::Stop
     }
 
     /// Runs the press through the input method by hand rather than handing the
     /// context to the controller: `GtkEventControllerKey` would let the IM
     /// swallow the event before `key-pressed` fires, and then plain letters
     /// would never reach the daemon's key tables as keys.
-    fn filter_input_method(&self, controller: &gtk::EventControllerKey) -> ImOutcome {
+    fn filter_input_method(&self, event: &gdk::Event) -> ImOutcome {
         let imp = self.imp();
         let Some(im) = imp.im.borrow().clone() else {
             return ImOutcome::Text(None);
         };
-        let Some(event) = controller.current_event() else {
-            return ImOutcome::Text(None);
-        };
         imp.pending_commit.replace(None);
         imp.in_key_press.set(true);
-        let claimed = im.filter_keypress(&event);
+        im.filter_keypress(event);
         imp.in_key_press.set(false);
         let committed = imp.pending_commit.borrow_mut().take();
         match committed {
             Some(text) => ImOutcome::Text(Some(text)),
-            None if claimed || imp.composing.get() => ImOutcome::Composing,
+            None if imp.composing.get() => ImOutcome::Composing,
             None => ImOutcome::Text(None),
         }
     }
@@ -927,6 +1205,7 @@ impl TerminalView {
             nodes: vec![None; usize::from(viewport.rows)],
         }));
         imp.scrolling.set(true);
+        self.refresh_accessible_text();
         self.queue_draw();
         self.schedule_scroll_sync(serial);
         true
@@ -934,6 +1213,10 @@ impl TerminalView {
 
     /// Drop the overlay. True when one was up.
     fn clear_local_scroll(&self) -> bool {
+        self.clear_local_scroll_with_accessibility(true)
+    }
+
+    fn clear_local_scroll_with_accessibility(&self, refresh_accessibility: bool) -> bool {
         let imp = self.imp();
         if !imp.scrolling.get() {
             return false;
@@ -942,6 +1225,9 @@ impl TerminalView {
             .set(imp.scroll_serial.get().wrapping_add(1));
         imp.scroll.replace(None);
         imp.scrolling.set(false);
+        if refresh_accessibility {
+            self.refresh_accessible_text();
+        }
         self.queue_draw();
         true
     }
@@ -1011,7 +1297,7 @@ impl TerminalView {
             })
         };
         if retire {
-            self.clear_local_scroll();
+            self.clear_local_scroll_with_accessibility(false);
         }
     }
 
@@ -1175,9 +1461,7 @@ fn pointer_button(button: u32) -> Option<TerminalMouseButton> {
 /// The `ui` table owns chords that belong to the whole client; `terminal` owns
 /// the ones only a terminal surface answers.
 fn resolve_chrome(chrome: &ChromeKeymap, input: &KeyInput) -> Option<ChromeAction> {
-    chrome
-        .resolve(zz_client::UI_TABLE, input)
-        .or_else(|| chrome.resolve(zz_client::TERMINAL_TABLE, input))
+    chrome.resolve(zz_client::TERMINAL_TABLE, input)
 }
 
 struct StyleRun {
@@ -1557,6 +1841,209 @@ fn glyph_of(dictionary: &TerminalDictionary, cell: PackedCell) -> Glyph<'_> {
     std::str::from_utf8(bytes).map_or(Glyph::Empty, Glyph::Grapheme)
 }
 
+fn accessible_text(
+    viewport: &TerminalViewport,
+    scroll: Option<&LocalScroll>,
+) -> AccessibleTerminalText {
+    let rows = usize::from(viewport.rows);
+    let columns = usize::from(viewport.columns);
+    let mut characters = Vec::with_capacity(rows.saturating_mul(columns.saturating_add(1)));
+    let mut lines = Vec::with_capacity(rows);
+    let mut column_offsets = Vec::with_capacity(rows);
+    for row in 0..rows {
+        let source = scroll.and_then(|scroll| {
+            let absolute = scroll.target.saturating_add(row as u32);
+            if absolute >= viewport.scrollbar.offset {
+                let live_row = usize::try_from(absolute - viewport.scrollbar.offset).ok()?;
+                viewport
+                    .row(u16::try_from(live_row).ok()?)
+                    .map(|cells| (cells, viewport.dictionary.as_ref()))
+            } else {
+                scroll
+                    .rows
+                    .get(row)
+                    .and_then(Option::as_ref)
+                    .map(|history| (history.cells.as_ref(), history.dictionary.as_ref()))
+            }
+        });
+        let source = source.or_else(|| {
+            if scroll.is_some() {
+                return None;
+            }
+            viewport
+                .row(u16::try_from(row).unwrap_or(u16::MAX))
+                .map(|cells| (cells, viewport.dictionary.as_ref()))
+        });
+        let line_start = characters.len();
+        let (cells, dictionary) = source.unwrap_or((&[], viewport.dictionary.as_ref()));
+        let offsets = accessible_row(&mut characters, cells, dictionary, columns);
+        if row + 1 < rows {
+            characters.push('\n');
+        }
+        lines.push(
+            u32::try_from(line_start).unwrap_or(u32::MAX)
+                ..u32::try_from(characters.len()).unwrap_or(u32::MAX),
+        );
+        column_offsets.push(offsets);
+    }
+    let end = u32::try_from(characters.len()).unwrap_or(u32::MAX);
+    let caret = accessible_caret(viewport, scroll, &column_offsets, end).unwrap_or(0);
+    let selections = accessible_selections(viewport, scroll, &column_offsets);
+    AccessibleTerminalText {
+        characters,
+        lines,
+        caret,
+        selections,
+    }
+}
+
+fn accessible_row(
+    characters: &mut Vec<char>,
+    cells: &[PackedCell],
+    dictionary: &TerminalDictionary,
+    columns: usize,
+) -> Vec<usize> {
+    let start = characters.len();
+    let mut last_content_end = None;
+    let mut offsets = Vec::with_capacity(columns.saturating_add(1));
+    for column in 0..columns {
+        offsets.push(characters.len());
+        let cell = cells.get(column).copied().unwrap_or(PackedCell::EMPTY);
+        if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+            continue;
+        }
+        match glyph_of(dictionary, cell) {
+            Glyph::Empty => characters.push(' '),
+            Glyph::Scalar(character) => {
+                characters.push(character);
+                last_content_end = Some(characters.len());
+            }
+            Glyph::Grapheme(grapheme) => {
+                characters.extend(grapheme.chars());
+                last_content_end = Some(characters.len());
+            }
+        }
+    }
+    offsets.push(characters.len());
+    let end = last_content_end.unwrap_or(start);
+    characters.truncate(end);
+    for offset in &mut offsets {
+        *offset = (*offset).min(end);
+    }
+    offsets
+}
+
+fn accessible_selections(
+    viewport: &TerminalViewport,
+    scroll: Option<&LocalScroll>,
+    column_offsets: &[Vec<usize>],
+) -> Vec<Range<u32>> {
+    let mut normal = Vec::new();
+    let mut rectangles = Vec::new();
+    for overlay in viewport
+        .overlays
+        .iter()
+        .filter(|overlay| overlay.kind() == OverlayKind::Selection)
+    {
+        let Some(row) = accessible_live_row(viewport, scroll, overlay.row) else {
+            continue;
+        };
+        let Some(offsets) = column_offsets.get(row) else {
+            continue;
+        };
+        let last = offsets.len().saturating_sub(1);
+        let Some(start) = offsets.get(usize::from(overlay.start).min(last)) else {
+            continue;
+        };
+        let Some(end) = offsets.get(usize::from(overlay.end).min(last)) else {
+            continue;
+        };
+        let range =
+            u32::try_from(*start).unwrap_or(u32::MAX)..u32::try_from(*end).unwrap_or(u32::MAX);
+        if overlay.flags() & OVERLAY_RECTANGLE != 0 {
+            if !range.is_empty() {
+                rectangles.push(range);
+            }
+        } else {
+            normal.push((row, range));
+        }
+    }
+    normal.sort_by_key(|(row, range)| (*row, range.start));
+    let mut merged: Vec<(usize, Range<u32>)> = Vec::with_capacity(normal.len());
+    for (row, selection) in normal {
+        match merged.last_mut() {
+            Some((previous_row, previous)) if row <= previous_row.saturating_add(1) => {
+                *previous_row = (*previous_row).max(row);
+                previous.end = previous.end.max(selection.end);
+            }
+            _ => merged.push((row, selection)),
+        }
+    }
+    let mut selections: Vec<_> = merged
+        .into_iter()
+        .map(|(_, range)| range)
+        .filter(|range| !range.is_empty())
+        .chain(rectangles)
+        .collect();
+    selections.sort_by_key(|range| range.start);
+    selections
+}
+
+fn accessible_caret(
+    viewport: &TerminalViewport,
+    scroll: Option<&LocalScroll>,
+    column_offsets: &[Vec<usize>],
+    text_end: u32,
+) -> Option<u32> {
+    let (live_row, column) = viewport
+        .cursor
+        .map(|cursor| (cursor.row(), cursor.column()))
+        .or_else(|| {
+            viewport
+                .overlays
+                .iter()
+                .find(|overlay| overlay.kind() == OverlayKind::CopyCursor)
+                .map(|overlay| (overlay.row, overlay.start))
+        })?;
+    let row = match scroll {
+        None => usize::from(live_row),
+        Some(scroll) => {
+            let absolute = viewport
+                .scrollbar
+                .offset
+                .saturating_add(u32::from(live_row));
+            if absolute < scroll.target {
+                return Some(0);
+            }
+            let row = absolute - scroll.target;
+            if row >= u32::from(viewport.rows) {
+                return Some(text_end);
+            }
+            usize::try_from(row).ok()?
+        }
+    };
+    column_offsets
+        .get(row)?
+        .get(usize::from(column))
+        .and_then(|offset| u32::try_from(*offset).ok())
+}
+
+fn accessible_live_row(
+    viewport: &TerminalViewport,
+    scroll: Option<&LocalScroll>,
+    live_row: u16,
+) -> Option<usize> {
+    let Some(scroll) = scroll else {
+        return Some(usize::from(live_row));
+    };
+    let absolute = viewport
+        .scrollbar
+        .offset
+        .saturating_add(u32::from(live_row));
+    let row = absolute.checked_sub(scroll.target)?;
+    (row < u32::from(viewport.rows)).then(|| usize::try_from(row).ok())?
+}
+
 /// Runs are keyed by the resolved style value, never by `style_id`: patch
 /// streams append to the frame dictionary while full frames rebuild it, so the
 /// same visible row can carry different ids.
@@ -1625,12 +2112,21 @@ fn run_attributes(style: PackedStyle) -> pango::AttrList {
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, time::Instant};
+
     use gtk::gdk;
     use zz_client::{ChromeAction, ChromeKeymap, ChromeProfile};
-    use zz_terminal::KeyAction;
+    use zz_terminal::{
+        CellWidth, Color, Cursor, CursorStyle, GRAPHEME_TABLE_BIT, KeyAction, OVERLAY_RECTANGLE,
+        OverlayKind, OverlaySpan, PackedCell, PackedStyle, ScrollbarState, SessionStatus,
+        TerminalDictionary, TerminalViewport, UnderlineStyle,
+    };
 
-    use super::{forced_selection, resolve_chrome, truncate_uri};
-    use crate::ui::keys;
+    use super::{
+        AccessibleTerminalText, LocalScroll, accessible_text, forced_selection, resolve_chrome,
+        truncate_uri,
+    };
+    use crate::{engine::HistoryRow, ui::keys};
 
     fn press(keyval: gdk::Key, state: gdk::ModifierType) -> zz_terminal::KeyInput {
         keys::key_input(KeyAction::Press, keyval, state, None)
@@ -1700,5 +2196,225 @@ mod tests {
             None,
             "Control-C belongs to the pane"
         );
+    }
+
+    fn dictionary(grapheme: &str) -> Arc<TerminalDictionary> {
+        Arc::new(TerminalDictionary::from_shared(
+            Arc::from([PackedStyle::new(
+                Color::default(),
+                Color::default(),
+                None,
+                0,
+                UnderlineStyle::None,
+            )]),
+            Arc::from([0, grapheme.len() as u32]),
+            Arc::from(grapheme.as_bytes()),
+        ))
+    }
+
+    fn rendered(text: &AccessibleTerminalText) -> String {
+        text.characters.iter().collect()
+    }
+
+    #[test]
+    fn blank_rows_remain_distinct_text_lines() {
+        let viewport = TerminalViewport::blank(3, 2, SessionStatus::Running);
+        let text = accessible_text(&viewport, None);
+
+        assert_eq!(rendered(&text), "\n");
+        assert_eq!(text.lines, [0..1, 1..1]);
+        assert_eq!(text.caret, 0);
+    }
+
+    #[test]
+    fn wide_and_spacer_cells_collapse_to_their_glyphs() {
+        let mut viewport = TerminalViewport::blank(4, 1, SessionStatus::Running);
+        viewport.cells = Arc::from([
+            PackedCell::new('界' as u32, 0, CellWidth::Wide),
+            PackedCell::new(0, 0, CellWidth::SpacerTail),
+            PackedCell::new('x' as u32, 0, CellWidth::Narrow),
+            PackedCell::new(0, 0, CellWidth::SpacerHead),
+        ]);
+        viewport.overlays = Arc::from([
+            OverlaySpan::new(0, 0, 2, OverlayKind::Selection),
+            OverlaySpan::new(0, 2, 3, OverlayKind::SearchMatch),
+        ]);
+        let text = accessible_text(&viewport, None);
+
+        assert_eq!(rendered(&text), "界x");
+        assert_eq!(text.selections.len(), 1);
+        assert_eq!(text.selections[0], 0..1);
+    }
+
+    #[test]
+    fn explicit_trailing_spaces_survive_empty_padding() {
+        let mut viewport = TerminalViewport::blank(3, 1, SessionStatus::Running);
+        viewport.cells = Arc::from([
+            PackedCell::new('a' as u32, 0, CellWidth::Narrow),
+            PackedCell::new(' ' as u32, 0, CellWidth::Narrow),
+            PackedCell::EMPTY,
+        ]);
+
+        assert_eq!(rendered(&accessible_text(&viewport, None)), "a ");
+    }
+
+    #[test]
+    fn grapheme_ranges_count_characters_instead_of_utf8_bytes() {
+        let mut viewport = TerminalViewport::blank(1, 1, SessionStatus::Running);
+        viewport.dictionary = dictionary("e\u{301}");
+        viewport.cells = Arc::from([PackedCell::new(GRAPHEME_TABLE_BIT, 0, CellWidth::Narrow)]);
+        viewport.overlays = Arc::from([OverlaySpan::new(0, 0, 1, OverlayKind::Selection)]);
+        let text = accessible_text(&viewport, None);
+
+        assert_eq!(rendered(&text), "e\u{301}");
+        assert_eq!(text.selections.len(), 1);
+        assert_eq!(text.selections[0], 0..2);
+        assert_eq!(text.contents(0, 1).as_deref(), Some("e".as_bytes()));
+        assert_eq!(
+            text.contents(1, u32::MAX).as_deref(),
+            Some("\u{301}".as_bytes())
+        );
+        assert_eq!(text.contents(2, 1).as_deref(), Some(b"".as_slice()));
+    }
+
+    #[test]
+    fn text_granularities_follow_unicode_boundaries() {
+        let characters: Vec<_> = "foo, bar. Next!".chars().collect();
+        let end = u32::try_from(characters.len()).unwrap();
+        let text = AccessibleTerminalText {
+            characters,
+            lines: std::iter::once(0..end).collect(),
+            ..AccessibleTerminalText::default()
+        };
+        let at = |offset, granularity| {
+            text.contents_at(offset, granularity)
+                .and_then(|(_, _, bytes)| String::from_utf8(bytes.as_ref().to_vec()).ok())
+        };
+
+        assert_eq!(
+            at(0, gtk::AccessibleTextGranularity::Word).as_deref(),
+            Some("foo, ")
+        );
+        assert_eq!(
+            at(0, gtk::AccessibleTextGranularity::Sentence).as_deref(),
+            Some("foo, bar. ")
+        );
+        assert_eq!(
+            at(0, gtk::AccessibleTextGranularity::Paragraph).as_deref(),
+            Some("foo, bar. Next!")
+        );
+        let (start, finish, contents) = text
+            .contents_at(end, gtk::AccessibleTextGranularity::Character)
+            .unwrap();
+        assert_eq!((start, finish, contents.len()), (end, end, 0));
+
+        let empty = AccessibleTerminalText::default();
+        let (start, finish, contents) = empty
+            .contents_at(0, gtk::AccessibleTextGranularity::Character)
+            .unwrap();
+        assert_eq!((start, finish, contents.len()), (0, 0, 0));
+    }
+
+    #[test]
+    fn malformed_graphemes_flatten_without_panicking() {
+        let mut viewport = TerminalViewport::blank(1, 1, SessionStatus::Running);
+        viewport.dictionary = Arc::new(TerminalDictionary::from_shared(
+            Arc::from([]),
+            Arc::from([2, 1]),
+            Arc::from(*b"x"),
+        ));
+        viewport.cells = Arc::from([PackedCell::new(GRAPHEME_TABLE_BIT, 0, CellWidth::Narrow)]);
+
+        assert_eq!(rendered(&accessible_text(&viewport, None)), "");
+    }
+
+    #[test]
+    fn cursors_map_to_character_insertion_offsets() {
+        let mut viewport = TerminalViewport::blank(3, 1, SessionStatus::Running);
+        viewport.cells = Arc::from([
+            PackedCell::new('界' as u32, 0, CellWidth::Wide),
+            PackedCell::new(0, 0, CellWidth::SpacerTail),
+            PackedCell::new('x' as u32, 0, CellWidth::Narrow),
+        ]);
+        viewport.cursor = Some(Cursor::new(
+            1,
+            0,
+            true,
+            false,
+            false,
+            CursorStyle::Block,
+            Color::default(),
+        ));
+        assert_eq!(accessible_text(&viewport, None).caret, 1);
+
+        viewport.cursor = None;
+        viewport.overlays = Arc::from([OverlaySpan::new(0, 2, 3, OverlayKind::CopyCursor)]);
+        assert_eq!(accessible_text(&viewport, None).caret, 1);
+    }
+
+    #[test]
+    fn normal_selections_join_lines_while_rectangles_stay_split() {
+        let mut viewport = TerminalViewport::blank(1, 3, SessionStatus::Running);
+        viewport.cells = Arc::from([
+            PackedCell::new('a' as u32, 0, CellWidth::Narrow),
+            PackedCell::EMPTY,
+            PackedCell::new('b' as u32, 0, CellWidth::Narrow),
+        ]);
+        viewport.overlays = Arc::from([
+            OverlaySpan::new(0, 0, 1, OverlayKind::Selection),
+            OverlaySpan::new(1, 0, 1, OverlayKind::Selection),
+            OverlaySpan::new(2, 0, 1, OverlayKind::Selection),
+        ]);
+        let selections = accessible_text(&viewport, None).selections;
+        assert_eq!(selections.len(), 1);
+        assert_eq!(selections[0], 0..4);
+
+        viewport.overlays = Arc::from([
+            OverlaySpan::with_flags(0, 0, 1, OverlayKind::Selection, OVERLAY_RECTANGLE),
+            OverlaySpan::with_flags(1, 0, 1, OverlayKind::Selection, OVERLAY_RECTANGLE),
+            OverlaySpan::with_flags(2, 0, 1, OverlayKind::Selection, OVERLAY_RECTANGLE),
+        ]);
+        assert_eq!(accessible_text(&viewport, None).selections, [0..1, 3..4]);
+    }
+
+    #[test]
+    fn local_scroll_uses_each_rows_own_dictionary() {
+        let mut viewport = TerminalViewport::blank(1, 2, SessionStatus::Running);
+        viewport.dictionary = dictionary("L");
+        viewport.cells = Arc::from([
+            PackedCell::new(GRAPHEME_TABLE_BIT, 0, CellWidth::Narrow),
+            PackedCell::new('x' as u32, 0, CellWidth::Narrow),
+        ]);
+        viewport.scrollbar = ScrollbarState {
+            total: 12,
+            offset: 10,
+            len: 2,
+        };
+        viewport.cursor = Some(Cursor::new(
+            0,
+            0,
+            true,
+            false,
+            false,
+            CursorStyle::Block,
+            Color::default(),
+        ));
+        let scroll = LocalScroll {
+            target: 9,
+            serial: 1,
+            started: Instant::now(),
+            rows: vec![
+                Some(HistoryRow {
+                    cells: Arc::from([PackedCell::new(GRAPHEME_TABLE_BIT, 0, CellWidth::Narrow)]),
+                    dictionary: dictionary("H"),
+                }),
+                None,
+            ],
+            nodes: vec![None, None],
+        };
+        let text = accessible_text(&viewport, Some(&scroll));
+
+        assert_eq!(rendered(&text), "H\nL");
+        assert_eq!(text.caret, 2);
     }
 }

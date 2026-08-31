@@ -18,6 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use zz_client::{CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile};
 use zz_daemon::{HostEntry, RejectedHost, apply_fleet_host_entry, validate_fleet_host};
 use zz_protocol::{ConfigOverrideEntry, MuxOptionKey};
 use zz_terminal::AppearanceConfigKey;
@@ -60,6 +61,8 @@ pub struct State {
     pub path: Option<PathBuf>,
     values: BTreeMap<String, String>,
     daemon_entries: Vec<ConfigOverrideEntry>,
+    chrome_overrides: Vec<ChromeOverride>,
+    chrome_errors: Vec<(usize, String)>,
     hosts: Vec<HostEntry>,
     rejected_hosts: Vec<RejectedHost>,
     malformed_lines: Vec<usize>,
@@ -105,6 +108,24 @@ impl State {
     }
 
     #[must_use]
+    pub fn chrome_keymap(&self) -> ChromeKeymap {
+        let mut chrome = ChromeKeymap::for_profile(ChromeProfile::DESKTOP);
+        for entry in &self.chrome_overrides {
+            match entry {
+                ChromeOverride::Bind { table, key, action } => {
+                    chrome
+                        .bind(table, key, action)
+                        .expect("validated chrome action");
+                }
+                ChromeOverride::Unbind { table, key } => {
+                    chrome.unbind(table, key);
+                }
+            }
+        }
+        chrome
+    }
+
+    #[must_use]
     pub fn boolean(&self, key: &str, default: bool) -> bool {
         match self.value(key) {
             Some("true") => true,
@@ -120,6 +141,19 @@ impl State {
             .filter(|value| value.is_finite())
             .unwrap_or(default)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ChromeOverride {
+    Bind {
+        table: &'static str,
+        key: String,
+        action: String,
+    },
+    Unbind {
+        table: &'static str,
+        key: String,
+    },
 }
 
 /// Parse one config source. Deliberately forgiving: this client models a
@@ -140,6 +174,17 @@ pub fn parse(source: &str) -> State {
         };
         let key = key.trim();
         let value = file::value_without_comment(value).trim();
+        let chrome = match key {
+            "chrome-keybind" => Some(parse_chrome_bind(value)),
+            "chrome-unbind" => Some(parse_chrome_unbind(value)),
+            _ => None,
+        };
+        if let Some(chrome) = chrome {
+            match chrome {
+                Ok(chrome) => state.chrome_overrides.push(chrome),
+                Err(error) => state.chrome_errors.push((index + 1, error)),
+            }
+        }
         if is_daemon_owned(key) {
             state
                 .daemon_entries
@@ -157,6 +202,47 @@ pub fn parse(source: &str) -> State {
         state.values.insert(key.to_owned(), value.to_owned());
     }
     state
+}
+
+fn parse_chrome_bind(value: &str) -> Result<ChromeOverride, String> {
+    let (target, action) = value
+        .rsplit_once('=')
+        .ok_or_else(|| "expected `<table>:<key>=<action>`".to_owned())?;
+    let (table, key) = parse_chrome_target(target)?;
+    let action = action.trim();
+    if ChromeAction::from_name(action).is_none() {
+        return Err(format!("unknown chrome action `{action}`"));
+    }
+    Ok(ChromeOverride::Bind {
+        table,
+        key,
+        action: action.to_owned(),
+    })
+}
+
+fn parse_chrome_unbind(value: &str) -> Result<ChromeOverride, String> {
+    let (table, key) = parse_chrome_target(value)?;
+    Ok(ChromeOverride::Unbind { table, key })
+}
+
+fn parse_chrome_target(target: &str) -> Result<(&'static str, String), String> {
+    let (table, key) = target
+        .split_once(':')
+        .ok_or_else(|| "expected `<table>:<key>`".to_owned())?;
+    let table = table.trim();
+    let table = CHROME_TABLES
+        .into_iter()
+        .find(|known| *known == table)
+        .ok_or_else(|| {
+            format!(
+                "unknown chrome table `{table}`; expected one of {}",
+                CHROME_TABLES.join(", "),
+            )
+        })?;
+    let key = key.trim();
+    let chord =
+        ChromeKey::parse(key).ok_or_else(|| format!("`{key}` is not a chord zz can bind"))?;
+    Ok((table, chord.to_string()))
 }
 
 /// The daemon's key set, taken from the daemon's own enums rather than a list
@@ -249,6 +335,13 @@ fn read_state(stamp: &file::Stamp) -> State {
         log::warn!(
             target: "zz_gtk::config",
             "{}:{line}: expected `key = value`",
+            path.display(),
+        );
+    }
+    for (line, error) in &state.chrome_errors {
+        log::warn!(
+            target: "zz_gtk::config",
+            "{}:{line}: ignoring chrome override: {error}",
             path.display(),
         );
     }
@@ -360,6 +453,51 @@ prefix = C-a
         let state = parse("pane-gaps = false\npane-gaps = true\n");
 
         assert!(state.boolean("pane-gaps", false));
+    }
+
+    #[test]
+    fn chrome_overrides_apply_in_file_order() {
+        let state = parse(
+            "chrome-keybind = ui:C-p=ui-zoom-in\n\
+             chrome-unbind = ui:C-p\n\
+             chrome-keybind = ui:C-p=open-settings\n\
+             chrome-unbind = ui:C-,\n\
+             chrome-keybind = browser:D-==browser-zoom-in\n",
+        );
+        let chrome = state.chrome_keymap();
+
+        assert_eq!(
+            chrome.action_for("ui", "C-p"),
+            Some(ChromeAction::OpenSettings)
+        );
+        assert_eq!(chrome.action_for("ui", "C-,"), None);
+        assert_eq!(
+            chrome.action_for("browser", "D-="),
+            Some(ChromeAction::BrowserZoomIn)
+        );
+    }
+
+    #[test]
+    fn invalid_chrome_overrides_are_reported_and_skipped() {
+        let state = parse(
+            "chrome-keybind = prefix:C-p=open-settings\n\
+             chrome-keybind = ui:C-p=teleport\n\
+             chrome-unbind = ui:\n\
+             chrome-keybind = ui:C-p=open-settings\n",
+        );
+
+        assert_eq!(
+            state
+                .chrome_errors
+                .iter()
+                .map(|(line, _)| *line)
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert_eq!(
+            state.chrome_keymap().action_for("ui", "C-p"),
+            Some(ChromeAction::OpenSettings)
+        );
     }
 
     #[test]

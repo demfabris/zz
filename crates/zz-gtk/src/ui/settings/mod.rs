@@ -1,4 +1,4 @@
-//! Preferences, as GNOME presents them: an `AdwPreferencesDialog` over the
+//! Preferences, as GNOME presents them: an adaptive sidebar dialog over the
 //! window, one page per subject, closed by Escape like every other dialog on
 //! the desktop.
 //!
@@ -44,7 +44,13 @@ pub struct Settings {
     store: RefCell<Store>,
     rows: RefCell<Vec<Row>>,
     syncing: Syncing,
-    dialog: adw::PreferencesDialog,
+    dialog: adw::Dialog,
+    toasts: adw::ToastOverlay,
+    sidebar: adw::Sidebar,
+    sidebar_section: adw::SidebarSection,
+    pages: gtk::Stack,
+    split: adw::NavigationSplitView,
+    content_page: adw::NavigationPage,
     zoom_row: adw::ActionRow,
     mux: Rc<MuxEditor>,
     hosts: Rc<HostsPage>,
@@ -61,8 +67,55 @@ impl Settings {
         let mux = MuxEditor::new();
         let zoom_row = adw::ActionRow::builder()
             .title("Interface zoom")
-            .subtitle("100%  ·  transient, never written to the file")
+            .subtitle("100%")
             .build();
+        let sidebar = adw::Sidebar::new();
+        let sidebar_section = adw::SidebarSection::new();
+        sidebar.append(sidebar_section.clone());
+
+        let sidebar_toolbar = adw::ToolbarView::new();
+        sidebar_toolbar.add_top_bar(&adw::HeaderBar::new());
+        sidebar_toolbar.set_content(Some(&sidebar));
+        let sidebar_page =
+            adw::NavigationPage::with_tag(&sidebar_toolbar, "Preferences", "preferences");
+
+        let pages = gtk::Stack::builder()
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .hexpand(true)
+            .vexpand(true)
+            .build();
+        let content_toolbar = adw::ToolbarView::new();
+        content_toolbar.add_top_bar(&adw::HeaderBar::new());
+        content_toolbar.set_content(Some(&pages));
+        let content_page = adw::NavigationPage::with_tag(
+            &content_toolbar,
+            Page::Interface.title(),
+            "preferences-page",
+        );
+
+        let split = adw::NavigationSplitView::builder()
+            .sidebar(&sidebar_page)
+            .content(&content_page)
+            .min_sidebar_width(190.0)
+            .max_sidebar_width(260.0)
+            .build();
+        let toasts = adw::ToastOverlay::new();
+        toasts.set_child(Some(&split));
+        let dialog = adw::Dialog::builder()
+            .title("Preferences")
+            .content_width(900)
+            .content_height(680)
+            .width_request(360)
+            .height_request(400)
+            .child(&toasts)
+            .build();
+        let breakpoint = adw::Breakpoint::new(
+            adw::BreakpointCondition::parse("max-width: 550sp")
+                .expect("the preferences breakpoint is valid"),
+        );
+        breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
+        breakpoint.add_setter(&sidebar, "mode", Some(&adw::SidebarMode::Page.to_value()));
+        dialog.add_breakpoint(breakpoint);
 
         let settings = Rc::new(Self {
             engine,
@@ -70,9 +123,13 @@ impl Settings {
             store: RefCell::new(Store::load()),
             rows: RefCell::new(Vec::new()),
             syncing,
-            dialog: adw::PreferencesDialog::builder()
-                .title("Preferences")
-                .build(),
+            dialog,
+            toasts,
+            sidebar,
+            sidebar_section,
+            pages,
+            split,
+            content_page,
             zoom_row,
             mux,
             hosts: HostsPage::new(),
@@ -89,6 +146,13 @@ impl Settings {
         settings.connect_host_edits();
         settings.install_css();
         settings.apply_file();
+
+        let target = Rc::downgrade(&settings);
+        settings.sidebar.connect_activated(move |_, position| {
+            if let Some(settings) = target.upgrade() {
+                settings.select_page(position as usize);
+            }
+        });
 
         let target = Rc::downgrade(&settings);
         settings.dialog.connect_closed(move |_| {
@@ -202,7 +266,7 @@ impl Settings {
         if moved {
             self.restyle();
             self.zoom_row
-                .set_subtitle(&format!("{}%  ·  transient", self.zoom.percent()));
+                .set_subtitle(&format!("{}%", self.zoom.percent()));
         }
         moved
     }
@@ -220,8 +284,8 @@ impl Settings {
         }
         self.mux.reload();
         self.refresh_rows();
-        if Page::ALL.iter().any(|page| page.name() == name) {
-            self.dialog.set_visible_page_name(name);
+        if let Some(position) = Page::ALL.iter().position(|page| page.name() == name) {
+            self.select_page(position);
         }
     }
 
@@ -260,12 +324,11 @@ impl Settings {
     }
 
     /// One `AdwPreferencesPage` per subject, every row generated from the key
-    /// table. The dialog's own view switcher is the navigation, so there is no
-    /// list of pages to keep in step with anything.
+    /// table.
     fn build_pages(self: &Rc<Self>) {
         let write = self.writer();
         let mut rows = Vec::new();
-        for page in Page::ALL {
+        for (position, page) in Page::ALL.into_iter().enumerate() {
             let content = match page {
                 Page::Hosts => self.hosts.widget().clone(),
                 _ => adw::PreferencesPage::new(),
@@ -293,9 +356,29 @@ impl Settings {
                 Page::System => content.add(&self.import_group()),
                 _ => {}
             }
-            self.dialog.add(&content);
+            self.pages.add_named(&content, Some(page.name()));
+            self.sidebar_section.append(
+                adw::SidebarItem::builder()
+                    .title(page.title())
+                    .icon_name(page.icon())
+                    .build(),
+            );
+            if position == 0 {
+                self.pages.set_visible_child_name(page.name());
+            }
         }
+        self.sidebar.set_selected(0);
         self.rows.replace(rows);
+    }
+
+    fn select_page(&self, position: usize) {
+        let Some(page) = Page::ALL.get(position).copied() else {
+            return;
+        };
+        self.sidebar.set_selected(position as u32);
+        self.pages.set_visible_child_name(page.name());
+        self.content_page.set_title(page.title());
+        self.split.set_show_content(true);
     }
 
     /// The offer the first-run prompt says can be taken later. Its group also
@@ -332,6 +415,11 @@ impl Settings {
             ("zoom-in-symbolic", ChromeAction::UiZoomIn),
         ] {
             let button = gtk::Button::from_icon_name(icon);
+            button.set_tooltip_text(Some(match action {
+                ChromeAction::UiZoomOut => "Zoom Out",
+                ChromeAction::UiZoomReset => "Reset Zoom",
+                _ => "Zoom In",
+            }));
             let target = Rc::downgrade(self);
             button.connect_clicked(move |_| {
                 if let Some(route) = target.upgrade()
@@ -376,7 +464,7 @@ impl Settings {
     /// message nobody can see is a message nobody gets.
     fn report(&self, message: &str) {
         if self.open.get() {
-            self.dialog.add_toast(adw::Toast::new(message));
+            self.toasts.add_toast(adw::Toast::new(message));
         } else {
             self.engine.notify(message.to_owned());
         }
@@ -395,6 +483,7 @@ impl Settings {
         let store = self.store.borrow();
         let state = store.state();
         apply_theme_mode(state);
+        let chrome = state.chrome_keymap();
         // The fleet is a config value like any other: the poll is what adds and
         // removes hosts, so a hand edit and this surface cannot disagree.
         self.engine.set_fleet_hosts(state.fleet_hosts());
@@ -404,6 +493,7 @@ impl Settings {
             .map(|host| (host.name.clone(), host.endpoint.to_string()))
             .collect();
         drop(store);
+        self.engine.set_chrome(chrome);
         self.hosts.refresh(&listed);
         self.config_group.set_description(Some(&self.config_path()));
         self.restyle();

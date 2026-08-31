@@ -1,13 +1,13 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
     sync::Arc,
 };
 
 use adw::prelude::*;
-use gtk::{gio, glib};
-use zz_client::{ChromeAction, ViewportDamage};
+use gtk::{gdk, gio, glib};
+use zz_client::{ChromeAction, UI_TABLE, ViewportDamage};
 use zz_protocol::{
     CommandInvocation, DisplayPanesAction, InputMessage, LayoutNode, PaneId, PaneKindSnapshot,
     SessionId, WindowId,
@@ -26,6 +26,7 @@ use crate::{
         picker::PanePicker,
         prefix,
         settings::Settings,
+        shortcuts,
         sidebar::{Hooks, NewSessionPanel, Sidebar},
         ssh_prompt,
         terminal::TerminalView,
@@ -139,16 +140,18 @@ impl Shell {
         let prefix = gtk::Label::builder().label("PREFIX").visible(false).build();
         prefix.add_css_class("caption-heading");
         prefix.add_css_class("zz-prefix");
-        header.pack_end(
-            &gtk::MenuButton::builder()
-                .icon_name("open-menu-symbolic")
-                .tooltip_text("Main Menu")
-                .menu_model(&primary_menu())
-                .build(),
-        );
+        let primary_menu = primary_menu();
+        let content_menu = gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text("Main Menu")
+            .menu_model(&primary_menu)
+            .primary(true)
+            .visible(false)
+            .build();
+        header.pack_end(&content_menu);
         header.pack_end(&prefix);
 
-        let sidebar = Sidebar::build(Arc::clone(&engine));
+        let sidebar = Sidebar::build(Arc::clone(&engine), &primary_menu);
         header.pack_start(&sidebar.toggle_button());
 
         let grid = PaneGrid::new();
@@ -174,12 +177,14 @@ impl Shell {
             .application(app)
             .default_width(1024)
             .default_height(680)
+            .width_request(360)
+            .height_request(300)
             .title("zz")
             .icon_name(super::APP_ID)
             .content(&toasts)
             .build();
 
-        sidebar.install_breakpoint(&window);
+        sidebar.install_breakpoint(&window, &content_menu);
         let overlays = Overlays::new(Arc::clone(&engine), &window);
 
         // >>> palette agent: the prefix claim has to be installed before any
@@ -218,6 +223,7 @@ impl Shell {
             }
         }));
         shell.install_actions();
+        shell.install_chrome();
         shell.connect_signals();
         shell.connect_sidebar();
         shell.pump_events();
@@ -297,7 +303,62 @@ impl Shell {
         self.window.add_action(&page);
     }
 
-    fn verbs() -> [(&'static str, fn(&Rc<Self>)); 11] {
+    fn install_chrome(self: &Rc<Self>) {
+        let held = Rc::new(RefCell::new(HashSet::new()));
+        let controller = gtk::EventControllerLegacy::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let target = Rc::downgrade(self);
+        let pressed = Rc::clone(&held);
+        controller.connect_event(move |_, event| {
+            let Some(shell) = target.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let Some(key) = event.downcast_ref::<gdk::KeyEvent>() else {
+                return glib::Propagation::Proceed;
+            };
+            match event.event_type() {
+                gdk::EventType::KeyPress => {
+                    if keys::is_modifier(key.keyval()) {
+                        return glib::Propagation::Proceed;
+                    }
+                    if pressed.borrow().contains(&key.keycode()) {
+                        return glib::Propagation::Stop;
+                    }
+                    if shell.numbering.get() {
+                        return glib::Propagation::Proceed;
+                    }
+                    let input = keys::key_input(
+                        KeyAction::Press,
+                        key.keyval(),
+                        event.modifier_state(),
+                        None,
+                    );
+                    let Some(action) = shell.engine.chrome().resolve(UI_TABLE, &input) else {
+                        return glib::Propagation::Proceed;
+                    };
+                    if pressed.borrow_mut().insert(key.keycode()) {
+                        shell.perform(action);
+                    }
+                    glib::Propagation::Stop
+                }
+                gdk::EventType::KeyRelease => {
+                    if pressed.borrow_mut().remove(&key.keycode()) {
+                        glib::Propagation::Stop
+                    } else {
+                        glib::Propagation::Proceed
+                    }
+                }
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        self.window.add_controller(controller);
+
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave(move |_| held.borrow_mut().clear());
+        self.window.add_controller(focus);
+    }
+
+    fn verbs() -> [(&'static str, fn(&Rc<Self>)); 12] {
         [
             ("new-window", |shell| {
                 shell.on_session(|session| {
@@ -340,6 +401,9 @@ impl Shell {
                 });
             }),
             ("detach", |shell| shell.detach()),
+            ("shortcuts", |shell| {
+                shortcuts::present(&shell.window, &shell.engine.chrome());
+            }),
             ("about", |shell| shell.present_about()),
             ("settings", |shell| shell.settings.toggle(&shell.window)),
         ]
@@ -905,13 +969,15 @@ impl Shell {
 // ── end gtk-termux ──
 
 /// The primary menu, in the order the HIG asks for: what this window can do,
-/// then what the session can do, and Preferences and About last.
+/// then what the session can do, and application-wide items last.
 fn primary_menu() -> gio::Menu {
     let windows = gio::Menu::new();
     windows.append(Some("New Window"), Some("win.new-window"));
-    windows.append(Some("Next Window"), Some("win.next-window"));
-    windows.append(Some("Previous Window"), Some("win.previous-window"));
-    windows.append(Some("Close Window"), Some("win.close-window"));
+    let switch_window = gio::Menu::new();
+    switch_window.append(Some("Next Window"), Some("win.next-window"));
+    switch_window.append(Some("Previous Window"), Some("win.previous-window"));
+    windows.append_submenu(Some("Switch Window"), &switch_window);
+    windows.append(Some("Delete Mux Window"), Some("win.close-window"));
 
     let focus = gio::Menu::new();
     for (label, direction) in [
@@ -935,6 +1001,7 @@ fn primary_menu() -> gio::Menu {
 
     let app = gio::Menu::new();
     app.append(Some("Preferences"), Some("win.settings"));
+    app.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
     app.append(Some("About zz"), Some("win.about"));
 
     let menu = gio::Menu::new();

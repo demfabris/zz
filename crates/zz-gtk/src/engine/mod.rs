@@ -163,7 +163,7 @@ pub struct Engine {
     notices: Sender<EngineEvent>,
     prompts: Receiver<SshPromptRequest>,
     asked: Sender<SshPromptRequest>,
-    chrome: ChromeKeymap,
+    chrome: Mutex<ChromeKeymap>,
 }
 
 impl Engine {
@@ -197,7 +197,7 @@ impl Engine {
             notices: sender,
             prompts,
             asked,
-            chrome: ChromeKeymap::for_profile(ChromeProfile::DESKTOP),
+            chrome: Mutex::new(ChromeKeymap::for_profile(ChromeProfile::DESKTOP)),
         }))
     }
 
@@ -228,8 +228,12 @@ impl Engine {
             .collect()
     }
 
-    pub const fn chrome(&self) -> &ChromeKeymap {
-        &self.chrome
+    pub fn chrome(&self) -> MutexGuard<'_, ChromeKeymap> {
+        self.chrome.lock().expect("chrome keymap poisoned")
+    }
+
+    pub fn set_chrome(&self, chrome: ChromeKeymap) {
+        *self.chrome.lock().expect("chrome keymap poisoned") = chrome;
     }
 
     pub fn snapshot(&self) -> Arc<MuxSnapshot> {

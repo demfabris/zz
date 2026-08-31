@@ -1,7 +1,7 @@
 //! The pinned `window-copy` action vocabulary.
 //!
 //! Every name in the pin's `window_copy_cmd_table` is listed here with the
-//! behaviour category that owns it and the pin's `WINDOW_COPY_CMD_FLAG_READONLY`
+//! behavior category that owns it and the pin's `WINDOW_COPY_CMD_FLAG_READONLY`
 //! bit. Support is derived from the `send-keys -X` parser rather than stored,
 //! so a newly mapped action shrinks the missing set without a second edit.
 
@@ -12,10 +12,10 @@ use CopyActionCategory::{
 
 use crate::command::copy_mode_probe_action;
 
-/// Which `copy-mode.action-fidelity` item owns a pinned action's behaviour.
+/// Which `copy-mode.action-fidelity` item owns a pinned action's behavior.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CopyActionCategory {
-    /// Names no behaviour item has claimed yet: search entry points, the
+    /// Names no behavior item has claimed yet: search entry points, the
     /// refresh toggles, and the client-owned mouse scroll.
     Vocabulary,
     CursorGeometry,

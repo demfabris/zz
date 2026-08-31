@@ -2645,30 +2645,6 @@
       "reason": "The shared attached-client and session-cwd facts have shipped, but deferred event hooks still run through zz's sentinel client instead of selecting tmux's current or best attached client for relative source resolution."
     },
     {
-      "id": "source-file.sourced-hook-client-cwd",
-      "title": "Keep the invoking Control client for sourced hooks",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:source-file-sourced-hook-client-cwd"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "A hook raised by a Control-sourced command inherits the outer queue client's selected cwd, so a relative source inside that hook loads the client-root file instead of the containing-file or daemon-home decoy without changing its flags-0 framing."
-      ],
-      "depends_on": [],
-      "reason": "Command replay now retains replay_client and matches the caller cwd. Control hook framing still clears replay_client before the hook runs, so a relative source inside that hook falls back to daemon HOME while pinned tmux retains the outer queue client."
-    },
-    {
       "id": "terminal.key-client-selection",
       "title": "Select the send-keys target client",
       "decision": "adopt",
@@ -4327,6 +4303,17 @@
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "resolution": "A registered client's direct zz-native reload-config now snapshots the same selected source base as source-file and carries it through the default mux.conf replay. A CLI regression runs from a cwd containing spaces and glob metacharacters, places distinct leaf files in the caller cwd and beside mux.conf, clears the earlier sourced state, and proves direct reload selects the caller-root leaf. A daemon regression proves clientless replay still uses the containing-file fallback. The change reuses the v72 ClientHello cwd and existing daemon state without a protocol change. Startup, attached session-cwd selection, deferred event hooks, and hooks raised during sentinel replay retain their separate tracked gaps."
+    },
+    {
+      "id": "source-file.sourced-hook-client-cwd",
+      "title": "Keep the invoking Control client for sourced hooks",
+      "closed_on": "2026-08-31",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/source-hook-cwd-sourced.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "source-file now resolves relative paths against the outer queue client when the running command carries a Control command target, so a hook raised by a Control-sourced command keeps the invoking client's cwd. The working-directory client is selected separately from the replay client, which leaves the hook's replay framing untouched: the 6-check differential drives a Control `source-file` of a config in a subdirectory whose after-display-message hook sources a repo-relative leaf, and both sides load the client-root leaf instead of the containing-file or daemon-home decoy while emitting the same six flags-0 %begin/%end pairs, one SOURCED_HOOK body line, no %error, and a trailing %exit."
     },
     {
       "id": "source-file.startup-client-cwd",

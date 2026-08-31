@@ -8129,6 +8129,9 @@ impl Shared {
         }
         let replay_client = context.replay_client();
         let source_client = replay_client.unwrap_or(client);
+        let cwd_client = replay_client
+            .or_else(|| context.control_command_target().map(|(client, _)| client))
+            .unwrap_or(client);
         let (
             source_kind,
             startup_source_client_working_directory,
@@ -8138,7 +8141,7 @@ impl Shared {
             source_client_terminal,
         ) = {
             let inner = self.inner.lock();
-            let registered = inner.client_kinds.contains_key(&source_client);
+            let registered = inner.client_kinds.contains_key(&cwd_client);
             let source_kind = if source_client == client {
                 kind
             } else {
@@ -8148,7 +8151,7 @@ impl Shared {
                     .copied()
                     .unwrap_or(kind)
             };
-            let source_session_working_directory = client_attached_session(&inner, source_client)
+            let source_session_working_directory = client_attached_session(&inner, cwd_client)
                 .and_then(|session| inner.engine.state.session_working_directory(session))
                 .map(Path::to_owned);
             let source_client_terminal = if context.has_no_client() {
@@ -8162,10 +8165,7 @@ impl Shared {
                 source_kind,
                 inner.startup_source_client_working_directory.clone(),
                 source_session_working_directory,
-                inner
-                    .client_working_directories
-                    .get(&source_client)
-                    .cloned(),
+                inner.client_working_directories.get(&cwd_client).cloned(),
                 registered,
                 source_client_terminal,
             )
@@ -8180,7 +8180,7 @@ impl Shared {
                 .unwrap_or_else(|| PathBuf::from("/"))
         });
         let source_client_base = startup_source_client_working_directory.or_else(|| {
-            if source_client != ClientId(u64::MAX) && source_client_registered {
+            if cwd_client != ClientId(u64::MAX) && source_client_registered {
                 source_working_directory.clone()
             } else {
                 None

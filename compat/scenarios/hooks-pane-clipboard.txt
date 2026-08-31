@@ -1,0 +1,5 @@
+shim:
+stage: fixtures/hooks-pane-clipboard.sh ~/hooks-pane-clipboard.sh
+out: set-environment -gu HOOKS_PANE_CLIPBOARD
+run-shell 'sh ~/hooks-pane-clipboard.sh'
+out: show-environment -g HOOKS_PANE_CLIPBOARD

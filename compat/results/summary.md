@@ -27,6 +27,7 @@
 | honest-knobs-c1-layout | 9 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-readback | 21 | yes | 0 | yes | yes | yes |
 | honest-knobs-c2 | 27 | yes | 0 | yes | yes | yes |
+| hooks-pane-clipboard | 3 | yes | 0 | yes | yes | yes |
 | jobs-run-shell-order | 3 | yes | 0 | yes | yes | yes |
 | join-pane-size | 11 | yes | 0 | yes | yes | yes |
 | lane2-store | 193 | yes | 0 | yes | yes | yes |

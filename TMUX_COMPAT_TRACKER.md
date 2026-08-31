@@ -6,7 +6,7 @@
 >
 > Ledger settlement: **69.2% (146 of 211 known groups); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **110 SCENARIOS, 1,773 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
+> Exit evidence: **120 SCENARIOS, 1,862 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
@@ -106,11 +106,11 @@ found during that wave.
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
 | New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
-| Live unresolved | 45 open + 20 blocked = 65 |
+| Live unresolved | 42 open + 20 blocked = 62 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 109 scenarios, 1,755 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
-| Differential SHA-256 | `0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0` |
-| Ledger settlement | 146 of 211 known groups = 69.2% |
+| Latest differential | 120 scenarios, 1,862 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
+| Differential SHA-256 | `1ff63ef2beb89731a84708681be491e6f0cb67ac2de42a6cb48fe5e2117862c0` |
+| Ledger settlement | 149 of 211 known groups = 70.6% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -124,7 +124,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(124 + 22) / (124 + 87) = 146 / 211 = 69.2%
+(127 + 22) / (127 + 84) = 149 / 211 = 70.6%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -1257,6 +1257,17 @@ nightly CI run.
 The patch stays inside raw zz-tui rendering. It leaves the wire protocol, pane snapshots, and GPUI
 rendering unchanged. Mutable tiled z-order after `join-pane`, `swap-pane`, or serialized
 `select-layout` remains registered under `F-PANE-BORDER-ZORDER`.
+
+The 2026-08-31 Opus batch run integrates two batched fronts in one evening: the daemon basket
+(run-shell immediate/background environment ordering, copy-pipe job environment, the
+pane-set-clipboard hook, and both source-hook client-cwd contracts) at `a5b924ec`, and the
+copy-mode action slice (source-owned 95-action inventory, selection lifecycle, scroll-exit latch,
+view-relative cursor placements, recentre cycling, and the opening-bracket walk; mapped vocabulary
+81 of 95) at `6624f042`. The wire protocol bumps to v88 for the fifteen `CopyModeAction` tail
+tags. Both merges ran the delta-corpus gate per protocol; this refreshed full corpus covers 120
+scenarios and 1,862 steps with attached-client `PASS`, exactly two approved geometry rows, and
+every other channel clean. Its SHA-256 digest is
+`1ff63ef2beb89731a84708681be491e6f0cb67ac2de42a6cb48fe5e2117862c0`.
 
 ## Validation and closure gates
 

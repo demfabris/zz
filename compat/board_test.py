@@ -60,6 +60,19 @@ MAIN_LOCK = [
 ]
 
 
+def test_withdraw_on_claimed_or_candidate_front_is_void():
+    b = fold(
+        BASE
+        + [
+            comment(4, 3, "CLAIM F-A\nholder: w/one\nlease: 6h"),
+            comment(5, 4, "CANDIDATE F-A\nholder: w/one\nbase: abc\ncommit: def\nbranch: campaign/F-A"),
+            comment(6, 5, "WITHDRAW F-A\nholder: good/triager\nreason: superseded"),
+        ]
+    )
+    assert b.fronts["F-A"].state == "CANDIDATE", b.fronts["F-A"].state
+    assert any("in state CANDIDATE ignored" in w for w in b.warnings), b.warnings
+
+
 def test_repair_dissolves_candidate_and_keeps_active_claim():
     b = fold(
         BASE

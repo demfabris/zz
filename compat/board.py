@@ -664,8 +664,30 @@ def cmd_note(args):
 
 def cmd_withdraw(args):
     holder = holder_or_die(args)
+    board = fold(args)
+    front = board.fronts.get(args.front)
+    if front is None:
+        sys.exit(f"unknown front {args.front}")
+    if front.state not in ("READY", "STALE-CANDIDATE"):
+        sys.exit(
+            f"{args.front} is {front.state}; only READY or STALE-CANDIDATE fronts can be "
+            "withdrawn (release the claim or wait for expiry, then re-post)"
+        )
+    now = datetime.now(timezone.utc)
+    triage = board.fronts.get("TRIAGE")
+    if triage is None or not triage.active(now) or triage.holder != holder:
+        sys.exit("withdraw requires holding TRIAGE")
     cid = post(args, block("WITHDRAW", args.front, [("holder", holder), ("reason", args.reason)]))
-    print(f"posted WITHDRAW {args.front} (comment {cid})")
+    time.sleep(3)
+    verify = fold(args).fronts.get(args.front)
+    if verify is not None and verify.state == "WITHDRAWN":
+        print(f"WITHDRAWN {args.front} (comment {cid})")
+    else:
+        state = verify.state if verify else "unknown"
+        sys.exit(
+            f"withdraw posted (comment {cid}) but did not land: {args.front} is {state}; "
+            "re-check the fold and re-post once withdrawable"
+        )
 
 
 def cmd_zones(args):

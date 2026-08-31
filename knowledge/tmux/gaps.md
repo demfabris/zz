@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **86**. Classified items: **580**.
+Tracked gap groups: **85**. Classified items: **579**.
 
-- Status: open: 44, blocked: 20, accepted: 22.
-- Decision: adopt: 49, native: 16, park: 15, never: 6.
-- Priority: later: 64, none: 22.
-- Closed history entries: 125.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 107, presentation: 8, protocol: 2.
+- Status: open: 43, blocked: 20, accepted: 22.
+- Decision: adopt: 48, native: 16, park: 15, never: 6.
+- Priority: later: 63, none: 22.
+- Closed history entries: 126.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 106, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -107,7 +107,6 @@ structure as proof.
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | park | blocked | hard | client | daily | clients.interactive-refresh |
 | `source-file.event-hook-client-cwd` | Select the current client cwd for event-hook sources | adopt | open | hard | daemon | scripts | none |
-| `source-file.sourced-hook-client-cwd` | Keep the invoking Control client for sourced hooks | adopt | open | hard | daemon | scripts | none |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
 | `capture.rich-transports` | Add rich capture transports | park | blocked | hardest | terminal | scripts | protocol.binary-streams |
 | `formats.terminal-runtime` | Expose terminal runtime formats | park | blocked | hardest | terminal | scripts | none |
@@ -1618,23 +1617,6 @@ The shared attached-client and session-cwd facts have shipped, but deferred even
 - Acceptance:
   - `An event hook that sources a relative path selects the same current or best attached client and session cwd as the pin, including when another client caused the event.`
 
-### `source-file.sourced-hook-client-cwd`: Keep the invoking Control client for sourced hooks
-
-Command replay now retains replay_client and matches the caller cwd. Control hook framing still clears replay_client before the hook runs, so a relative source inside that hook falls back to daemon HOME while pinned tmux retains the outer queue client.
-
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `later` / `hard`
-- Owner: `daemon`
-- User impact: scripts
-- Items: `semantic:source-file-sourced-hook-client-cwd`
-- Depends on: none
-- Evidence:
-  - `resource:crates/zz-daemon/src/daemon.rs`
-  - `resource:knowledge/tmux/divergences.md`
-- Acceptance:
-  - `A hook raised by a Control-sourced command inherits the outer queue client's selected cwd, so a relative source inside that hook loads the client-root file instead of the containing-file or daemon-home decoy without changing its flags-0 framing.`
-
 ### `terminal.key-client-selection`: Select the send-keys target client
 
 Pinned tmux resolves -c through its target-client selector and supplies that client to read-only checks and key delivery. Implementers need protocol-catalog and daemon-core client selection; catalog acceptance alone would leave the behavior inert.
@@ -1827,6 +1809,7 @@ The mux cannot inspect cursor, history, or terminal mode state.
 | `source-file.nested-diagnostic-semantics` | 2026-08-23 | Nested source-file no-match and glob errors now retain the post-F declared argument; a quiet no-match stays silent. Command clients receive stderr and exit 1, and Interactive clients receive a warning. Protocol v76 puts parser-owned Control no-match and glob diagnostics inside the source command's own flags-1 guard; a hit plus miss ends `%end`, while an all-miss ends `%error`. At this checkpoint matched child actual OS or path read failures used zz's typed standalone Error path, whose internal identity had closed under control-mode.source-diagnostic-typing. The later protocol-v78 control-mode.hook-source-read-diagnostics closure closes the pinned external raw placement and invisible source-completion numbering. Invalid UTF-8 was a zz-side typed error at this checkpoint; config.non-utf8-file-bytes owns the later pinned semantic mismatch. Per-command framing closed under control-mode.sourced-command-frames, and the later source-file.nested-control-queue closure proved cross-depth parser-owned diagnostic ordering. The later control-mode.indirect-source-frames closure covers synchronous foreground inserted sources. Immediate hook and background callback flags-0 framing closed later under control-mode.hook-command-frames and control-mode.background-inserted-command-frames. Registered-client nested cwd rebasing closed separately under source-file.nested-client-cwd, while startup and deferred event-hook base selection remain active. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/scenarios/smoke/fixtures/source-file-diagnostics.conf`, `scenario:compat/scenarios/smoke/source-file-diagnostics.txt`, `scenario:compat/scenarios/smoke/source-file-control.txt` |
 | `source-file.nesting-semantics` | 2026-08-23 | Counting the initial source-file as invocation 1, 50 concurrent source invocations now run and invocation 51 is refused before any of its paths are matched or loaded. Command clients get `too many nested files` on stderr and exit 1, Protocol v76 Control clients get the same lowercase text inside the refused command's own flags-1 `%begin`/`%error` guard while the outer line continues, and attached clients get the pin's capitalized `Too many nested files` status message. `-q` does not suppress it, one diagnostic is emitted per refused command rather than per path, and the containing file keeps running its later lines. The later source-file.nested-control-queue closure proved cross-depth ordering. A malformed invocation at the refused depth is diagnosed as malformed rather than as depth on both sides, because the pin rejects it while parsing the containing file and never consults its depth guard. Later shared arity and flag closures matched that malformed text as well. The later config.parser-abort and mux.chain-parse-abort closures prove that a parser or construction failure drops every command from that file. Same-line removal closed separately under config.same-line-error-group, and cumulative startup accounting closed separately under source-file.startup-depth-accounting. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/attached-client.sh`, `file:compat/scenarios/smoke/fixtures/source-file-depth.sh`, `scenario:compat/scenarios/smoke/source-file-depth.txt`, `scenario:compat/scenarios/smoke/source-file-control.txt` |
 | `source-file.reload-config-client-cwd` | 2026-08-25 | A registered client's direct zz-native reload-config now snapshots the same selected source base as source-file and carries it through the default mux.conf replay. A CLI regression runs from a cwd containing spaces and glob metacharacters, places distinct leaf files in the caller cwd and beside mux.conf, clears the earlier sourced state, and proves direct reload selects the caller-root leaf. A daemon regression proves clientless replay still uses the containing-file fallback. The change reuses the v72 ClientHello cwd and existing daemon state without a protocol change. Startup, attached session-cwd selection, deferred event hooks, and hooks raised during sentinel replay retain their separate tracked gaps. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
+| `source-file.sourced-hook-client-cwd` | 2026-08-31 | source-file now resolves relative paths against the outer queue client when the running command carries a Control command target, so a hook raised by a Control-sourced command keeps the invoking client's cwd. The working-directory client is selected separately from the replay client, which leaves the hook's replay framing untouched: the 6-check differential drives a Control `source-file` of a config in a subdirectory whose after-display-message hook sources a repo-relative leaf, and both sides load the client-root leaf instead of the containing-file or daemon-home decoy while emitting the same six flags-0 %begin/%end pairs, one SOURCED_HOOK body line, no %error, and a trailing %exit. | `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/source-hook-cwd-sourced.txt`, `resource:knowledge/tmux/divergences.md` |
 | `source-file.startup-client-cwd` | 2026-08-29 | The cold launcher now captures a bounded, valid UTF-8 working directory and passes it through the private --bootstrap-client-cwd daemon argument only when it starts a new daemon. Startup replay temporarily installs that directory as its initial client base, gives it precedence over a session, registered reentry client, command context, HOME, and root fallback, then clears it at the replay boundary on both success and error. Nested relative sources retain that base, paths containing shell metacharacters remain literal, a direct daemon launch has no bootstrap base, and later runtime source-file commands use the registered client's current cwd. CLI and daemon regressions cover bounded capture, priority, nesting, literal path handling, expiration, and cleanup. The isolated startup-client-cwd differential passes exactly on both engines. The complete eight-case startup diagnostic script reaches the new control-mode.exit-pane-output difference after proving cwd selection: zz can emit a queued shell-prompt %output between the flags-0 guard and %exit, while pinned tmux discards it. No public protocol field or version changed. Event-hook cwd, sourced-hook cwd, non-UTF-8 path transport, and top-level config discovery retain their existing owners. | `resource:crates/zz/src/lib.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/startup-diagnostics.sh`, `resource:third_party/tmux-reference/UPSTREAM.md`, `resource:knowledge/references/tmux-upstream.md`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `source-file.startup-depth-accounting` | 2026-08-24 | One startup accounting value now spans every explicit or discovered top-level configuration. The roots do not consume slots; source commands 1 through 50 run, command 51 and later retain the declaring file and line in their cause, quiet misses consume slots, and one command with many paths consumes one slot. Runtime sequential source commands remain unbounded, while the zz-native `reload-config` whole-root replay takes one fresh startup budget of its own so reloading a file lands the same state a fresh start would. Client delivery and placement of retained startup causes remain tracked under config.startup-diagnostic-delivery. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs` |
 | `source-file.tilde-semantics` | 2026-08-23 | source-file no longer rewrites a literal leading ~/ after parsing: parser-expanded leading tildes still arrive as absolute paths, top-level literal tildes pass through cwd resolution, and registered-client nested literal tildes use the stable invoking base closed under source-file.nested-client-cwd. Startup and deferred event-hook base selection remain active. The CLI regression pins the top-level choice against a metacharacter-bearing daemon HOME. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `file:compat/scenarios/smoke/fixtures/source-file-tilde-decoy.conf`, `scenario:compat/scenarios/smoke/source-file-tilde.txt` |

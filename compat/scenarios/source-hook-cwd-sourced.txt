@@ -1,0 +1,5 @@
+shim:
+stage: fixtures/source-hook-cwd-sourced.sh ~/source-hook-cwd-sourced.sh
+out: set-environment -gu SOURCE_HOOK_CWD_SOURCED
+run-shell 'sh ~/source-hook-cwd-sourced.sh'
+out: show-environment -g SOURCE_HOOK_CWD_SOURCED

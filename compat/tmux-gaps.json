@@ -1346,32 +1346,6 @@
       "reason": "Command and status shell jobs are proved separately. Positive-delay run-shell sampling now has a bounded owner, while copy-pipe and popup remain distinct producer families."
     },
     {
-      "id": "jobs.run-shell-immediate-background-environment",
-      "title": "Order immediate background run-shell environment sampling",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "daily",
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:run-shell-immediate-background-environment-ordering"
-      ],
-      "evidence": [
-        "resource:knowledge/references/tmux-upstream.md",
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-daemon/src/daemon.rs"
-      ],
-      "acceptance": [
-        "For absent -d and -d 0, foreground blocking order and background same-group order match the pin without timing sleeps; later commands in the group are visible to the background child, while foreground execution still blocks them."
-      ],
-      "depends_on": [],
-      "reason": "Pinned tmux queues absent-delay and -d 0 callbacks onto the next server turn, so a later command in the same group can mutate the environment before a background child starts. zz launches an OS worker from the command handler and cannot reproduce that ordering by racing a zero-duration sleep."
-    },
-    {
       "id": "keys.copy-mode-binding-fidelity",
       "title": "Match shared copy-mode binding commands",
       "decision": "adopt",
@@ -3869,6 +3843,17 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Shell-form run-shell and if-shell now construct each child from an empty environment, then apply server-global values followed by resolved session values. Hidden and unset entries disappear, and an explicit missing target becomes sessionless. During startup they preserve modeled TERM-family values; afterward they force TERM from default-terminal, TERM_PROGRAM=tmux, TERM_PROGRAM_VERSION=3.8-zz, COLORTERM=truecolor, and TMUX with the resolved session id or -1. Status #() follows the same clean construction with global-only state and a TMUX suffix of -1. Visible modeled TMUX_PANE survives but is not synthesized. The private tmux launcher is prepended to modeled PATH, stale private values are rejected, and current zz transport and reentry values are injected only where needed. Focused daemon tests cover overlay precedence, hidden and unset values, startup and post-startup identity, missing targets, status scope, and the private launcher. The three-step differential gives eight assertions per engine, and the attached fixture proves global-only status state. Delayed callback timing, copy-pipe and popup environments, and status cwd remain active separately. No mux or wire protocol changed."
+    },
+    {
+      "id": "jobs.run-shell-immediate-background-environment",
+      "title": "Order immediate background run-shell environment sampling",
+      "closed_on": "2026-08-31",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/jobs-run-shell-order.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Absent-delay and -d 0 background run-shell jobs now launch at the end of the command group that queued them, sampling the job environment and default-terminal at that boundary instead of at command-handling time. The 8-check differential fixture sources a config group that sets ORDER_V and default-terminal before the job and again after it: on both sides the background child reads the after values, while the foreground forms read the before values and the next command in the group only runs once the job has exited. This closure covers server-side groups (sourced files, command blocks, alias groups, and inserted command bodies). Chains split across separate client requests - an argv `;` chain or a Control-mode line - still start the child before the later request arrives, because the daemon receives one command per request and has no batch boundary to defer to; the same holds for a hook body appended with set-hook -a, where each appended element is its own group."
     },
     {
       "id": "jobs.run-shell-positive-delay-environment",

@@ -1887,6 +1887,14 @@ impl CommandSender {
     }
 }
 
+/// Where `recentre-top-bottom` parks the cursor line on its next press.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecentreTarget {
+    Middle,
+    Top,
+    Bottom,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SelectionMode {
     Cell,
@@ -1912,6 +1920,7 @@ struct CopyModeState {
     selection: Option<ModeSelection>,
     selection_mode: CopySelectionMode,
     selection_origin: PointCoordinate,
+    recentre: Option<(u32, RecentreTarget)>,
     mark: Option<PointCoordinate>,
     last_jump: Option<CopyJump>,
     selecting: bool,
@@ -6150,6 +6159,7 @@ fn enter_copy_mode(
         selection: None,
         selection_mode: CopySelectionMode::Char,
         selection_origin: PointCoordinate { x: 0, y: 0 },
+        recentre: None,
         mark: None,
         last_jump: None,
         selecting: false,
@@ -7460,6 +7470,28 @@ fn apply_copy_mode_action(
                 _ => last / 2,
             };
             scroll_copy_view_to_screen_row(&mut mode, row);
+            if mode.selecting {
+                update_copy_selection(&mut mode, Some(word_separators));
+            }
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::RecentreTopBottom => {
+            let row = mode.cursor.y;
+            let target = match mode.recentre {
+                Some((line, target)) if line == row => target,
+                _ => RecentreTarget::Middle,
+            };
+            let last = u32::from(mode.revision.viewport_rows.saturating_sub(1));
+            let (screen_row, next) = match target {
+                RecentreTarget::Middle => (last / 2, RecentreTarget::Top),
+                RecentreTarget::Top => (0, RecentreTarget::Bottom),
+                RecentreTarget::Bottom => (last, RecentreTarget::Middle),
+            };
+            mode.recentre = Some((row, next));
+            mode.viewport_offset = row
+                .saturating_sub(screen_row)
+                .min(mode.revision.maximum_offset());
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
             }
@@ -17859,5 +17891,65 @@ mod tests {
             ],
         );
         assert!(!shown.hide_position);
+    }
+
+    #[test]
+    fn recentre_cycles_middle_top_bottom_and_restarts_on_a_new_line() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 32,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let mut unseen_output = 0;
+        let anchor = {
+            let mode = copy_mode.as_mut().expect("mode");
+            let maximum = mode.revision.maximum_offset();
+            assert!(maximum >= 4);
+            mode.viewport_offset = maximum - 2;
+            mode.cursor = PointCoordinate {
+                x: 0,
+                y: maximum - 1,
+            };
+            mode.cursor.y
+        };
+        let mut recentre = |copy_mode: &mut CopyModeSlot| {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                copy_mode,
+                &mut unseen_output,
+                CopyModeAction::RecentreTopBottom,
+                &WordSeparators::default(),
+            )
+            .expect("recentre");
+            let mode = copy_mode.as_ref().expect("mode");
+            (mode.cursor.y, mode.viewport_offset)
+        };
+        assert_eq!(recentre(&mut copy_mode), (anchor, anchor - 1));
+        assert_eq!(recentre(&mut copy_mode), (anchor, anchor));
+        assert_eq!(recentre(&mut copy_mode), (anchor, anchor - 2));
+        assert_eq!(recentre(&mut copy_mode), (anchor, anchor - 1));
+
+        copy_mode.as_mut().expect("mode").cursor.y = anchor - 1;
+        assert_eq!(recentre(&mut copy_mode), (anchor - 1, anchor - 2));
+    }
+
+    #[test]
+    fn recentre_clamps_instead_of_refusing_when_the_view_cannot_reach() {
+        let mode = run_copy_actions(
+            b"a\r\nb\r\nc",
+            8,
+            3,
+            PointCoordinate { x: 0, y: 0 },
+            &[CopyModeAction::RecentreTopBottom],
+        );
+        assert_eq!(mode.viewport_offset, 0);
+        assert_eq!(mode.cursor.y, mode.revision.maximum_offset());
     }
 }

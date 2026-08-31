@@ -4838,6 +4838,44 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn foreground_callback_error_prevents_later_shutdown_without_losing_guards() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let created = fixture.run(&["new-session", "-d", "-s", "callback-error"]);
+            assert_eq!(created.status.code(), Some(0));
+            let output = fixture.run_with_stdin(
+                &[
+                    "-C",
+                    "run-shell",
+                    "-C",
+                    "display-message -F MATCH one ; kill-server",
+                ],
+                b"",
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(
+                &stream.blocks[1],
+                2,
+                0,
+                &["only one of -F or argument must be given"],
+                true,
+            );
+            assert_eq!(stream.outside, ["%exit"]);
+
+            let listed = fixture.run(&["list-sessions"]);
+            assert_eq!(listed.status.code(), Some(0));
+            let stopped = fixture.run(&["kill-server"]);
+            assert_eq!(stopped.status.code(), Some(0));
+            fixture.assert_stopped();
+        }
+
+        #[test]
         fn draining_alias_shutdown_tears_down_panes_and_rejects_late_commands_cleanly() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
@@ -6340,6 +6378,115 @@ mod daemon_autostart {
                     .any(|line| line == &format!("%session-changed $0 {session}"))
             );
             assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
+        fn held_control_detached_shutdown_drains_callback_guards_before_exit() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let session = "control-background-shutdown";
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let output_path = fixture._directory.path().join("control.raw");
+            let (child, mut stdin) = spawn_control_to_file(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                &output_path,
+            );
+            writeln!(
+                stdin,
+                "run-shell -bC 'kill-server ; display-message -p AFTER'"
+            )
+            .expect("write detached shutdown command");
+            stdin.flush().expect("flush detached shutdown command");
+
+            let output = collect_control_process(child, Some(stdin), "detached shutdown callback");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stdout = std::fs::read(&output_path).expect("read detached shutdown output");
+            let stream = parse_stream(&stdout, false);
+            assert_eq!(stream.blocks.len(), 4, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 0, &[], false);
+            assert_block(&stream.blocks[3], 4, 0, &["AFTER"], false);
+            let lines = std::str::from_utf8(&stdout)
+                .expect("UTF-8 detached shutdown output")
+                .lines()
+                .collect::<Vec<_>>();
+            assert_eq!(lines.iter().filter(|line| **line == "%exit").count(), 1);
+            assert_eq!(lines.last().copied(), Some("%exit"));
+
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let scenarios = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compat/scenarios");
+            let root = scenarios.join("source-file-output-hook-root.conf");
+            let child = scenarios.join("source-file-output-child.conf");
+            let hook = format!("source-file '{}'", child.display());
+            assert!(
+                fixture
+                    .run(&["set-hook", "-g", "after-display-message", hook.as_str()])
+                    .status
+                    .success()
+            );
+            let output_path = fixture._directory.path().join("nested-control.raw");
+            let (child, mut stdin) = spawn_control_to_file(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                &output_path,
+            );
+            writeln!(
+                stdin,
+                "run-shell -bC 'kill-server ; source-file \"{}\" ; display-message -p OUTER'",
+                root.display()
+            )
+            .expect("write nested detached shutdown command");
+            stdin
+                .flush()
+                .expect("flush nested detached shutdown command");
+
+            let output =
+                collect_control_process(child, Some(stdin), "nested detached shutdown callback");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stdout = std::fs::read(&output_path).expect("read nested detached shutdown output");
+            let stream = parse_stream_allow_gaps(&stdout, false);
+            assert_eq!(stream.blocks.len(), 7, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 0, &[], false);
+            assert_block(&stream.blocks[3], 4, 0, &[], false);
+            assert_block(&stream.blocks[4], 5, 0, &["HOOK_TRIGGER"], false);
+            assert_block(&stream.blocks[5], 6, 0, &[], false);
+            assert_block(&stream.blocks[6], 9, 0, &["OUTER"], false);
+            let payloads = stream
+                .blocks
+                .iter()
+                .flat_map(|block| block.payload.iter().map(String::as_str))
+                .collect::<Vec<_>>();
+            for suppressed in ["HOOK_LATER", "CHILD_ONE", "CHILD_TWO"] {
+                assert!(!payloads.contains(&suppressed), "{stream:?}");
+            }
+            let lines = std::str::from_utf8(&stdout)
+                .expect("UTF-8 nested detached shutdown output")
+                .lines()
+                .collect::<Vec<_>>();
+            assert_eq!(lines.iter().filter(|line| **line == "%exit").count(), 1);
+            assert_eq!(lines.last().copied(), Some("%exit"));
         }
 
         #[test]

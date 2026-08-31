@@ -1,12 +1,12 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **`F-ALIASES-MULTI-BODY` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **`F-SOURCE-REPLAY-DIAGNOSTICS-V3` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
 >
 > Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED)**
 >
 > Ledger settlement: **69.0% (145 of 210 known groups); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **106 SCENARIOS, 1,683 STEPS, ATTACHED-CLIENT PASS**
+> Exit evidence: **108 SCENARIOS, 1,745 STEPS, ATTACHED-CLIENT PASS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
@@ -76,16 +76,16 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | `F-CONFIG-BYTE-LEXER` adds raw-byte parser entrypoints for startup-file and signed-buffer semantics plus the two-step byte matrix; `F-CONFIG-BYTE-ENGINE` and `F-CONFIG-BYTE-LOADERS` remain queued |
+| Delivery | `F-SOURCE-REPLAY-DIAGNOSTICS-V3` restores located source replay diagnostics and drains detached Control callback guards before exit; `F-CONFIG-BYTE-ENGINE` and `F-CONFIG-BYTE-LOADERS` remain queued |
 | Campaign worktrees | Each editor creates a dedicated worktree after claiming its front; shared campaign artifacts remain coordinator-owned |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Config parsing preserves raw input bytes under separate startup-file and signed-buffer modes; MuxEngine adapters, filesystem loaders, Command, Control, if-shell, and source-path encoding remain open |
+| Campaign point | Source replay preserves physical command groups, located parser diagnostics, Command and Control framing, and post-shutdown guard order; sourced-hook and event-hook cwd remain queued |
 | Live registry | 87 active groups, 586 active items, 123 closed records |
 | Active status | 45 open, 20 blocked, 22 accepted |
-| Known differentials | 2 registered geometry cases plus 2 clean-main source-replay output and warning regressions under issue comment `5471998427` |
+| Known differentials | 2 registered geometry cases |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
 `fde87af3`. Resolve the commit containing the latest tracker update with
@@ -108,8 +108,8 @@ found during that wave.
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
 | Live unresolved | 45 open + 20 blocked = 65 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 107 scenarios, 1,685 steps, attached-client `PASS`, 2 registered GEO rows, and 2 clean-main source-replay OUT/WARN rows |
-| Differential SHA-256 | `b7236c220735d917649fd4ce9e1ad0480479a3242779b0a38b98bdd90160afc8` |
+| Latest differential | 108 scenarios, 1,745 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
+| Differential SHA-256 | `479809f27e291e22e332813b55267be372ea26ee81f59678f4c08c63dd0ed1e0` |
 | Ledger settlement | 145 of 210 known groups = 69.0% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
@@ -1218,6 +1218,19 @@ shutdown and the tested session-name grouping are exact, while complete multi-wi
 group and registering this residual leaves 84 active groups and 586 items, with 42 open, 20 blocked,
 22 accepted, and 123 closed records. The secondary ledger is 145 of 207 groups (70.0%); unresolved
 work remains 62.
+
+## Completed front: F-SOURCE-REPLAY-DIAGNOSTICS-V3, 2026-08-31
+
+Source replay now retains each syntax or command diagnostic on its physical source path and line.
+Command stderr, Control flags, command-error hooks, later siblings, and physical command groups keep
+their pinned ownership. Detached `run-shell -bC` shutdown drains kill, nested source and hook, and
+outer callback guards before one final `%exit`; foreground queues keep their earlier exit order.
+
+The dedicated source-replay row passes all 60 steps with zero topology, geometry, format, output, or
+warning differences. The accepted full corpus covers 108 scenarios and 1,745 steps with
+attached-client `PASS`, two registered geometry rows, and every other channel clean. The existing
+config-grammar row now expects the located warning from both engines. Workspace tests and clippy
+pass, and this defect front changes no registry record.
 
 ## Validation and closure gates
 

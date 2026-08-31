@@ -4877,9 +4877,11 @@ impl Shared {
                 .get(&client)
                 .cloned()
                 .unwrap_or_else(|| format!("device-{}", client.0));
-            let command = command_log_line(&command);
-            push_server_message(&mut inner, format!("{client_name} command: {command}"));
-            if kind == ClientKind::Command {
+            let command_line = command_log_line(&command);
+            push_server_message(&mut inner, format!("{client_name} command: {command_line}"));
+            if kind == ClientKind::Command
+                || kind == ClientKind::Control && command.source.is_none()
+            {
                 inner
                     .command_streams
                     .insert(client, CommandStreams::default());
@@ -4910,7 +4912,10 @@ impl Shared {
                 exit_code: 0,
                 stderr: String::new(),
             },
-            Err(DaemonError::CommandExit { output, exit_code }) => CommandResponse::Success {
+            Err(
+                DaemonError::CommandExit { output, exit_code }
+                | DaemonError::ReportedCommandExit { output, exit_code },
+            ) => CommandResponse::Success {
                 request_id,
                 output,
                 exit_code,
@@ -5261,6 +5266,9 @@ impl Shared {
                 yield_boundary: false,
                 shutdown_blocker: RefCell::new(shutdown_blocker),
                 pending_event_hooks: RefCell::new(Vec::new()),
+                callback_parse_failures: RefCell::new(Vec::new()),
+                deferred_config_replay_issues: RefCell::new(Vec::new()),
+                reported_failures: Cell::new(false),
                 suppress_after_hooks: Cell::new(
                     queue_execution.is_some_and(|execution| execution.suppress_after_hooks.get()),
                 ),
@@ -5277,7 +5285,19 @@ impl Shared {
                 client_terminal,
                 &alias_execution,
             );
+            let reported_failure = alias_execution.reported_failures.get();
             self.finish_command_queue_execution(&alias_execution, queue_execution);
+            if queue_execution.is_none()
+                && reported_failure
+                && alias_execution.deferred_shutdown.get() != DeferredShutdown::Force
+                && matches!(kind, ClientKind::Command | ClientKind::Control)
+                && let Ok(execution) = &result
+            {
+                return Err(DaemonError::ReportedCommandExit {
+                    output: execution.output.clone(),
+                    exit_code: 1,
+                });
+            }
             return result;
         }
         let no_hooks = context.no_hooks
@@ -5327,7 +5347,15 @@ impl Shared {
             &result,
             Ok(execution) if execution.effects.contains(&MuxEffect::SuppressAfterHook)
         );
-        let hook_output = if no_hooks || suppress_after_hook {
+        let suppress_callback_parse_hook = result.as_ref().err().is_some_and(|error| {
+            post_admission_callback_parse_depth(error) != 0
+                && CallbackGroupAction::for_command(&name) == Some(CallbackGroupAction::Continue)
+        });
+        let hook_output = if no_hooks
+            || suppress_after_hook
+            || suppress_callback_parse_hook
+            || matches!(&result, Err(DaemonError::ReportedCommandExit { .. }))
+        {
             String::new()
         } else {
             let (hook, mut hook_context) = match &result {
@@ -5354,6 +5382,22 @@ impl Shared {
             }) => {
                 append_inserted_output(&mut output, &hook_output);
                 Err(DaemonError::CommandExit { output, exit_code })
+            }
+            Err(DaemonError::ReportedCommandExit { output, .. })
+                if let Some(queue_execution) = queue_execution =>
+            {
+                queue_execution.note_reported_failure();
+                Ok(Execution {
+                    output,
+                    effects: Vec::new(),
+                })
+            }
+            Err(DaemonError::ReportedCommandExit {
+                mut output,
+                exit_code,
+            }) => {
+                append_inserted_output(&mut output, &hook_output);
+                Err(DaemonError::ReportedCommandExit { output, exit_code })
             }
             Err(DaemonError::CommandFailed { mut output, error }) => {
                 append_inserted_output(&mut output, &hook_output);
@@ -5405,6 +5449,19 @@ impl Shared {
                 .pending_event_hooks
                 .borrow_mut()
                 .extend(execution.pending_event_hooks.borrow_mut().drain(..));
+            parent
+                .callback_parse_failures
+                .borrow_mut()
+                .extend(execution.callback_parse_failures.borrow_mut().drain(..));
+            parent.deferred_config_replay_issues.borrow_mut().extend(
+                execution
+                    .deferred_config_replay_issues
+                    .borrow_mut()
+                    .drain(..),
+            );
+            parent
+                .reported_failures
+                .set(parent.reported_failures.get() || execution.reported_failures.get());
             return;
         }
         let deferred_shutdown = execution.deferred_shutdown.get();
@@ -5526,9 +5583,14 @@ impl Shared {
                     DaemonCommandDispatch::DisplayMenu => {
                         self.display_menu(client, kind, context, canonical, command)
                     }
-                    DaemonCommandDispatch::ConfirmBefore => {
-                        self.confirm_before(client, kind, context, canonical, command)
-                    }
+                    DaemonCommandDispatch::ConfirmBefore => self.confirm_before(
+                        client,
+                        kind,
+                        context,
+                        canonical,
+                        command,
+                        queue_execution,
+                    ),
                     DaemonCommandDispatch::Lock => {
                         self.lock_command(client, context, canonical, &command.args)
                     }
@@ -5707,6 +5769,9 @@ impl Shared {
                 yield_boundary: true,
                 shutdown_blocker: RefCell::new(shutdown_blocker),
                 pending_event_hooks: RefCell::new(Vec::new()),
+                callback_parse_failures: RefCell::new(Vec::new()),
+                deferred_config_replay_issues: RefCell::new(Vec::new()),
+                reported_failures: Cell::new(false),
                 suppress_after_hooks: Cell::new(
                     parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
                 ),
@@ -5740,26 +5805,122 @@ impl Shared {
                 }
                 hook_context.no_hooks = true;
                 hook_context.format_variables.clone_from(variables);
-                let execution = match control_target {
-                    Some(target) => self.execute_control_command_with_guard(
-                        client,
-                        kind,
-                        &mut hook_context,
-                        &command,
-                        target,
-                        true,
-                        MuxOptionSource::RuntimeCommand,
-                        InsertedCommandMode::Standard(&queue_execution),
-                    ),
-                    None => self.execute_with_mux_source_routed_in_queue(
-                        client,
-                        kind,
-                        &mut hook_context,
-                        &command,
-                        MuxOptionSource::RuntimeCommand,
-                        Some(&queue_execution),
+                let callback_failures_start =
+                    queue_execution.callback_parse_failures.borrow().len();
+                let (execution, direct_callback_failure) = match control_target {
+                    Some(target) => {
+                        let (execution, _, _, callback_failure, _) = self
+                            .execute_control_command_with_guard(
+                                client,
+                                kind,
+                                &mut hook_context,
+                                &command,
+                                target,
+                                true,
+                                MuxOptionSource::RuntimeCommand,
+                                InsertedCommandMode::Standard(&queue_execution),
+                            );
+                        (execution, callback_failure)
+                    }
+                    None => (
+                        self.execute_with_mux_source_routed_in_queue(
+                            client,
+                            kind,
+                            &mut hook_context,
+                            &command,
+                            MuxOptionSource::RuntimeCommand,
+                            Some(&queue_execution),
+                        ),
+                        None,
                     ),
                 };
+                if let Some(failure) = direct_callback_failure {
+                    queue_execution
+                        .callback_parse_failures
+                        .borrow_mut()
+                        .push(failure);
+                }
+                if control_target.is_none()
+                    && context.replay_client().is_some()
+                    && execution.as_ref().err().is_some_and(command_parse_error)
+                    && queue_execution.callback_parse_failures.borrow().len()
+                        == callback_failures_start
+                {
+                    queue_execution.callback_parse_failures.borrow_mut().push(
+                        CallbackParseFailure::runtime_command(
+                            execution
+                                .as_ref()
+                                .err()
+                                .map_or_else(String::new, daemon_error_text),
+                            canonical_command(&command.name),
+                        ),
+                    );
+                }
+                let callback_parse_depth = execution
+                    .as_ref()
+                    .err()
+                    .map_or(0, post_admission_callback_parse_depth);
+                if callback_parse_depth != 0
+                    && queue_execution.callback_parse_failures.borrow().len()
+                        == callback_failures_start
+                    && let Some(failure) = CallbackParseFailure::for_command(
+                        execution
+                            .as_ref()
+                            .err()
+                            .map_or_else(String::new, daemon_error_text),
+                        canonical_command(&command.name),
+                        None,
+                        callback_parse_depth,
+                    )
+                {
+                    queue_execution
+                        .callback_parse_failures
+                        .borrow_mut()
+                        .push(failure);
+                }
+                let callback_group_action = queue_execution.callback_group_action_since(
+                    callback_failures_start,
+                    canonical_command(&command.name),
+                    callback_parse_depth,
+                );
+                let nested_callback_only =
+                    callback_parse_depth > 1 && callback_group_action.is_none();
+                let mut callback_failures = queue_execution
+                    .callback_parse_failures
+                    .borrow_mut()
+                    .split_off(callback_failures_start);
+                if !callback_failures.is_empty() {
+                    queue_execution.note_reported_failure();
+                    let owner = if variables
+                        .get(HOOK_CONTEXT_FORMAT)
+                        .is_some_and(|hook| hook == "command-error")
+                    {
+                        CallbackFailureOwner::CommandErrorHook
+                    } else {
+                        CallbackFailureOwner::Hook
+                    };
+                    for failure in &mut callback_failures {
+                        failure.owner = owner;
+                    }
+                    if owner == CallbackFailureOwner::CommandErrorHook
+                        && control_target.is_none()
+                        && context.replay_client().is_some()
+                    {
+                        queue_execution
+                            .deferred_config_replay_issues
+                            .borrow_mut()
+                            .extend(
+                                callback_failures
+                                    .into_iter()
+                                    .map(DeferredConfigReplayIssue::Callback),
+                            );
+                    } else {
+                        queue_execution
+                            .callback_parse_failures
+                            .borrow_mut()
+                            .extend(callback_failures);
+                    }
+                }
                 match execution {
                     Ok(execution) => {
                         if control_target.is_none() {
@@ -5786,6 +5947,12 @@ impl Shared {
                                 &error,
                                 false,
                             );
+                        }
+                        if callback_parse_depth != 0
+                            && (callback_group_action == Some(CallbackGroupAction::Continue)
+                                || nested_callback_only)
+                        {
+                            continue;
                         }
                         break;
                     }
@@ -7774,6 +7941,8 @@ impl Shared {
         let mut source_invocations = SourceInvocationAccounting::default();
         let mut pending_source_files = Vec::new();
         let source_invocation = !source_files.is_empty();
+        let mut reported_source_failure = false;
+        let mut reported_source_callback_failure = false;
         let control_source_invocation = control_target.is_some() && source_invocation;
         let suppress_source_replay_output = source_kind == ClientKind::Command
             && queue_execution.is_some_and(CommandQueueExecution::is_draining);
@@ -7887,6 +8056,7 @@ impl Shared {
             pending_source_files.clear();
         }
         let mut parsed_source_files = Vec::new();
+        let mut deferred_control_config_warnings = Vec::new();
         for pending in pending_source_files {
             let mut report = if control_target.is_some() || source_client == ClientId(u64::MAX) {
                 ConfigLoadReport::default()
@@ -7896,6 +8066,13 @@ impl Shared {
             match self.parse_config_file(&pending.path, &mut report, pending.options, true) {
                 Ok(parsed) => parsed_source_files.push((pending, parsed, report)),
                 Err(DaemonError::Io(error)) => {
+                    if !pending
+                        .context
+                        .format_variables
+                        .contains_key(HOOK_CONTEXT_FORMAT)
+                    {
+                        reported_source_failure = true;
+                    }
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&pending.path, &error)
                     } else {
@@ -7924,13 +8101,28 @@ impl Shared {
                 }
             }
         }
-        let mut deferred_control_config_warnings = Vec::new();
         for (pending, parsed, mut report) in parsed_source_files {
+            if let Some((client, _)) = control_target {
+                deferred_control_config_warnings.extend(report.diagnostics().iter().map(
+                    |diagnostic| DeferredControlConfigWarning {
+                        client,
+                        pane: pending.context.pane,
+                        text: diagnostic.clone(),
+                    },
+                ));
+            }
             let PendingConfigFile {
                 path,
                 mut context,
                 options,
             } = pending;
+            let defer_command_error_hook_replay_issues = control_target.is_none()
+                && queue_execution.is_some()
+                && context.replay_client().is_some()
+                && context
+                    .format_variables
+                    .get(HOOK_CONTEXT_FORMAT)
+                    .is_some_and(|hook| hook == "command-error");
             let replayed = parsed.map_or(Ok(()), |parsed| {
                 self.replay_config_file_with_parent_queue(
                     &path,
@@ -7949,6 +8141,9 @@ impl Shared {
             match replayed {
                 Ok(()) => {}
                 Err(DaemonError::Io(error)) => {
+                    if !context.format_variables.contains_key(HOOK_CONTEXT_FORMAT) {
+                        reported_source_failure = true;
+                    }
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&path, &error)
                     } else {
@@ -7978,6 +8173,16 @@ impl Shared {
                     }
                 }
             }
+            let hook_owned_replay = context.format_variables.contains_key(HOOK_CONTEXT_FORMAT);
+            reported_source_callback_failure |= report.source_callback_failure;
+            if report.reported_failure || !hook_owned_replay && !report.replay_issues().is_empty() {
+                reported_source_failure = true;
+                if let Some((client, _)) = control_target
+                    && let Some(streams) = self.inner.lock().command_streams.get_mut(&client)
+                {
+                    streams.exit_code = 1;
+                }
+            }
             if !options.parse_only {
                 self.apply_stored_mux_config_overrides("source-file-replay");
             }
@@ -7997,45 +8202,58 @@ impl Shared {
                         self.record_command_failure(source_client);
                     }
                 }
-                if let Some((client, flags)) = control_target {
-                    if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                if defer_command_error_hook_replay_issues {
+                    queue_execution
+                        .expect("deferred replay issue queue")
+                        .deferred_config_replay_issues
+                        .borrow_mut()
+                        .extend(
+                            report
+                                .take_undelivered_replay_issues()
+                                .into_iter()
+                                .map(DeferredConfigReplayIssue::Replay),
+                        );
+                } else {
+                    if let Some((client, flags)) = control_target {
+                        if flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL {
+                            self.route_config_replay_errors(
+                                client,
+                                ClientKind::Control,
+                                context.pane,
+                                &mut report,
+                            );
+                        } else {
+                            report.delivered_replay_issues = report.replay_issues().len();
+                        }
+                    } else {
                         self.route_config_replay_errors(
-                            client,
-                            ClientKind::Control,
+                            source_client,
+                            source_kind,
                             context.pane,
                             &mut report,
                         );
-                    } else {
-                        report.delivered_replay_issues = report.replay_issues().len();
                     }
-                } else {
-                    self.route_config_replay_errors(
-                        source_client,
-                        source_kind,
-                        context.pane,
-                        &mut report,
-                    );
-                }
-                if control_target.is_none()
-                    && source_kind == ClientKind::Command
-                    && let Some(skipped) = report.skipped_summary()
-                {
-                    self.record_command_stderr(source_client, &skipped);
-                }
-                let summary = if control_target.is_some() && report.control_guarded {
-                    report.skipped_summary()
-                } else {
-                    report.message()
-                };
-                if let Some(summary) = summary {
-                    self.publish_to_client(
-                        control_client.unwrap_or(source_client),
-                        EventPayload::ClientMessage {
-                            pane: context.pane,
-                            kind: ClientMessageKind::Warning,
-                            text: summary,
-                        },
-                    );
+                    if control_target.is_none()
+                        && source_kind == ClientKind::Command
+                        && let Some(skipped) = report.skipped_summary()
+                    {
+                        self.record_command_stderr(source_client, &skipped);
+                    }
+                    let summary = if control_target.is_some() && report.control_guarded {
+                        report.skipped_summary()
+                    } else {
+                        report.message()
+                    };
+                    if let Some(summary) = summary {
+                        self.publish_to_client(
+                            control_client.unwrap_or(source_client),
+                            EventPayload::ClientMessage {
+                                pane: context.pane,
+                                kind: ClientMessageKind::Warning,
+                                text: summary,
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -8096,8 +8314,28 @@ impl Shared {
         {
             queue_execution.suppress_output.set(true);
         }
+        let report_sets_request_status = reported_source_failure
+            && (source_kind == ClientKind::Command
+                || control_target.is_some_and(|(_, flags)| {
+                    flags == CONTROL_COMMAND_FRAME_FLAGS_NONE
+                        || flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+                            && reported_source_callback_failure
+                }));
+        if report_sets_request_status && let Some(queue_execution) = queue_execution {
+            queue_execution.note_reported_failure();
+        }
         match source_file_error {
             Some(error) => Err(prepend_command_output(execution.output, error)),
+            None if source_invocation
+                && report_sets_request_status
+                && queue_execution.is_none()
+                && matches!(source_kind, ClientKind::Command | ClientKind::Control) =>
+            {
+                Err(DaemonError::ReportedCommandExit {
+                    output: execution.output,
+                    exit_code: 1,
+                })
+            }
             None if source_path_error && !source_path_matched => Err(DaemonError::CommandExit {
                 output: execution.output,
                 exit_code: 1,
@@ -9639,10 +9877,10 @@ impl Shared {
         label: &str,
         parent_queue: Option<&CommandQueueExecution>,
     ) -> Result<InsertedCommandResult, DaemonError> {
-        let control_target = context
-            .control_command_target()
-            .filter(|(client, _)| self.is_capturing_control_command_events(*client));
-        self.execute_inserted_commands_with_control_target_in_queue(
+        let control_target = context.control_command_target();
+        let callback_failures_start =
+            parent_queue.map(|execution| execution.callback_parse_failures.borrow().len());
+        let result = self.execute_inserted_commands_with_control_target_in_queue(
             client,
             kind,
             context,
@@ -9652,8 +9890,11 @@ impl Shared {
             parent_queue,
             false,
             None,
-        )
-        .map_err(post_admission_callback_error)
+        );
+        if let (Some(queue_execution), Some(start)) = (parent_queue, callback_failures_start) {
+            queue_execution.nest_callback_parse_failures_since(start);
+        }
+        result.map_err(post_admission_callback_error)
     }
 
     fn execute_command_alias_group(
@@ -9770,6 +10011,9 @@ impl Shared {
             yield_boundary: false,
             shutdown_blocker: RefCell::new(shutdown_blocker),
             pending_event_hooks: RefCell::new(Vec::new()),
+            callback_parse_failures: RefCell::new(Vec::new()),
+            deferred_config_replay_issues: RefCell::new(Vec::new()),
+            reported_failures: Cell::new(false),
             suppress_after_hooks: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
             ),
@@ -9790,7 +10034,20 @@ impl Shared {
         if let Ok(result) = &mut result {
             result.yielded = queue_execution.has_yielded();
         }
+        let reported_failure = queue_execution.reported_failures.get();
         self.finish_command_queue_execution(&queue_execution, parent_queue);
+        if parent_queue.is_none()
+            && !detached
+            && reported_failure
+            && queue_execution.deferred_shutdown.get() != DeferredShutdown::Force
+            && matches!(kind, ClientKind::Command | ClientKind::Control)
+            && let Ok(result) = &result
+        {
+            return Err(DaemonError::ReportedCommandExit {
+                output: result.output.clone(),
+                exit_code: 1,
+            });
+        }
         result
     }
 
@@ -9848,47 +10105,151 @@ impl Shared {
                 }
                 failed_group = None;
             }
-            let execution = match control_target {
+            let callback_failures_start = mode
+                .queue_execution()
+                .callback_parse_failures
+                .borrow()
+                .len();
+            let command_control_target = control_target.filter(|(client, _)| {
+                !matches!(mode, InsertedCommandMode::Standard(_))
+                    || self.is_capturing_control_command_events(*client)
+                    || mode.queue_execution().deferred_shutdown.get() != DeferredShutdown::Force
+            });
+            let (
+                execution,
+                routed_name,
+                alias_group,
+                direct_callback_failure,
+                direct_command_prepare_error,
+            ) = match command_control_target {
                 Some(target) => self.execute_control_command_with_guard(
                     client, kind, context, &command, target, prepared, mux_source, mode,
                 ),
-                None if prepared => match mode {
-                    InsertedCommandMode::Standard(queue_execution) => self
-                        .execute_with_mux_source_routed_in_queue(
+                None if prepared => {
+                    let alias_group = MuxEngine::is_command_alias_group(&command);
+                    let execution = match mode {
+                        InsertedCommandMode::Standard(queue_execution) => self
+                            .execute_with_mux_source_routed_in_queue(
+                                client,
+                                kind,
+                                context,
+                                &command,
+                                mux_source,
+                                Some(queue_execution),
+                            ),
+                        InsertedCommandMode::CommandAlias {
+                            client_terminal,
+                            queue_execution,
+                        } => self.execute_with_mux_source_routed_for_terminal_in_queue(
                             client,
                             kind,
                             context,
                             &command,
                             mux_source,
+                            client_terminal,
                             Some(queue_execution),
                         ),
-                    InsertedCommandMode::CommandAlias {
-                        client_terminal,
-                        queue_execution,
-                    } => self.execute_with_mux_source_routed_for_terminal_in_queue(
-                        client,
-                        kind,
-                        context,
-                        &command,
-                        mux_source,
-                        client_terminal,
-                        Some(queue_execution),
-                    ),
-                },
-                None => match mode {
-                    InsertedCommandMode::Standard(queue_execution) => self
-                        .execute_with_mux_source_in_queue(
-                            client,
-                            kind,
-                            context,
-                            &command,
-                            MuxOptionSource::RuntimeCommand,
-                            Some(queue_execution),
-                        ),
-                    InsertedCommandMode::CommandAlias { .. } => unreachable!(),
-                },
+                    };
+                    (
+                        execution,
+                        Some(canonical_command(&command.name).to_owned()),
+                        alias_group,
+                        None,
+                        false,
+                    )
+                }
+                None => {
+                    let routed = prepare_config_command(&self.inner.lock().engine, &command)
+                        .map(|(command, _)| command);
+                    let direct_command_prepare_error = routed.is_err();
+                    let alias_group = routed.as_ref().is_ok_and(MuxEngine::is_command_alias_group);
+                    let routed_name = routed
+                        .as_ref()
+                        .ok()
+                        .map(|command| canonical_command(&command.name).to_owned());
+                    let execution = match mode {
+                        InsertedCommandMode::Standard(queue_execution) => match routed {
+                            Ok(command) => self.execute_with_mux_source_routed_in_queue(
+                                client,
+                                kind,
+                                context,
+                                &command,
+                                MuxOptionSource::RuntimeCommand,
+                                Some(queue_execution),
+                            ),
+                            Err(error) => Err(error.into()),
+                        },
+                        InsertedCommandMode::CommandAlias { .. } => unreachable!(),
+                    };
+                    (
+                        execution,
+                        routed_name,
+                        alias_group,
+                        None,
+                        direct_command_prepare_error,
+                    )
+                }
             };
-            if let Some((guard_client, flags)) = control_target {
+            let routed_name =
+                routed_name.unwrap_or_else(|| canonical_command(&command.name).to_owned());
+            if let Some(failure) = direct_callback_failure {
+                mode.queue_execution()
+                    .callback_parse_failures
+                    .borrow_mut()
+                    .push(failure);
+            }
+            if command_control_target.is_none()
+                && matches!(mode, InsertedCommandMode::Standard(_))
+                && !direct_command_prepare_error
+                && execution.as_ref().err().is_some_and(command_parse_error)
+            {
+                mode.queue_execution().note_reported_failure();
+                mode.queue_execution()
+                    .callback_parse_failures
+                    .borrow_mut()
+                    .push(CallbackParseFailure::runtime_command(
+                        execution
+                            .as_ref()
+                            .err()
+                            .map_or_else(String::new, daemon_error_text),
+                        label,
+                    ));
+            }
+            let callback_parse_depth = execution
+                .as_ref()
+                .err()
+                .map_or(0, post_admission_callback_parse_depth);
+            if callback_parse_depth != 0
+                && mode
+                    .queue_execution()
+                    .callback_parse_failures
+                    .borrow()
+                    .len()
+                    == callback_failures_start
+                && let Some(failure) = CallbackParseFailure::for_command(
+                    execution
+                        .as_ref()
+                        .err()
+                        .map_or_else(String::new, daemon_error_text),
+                    &routed_name,
+                    None,
+                    callback_parse_depth,
+                )
+            {
+                mode.queue_execution()
+                    .callback_parse_failures
+                    .borrow_mut()
+                    .push(failure);
+            }
+            let callback_group_action = mode.queue_execution().callback_group_action_since(
+                callback_failures_start,
+                &routed_name,
+                callback_parse_depth,
+            );
+            let nested_callback_only = callback_parse_depth > 1 && callback_group_action.is_none();
+            let preserve_callback_group_action =
+                alias_group || matches!(mode, InsertedCommandMode::CommandAlias { .. });
+            if let Some((guard_client, flags)) = command_control_target {
                 match execution {
                     Ok(_) => {}
                     Err(DaemonError::CommandExit { exit_code, .. }) => {
@@ -9902,7 +10263,7 @@ impl Shared {
                         }
                         result.exit_code = exit_code;
                         if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
-                            if canonical_command(&command.name) == "source-file" {
+                            if routed_name == "source-file" {
                                 break;
                             }
                             continue;
@@ -9914,6 +10275,37 @@ impl Shared {
                         break;
                     }
                     Err(error) => {
+                        if direct_command_prepare_error {
+                            return Err(error);
+                        }
+                        if callback_parse_depth != 0 {
+                            if prepared
+                                || callback_group_action == Some(CallbackGroupAction::Continue)
+                                || nested_callback_only
+                            {
+                                if first_error.is_none() {
+                                    first_error = Some(discard_all_command_output(error));
+                                }
+                                if prepared
+                                    && callback_group_action == Some(CallbackGroupAction::Fail)
+                                {
+                                    failed_group = Some(group);
+                                }
+                                if callback_group_action.is_some()
+                                    && !preserve_callback_group_action
+                                {
+                                    mode.queue_execution().handle_callback_group_actions_since(
+                                        callback_failures_start,
+                                    );
+                                }
+                                continue;
+                            }
+                            if callback_group_action.is_some() && !preserve_callback_group_action {
+                                mode.queue_execution()
+                                    .handle_callback_group_actions_since(callback_failures_start);
+                            }
+                            return Err(error);
+                        }
                         let (guard_error, sticky_failure, _) = control_command_guard_error(&error);
                         if !guard_error {
                             continue;
@@ -9953,7 +10345,7 @@ impl Shared {
                     }
                     result.exit_code = exit_code;
                     if matches!(mode, InsertedCommandMode::CommandAlias { .. }) {
-                        if canonical_command(&command.name) == "source-file" {
+                        if routed_name == "source-file" {
                             break;
                         }
                         continue;
@@ -9965,6 +10357,30 @@ impl Shared {
                     break;
                 }
                 Err(error) => {
+                    if callback_parse_depth != 0
+                        && (prepared
+                            || callback_group_action == Some(CallbackGroupAction::Continue)
+                            || nested_callback_only)
+                    {
+                        if first_error.is_none() {
+                            first_error = Some(discard_all_command_output(error));
+                        }
+                        if prepared && callback_group_action == Some(CallbackGroupAction::Fail) {
+                            failed_group = Some(group);
+                        }
+                        if callback_group_action.is_some() && !preserve_callback_group_action {
+                            mode.queue_execution()
+                                .handle_callback_group_actions_since(callback_failures_start);
+                        }
+                        continue;
+                    }
+                    if callback_parse_depth != 0
+                        && callback_group_action.is_some()
+                        && !preserve_callback_group_action
+                    {
+                        mode.queue_execution()
+                            .handle_callback_group_actions_since(callback_failures_start);
+                    }
                     if prepared {
                         if !mode.queue_execution().suppress_output.get()
                             && mode.queue_execution().deferred_shutdown.get()
@@ -10020,18 +10436,32 @@ impl Shared {
         prepared: bool,
         mux_source: MuxOptionSource,
         mode: InsertedCommandMode,
-    ) -> Result<Execution, DaemonError> {
+    ) -> (
+        Result<Execution, DaemonError>,
+        Option<String>,
+        bool,
+        Option<CallbackParseFailure>,
+        bool,
+    ) {
+        let aggregate_forced_shutdown = matches!(mode, InsertedCommandMode::Standard(_))
+            && !self.is_capturing_control_command_events(target.0);
+        let deferred_shutdown_before = mode.queue_execution().deferred_shutdown.get();
         let capture = self.begin_control_command_event_capture(target.0);
+        let reported_failure_before = mode.queue_execution().reported_failures.get();
         let routed = if prepared {
             Ok(command.clone())
         } else {
-            resolve_and_prepare_command(&self.inner.lock().engine, command)
-                .map(|(command, _)| command)
+            prepare_config_command(&self.inner.lock().engine, command).map(|(command, _)| command)
         };
+        let direct_command_prepare_error = !prepared && routed.is_err();
         let source_command = routed
             .as_ref()
             .is_ok_and(|command| canonical_command(&command.name) == "source-file");
         let alias_group = routed.as_ref().is_ok_and(MuxEngine::is_command_alias_group);
+        let routed_name = routed
+            .as_ref()
+            .ok()
+            .map(|command| canonical_command(&command.name).to_owned());
         let execution = match routed {
             Ok(command) => match mode {
                 InsertedCommandMode::Standard(queue_execution) => self
@@ -10058,25 +10488,128 @@ impl Shared {
             },
             Err(error) => Err(error.into()),
         };
-        let captured_events = capture.finish();
-        let source_guard = source_command.then(|| {
-            captured_events
-                .iter()
-                .position(|event| matches!(event, EventPayload::ControlCommandGuard { .. }))
+        let mut captured_events = capture.finish();
+        let forced_shutdown_transition = aggregate_forced_shutdown
+            && deferred_shutdown_before != DeferredShutdown::Force
+            && mode.queue_execution().deferred_shutdown.get() == DeferredShutdown::Force;
+        let source_guard = source_command
+            .then(|| {
+                captured_events
+                    .events
+                    .iter()
+                    .position(|event| matches!(event, EventPayload::ControlCommandGuard { .. }))
+            })
+            .flatten();
+        if source_command
+            && target.1 == CONTROL_COMMAND_FRAME_FLAGS_CONTROL
+            && !reported_failure_before
+            && mode.queue_execution().reported_failures.get()
+            && let Some(index) = source_guard
+            && let EventPayload::ControlCommandGuard { sticky_failure, .. } =
+                &mut captured_events.events[index]
+        {
+            *sticky_failure = true;
+        }
+        let source_error = source_guard.and_then(|index| match &captured_events.events[index] {
+            EventPayload::ControlCommandGuard {
+                output,
+                error: true,
+                ..
+            } => Some(output.clone()),
+            _ => None,
         });
-        let source_error = source_guard
-            .flatten()
-            .and_then(|index| match &captured_events[index] {
-                EventPayload::ControlCommandGuard {
-                    output,
-                    error: true,
-                    ..
-                } => Some(output.clone()),
-                _ => None,
-            });
-        if alias_group || source_command && !captured_events.is_empty() {
+        let callback_parse_depth = execution
+            .as_ref()
+            .err()
+            .map_or(0, post_admission_callback_parse_depth);
+        let runtime_command_parse_error = !direct_command_prepare_error
+            && execution.as_ref().err().is_some_and(command_parse_error);
+        if runtime_command_parse_error {
+            mode.queue_execution().note_reported_failure();
+            self.inner
+                .lock()
+                .command_streams
+                .entry(target.0)
+                .or_default()
+                .exit_code = 1;
+        }
+        let callback_parse_failure = (callback_parse_depth == 1)
+            .then(|| {
+                let event = Arc::new(());
+                CallbackParseFailure::for_command(
+                    execution
+                        .as_ref()
+                        .err()
+                        .map_or_else(String::new, daemon_error_text),
+                    routed_name.as_deref()?,
+                    Some(event),
+                    callback_parse_depth,
+                )
+            })
+            .flatten();
+        if forced_shutdown_transition {
             self.publish_captured_control_command_events(target.0, captured_events);
-        } else {
+        } else if !direct_command_prepare_error && callback_parse_depth > 1 {
+            self.publish_control_command_guard_tree(
+                Some(target),
+                String::new(),
+                false,
+                false,
+                captured_events,
+            );
+        } else if !direct_command_prepare_error
+            && callback_parse_failure
+                .as_ref()
+                .is_some_and(|failure| failure.group_action == CallbackGroupAction::Fail)
+        {
+            let failure = callback_parse_failure
+                .as_ref()
+                .expect("callback parse failure exists");
+            self.publish_callback_parse_control_command_guard(
+                Some(target),
+                failure.message.clone(),
+                true,
+                false,
+                Arc::clone(
+                    failure
+                        .control_event
+                        .as_ref()
+                        .expect("Control callback parse event"),
+                ),
+            );
+            self.publish_captured_control_command_events(target.0, captured_events);
+        } else if !direct_command_prepare_error
+            && callback_parse_failure
+                .as_ref()
+                .is_some_and(|failure| failure.group_action == CallbackGroupAction::Continue)
+        {
+            let failure = callback_parse_failure
+                .as_ref()
+                .expect("callback parse failure exists");
+            self.publish_control_command_guard_tree(
+                Some(target),
+                String::new(),
+                false,
+                false,
+                captured_events,
+            );
+            self.publish_callback_parse_event(
+                target.0,
+                EventPayload::ControlCommandOutput {
+                    output: failure.message.clone(),
+                },
+                Arc::clone(
+                    failure
+                        .control_event
+                        .as_ref()
+                        .expect("Control callback parse event"),
+                ),
+            );
+        } else if !direct_command_prepare_error
+            && (alias_group || source_command && !captured_events.is_empty())
+        {
+            self.publish_captured_control_command_events(target.0, captured_events);
+        } else if !direct_command_prepare_error {
             let (output, error, sticky_failure) =
                 control_command_guard_for_execution(&execution, mode);
             self.publish_control_command_guard_tree(
@@ -10087,11 +10620,18 @@ impl Shared {
                 captured_events,
             );
         }
-        if let Some(source_error) = source_error {
+        let execution = if let Some(source_error) = source_error {
             Err(ServerError::InvalidCommand(source_error).into())
         } else {
             execution
-        }
+        };
+        (
+            execution,
+            routed_name,
+            alias_group,
+            callback_parse_failure,
+            direct_command_prepare_error,
+        )
     }
 
     fn finish_run_shell(
@@ -11900,6 +12440,7 @@ impl Shared {
         context: &ExecutionContext,
         command_name: &str,
         invocation: &CommandInvocation,
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_confirm_before_args(&invocation.args)?;
         let command = parsed
@@ -12032,8 +12573,14 @@ impl Shared {
             });
         }
         let mut command_context = context.clone();
-        self.run_confirm_commands(client, kind, &mut command_context, &blocking_commands)
-            .map_err(post_admission_callback_error)
+        self.run_confirm_commands(
+            client,
+            kind,
+            &mut command_context,
+            &blocking_commands,
+            queue_execution,
+        )
+        .map_err(post_admission_callback_error)
     }
 
     fn parse_confirm_commands(
@@ -13698,7 +14245,7 @@ impl Shared {
         commands: &[CommandInvocation],
         title: &str,
     ) {
-        match self.run_confirm_commands(client, kind, context, commands) {
+        match self.run_confirm_commands(client, kind, context, commands, None) {
             Ok(execution) => self.route_background_inserted_output(
                 client,
                 kind,
@@ -13716,11 +14263,46 @@ impl Shared {
         kind: ClientKind,
         context: &mut ExecutionContext,
         commands: &[CommandInvocation],
+        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
+        if queue_execution.is_none() && context.control_command_target().is_some() {
+            let queue_execution = CommandQueueExecution {
+                draining: false,
+                wait_yields: false,
+                detached: false,
+                deferred_shutdown: Cell::new(DeferredShutdown::None),
+                yielded: Cell::new(CommandQueueYield::None),
+                yield_boundary: false,
+                shutdown_blocker: RefCell::new(None),
+                pending_event_hooks: RefCell::new(Vec::new()),
+                callback_parse_failures: RefCell::new(Vec::new()),
+                deferred_config_replay_issues: RefCell::new(Vec::new()),
+                reported_failures: Cell::new(false),
+                suppress_after_hooks: Cell::new(false),
+                suppress_output: Cell::new(false),
+            };
+            let result =
+                self.run_confirm_commands(client, kind, context, commands, Some(&queue_execution));
+            let reported_failure = queue_execution.reported_failures.get();
+            self.finish_command_queue_execution(&queue_execution, None);
+            if reported_failure
+                && queue_execution.deferred_shutdown.get() != DeferredShutdown::Force
+                && matches!(kind, ClientKind::Command | ClientKind::Control)
+                && let Ok(execution) = &result
+            {
+                return Err(DaemonError::ReportedCommandExit {
+                    output: execution.output.clone(),
+                    exit_code: 1,
+                });
+            }
+            return result;
+        }
         let mut output = String::new();
         let mut first_error = None;
+        let mut reported_error = None;
         let mut failed_group = None;
         for command in commands {
+            let routed_name = canonical_command(&command.name);
             let group = command
                 .source
                 .as_ref()
@@ -13731,27 +14313,109 @@ impl Shared {
                 }
                 failed_group = None;
             }
-            match self.execute_with_mux_source_routed(
-                client,
-                kind,
-                context,
-                command,
-                MuxOptionSource::RuntimeCommand,
-            ) {
+            let callback_failures_start =
+                queue_execution.map(|execution| execution.callback_parse_failures.borrow().len());
+            let (execution, guarded) = match (context.control_command_target(), queue_execution) {
+                (Some(target), Some(queue_execution)) => {
+                    let (execution, _, _, callback_failure, _) = self
+                        .execute_control_command_with_guard(
+                            client,
+                            kind,
+                            context,
+                            command,
+                            target,
+                            true,
+                            MuxOptionSource::RuntimeCommand,
+                            InsertedCommandMode::Standard(queue_execution),
+                        );
+                    if let Some(failure) = callback_failure {
+                        queue_execution
+                            .callback_parse_failures
+                            .borrow_mut()
+                            .push(failure);
+                    }
+                    (execution, true)
+                }
+                _ => (
+                    self.execute_with_mux_source_routed_in_queue(
+                        client,
+                        kind,
+                        context,
+                        command,
+                        MuxOptionSource::RuntimeCommand,
+                        queue_execution,
+                    ),
+                    false,
+                ),
+            };
+            let callback_parse_depth = execution
+                .as_ref()
+                .err()
+                .map_or(0, post_admission_callback_parse_depth);
+            if let (Some(queue_execution), Some(start)) = (queue_execution, callback_failures_start)
+                && callback_parse_depth != 0
+                && queue_execution.callback_parse_failures.borrow().len() == start
+                && let Some(failure) = CallbackParseFailure::for_command(
+                    execution
+                        .as_ref()
+                        .err()
+                        .map_or_else(String::new, daemon_error_text),
+                    routed_name,
+                    None,
+                    callback_parse_depth,
+                )
+            {
+                queue_execution
+                    .callback_parse_failures
+                    .borrow_mut()
+                    .push(failure);
+            }
+            let callback_group_action = match (queue_execution, callback_failures_start) {
+                (Some(queue_execution), Some(start)) => queue_execution
+                    .callback_group_action_since(start, routed_name, callback_parse_depth),
+                _ if callback_parse_depth == 1 => CallbackGroupAction::for_command(routed_name),
+                _ => None,
+            };
+            let nested_callback_only = callback_parse_depth > 1 && callback_group_action.is_none();
+            match execution {
+                Ok(_) if guarded => {}
                 Ok(execution) => append_inserted_output(&mut output, &execution.output),
-                Err(error) => {
-                    if let Some(error_output) = daemon_error_output(&error) {
+                Err(error @ DaemonError::ReportedCommandExit { .. }) => {
+                    if !guarded && let Some(error_output) = daemon_error_output(&error) {
                         append_inserted_output(&mut output, error_output);
                     }
-                    failed_group = Some(group);
+                    if reported_error.is_none() {
+                        reported_error = Some(discard_all_command_output(error));
+                    }
+                }
+                Err(error) => {
+                    if !guarded && let Some(error_output) = daemon_error_output(&error) {
+                        append_inserted_output(&mut output, error_output);
+                    }
                     if first_error.is_none() {
                         first_error = Some(discard_all_command_output(error));
+                    }
+                    if callback_parse_depth == 0
+                        || callback_group_action == Some(CallbackGroupAction::Fail)
+                    {
+                        failed_group = Some(group);
+                    }
+                    if callback_parse_depth != 0
+                        && (callback_group_action.is_some() || nested_callback_only)
+                        && let (Some(queue_execution), Some(start)) =
+                            (queue_execution, callback_failures_start)
+                    {
+                        queue_execution.handle_callback_group_actions_since(start);
                     }
                 }
             }
         }
         match first_error {
             Some(error) => Err(prepend_command_output(output, error)),
+            None if reported_error.is_some() => Err(prepend_command_output(
+                output,
+                reported_error.expect("reported confirm error"),
+            )),
             None => Ok(Execution {
                 output,
                 effects: Vec::new(),
@@ -15126,7 +15790,9 @@ impl Shared {
             let execution = match execution {
                 Ok(execution) => execution,
                 Err(error) => {
-                    let command_exit = matches!(&error, DaemonError::CommandExit { .. });
+                    let reported_exit = matches!(&error, DaemonError::ReportedCommandExit { .. });
+                    let command_exit =
+                        reported_exit || matches!(&error, DaemonError::CommandExit { .. });
                     if let Some(error_output) = daemon_error_output(&error)
                         && !output_truncated
                     {
@@ -15138,7 +15804,9 @@ impl Shared {
                         command.name,
                         command.args,
                     );
-                    failed_group = Some(group);
+                    if !reported_exit {
+                        failed_group = Some(group);
+                    }
                     if !command_exit && first_error.is_none() {
                         first_error = Some(error);
                     }
@@ -15658,6 +16326,13 @@ impl Shared {
                     output_truncated = append_command_prompt_output(&mut output, &execution.output);
                 }
                 Ok(_) => {}
+                Err(error @ DaemonError::ReportedCommandExit { .. }) => {
+                    if let Some(error_output) = daemon_error_output(&error)
+                        && !output_truncated
+                    {
+                        output_truncated = append_command_prompt_output(&mut output, error_output);
+                    }
+                }
                 Err(error) => {
                     if let Some(error_output) = daemon_error_output(&error)
                         && !output_truncated
@@ -18200,6 +18875,28 @@ impl Shared {
     }
 
     fn publish_to_client(&self, client: ClientId, payload: EventPayload) {
+        self.publish_to_client_with_callback_parse_event(client, payload, None);
+    }
+
+    fn publish_callback_parse_event(
+        &self,
+        client: ClientId,
+        payload: EventPayload,
+        callback_parse_event: Arc<()>,
+    ) {
+        self.publish_to_client_with_callback_parse_event(
+            client,
+            payload,
+            Some(callback_parse_event),
+        );
+    }
+
+    fn publish_to_client_with_callback_parse_event(
+        &self,
+        client: ClientId,
+        payload: EventPayload,
+        callback_parse_event: Option<Arc<()>>,
+    ) {
         if matches!(
             &payload,
             EventPayload::ControlCommandGuard { .. }
@@ -18216,7 +18913,12 @@ impl Shared {
                 .get_mut(&capture_key)
                 .and_then(|captures| captures.last_mut())
             {
-                capture.push(payload);
+                if let Some(callback_parse_event) = callback_parse_event {
+                    capture
+                        .callback_parse_events
+                        .push((capture.events.len(), callback_parse_event));
+                }
+                capture.events.push(payload);
                 return;
             }
         }
@@ -18285,7 +18987,7 @@ impl Shared {
             .control_command_event_captures
             .entry((client, thread_id))
             .or_default()
-            .push(Vec::new());
+            .push(CapturedControlCommandEvents::default());
         ControlCommandEventCapture {
             shared: self,
             client,
@@ -18298,7 +19000,7 @@ impl Shared {
         &self,
         client: ClientId,
         thread_id: thread::ThreadId,
-    ) -> Option<Vec<EventPayload>> {
+    ) -> Option<CapturedControlCommandEvents> {
         let capture_key = (client, thread_id);
         let mut inner = self.inner.lock();
         let captures = inner.control_command_event_captures.get_mut(&capture_key)?;
@@ -18321,10 +19023,18 @@ impl Shared {
     fn publish_captured_control_command_events(
         &self,
         client: ClientId,
-        captured: Vec<EventPayload>,
+        captured: CapturedControlCommandEvents,
     ) {
-        for payload in captured {
-            self.publish_to_client(client, payload);
+        let CapturedControlCommandEvents {
+            events,
+            callback_parse_events,
+        } = captured;
+        let mut callback_parse_events = callback_parse_events.into_iter().peekable();
+        for (index, payload) in events.into_iter().enumerate() {
+            let callback_parse_event = callback_parse_events
+                .next_if(|(event_index, _)| *event_index == index)
+                .map(|(_, event)| event);
+            self.publish_to_client_with_callback_parse_event(client, payload, callback_parse_event);
         }
     }
 
@@ -18334,7 +19044,7 @@ impl Shared {
         output: String,
         error: bool,
         sticky_failure: bool,
-        captured: Vec<EventPayload>,
+        captured: CapturedControlCommandEvents,
     ) {
         self.publish_control_command_guard(target, output, error, sticky_failure);
         if let Some((client, _)) = target {
@@ -18349,16 +19059,48 @@ impl Shared {
         error: bool,
         sticky_failure: bool,
     ) {
+        self.publish_control_command_guard_with_callback_parse_event(
+            target,
+            output,
+            error,
+            sticky_failure,
+            None,
+        );
+    }
+
+    fn publish_callback_parse_control_command_guard(
+        &self,
+        target: Option<(ClientId, u8)>,
+        output: String,
+        error: bool,
+        sticky_failure: bool,
+        callback_parse_event: Arc<()>,
+    ) {
+        self.publish_control_command_guard_with_callback_parse_event(
+            target,
+            output,
+            error,
+            sticky_failure,
+            Some(callback_parse_event),
+        );
+    }
+
+    fn publish_control_command_guard_with_callback_parse_event(
+        &self,
+        target: Option<(ClientId, u8)>,
+        output: String,
+        error: bool,
+        sticky_failure: bool,
+        callback_parse_event: Option<Arc<()>>,
+    ) {
         if let Some((client, flags)) = target {
-            self.publish_to_client(
-                client,
-                EventPayload::ControlCommandGuard {
-                    output,
-                    error,
-                    sticky_failure,
-                    flags,
-                },
-            );
+            let payload = EventPayload::ControlCommandGuard {
+                output,
+                error,
+                sticky_failure,
+                flags,
+            };
+            self.publish_to_client_with_callback_parse_event(client, payload, callback_parse_event);
         }
     }
 
@@ -20064,6 +20806,9 @@ impl Shared {
             yield_boundary: false,
             shutdown_blocker: RefCell::new(shutdown_blocker),
             pending_event_hooks: RefCell::new(Vec::new()),
+            callback_parse_failures: RefCell::new(Vec::new()),
+            deferred_config_replay_issues: RefCell::new(Vec::new()),
+            reported_failures: Cell::new(false),
             suppress_after_hooks: Cell::new(
                 parent_queue.is_some_and(|execution| execution.suppress_after_hooks.get()),
             ),
@@ -20084,6 +20829,8 @@ impl Shared {
             deferred_control_config_warnings,
             &queue_execution,
         );
+        let reported_failure = queue_execution.reported_failures.get();
+        report.reported_failure |= reported_failure;
         self.finish_command_queue_execution(&queue_execution, parent_queue);
         result
     }
@@ -20122,7 +20869,11 @@ impl Shared {
                         .client_kinds
                         .get(&replay_client)
                         .copied()
-                        .unwrap_or(ClientKind::Command);
+                        .unwrap_or(if options.control_target.is_some() {
+                            ClientKind::Control
+                        } else {
+                            ClientKind::Command
+                        });
                     self.route_config_replay_errors(
                         replay_client,
                         replay_kind,
@@ -20167,7 +20918,11 @@ impl Shared {
                     .client_kinds
                     .get(&replay_client)
                     .copied()
-                    .unwrap_or(ClientKind::Command);
+                    .unwrap_or(if options.control_target.is_some() {
+                        ClientKind::Control
+                    } else {
+                        ClientKind::Command
+                    });
                 self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
             }
             let group = command
@@ -20207,7 +20962,7 @@ impl Shared {
                 );
                 continue;
             }
-            if matches!(routed.name.as_str(), "source" | "source-file") {
+            if routed_name == "source-file" {
                 let source_effects = {
                     let mut inner = self.inner.lock();
                     inner.engine.execute_prepared(context, &routed)
@@ -20252,10 +21007,10 @@ impl Shared {
                             "{}: ignoring invalid tmux command: {message}",
                             path.display()
                         );
-                        report.note_invalid_command(&command, &message);
+                        report.note_unlocated_command_error(&message);
                         self.publish_control_command_guard(
                             options.control_target,
-                            config_command_error(&command, &message),
+                            message,
                             true,
                             false,
                         );
@@ -20378,8 +21133,12 @@ impl Shared {
                 let mut parsed_sources = Vec::new();
                 report.push_stdout_frame();
                 for pending in pending_sources {
+                    let diagnostics_start = report.diagnostics().len();
                     match self.parse_config_file(&pending.path, report, pending.options, true) {
-                        Ok(Some(parsed)) => parsed_sources.push((pending, parsed)),
+                        Ok(Some(parsed)) => {
+                            let diagnostics = report.diagnostics()[diagnostics_start..].to_vec();
+                            parsed_sources.push((pending, parsed, diagnostics));
+                        }
                         Err(DaemonError::Io(error)) => {
                             let warning = if options.control_target.is_some()
                                 || source_invocations.is_startup()
@@ -20412,7 +21171,16 @@ impl Shared {
                     }
                 }
                 let mut nested_control_config_warnings = Vec::new();
-                for (pending, parsed) in parsed_sources {
+                for (pending, parsed, diagnostics) in parsed_sources {
+                    if let Some((client, _)) = pending.options.control_target {
+                        nested_control_config_warnings.extend(diagnostics.into_iter().map(
+                            |text| DeferredControlConfigWarning {
+                                client,
+                                pane: pending.context.pane,
+                                text,
+                            },
+                        ));
+                    }
                     let mut source_context = pending.context.clone();
                     match self.replay_config_file_with_parent_queue(
                         &pending.path,
@@ -20503,6 +21271,10 @@ impl Shared {
                 .control_target
                 .map(|(client, _)| client)
                 .map(|client| self.begin_control_command_event_capture(client));
+            let callback_parse_failures_start =
+                queue_execution.callback_parse_failures.borrow().len();
+            let deferred_replay_issues_start =
+                queue_execution.deferred_config_replay_issues.borrow().len();
             let result = self.execute_with_mux_source_routed_for_terminal_in_queue(
                 ClientId(u64::MAX),
                 ClientKind::Command,
@@ -20512,10 +21284,67 @@ impl Shared {
                 client_terminal,
                 Some(queue_execution),
             );
+            let mut callback_parse_failures = queue_execution
+                .callback_parse_failures
+                .borrow_mut()
+                .split_off(callback_parse_failures_start);
+            let deferred_replay_issues = queue_execution
+                .deferred_config_replay_issues
+                .borrow_mut()
+                .split_off(deferred_replay_issues_start);
+            let callback_parse_depth = result
+                .as_ref()
+                .err()
+                .map_or(0, post_admission_callback_parse_depth);
+            let had_source_callback_failure = callback_parse_failures
+                .iter()
+                .any(|failure| failure.owner.is_replay_callback());
+            let direct_callback = callback_parse_depth == 1 && !had_source_callback_failure;
+            if direct_callback {
+                let failure = CallbackParseFailure::for_command(
+                    result
+                        .as_ref()
+                        .err()
+                        .map_or_else(String::new, daemon_error_text),
+                    routed_name,
+                    None,
+                    callback_parse_depth,
+                )
+                .unwrap_or(CallbackParseFailure {
+                    message: result
+                        .as_ref()
+                        .err()
+                        .map_or_else(String::new, daemon_error_text),
+                    group_action: CallbackGroupAction::Handled,
+                    owner: CallbackFailureOwner::Source,
+                    control_event: None,
+                    depth: callback_parse_depth,
+                });
+                let index = callback_parse_failures
+                    .iter()
+                    .position(|failure| failure.owner == CallbackFailureOwner::CommandErrorHook)
+                    .unwrap_or(callback_parse_failures.len());
+                callback_parse_failures.insert(index, failure);
+            }
+            let mut callback_failures_before_result = Vec::new();
+            let mut callback_failures_after_result = Vec::new();
+            for failure in callback_parse_failures {
+                if callback_parse_depth == 0
+                    && failure.owner == CallbackFailureOwner::CommandErrorHook
+                {
+                    callback_failures_after_result.push(failure);
+                } else {
+                    callback_failures_before_result.push(failure);
+                }
+            }
+            let source_callback_failures =
+                report.note_callback_failures(path, &command, callback_failures_before_result);
             context.set_replay_client(previous_replay_client);
             context.set_control_command_target(previous_control_target);
-            let captured_events =
-                guard_capture.map_or_else(Vec::new, ControlCommandEventCapture::finish);
+            let mut captured_events = guard_capture.map_or_else(
+                CapturedControlCommandEvents::default,
+                ControlCommandEventCapture::finish,
+            );
             let mut captured_output = result.as_ref().map_or_else(
                 |error| daemon_error_output(error).unwrap_or_default().to_owned(),
                 |execution| execution.output.clone(),
@@ -20542,6 +21371,23 @@ impl Shared {
                         );
                     }
                 };
+            if options.control_target.is_some()
+                && !direct_callback
+                && !source_callback_failures.is_empty()
+            {
+                let qualified =
+                    captured_events.qualify_callback_parse_events(&source_callback_failures);
+                debug_assert_eq!(
+                    qualified,
+                    source_callback_failures
+                        .iter()
+                        .filter(|failure| {
+                            failure.owner == CallbackFailureOwner::Source
+                                && failure.control_event.is_some()
+                        })
+                        .count()
+                );
+            }
             match result.map_err(discard_command_output) {
                 Ok(_) => publish_guard(captured_output, false, false, captured_events),
                 Err(DaemonError::Server(ServerError::UnsupportedCommand(unsupported))) => {
@@ -20557,20 +21403,64 @@ impl Shared {
                         "{}: invalid inserted tmux command: {message}",
                         path.display()
                     );
+                    let _ = report.note_callback_failures(
+                        path,
+                        &command,
+                        std::mem::take(&mut callback_failures_after_result),
+                    );
+                    report.note_deferred_config_replay_issues(
+                        path,
+                        &command,
+                        deferred_replay_issues,
+                    );
                     return Err(DaemonError::InsertedCommandParse(config_command_error(
                         &command, &message,
                     )));
+                }
+                Err(error) if post_admission_callback_parse_depth(&error) != 0 => {
+                    let failed_source_group = source_callback_failures.iter().any(|failure| {
+                        failure.depth == 1 && failure.group_action == CallbackGroupAction::Fail
+                    });
+                    let diagnostics = source_callback_failures;
+                    if let Some((client, _)) = options.control_target {
+                        self.inner
+                            .lock()
+                            .command_streams
+                            .entry(client)
+                            .or_default()
+                            .exit_code = 1;
+                    }
+                    if !direct_callback {
+                        publish_guard(captured_output, false, false, captured_events);
+                    } else if routed_name == "if-shell" {
+                        for diagnostic in &diagnostics {
+                            append_inserted_output(&mut captured_output, &diagnostic.message);
+                        }
+                        publish_guard(captured_output, true, false, captured_events);
+                    } else {
+                        publish_guard(captured_output, false, false, captured_events);
+                        if let Some((client, _)) = options.control_target {
+                            for diagnostic in diagnostics {
+                                self.publish_to_client(
+                                    client,
+                                    EventPayload::ControlCommandOutput {
+                                        output: diagnostic.message,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    if failed_source_group {
+                        failed_group = group;
+                    }
                 }
                 Err(DaemonError::Server(ServerError::CommandParse(message))) => {
                     log::warn!(
                         "{}: ignoring invalid tmux command: {message}",
                         path.display()
                     );
-                    report.note_invalid_command(&command, &message);
-                    append_inserted_output(
-                        &mut captured_output,
-                        &config_command_error(&command, &message),
-                    );
+                    report.note_unlocated_command_error(&message);
+                    append_inserted_output(&mut captured_output, &message);
                     publish_guard(captured_output, true, false, captured_events);
                     failed_group = group;
                 }
@@ -20586,11 +21476,33 @@ impl Shared {
                     report.note_startup_command_cause(&command, &daemon_error_text(&error));
                     append_inserted_output(&mut captured_output, &daemon_error_text(&error));
                     publish_guard(captured_output, true, true, captured_events);
+                    let _ = report.note_callback_failures(
+                        path,
+                        &command,
+                        std::mem::take(&mut callback_failures_after_result),
+                    );
+                    report.note_deferred_config_replay_issues(
+                        path,
+                        &command,
+                        deferred_replay_issues,
+                    );
                     return Err(error);
                 }
             }
+            let _ = report.note_callback_failures(
+                path,
+                &command,
+                std::mem::take(&mut callback_failures_after_result),
+            );
+            report.note_deferred_config_replay_issues(path, &command, deferred_replay_issues);
         }
+        let defer_command_error_hook_replay_issues = options.control_target.is_none()
+            && context
+                .format_variables
+                .get(HOOK_CONTEXT_FORMAT)
+                .is_some_and(|hook| hook == "command-error");
         if !options.suppress_replay_output
+            && !defer_command_error_hook_replay_issues
             && let Some(replay_client) = options.replay_client
         {
             let replay_kind = self
@@ -20599,7 +21511,11 @@ impl Shared {
                 .client_kinds
                 .get(&replay_client)
                 .copied()
-                .unwrap_or(ClientKind::Command);
+                .unwrap_or(if options.control_target.is_some() {
+                    ClientKind::Control
+                } else {
+                    ClientKind::Command
+                });
             self.route_config_replay_errors(replay_client, replay_kind, context.pane, report);
         }
         Ok(())
@@ -21402,6 +22318,11 @@ enum ConfigReplayIssue {
     },
 }
 
+enum DeferredConfigReplayIssue {
+    Callback(CallbackParseFailure),
+    Replay(ConfigReplayIssue),
+}
+
 #[derive(Default)]
 struct ConfigLoadReport {
     skipped_count: usize,
@@ -21416,6 +22337,8 @@ struct ConfigLoadReport {
     source_errors: Vec<String>,
     source_error_groups: Vec<Vec<String>>,
     replay_issues: Vec<ConfigReplayIssue>,
+    reported_failure: bool,
+    source_callback_failure: bool,
     delivered_replay_issues: usize,
     control_guarded: bool,
     startup_causes: Option<Vec<String>>,
@@ -21566,6 +22489,7 @@ impl ConfigLoadReport {
     fn note_parse_diagnostic(&mut self, source: &str, line: u32, message: &str, top_level: bool) {
         let diagnostic = format!("{source}:{line}: {message}");
         self.note_startup_cause(&diagnostic);
+        self.reported_failure = true;
         let index = self.note_invalid(&diagnostic);
         if self.stdout_transcript.is_some() {
             self.replayed_diagnostics.insert(index);
@@ -21595,6 +22519,7 @@ impl ConfigLoadReport {
             |source| format!("{}:{}: {message}", source.source, source.line),
         );
         self.note_startup_cause(&diagnostic);
+        self.reported_failure = true;
         let index = self.note_invalid(&diagnostic);
         if let Some(transcript) = self
             .stdout_transcript
@@ -21605,6 +22530,16 @@ impl ConfigLoadReport {
             append_inserted_output(&mut transcript.diagnostics, &diagnostic);
             transcript.diagnostics.push('\n');
         }
+    }
+
+    fn note_invalid_command_error(&mut self, command: &CommandInvocation, message: &str) {
+        let diagnostic = config_command_error(command, message);
+        self.note_startup_cause(&diagnostic);
+        self.reported_failure = true;
+        self.replay_issues.push(ConfigReplayIssue::CommandError {
+            source: command.source.clone(),
+            message: diagnostic,
+        });
     }
 
     /// Every invalid-line diagnostic in encounter order, duplicates kept. The
@@ -21714,6 +22649,53 @@ impl ConfigLoadReport {
         });
     }
 
+    fn note_unlocated_command_error(&mut self, message: &str) {
+        self.note_startup_cause(message);
+        self.reported_failure = true;
+        self.replay_issues.push(ConfigReplayIssue::CommandError {
+            source: None,
+            message: message.to_owned(),
+        });
+    }
+
+    fn note_callback_failures(
+        &mut self,
+        path: &Path,
+        command: &CommandInvocation,
+        failures: Vec<CallbackParseFailure>,
+    ) -> Vec<CallbackParseFailure> {
+        let mut source_failures = Vec::new();
+        for mut failure in failures {
+            match failure.owner {
+                CallbackFailureOwner::Source => {
+                    self.source_callback_failure = true;
+                    let message = std::mem::take(&mut failure.message);
+                    log::warn!(
+                        "{}: invalid inserted tmux command: {message}",
+                        path.display()
+                    );
+                    self.note_invalid_command_error(command, &message);
+                    failure.message = config_command_error(command, &message);
+                    source_failures.push(failure);
+                }
+                CallbackFailureOwner::RuntimeCommand => {
+                    self.source_callback_failure = true;
+                    log::warn!(
+                        "{}: invalid inserted tmux command: {}",
+                        path.display(),
+                        failure.message
+                    );
+                    self.note_unlocated_command_error(&failure.message);
+                    source_failures.push(failure);
+                }
+                CallbackFailureOwner::Hook | CallbackFailureOwner::CommandErrorHook => {
+                    self.note_unlocated_command_error(&failure.message);
+                }
+            }
+        }
+        source_failures
+    }
+
     #[cfg(test)]
     fn source_errors(&self) -> &[String] {
         &self.source_errors
@@ -21725,6 +22707,61 @@ impl ConfigLoadReport {
 
     fn replay_issues(&self) -> &[ConfigReplayIssue] {
         &self.replay_issues
+    }
+
+    fn take_undelivered_replay_issues(&mut self) -> Vec<ConfigReplayIssue> {
+        let mut issues = Vec::new();
+        for issue in &self.replay_issues[self.delivered_replay_issues..] {
+            match issue {
+                ConfigReplayIssue::SourceErrors(index) => {
+                    for message in &self.source_error_groups[*index] {
+                        issues.push(ConfigReplayIssue::CommandError {
+                            source: None,
+                            message: message.clone(),
+                        });
+                    }
+                }
+                ConfigReplayIssue::CommandError { source, message } => {
+                    issues.push(ConfigReplayIssue::CommandError {
+                        source: source.clone(),
+                        message: message.clone(),
+                    });
+                }
+            }
+        }
+        self.delivered_replay_issues = self.replay_issues.len();
+        issues
+    }
+
+    fn append_deferred_replay_issues(&mut self, issues: Vec<ConfigReplayIssue>) {
+        if issues.is_empty() {
+            return;
+        }
+        self.reported_failure = true;
+        for issue in issues {
+            if let ConfigReplayIssue::CommandError { message, .. } = &issue {
+                self.note_startup_cause(message);
+            }
+            self.replay_issues.push(issue);
+        }
+    }
+
+    fn note_deferred_config_replay_issues(
+        &mut self,
+        path: &Path,
+        command: &CommandInvocation,
+        issues: Vec<DeferredConfigReplayIssue>,
+    ) {
+        for issue in issues {
+            match issue {
+                DeferredConfigReplayIssue::Callback(failure) => {
+                    let _ = self.note_callback_failures(path, command, vec![failure]);
+                }
+                DeferredConfigReplayIssue::Replay(issue) => {
+                    self.append_deferred_replay_issues(vec![issue]);
+                }
+            }
+        }
     }
 
     fn message(&self) -> Option<String> {
@@ -21791,6 +22828,53 @@ struct CommandStreams {
     exit_code: u8,
 }
 
+#[derive(Default)]
+struct CapturedControlCommandEvents {
+    events: Vec<EventPayload>,
+    callback_parse_events: Vec<(usize, Arc<()>)>,
+}
+
+impl CapturedControlCommandEvents {
+    fn qualify_callback_parse_events(&mut self, diagnostics: &[CallbackParseFailure]) -> usize {
+        let mut qualified = 0;
+        for diagnostic in diagnostics {
+            let Some(event) = diagnostic.control_event.as_ref() else {
+                continue;
+            };
+            let Some((index, _)) = self
+                .callback_parse_events
+                .iter()
+                .find(|(_, candidate)| Arc::ptr_eq(candidate, event))
+            else {
+                continue;
+            };
+            let Some(event) = self.events.get_mut(*index) else {
+                continue;
+            };
+            match event {
+                EventPayload::ControlCommandGuard {
+                    output,
+                    error: true,
+                    sticky_failure: false,
+                    ..
+                }
+                | EventPayload::ControlCommandOutput { output } => {
+                    output.clear();
+                    output.push_str(&diagnostic.message);
+                    qualified += 1;
+                }
+                _ => {}
+            }
+        }
+        self.callback_parse_events.clear();
+        qualified
+    }
+
+    fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+}
+
 struct ControlCommandEventCapture<'a> {
     shared: &'a Shared,
     client: ClientId,
@@ -21799,7 +22883,7 @@ struct ControlCommandEventCapture<'a> {
 }
 
 impl ControlCommandEventCapture<'_> {
-    fn finish(mut self) -> Vec<EventPayload> {
+    fn finish(mut self) -> CapturedControlCommandEvents {
         self.active = false;
         self.shared
             .pop_control_command_event_capture(self.client, self.thread_id)
@@ -22058,7 +23142,8 @@ struct ServerState {
     next_command_output_id: u64,
     command_outputs: BTreeMap<ClientId, CommandOutputSession>,
     command_streams: BTreeMap<ClientId, CommandStreams>,
-    control_command_event_captures: HashMap<(ClientId, thread::ThreadId), Vec<Vec<EventPayload>>>,
+    control_command_event_captures:
+        HashMap<(ClientId, thread::ThreadId), Vec<CapturedControlCommandEvents>>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
@@ -28050,6 +29135,9 @@ struct CommandQueueExecution {
     yield_boundary: bool,
     shutdown_blocker: RefCell<Option<ShutdownBlocker>>,
     pending_event_hooks: RefCell<Vec<PendingHookEvent>>,
+    callback_parse_failures: RefCell<Vec<CallbackParseFailure>>,
+    deferred_config_replay_issues: RefCell<Vec<DeferredConfigReplayIssue>>,
+    reported_failures: Cell<bool>,
     suppress_after_hooks: Cell<bool>,
     suppress_output: Cell<bool>,
 }
@@ -28061,6 +29149,36 @@ impl CommandQueueExecution {
 
     fn has_yielded(&self) -> bool {
         self.yielded.get() != CommandQueueYield::None
+    }
+
+    fn note_reported_failure(&self) {
+        self.reported_failures.set(true);
+    }
+
+    fn callback_group_action_since(
+        &self,
+        start: usize,
+        routed_name: &str,
+        terminal_depth: usize,
+    ) -> Option<CallbackGroupAction> {
+        let failures = self.callback_parse_failures.borrow();
+        select_callback_group_action(&failures[start..], routed_name, terminal_depth)
+    }
+
+    fn handle_callback_group_actions_since(&self, start: usize) {
+        for failure in &mut self.callback_parse_failures.borrow_mut()[start..] {
+            if failure.owner.is_replay_callback() && failure.depth == 1 {
+                failure.group_action = CallbackGroupAction::Handled;
+            }
+        }
+    }
+
+    fn nest_callback_parse_failures_since(&self, start: usize) {
+        for failure in &mut self.callback_parse_failures.borrow_mut()[start..] {
+            if failure.owner.is_replay_callback() {
+                failure.depth += 1;
+            }
+        }
     }
 
     fn yield_queue(&self) {
@@ -28087,6 +29205,107 @@ impl CommandQueueExecution {
             .as_ref()
             .map(|blocker| blocker.fork(detached))
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallbackGroupAction {
+    Continue,
+    Fail,
+    Handled,
+}
+
+impl CallbackGroupAction {
+    fn for_command(name: &str) -> Option<Self> {
+        match name {
+            "if-shell" => Some(Self::Fail),
+            "run-shell" => Some(Self::Continue),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct CallbackParseFailure {
+    message: String,
+    group_action: CallbackGroupAction,
+    owner: CallbackFailureOwner,
+    control_event: Option<Arc<()>>,
+    depth: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallbackFailureOwner {
+    Source,
+    RuntimeCommand,
+    Hook,
+    CommandErrorHook,
+}
+
+impl CallbackFailureOwner {
+    fn is_replay_callback(self) -> bool {
+        matches!(self, Self::Source | Self::RuntimeCommand)
+    }
+}
+
+impl CallbackParseFailure {
+    fn for_command(
+        message: String,
+        name: &str,
+        control_event: Option<Arc<()>>,
+        depth: usize,
+    ) -> Option<Self> {
+        Some(Self {
+            message,
+            group_action: CallbackGroupAction::for_command(name)?,
+            owner: CallbackFailureOwner::Source,
+            control_event,
+            depth,
+        })
+    }
+
+    fn runtime_command(message: String, label: &str) -> Self {
+        let name = label
+            .strip_prefix('<')
+            .and_then(|label| label.strip_suffix('>'))
+            .unwrap_or(label)
+            .split_ascii_whitespace()
+            .next()
+            .unwrap_or(label);
+        Self {
+            message,
+            group_action: CallbackGroupAction::for_command(name)
+                .unwrap_or(CallbackGroupAction::Handled),
+            owner: CallbackFailureOwner::RuntimeCommand,
+            control_event: None,
+            depth: 0,
+        }
+    }
+}
+
+fn select_callback_group_action(
+    failures: &[CallbackParseFailure],
+    routed_name: &str,
+    terminal_depth: usize,
+) -> Option<CallbackGroupAction> {
+    let mut continuing = false;
+    for failure in failures.iter().filter(|failure| {
+        failure.owner.is_replay_callback()
+            && failure.group_action != CallbackGroupAction::Handled
+            && failure.depth == 1
+    }) {
+        match failure.group_action {
+            CallbackGroupAction::Fail => return Some(CallbackGroupAction::Fail),
+            CallbackGroupAction::Continue => continuing = true,
+            CallbackGroupAction::Handled => unreachable!(),
+        }
+    }
+    continuing
+        .then_some(CallbackGroupAction::Continue)
+        .or_else(|| {
+            (terminal_depth == 1)
+                .then(|| CallbackGroupAction::for_command(routed_name))
+                .flatten()
+        })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -28331,6 +29550,13 @@ fn prepend_command_output(mut output: String, error: DaemonError) -> DaemonError
             append_inserted_output(&mut output, &error_output);
             DaemonError::CommandExit { output, exit_code }
         }
+        DaemonError::ReportedCommandExit {
+            output: error_output,
+            exit_code,
+        } => {
+            append_inserted_output(&mut output, &error_output);
+            DaemonError::ReportedCommandExit { output, exit_code }
+        }
         DaemonError::CommandFailed {
             output: error_output,
             error,
@@ -28348,6 +29574,10 @@ fn prepend_command_output(mut output: String, error: DaemonError) -> DaemonError
 fn discard_all_command_output(error: DaemonError) -> DaemonError {
     match error {
         DaemonError::CommandExit { exit_code, .. } => DaemonError::CommandExit {
+            output: String::new(),
+            exit_code,
+        },
+        DaemonError::ReportedCommandExit { exit_code, .. } => DaemonError::ReportedCommandExit {
             output: String::new(),
             exit_code,
         },
@@ -28472,7 +29702,9 @@ fn discard_command_output(error: DaemonError) -> DaemonError {
 
 fn daemon_error_output(error: &DaemonError) -> Option<&str> {
     match error {
-        DaemonError::CommandExit { output, .. } | DaemonError::CommandFailed { output, .. }
+        DaemonError::CommandExit { output, .. }
+        | DaemonError::ReportedCommandExit { output, .. }
+        | DaemonError::CommandFailed { output, .. }
             if !output.is_empty() =>
         {
             Some(output)
@@ -28504,11 +29736,37 @@ fn control_command_guard_for_execution(
 fn control_command_guard_error(error: &DaemonError) -> (bool, bool, String) {
     match error {
         DaemonError::CommandFailed { error, .. } => control_command_guard_error(error),
-        DaemonError::Server(ServerError::UnsupportedCommand(_)) => (false, false, String::new()),
+        DaemonError::ReportedCommandExit { .. }
+        | DaemonError::Server(ServerError::UnsupportedCommand(_)) => (false, false, String::new()),
         DaemonError::InsertedCommandParse(message)
         | DaemonError::Server(ServerError::CommandParse(message)) => (true, false, message.clone()),
         DaemonError::Server(error) => (true, true, error.tmux_message()),
         error => (true, true, daemon_error_text(error)),
+    }
+}
+
+fn post_admission_callback_parse_depth(error: &DaemonError) -> usize {
+    match error {
+        DaemonError::CommandFailed { error, .. } => post_admission_callback_parse_depth(error),
+        DaemonError::Server(error) => server_post_admission_callback_parse_depth(error),
+        _ => 0,
+    }
+}
+
+fn command_parse_error(error: &DaemonError) -> bool {
+    match error {
+        DaemonError::CommandFailed { error, .. } => command_parse_error(error),
+        DaemonError::Server(ServerError::CommandParse(_)) => true,
+        _ => false,
+    }
+}
+
+fn server_post_admission_callback_parse_depth(error: &ServerError) -> usize {
+    match error {
+        ServerError::PostAdmissionCallback(error) if error.is_command_parse() => {
+            1 + server_post_admission_callback_parse_depth(error)
+        }
+        _ => 0,
     }
 }
 
@@ -30638,7 +31896,8 @@ fn daemon_server_error(error: DaemonError) -> ServerError {
         DaemonError::Server(error) => error,
         DaemonError::InsertedCommandParse(message) => ServerError::CommandParse(message),
         DaemonError::CommandFailed { error, .. } => daemon_server_error(*error),
-        DaemonError::CommandExit { exit_code, .. } => {
+        DaemonError::CommandExit { exit_code, .. }
+        | DaemonError::ReportedCommandExit { exit_code, .. } => {
             ServerError::Internal(format!("command exited with status {exit_code}"))
         }
         other => ServerError::Internal(other.to_string()),
@@ -30647,7 +31906,9 @@ fn daemon_server_error(error: DaemonError) -> ServerError {
 
 fn post_admission_callback_error(error: DaemonError) -> DaemonError {
     match error {
-        error @ DaemonError::CommandExit { .. } => error,
+        error @ (DaemonError::CommandExit { .. } | DaemonError::ReportedCommandExit { .. }) => {
+            error
+        }
         DaemonError::CommandFailed { output, error } => DaemonError::CommandFailed {
             output,
             error: Box::new(DaemonError::Server(ServerError::PostAdmissionCallback(
@@ -32618,6 +33879,34 @@ mod tests {
             format!("{}:7: MULTI_FIRST\nMULTI_SECOND", root.display())
         );
         assert_eq!(causes.len(), 7);
+    }
+
+    #[test]
+    fn startup_hook_callback_failure_reports_and_continues() {
+        let directory = tempfile::tempdir().expect("temporary config directory");
+        let root = directory.path().join("hook-callback.conf");
+        fs::write(
+            &root,
+            "set-hook -g after-display-message 'run-shell -C \"{ display-message -p quoted }\" ; set-option -g @startup-hook-after yes'\n\
+             display-message -p TRIGGER\n\
+             set-option -g @startup-after yes\n",
+        )
+        .expect("startup hook callback fixture");
+
+        let shared = Arc::new(Shared::new(1));
+        shared
+            .initialize_with_mux_config_files(true, Some(std::slice::from_ref(&root)), None)
+            .expect("initialize startup hook callback config");
+
+        assert_eq!(read_global_option(&shared, "@startup-hook-after"), "yes");
+        assert_eq!(read_global_option(&shared, "@startup-after"), "yes");
+        assert_eq!(
+            retained_startup_causes(&shared),
+            [
+                "syntax error".to_owned(),
+                format!("{}:2: TRIGGER", root.display())
+            ]
+        );
     }
 
     #[test]
@@ -42636,6 +43925,2963 @@ mod tests {
     }
 
     #[test]
+    fn source_file_qualifies_post_admission_parse_errors() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(64));
+        let client = ClientId(u64::from(u16::MAX));
+
+        for (request_id, (name, contents)) in (1_u64..).zip([
+            (
+                "if-shell.conf",
+                "if-shell -F 1 \"{ display-message -p quoted }\"\n",
+            ),
+            (
+                "run-shell.conf",
+                "run-shell -C \"{ display-message -p quoted }\"\n",
+            ),
+            (
+                "nested-if-shell.conf",
+                "if-shell -F 1 \"if-shell -F 1 \\\"{ display-message -p quoted }\\\"\"\n",
+            ),
+            (
+                "nested-run-shell.conf",
+                "run-shell -C \"run-shell -C \\\"{ display-message -p quoted }\\\"\"\n",
+            ),
+        ]) {
+            let path = directory.path().join(name);
+            fs::write(&path, contents).expect("source fixture");
+            let path = path.display().to_string();
+            let mut context = ExecutionContext::default();
+
+            assert_eq!(
+                shared.execute_command_request(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    request_id,
+                    &CommandInvocation::new("source-file", [&path]),
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: format!("{path}:1: syntax error\n"),
+                }
+            );
+        }
+
+        let inner = directory.path().join("inner.conf");
+        fs::write(&inner, "if-shell -F 1 \"{ display-message -p quoted }\"\n")
+            .expect("inner source fixture");
+        let outer = directory.path().join("outer.conf");
+        fs::write(
+            &outer,
+            format!("if-shell -F 1 \"source-file '{}'\"\n", inner.display()),
+        )
+        .expect("outer source fixture");
+        let inner = inner.display().to_string();
+        let outer = outer.display().to_string();
+        let mut context = ExecutionContext::default();
+
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                5,
+                &CommandInvocation::new("source-file", [&outer]),
+            ),
+            CommandResponse::Success {
+                request_id: 5,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{inner}:1: syntax error\n"),
+            }
+        );
+    }
+
+    #[test]
+    fn source_file_callback_parse_errors_preserve_replay_groups() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(64));
+        let client = ClientId(u64::from(u16::MAX));
+
+        for (request_id, name, first, before, same, next, keeps_same) in [
+            (
+                1,
+                "if-shell.conf",
+                "if-shell -F 1 \"{ display-message -p quoted }\"",
+                "@callback-if-before",
+                "@callback-if-same",
+                "@callback-if-next",
+                false,
+            ),
+            (
+                2,
+                "run-shell.conf",
+                "run-shell -C \"{ display-message -p quoted }\"",
+                "@callback-run-before",
+                "@callback-run-same",
+                "@callback-run-next",
+                true,
+            ),
+            (
+                3,
+                "nested-if-shell.conf",
+                "if-shell -F 1 { if-shell -F 1 \"{ display-message -p quoted }\" }",
+                "@nested-callback-if-before",
+                "@nested-callback-if-same",
+                "@nested-callback-if-next",
+                true,
+            ),
+            (
+                4,
+                "nested-run-shell.conf",
+                "run-shell -C { run-shell -C \"{ display-message -p quoted }\" }",
+                "@nested-callback-run-before",
+                "@nested-callback-run-same",
+                "@nested-callback-run-next",
+                true,
+            ),
+        ] {
+            let path = directory.path().join(name);
+            fs::write(
+                &path,
+                format!(
+                    "set-option -g {before} yes ; {first} ; set-option -g {same} yes\n\
+                     set-option -g {next} yes\n"
+                ),
+            )
+            .expect("source fixture");
+            let path = path.display().to_string();
+            let mut context = ExecutionContext::default();
+
+            assert_eq!(
+                shared.execute_command_request(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    request_id,
+                    &CommandInvocation::new("source-file", [&path]),
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: format!("{path}:1: syntax error\n"),
+                }
+            );
+            assert_eq!(read_global_option(&shared, before), "yes", "{name} prefix");
+            assert_eq!(
+                read_global_option(&shared, same),
+                if keeps_same { "yes" } else { "" },
+                "{name} same-line group"
+            );
+            assert_eq!(read_global_option(&shared, next), "yes", "{name} next line");
+        }
+
+        let quoted = directory.path().join("quoted-nested-run-shell.conf");
+        fs::write(
+            &quoted,
+            r#"set-option -g @quoted-outer-before yes ; run-shell -C "set-option -g @quoted-inner-before yes ; run-shell -C \"{ display-message -p quoted }\" ; set-option -g @quoted-inner-same yes" ; set-option -g @quoted-outer-same yes
+set-option -g @quoted-next yes
+"#,
+        )
+        .expect("quoted nested run-shell source fixture");
+        let quoted = quoted.display().to_string();
+        let mut context = ExecutionContext::default();
+
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                5,
+                &CommandInvocation::new("source-file", [&quoted]),
+            ),
+            CommandResponse::Success {
+                request_id: 5,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{quoted}:1: syntax error\n"),
+            }
+        );
+        for name in [
+            "@quoted-outer-before",
+            "@quoted-inner-before",
+            "@quoted-inner-same",
+            "@quoted-outer-same",
+            "@quoted-next",
+        ] {
+            assert_eq!(read_global_option(&shared, name), "yes", "{name} state");
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[100]", "rr=run-shell -C"],
+                ),
+            )
+            .expect("runtime run-shell alias");
+        let aliased = directory.path().join("aliased-nested-run-shell.conf");
+        fs::write(
+            &aliased,
+            r#"run-shell -C "set-option -g @alias-inner-before yes ; rr \"{ display-message -p quoted }\" ; set-option -g @alias-inner-same yes"
+set-option -g @alias-next yes
+"#,
+        )
+        .expect("aliased nested run-shell source fixture");
+        let aliased = aliased.display().to_string();
+
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                6,
+                &CommandInvocation::new("source-file", [&aliased]),
+            ),
+            CommandResponse::Success {
+                request_id: 6,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{aliased}:1: syntax error\n"),
+            }
+        );
+        for name in ["@alias-inner-before", "@alias-inner-same", "@alias-next"] {
+            assert_eq!(read_global_option(&shared, name), "yes", "{name} state");
+        }
+
+        for (index, alias) in [
+            "aliasif=if-shell -F 1 \"{ display-message -p quoted }\" ; set-option -g @alias-if-same yes",
+            "aliasrun=run-shell -C \"{ display-message -p quoted }\" ; set-option -g @alias-run-same yes",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        [
+                            "-s",
+                            &format!("command-alias[{}]", index + 101),
+                            alias,
+                        ],
+                    ),
+                )
+                .expect("callback command alias group");
+        }
+        for (request_id, name, command, same, next, keeps_same) in [
+            (
+                7,
+                "alias-group-if-shell.conf",
+                "aliasif",
+                "@alias-if-same",
+                "@alias-if-next",
+                false,
+            ),
+            (
+                8,
+                "alias-group-run-shell.conf",
+                "aliasrun",
+                "@alias-run-same",
+                "@alias-run-next",
+                true,
+            ),
+        ] {
+            let path = directory.path().join(name);
+            fs::write(&path, format!("{command}\nset-option -g {next} yes\n"))
+                .expect("callback alias group source fixture");
+            let path = path.display().to_string();
+
+            assert_eq!(
+                shared.execute_command_request(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    request_id,
+                    &CommandInvocation::new("source-file", [&path]),
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: format!("{path}:1: syntax error\n"),
+                }
+            );
+            assert_eq!(
+                read_global_option(&shared, same),
+                if keeps_same { "yes" } else { "" },
+                "{name} same-group state"
+            );
+            assert_eq!(read_global_option(&shared, next), "yes", "{name} next line");
+        }
+
+        let alias_if_group = directory.path().join("alias-if-caller-group.conf");
+        fs::write(
+            &alias_if_group,
+            "set-option -g @alias-if-caller-before yes ; aliasif ; set-option -g @alias-if-caller-same yes\n\
+             set-option -g @alias-if-caller-next yes\n",
+        )
+        .expect("if-shell alias caller group source fixture");
+        let alias_if_group = alias_if_group.display().to_string();
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                9,
+                &CommandInvocation::new("source-file", [&alias_if_group]),
+            ),
+            CommandResponse::Success {
+                request_id: 9,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{alias_if_group}:1: syntax error\n"),
+            }
+        );
+        assert_eq!(
+            read_global_option(&shared, "@alias-if-caller-before"),
+            "yes"
+        );
+        assert_eq!(read_global_option(&shared, "@alias-if-caller-same"), "");
+        assert_eq!(read_global_option(&shared, "@alias-if-caller-next"), "yes");
+
+        let alias_run_string = directory.path().join("alias-run-caller-string.conf");
+        fs::write(
+            &alias_run_string,
+            r#"run-shell -C "set-option -g @alias-run-caller-before yes ; aliasrun ; set-option -g @alias-run-caller-same yes"
+set-option -g @alias-run-caller-next yes
+"#,
+        )
+        .expect("run-shell alias caller string source fixture");
+        let alias_run_string = alias_run_string.display().to_string();
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                10,
+                &CommandInvocation::new("source-file", [&alias_run_string]),
+            ),
+            CommandResponse::Success {
+                request_id: 10,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{alias_run_string}:1: syntax error\n"),
+            }
+        );
+        for name in [
+            "@alias-run-caller-before",
+            "@alias-run-caller-same",
+            "@alias-run-caller-next",
+        ] {
+            assert_eq!(read_global_option(&shared, name), "yes", "{name} state");
+        }
+
+        shared
+            .execute(
+                client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[103]",
+                        "aliasmixed=run-shell -C \"{ display-message -p quoted }\" ; if-shell -F 1 \"{ display-message -p quoted }\" ; set-option -g @alias-mixed-body yes",
+                    ],
+                ),
+            )
+            .expect("mixed callback command alias");
+        let alias_mixed = directory.path().join("alias-mixed-caller-string.conf");
+        fs::write(
+            &alias_mixed,
+            r#"run-shell -C "set-option -g @alias-mixed-before yes ; aliasmixed ; set-option -g @alias-mixed-outer yes"
+set-option -g @alias-mixed-next yes
+"#,
+        )
+        .expect("mixed callback alias caller string fixture");
+        let alias_mixed = alias_mixed.display().to_string();
+        let diagnostic = format!("{alias_mixed}:1: syntax error");
+
+        assert_eq!(
+            shared.execute_command_request(
+                client,
+                ClientKind::Command,
+                &mut context,
+                11,
+                &CommandInvocation::new("source-file", [&alias_mixed]),
+            ),
+            CommandResponse::Success {
+                request_id: 11,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{diagnostic}\n{diagnostic}\n"),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@alias-mixed-before"), "yes");
+        assert_eq!(read_global_option(&shared, "@alias-mixed-body"), "");
+        assert_eq!(read_global_option(&shared, "@alias-mixed-outer"), "");
+        assert_eq!(read_global_option(&shared, "@alias-mixed-next"), "yes");
+    }
+
+    #[test]
+    fn source_mixed_depth_alias_callback_failures_prune_caller_group() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "mixed-depth-alias"]),
+            )
+            .expect("mixed-depth alias session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[100]",
+                        r#"deepmixed=run-shell -C "run-shell -C \"{ display-message -p quoted }\"" ; if-shell -F 1 "{ display-message -p quoted }" ; set-option -g @deep-mixed-alias-body yes"#,
+                    ],
+                ),
+            )
+            .expect("mixed-depth callback alias");
+
+        let command_path = directory.path().join("command.conf");
+        fs::write(
+            &command_path,
+            "set-option -g @deep-mixed-command-before yes ; deepmixed ; set-option -g @deep-mixed-command-same yes\n\
+             set-option -g @deep-mixed-command-later yes\n",
+        )
+        .expect("mixed-depth Command source fixture");
+        let command_path = command_path.display().to_string();
+        let diagnostic = format!("{command_path}:1: syntax error");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [&command_path]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{diagnostic}\n{diagnostic}\n"),
+            }
+        );
+        assert_eq!(
+            read_global_option(&shared, "@deep-mixed-command-before"),
+            "yes"
+        );
+        assert_eq!(read_global_option(&shared, "@deep-mixed-alias-body"), "");
+        assert_eq!(read_global_option(&shared, "@deep-mixed-command-same"), "");
+        assert_eq!(
+            read_global_option(&shared, "@deep-mixed-command-later"),
+            "yes"
+        );
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context.session.expect("mixed-depth alias session id"),
+            )
+            .expect("attach mixed-depth Control client");
+        take_reliable_messages(&mailbox);
+
+        for (direct_argv, request_id) in [(false, 2), (true, 3)] {
+            let prefix = if direct_argv { "argv" } else { "stdin" };
+            let before = format!("@deep-mixed-{prefix}-before");
+            let same = format!("@deep-mixed-{prefix}-same");
+            let later = format!("@deep-mixed-{prefix}-later");
+            let path = directory.path().join(format!("control-{prefix}.conf"));
+            fs::write(
+                &path,
+                format!(
+                    "set-option -g {before} yes ; deepmixed ; set-option -g {same} yes\n\
+                     set-option -g {later} yes\n"
+                ),
+            )
+            .expect("mixed-depth Control source fixture");
+            let invocation = if direct_argv {
+                CommandInvocation::new("source-file", [path.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [path.display().to_string()])
+            };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &invocation,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                read_global_option(&shared, &before),
+                "yes",
+                "{prefix} before"
+            );
+            assert_eq!(read_global_option(&shared, &same), "", "{prefix} same");
+            assert_eq!(read_global_option(&shared, &later), "yes", "{prefix} later");
+            take_reliable_messages(&mailbox);
+        }
+
+        assert!(shared.inner.lock().command_streams.is_empty());
+    }
+
+    #[test]
+    fn source_nested_only_alias_callback_failure_keeps_caller_groups() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "nested-only-alias"]),
+            )
+            .expect("nested-only alias session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[100]",
+                        r#"nestedonly=if-shell -F 1 { if-shell -F 1 "{ display-message -p quoted }" } ; set-option -g @nested-only-alias-body yes"#,
+                    ],
+                ),
+            )
+            .expect("nested-only callback alias");
+
+        let command_path = directory.path().join("command.conf");
+        fs::write(
+            &command_path,
+            "set-option -g @nested-only-command-before yes ; nestedonly ; set-option -g @nested-only-command-same yes\n\
+             set-option -g @nested-only-command-next yes\n",
+        )
+        .expect("nested-only Command source fixture");
+        let command_path = command_path.display().to_string();
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [&command_path]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{command_path}:1: syntax error\n"),
+            }
+        );
+        for name in [
+            "@nested-only-command-before",
+            "@nested-only-alias-body",
+            "@nested-only-command-same",
+            "@nested-only-command-next",
+        ] {
+            assert_eq!(read_global_option(&shared, name), "yes", "{name}");
+        }
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context.session.expect("nested-only alias session id"),
+            )
+            .expect("attach nested-only Control client");
+        take_reliable_messages(&mailbox);
+
+        for (direct_argv, request_id, flags) in [(false, 2, 1), (true, 3, 0)] {
+            let prefix = if direct_argv { "argv" } else { "stdin" };
+            let before = format!("@nested-only-{prefix}-before");
+            let same = format!("@nested-only-{prefix}-same");
+            let next = format!("@nested-only-{prefix}-next");
+            let path = directory.path().join(format!("control-{prefix}.conf"));
+            fs::write(
+                &path,
+                format!(
+                    "set-option -g {before} yes ; nestedonly ; set-option -g {same} yes\n\
+                     set-option -g {next} yes\n"
+                ),
+            )
+            .expect("nested-only Control source fixture");
+            let invocation = if direct_argv {
+                CommandInvocation::new("source-file", [path.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [path.display().to_string()])
+            };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &invocation,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            let diagnostic = format!("{}:1: syntax error", path.display());
+            let messages = take_reliable_messages(&mailbox);
+            assert_eq!(
+                messages
+                    .iter()
+                    .filter(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ControlCommandGuard { output, .. }
+                                | EventPayload::ControlCommandOutput { output },
+                            ..
+                        }) if output == &diagnostic
+                    ))
+                    .count(),
+                1,
+                "{prefix} diagnostic"
+            );
+            assert!(
+                messages
+                    .iter()
+                    .filter_map(|message| match message {
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ControlCommandGuard { flags, .. },
+                            ..
+                        }) => Some(*flags),
+                        _ => None,
+                    })
+                    .all(|event_flags| event_flags == flags)
+            );
+            for name in [&before, "@nested-only-alias-body", &same, &next] {
+                assert_eq!(read_global_option(&shared, name), "yes", "{prefix} {name}");
+            }
+        }
+
+        for (mode, request_id) in [("command", 4), ("stdin", 5), ("argv", 6)] {
+            let marker = format!("@nested-string-{mode}-same");
+            let body = format!(
+                r#"if-shell -F 1 "if-shell -F 1 \"{{ display-message -p quoted }}\"" ; set-option -g {marker} yes"#
+            );
+            let (request_client, kind, invocation) = match mode {
+                "command" => (
+                    command,
+                    ClientKind::Command,
+                    CommandInvocation::new("run-shell", ["-C", &body]),
+                ),
+                "stdin" => (
+                    control,
+                    ClientKind::Control,
+                    control_stdin_command("run-shell", ["-C", &body]),
+                ),
+                "argv" => (
+                    control,
+                    ClientKind::Control,
+                    CommandInvocation::new("run-shell", ["-C", &body]),
+                ),
+                _ => unreachable!(),
+            };
+            let response = shared.execute_command_request(
+                request_client,
+                kind,
+                &mut context,
+                request_id,
+                &invocation,
+            );
+            assert!(matches!(
+                response,
+                CommandResponse::Error {
+                    request_id: response_id,
+                    error,
+                    output,
+                } if response_id == request_id
+                    && output.is_empty()
+                    && server_post_admission_callback_parse_depth(&error) == 3
+            ));
+            assert_eq!(read_global_option(&shared, &marker), "yes", "{mode}");
+            if kind == ClientKind::Control {
+                assert_eq!(
+                    take_reliable_messages(&mailbox)
+                        .into_iter()
+                        .filter(|message| matches!(
+                            message,
+                            ProtocolMessage::Event(Event {
+                                payload: EventPayload::ControlCommandGuard { output, .. }
+                                    | EventPayload::ControlCommandOutput { output },
+                                ..
+                            }) if output == "syntax error"
+                        ))
+                        .count(),
+                    1,
+                    "{mode} diagnostic"
+                );
+            }
+        }
+
+        assert!(shared.inner.lock().command_streams.is_empty());
+    }
+
+    #[test]
+    fn control_source_callback_parse_errors_preserve_framing() {
+        fn timeline(messages: Vec<ProtocolMessage>) -> Vec<String> {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlCommandGuard {
+                                output,
+                                error,
+                                sticky_failure,
+                                flags,
+                            },
+                        ..
+                    }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandOutput { output },
+                        ..
+                    }) => Some(format!("raw:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::Complete,
+                            },
+                        ..
+                    }) => Some("complete".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "callback-framing"]),
+            )
+            .expect("Control framing session");
+        for (index, alias) in [
+            "rr=run-shell -C",
+            "aliasif=if-shell -F 1 \"{ display-message -p quoted }\" ; display-message -p ALIAS_IF_SAME",
+            "aliasrun=run-shell -C \"{ display-message -p quoted }\" ; display-message -p ALIAS_RUN_SAME",
+            "aliasmixed=run-shell -C \"{ display-message -p quoted }\" ; if-shell -F 1 \"{ display-message -p quoted }\" ; display-message -p ALIAS_MIXED_BODY",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "set-option",
+                        [
+                            "-s",
+                            &format!("command-alias[{}]", index + 100),
+                            alias,
+                        ],
+                    ),
+                )
+                .expect("Control callback alias");
+        }
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context.session.expect("Control framing session id"),
+            )
+            .expect("attach Control client");
+        take_reliable_messages(&mailbox);
+
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            for (request_id, name, first, framing, after) in [
+                (
+                    1_u64,
+                    "if-shell.conf",
+                    "if-shell -F 1 \"{ display-message -p quoted }\"",
+                    "if-shell",
+                    "AFTER_IF_CALLBACK",
+                ),
+                (
+                    2,
+                    "run-shell.conf",
+                    "run-shell -C \"{ display-message -p quoted }\"",
+                    "run-shell",
+                    "AFTER_RUN_CALLBACK",
+                ),
+                (
+                    3,
+                    "nested-if-shell.conf",
+                    "if-shell -F 1 { if-shell -F 1 \"{ display-message -p quoted }\" }",
+                    "nested-if-shell",
+                    "AFTER_NESTED_IF_CALLBACK",
+                ),
+                (
+                    4,
+                    "nested-run-shell.conf",
+                    "run-shell -C { run-shell -C \"{ display-message -p quoted }\" }",
+                    "nested-run-shell",
+                    "AFTER_NESTED_RUN_CALLBACK",
+                ),
+                (
+                    5,
+                    "multi-run-shell.conf",
+                    "run-shell -C { run-shell -C \"{ display-message -p quoted }\" ; run-shell -C \"{ display-message -p quoted }\" }",
+                    "multi-run-shell",
+                    "AFTER_MULTI_RUN_CALLBACK",
+                ),
+                (
+                    6,
+                    "aliased-run-shell.conf",
+                    "run-shell -C \"display-message -p ALIAS_INNER_BEFORE ; rr \\\"{ display-message -p quoted }\\\" ; display-message -p ALIAS_INNER_SAME\"",
+                    "aliased-run-shell",
+                    "AFTER_ALIASED_RUN_CALLBACK",
+                ),
+                (
+                    7,
+                    "alias-group-if-shell.conf",
+                    "aliasif",
+                    "alias-group-if-shell",
+                    "AFTER_ALIAS_GROUP_IF_CALLBACK",
+                ),
+                (
+                    8,
+                    "alias-group-run-shell.conf",
+                    "aliasrun",
+                    "alias-group-run-shell",
+                    "AFTER_ALIAS_GROUP_RUN_CALLBACK",
+                ),
+            ] {
+                let path = directory.path().join(format!(
+                    "{}-{name}",
+                    if direct_argv { "argv" } else { "stdin" }
+                ));
+                fs::write(&path, format!("{first}\ndisplay-message -p {after}\n"))
+                    .expect("Control source fixture");
+                let diagnostic = format!("{}:1: syntax error", path.display());
+                let command = if direct_argv {
+                    CommandInvocation::new("source-file", [path.display().to_string()])
+                } else {
+                    control_stdin_command("source-file", [path.display().to_string()])
+                };
+                let request_id = request_id + if direct_argv { 10 } else { 0 };
+
+                assert_eq!(
+                    shared.execute_command_request(
+                        control,
+                        ClientKind::Control,
+                        &mut context,
+                        request_id,
+                        &command,
+                    ),
+                    CommandResponse::Success {
+                        request_id,
+                        output: String::new(),
+                        exit_code: 1,
+                        stderr: String::new(),
+                    }
+                );
+                let timeline = timeline(take_reliable_messages(&mailbox));
+                let expected = match framing {
+                    "if-shell" | "alias-group-if-shell" => vec![
+                        format!("guard:{flags}:true:false:{diagnostic}"),
+                        format!("guard:{flags}:false:false:{after}"),
+                        "complete".to_owned(),
+                    ],
+                    "run-shell" => vec![
+                        format!("guard:{flags}:false:false:"),
+                        format!("raw:{diagnostic}"),
+                        format!("guard:{flags}:false:false:{after}"),
+                        "complete".to_owned(),
+                    ],
+                    "nested-if-shell" => vec![
+                        format!("guard:{flags}:false:false:"),
+                        format!("guard:{flags}:true:false:{diagnostic}"),
+                        format!("guard:{flags}:false:false:{after}"),
+                        "complete".to_owned(),
+                    ],
+                    "nested-run-shell" => vec![
+                        format!("guard:{flags}:false:false:"),
+                        format!("guard:{flags}:false:false:"),
+                        format!("raw:{diagnostic}"),
+                        format!("guard:{flags}:false:false:{after}"),
+                        "complete".to_owned(),
+                    ],
+                    "multi-run-shell" => vec![
+                        format!("guard:{flags}:false:false:"),
+                        format!("guard:{flags}:false:false:"),
+                        format!("raw:{diagnostic}"),
+                        format!("guard:{flags}:false:false:"),
+                        format!("raw:{diagnostic}"),
+                        format!("guard:{flags}:false:false:{after}"),
+                        "complete".to_owned(),
+                    ],
+                    "aliased-run-shell" => vec![
+                        format!("guard:{flags}:false:false:"),
+                        format!("guard:{flags}:false:false:ALIAS_INNER_BEFORE"),
+                        format!("guard:{flags}:false:false:"),
+                        format!("raw:{diagnostic}"),
+                        format!("guard:{flags}:false:false:ALIAS_INNER_SAME"),
+                        format!("guard:{flags}:false:false:{after}"),
+                        "complete".to_owned(),
+                    ],
+                    "alias-group-run-shell" => vec![
+                        format!("guard:{flags}:false:false:"),
+                        format!("raw:{diagnostic}"),
+                        format!("guard:{flags}:false:false:ALIAS_RUN_SAME"),
+                        format!("guard:{flags}:false:false:{after}"),
+                        "complete".to_owned(),
+                    ],
+                    _ => unreachable!(),
+                };
+                assert_eq!(timeline, expected);
+            }
+        }
+
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            let prefix = if direct_argv { "argv" } else { "stdin" };
+            let inner = directory
+                .path()
+                .join(format!("{prefix}-abbreviated-inner.conf"));
+            fs::write(
+                &inner,
+                "run-shell -C \"{ display-message -p quoted }\"\n\
+                 display-message -p ABBREVIATED_INNER_AFTER\n",
+            )
+            .expect("abbreviated inner source fixture");
+            let outer = directory
+                .path()
+                .join(format!("{prefix}-abbreviated-outer.conf"));
+            fs::write(
+                &outer,
+                format!(
+                    "source-f '{}'\ndisplay-message -p ABBREVIATED_OUTER_AFTER\n",
+                    inner.display()
+                ),
+            )
+            .expect("abbreviated outer source fixture");
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [outer.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [outer.display().to_string()])
+            };
+            let request_id = if direct_argv { 31 } else { 30 };
+
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:"),
+                    format!("guard:{flags}:false:false:"),
+                    format!("raw:{}:1: syntax error", inner.display()),
+                    format!("guard:{flags}:false:false:ABBREVIATED_INNER_AFTER"),
+                    "complete".to_owned(),
+                    format!("guard:{flags}:false:false:ABBREVIATED_OUTER_AFTER"),
+                    "complete".to_owned(),
+                ]
+            );
+
+            let alias_mixed = directory
+                .path()
+                .join(format!("{prefix}-alias-mixed-string.conf"));
+            fs::write(
+                &alias_mixed,
+                "run-shell -C \"display-message -p ALIAS_MIXED_BEFORE ; aliasmixed ; display-message -p ALIAS_MIXED_OUTER\"\n\
+                 display-message -p ALIAS_MIXED_NEXT\n",
+            )
+            .expect("Control mixed callback alias caller string fixture");
+            let diagnostic = format!("{}:1: syntax error", alias_mixed.display());
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [alias_mixed.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [alias_mixed.display().to_string()])
+            };
+            let request_id = if direct_argv { 45 } else { 44 };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:"),
+                    format!("guard:{flags}:false:false:ALIAS_MIXED_BEFORE"),
+                    format!("guard:{flags}:false:false:"),
+                    format!("raw:{diagnostic}"),
+                    format!("guard:{flags}:true:false:{diagnostic}"),
+                    format!("guard:{flags}:false:false:ALIAS_MIXED_NEXT"),
+                    "complete".to_owned(),
+                ]
+            );
+        }
+
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            let prefix = if direct_argv { "argv" } else { "stdin" };
+            let alias_if = directory
+                .path()
+                .join(format!("{prefix}-alias-if-group.conf"));
+            fs::write(
+                &alias_if,
+                "display-message -p ALIAS_IF_CALLER_BEFORE ; aliasif ; display-message -p ALIAS_IF_CALLER_SAME\n\
+                 display-message -p ALIAS_IF_CALLER_NEXT\n",
+            )
+            .expect("Control if-shell alias caller group fixture");
+            let diagnostic = format!("{}:1: syntax error", alias_if.display());
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [alias_if.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [alias_if.display().to_string()])
+            };
+            let request_id = if direct_argv { 41 } else { 40 };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:ALIAS_IF_CALLER_BEFORE"),
+                    format!("guard:{flags}:true:false:{diagnostic}"),
+                    format!("guard:{flags}:false:false:ALIAS_IF_CALLER_NEXT"),
+                    "complete".to_owned(),
+                ]
+            );
+
+            let alias_run = directory
+                .path()
+                .join(format!("{prefix}-alias-run-string.conf"));
+            fs::write(
+                &alias_run,
+                "run-shell -C \"display-message -p ALIAS_RUN_CALLER_BEFORE ; aliasrun ; display-message -p ALIAS_RUN_CALLER_SAME\"\n\
+                 display-message -p ALIAS_RUN_CALLER_NEXT\n",
+            )
+            .expect("Control run-shell alias caller string fixture");
+            let diagnostic = format!("{}:1: syntax error", alias_run.display());
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [alias_run.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [alias_run.display().to_string()])
+            };
+            let request_id = if direct_argv { 43 } else { 42 };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:"),
+                    format!("guard:{flags}:false:false:ALIAS_RUN_CALLER_BEFORE"),
+                    format!("guard:{flags}:false:false:"),
+                    format!("raw:{diagnostic}"),
+                    format!("guard:{flags}:false:false:ALIAS_RUN_SAME"),
+                    format!("guard:{flags}:false:false:ALIAS_RUN_CALLER_SAME"),
+                    format!("guard:{flags}:false:false:ALIAS_RUN_CALLER_NEXT"),
+                    "complete".to_owned(),
+                ]
+            );
+        }
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                3,
+                &control_stdin_command("display-message", ["-p", "AFTER_CALLBACK_ERROR"]),
+            ),
+            CommandResponse::Success {
+                request_id: 3,
+                output: "AFTER_CALLBACK_ERROR".to_owned(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert!(shared.inner.lock().command_streams.is_empty());
+    }
+
+    #[test]
+    fn control_source_run_shell_command_parse_failures_use_source_owner() {
+        fn timeline(messages: Vec<ProtocolMessage>) -> Vec<String> {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlCommandGuard {
+                                output,
+                                error,
+                                sticky_failure,
+                                flags,
+                            },
+                        ..
+                    }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandOutput { output },
+                        ..
+                    }) => Some(format!("raw:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::Complete,
+                            },
+                        ..
+                    }) => Some("complete".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "callback-command-parse"]),
+            )
+            .expect("Control callback command parse session");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context
+                    .session
+                    .expect("Control callback command parse session id"),
+            )
+            .expect("attach callback command parse Control client");
+        take_reliable_messages(&mailbox);
+
+        let mut request_id = 0;
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            for (name, callback, message, marker) in [
+                (
+                    "unknown",
+                    "wibble",
+                    "unknown command: wibble",
+                    "AFTER_UNKNOWN_CALLBACK",
+                ),
+                (
+                    "set-option-arity",
+                    "set-option -g",
+                    "command set-option: too few arguments (need at least 1)",
+                    "AFTER_SET_OPTION_ARITY",
+                ),
+                (
+                    "set-environment-arity",
+                    "set-environment -g",
+                    "command set-environment: too few arguments (need at least 1)",
+                    "AFTER_SET_ENVIRONMENT_ARITY",
+                ),
+            ] {
+                request_id += 1;
+                let path = directory.path().join(format!(
+                    "{}-{name}.conf",
+                    if direct_argv { "argv" } else { "stdin" }
+                ));
+                fs::write(
+                    &path,
+                    format!("run-shell -C \"{callback}\"\ndisplay-message -p {marker}\n"),
+                )
+                .expect("Control callback command parse fixture");
+                let command = if direct_argv {
+                    CommandInvocation::new("source-file", [path.display().to_string()])
+                } else {
+                    control_stdin_command("source-file", [path.display().to_string()])
+                };
+
+                assert_eq!(
+                    shared.execute_command_request(
+                        control,
+                        ClientKind::Control,
+                        &mut context,
+                        request_id,
+                        &command,
+                    ),
+                    CommandResponse::Success {
+                        request_id,
+                        output: String::new(),
+                        exit_code: 1,
+                        stderr: String::new(),
+                    }
+                );
+                assert_eq!(
+                    timeline(take_reliable_messages(&mailbox)),
+                    [
+                        format!("guard:{flags}:false:false:"),
+                        format!("raw:{}:1: {message}", path.display()),
+                        format!("guard:{flags}:false:false:{marker}"),
+                        "complete".to_owned(),
+                    ]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sourced_direct_callback_command_parse_hooks_match_wrapper_ownership() {
+        fn timeline(messages: Vec<ProtocolMessage>) -> Vec<String> {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlCommandGuard {
+                                output,
+                                error,
+                                sticky_failure,
+                                flags,
+                            },
+                        ..
+                    }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandOutput { output },
+                        ..
+                    }) => Some(format!("raw:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::Complete,
+                            },
+                        ..
+                    }) => Some("complete".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let run = directory.path().join("run-shell.conf");
+        fs::write(
+            &run,
+            "run-shell -C \"wibble\"\ndisplay-message -p RUN_LATER\n",
+        )
+        .expect("run-shell callback hook fixture");
+        let condition = directory.path().join("if-shell.conf");
+        fs::write(
+            &condition,
+            "if-shell -F 1 \"wibble\"\ndisplay-message -p IF_LATER\n",
+        )
+        .expect("if-shell callback hook fixture");
+
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "callback-hook-owner"]),
+            )
+            .expect("callback hook owner session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "command-error",
+                        "set-option -ga @callback-hook-hits x",
+                    ],
+                ),
+            )
+            .expect("callback command-error hook");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context.session.expect("callback hook owner session id"),
+            )
+            .expect("attach callback hook owner Control client");
+        take_reliable_messages(&mailbox);
+
+        let mut request_id = 0;
+        for (wrapper, path, marker, expected_hits) in [
+            ("run-shell", &run, "RUN_LATER", ""),
+            ("if-shell", &condition, "IF_LATER", "x"),
+        ] {
+            let diagnostic = format!("{}:1: unknown command: wibble", path.display());
+            for (mode, flags) in [("command", None), ("argv", Some(0)), ("stdin", Some(1))] {
+                shared
+                    .execute(
+                        command,
+                        ClientKind::Command,
+                        &mut context,
+                        &CommandInvocation::new("set-option", ["-gu", "@callback-hook-hits"]),
+                    )
+                    .expect("reset callback hook hits");
+                request_id += 1;
+                if let Some(flags) = flags {
+                    let invocation = if mode == "argv" {
+                        CommandInvocation::new("source-file", [path.display().to_string()])
+                    } else {
+                        control_stdin_command("source-file", [path.display().to_string()])
+                    };
+                    assert_eq!(
+                        shared.execute_command_request(
+                            control,
+                            ClientKind::Control,
+                            &mut context,
+                            request_id,
+                            &invocation,
+                        ),
+                        CommandResponse::Success {
+                            request_id,
+                            output: String::new(),
+                            exit_code: 1,
+                            stderr: String::new(),
+                        },
+                        "{wrapper} {mode}",
+                    );
+                    let expected = if wrapper == "run-shell" {
+                        vec![
+                            format!("guard:{flags}:false:false:"),
+                            format!("raw:{diagnostic}"),
+                            format!("guard:{flags}:false:false:{marker}"),
+                            "complete".to_owned(),
+                        ]
+                    } else {
+                        vec![
+                            format!("guard:{flags}:true:false:{diagnostic}"),
+                            "guard:0:false:false:".to_owned(),
+                            format!("guard:{flags}:false:false:{marker}"),
+                            "complete".to_owned(),
+                        ]
+                    };
+                    assert_eq!(
+                        timeline(take_reliable_messages(&mailbox)),
+                        expected,
+                        "{wrapper} {mode}",
+                    );
+                } else {
+                    assert_eq!(
+                        shared.execute_command_request(
+                            command,
+                            ClientKind::Command,
+                            &mut context,
+                            request_id,
+                            &CommandInvocation::new("source-file", [path.display().to_string()],),
+                        ),
+                        CommandResponse::Success {
+                            request_id,
+                            output: marker.to_owned(),
+                            exit_code: 1,
+                            stderr: format!("{diagnostic}\n"),
+                        },
+                        "{wrapper} {mode}",
+                    );
+                }
+                assert_eq!(
+                    read_global_option(&shared, "@callback-hook-hits"),
+                    expected_hits,
+                    "{wrapper} {mode}",
+                );
+            }
+        }
+        assert!(shared.inner.lock().command_streams.is_empty());
+    }
+
+    #[test]
+    fn sourced_prepared_runtime_command_parse_is_unlocated_for_direct_and_alias_commands() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let direct = directory.path().join("direct-runtime-parse.conf");
+        fs::write(
+            &direct,
+            "display-message -F MATCH one\ndisplay-message -p DIRECT_LATER\n",
+        )
+        .expect("direct runtime parse source fixture");
+        let alias = directory.path().join("alias-runtime-parse.conf");
+        fs::write(
+            &alias,
+            "directruntimealias\ndisplay-message -p ALIAS_LATER\n",
+        )
+        .expect("alias runtime parse source fixture");
+
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "prepared-runtime-parse"]),
+            )
+            .expect("prepared runtime parse session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s",
+                        "command-alias[120]",
+                        "directruntimealias=display-message -F MATCH one",
+                    ],
+                ),
+            )
+            .expect("direct runtime parse alias");
+
+        let diagnostic = "only one of -F or argument must be given";
+        for (request_id, path, marker) in [(1, &direct, "DIRECT_LATER"), (2, &alias, "ALIAS_LATER")]
+        {
+            assert_eq!(
+                shared.execute_command_request(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    request_id,
+                    &CommandInvocation::new("source-file", [path.display().to_string()]),
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: marker.to_owned(),
+                    exit_code: 1,
+                    stderr: format!("{diagnostic}\n"),
+                }
+            );
+        }
+        assert!(shared.inner.lock().command_streams.is_empty());
+    }
+
+    #[test]
+    fn sourced_runtime_command_parse_preserves_control_frames_hook_and_continuation() {
+        fn timeline(messages: Vec<ProtocolMessage>) -> Vec<String> {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlCommandGuard {
+                                output,
+                                error,
+                                sticky_failure,
+                                flags,
+                            },
+                        ..
+                    }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::Complete,
+                            },
+                        ..
+                    }) => Some("complete".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("runtime-command-parse.conf");
+        fs::write(
+            &source,
+            "run-shell -C \"display-message -F MATCH one\"\ndisplay-message -p LATER\n",
+        )
+        .expect("runtime command parse source fixture");
+        let diagnostic = "only one of -F or argument must be given";
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "runtime-command-parse"]),
+            )
+            .expect("runtime command parse session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "command-error",
+                        "set-option -ga @runtime-command-parse-hook x",
+                    ],
+                ),
+            )
+            .expect("runtime command parse hook");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context.session.expect("runtime command parse session id"),
+            )
+            .expect("attach runtime command parse Control client");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: "LATER".to_owned(),
+                exit_code: 1,
+                stderr: format!("{diagnostic}\n"),
+            }
+        );
+        assert_eq!(
+            read_global_option(&shared, "@runtime-command-parse-hook"),
+            "x"
+        );
+        take_reliable_messages(&mailbox);
+
+        for (request_id, invocation, flags) in [
+            (
+                2,
+                CommandInvocation::new("source-file", [source.display().to_string()]),
+                CONTROL_COMMAND_FRAME_FLAGS_NONE,
+            ),
+            (
+                3,
+                control_stdin_command("source-file", [source.display().to_string()]),
+                CONTROL_COMMAND_FRAME_FLAGS_CONTROL,
+            ),
+        ] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-gu", "@runtime-command-parse-hook"]),
+                )
+                .expect("reset runtime command parse hook");
+            take_reliable_messages(&mailbox);
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &invocation,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:"),
+                    format!("guard:{flags}:true:false:{diagnostic}"),
+                    "guard:0:false:false:".to_owned(),
+                    format!("guard:{flags}:false:false:LATER"),
+                    "complete".to_owned(),
+                ]
+            );
+            assert_eq!(
+                read_global_option(&shared, "@runtime-command-parse-hook"),
+                "x"
+            );
+        }
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    ["-g", "command-error", "display-message -F HOOK one"],
+                ),
+            )
+            .expect("failing runtime command parse hook");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                4,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 4,
+                output: "LATER".to_owned(),
+                exit_code: 1,
+                stderr: format!("{diagnostic}\n{diagnostic}\n"),
+            }
+        );
+        assert!(shared.inner.lock().command_streams.is_empty());
+    }
+
+    #[test]
+    fn unregistered_control_argv_source_callback_error_returns_failure() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("control-argv-callback.conf");
+        fs::write(&source, "if-shell -F 1 \"{ display-message -p quoted }\"\n")
+            .expect("Control argv callback source fixture");
+        let shared = Arc::new(Shared::new(64));
+        let control = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        let inner = shared.inner.lock();
+        assert!(!inner.client_kinds.contains_key(&control));
+        assert!(inner.command_streams.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_callback_diagnostic_does_not_rewrite_matching_shell_output() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("matching-shell-output.conf");
+        fs::write(
+            &source,
+            "run-shell -C { run-shell -C \"{ display-message -p quoted }\" ; run-shell \"printf 'syntax error'\" }\n\
+             display-message -p AFTER_MATCHING_OUTPUT\n",
+        )
+        .expect("matching shell output source fixture");
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "matching-output"]),
+            )
+            .expect("matching output session");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context.session.expect("matching output session id"),
+            )
+            .expect("attach matching output Control client");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                1,
+                &control_stdin_command("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        let timeline = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlCommandGuard {
+                            output,
+                            error,
+                            flags,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("guard:{flags}:{error}:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandOutput { output },
+                    ..
+                }) => Some(format!("raw:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::Complete,
+                        },
+                    ..
+                }) => Some("complete".to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            timeline,
+            [
+                "guard:1:false:".to_owned(),
+                "guard:1:false:".to_owned(),
+                format!("raw:{}:1: syntax error", source.display()),
+                "guard:1:false:".to_owned(),
+                "raw:syntax error".to_owned(),
+                "guard:1:false:AFTER_MATCHING_OUTPUT".to_owned(),
+                "complete".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn interactive_source_callback_parse_errors_are_warned_once_each() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("interactive-callback.conf");
+        fs::write(
+            &source,
+            "if-shell -F 1 \"{ display-message -p quoted }\"\n\
+             run-shell -C \"{ display-message -p quoted }\"\n",
+        )
+        .expect("interactive callback source fixture");
+        let shared = Arc::new(Shared::new(64));
+        let mailbox = OutboundMailbox::new();
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::default();
+
+        assert_eq!(
+            shared.execute_command_request(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            warnings,
+            [
+                format!("{}:1: syntax error", source.display()),
+                format!("{}:2: syntax error", source.display()),
+            ]
+        );
+    }
+
+    #[test]
+    fn source_file_retains_every_continuing_callback_parse_error() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("multiple-callback-errors.conf");
+        fs::write(
+            &source,
+            "run-shell -C { run-shell -C \"{ display-message -p quoted }\" ; run-shell -C \"{ display-message -p quoted }\" }\n\
+             set-option -g @after-multiple-callback-errors yes\n",
+        )
+        .expect("multiple callback error source fixture");
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        let diagnostic = format!("{}:1: syntax error", source.display());
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!("{diagnostic}\n{diagnostic}\n"),
+            }
+        );
+        assert_eq!(
+            read_global_option(&shared, "@after-multiple-callback-errors"),
+            "yes"
+        );
+
+        let mailbox = OutboundMailbox::new();
+        let (interactive, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                interactive,
+                ClientKind::Interactive,
+                &mut context,
+                2,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        let warnings = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ClientMessage {
+                            kind: ClientMessageKind::Warning,
+                            text,
+                            ..
+                        },
+                    ..
+                }) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(warnings, [diagnostic.clone(), diagnostic]);
+    }
+
+    #[test]
+    fn source_file_hook_callback_failures_keep_identity_output_and_status() {
+        fn timeline(messages: Vec<ProtocolMessage>) -> Vec<String> {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlCommandGuard {
+                                output,
+                                error,
+                                sticky_failure,
+                                flags,
+                            },
+                        ..
+                    }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandOutput { output },
+                        ..
+                    }) => Some(format!("raw:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::Complete,
+                            },
+                        ..
+                    }) => Some("complete".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let combined = directory.path().join("hook-and-source-callback.conf");
+        fs::write(
+            &combined,
+            r#"run-shell -C "display-message -p TRIGGER ; run-shell -C \"{ display-message -p quoted }\""
+"#,
+        )
+        .expect("combined hook and source callback fixture");
+        let hook_only = directory.path().join("hook-callback-only.conf");
+        fs::write(
+            &hook_only,
+            "display-message -p TRIGGER\ndisplay-message -p AFTER\n",
+        )
+        .expect("hook callback only fixture");
+
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "hook-callback-status"]),
+            )
+            .expect("hook callback session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "after-display-message",
+                        "run-shell -C \"{ display-message -p quoted }\"",
+                    ],
+                ),
+            )
+            .expect("callback parse hook");
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [combined.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: "TRIGGER".to_owned(),
+                exit_code: 1,
+                stderr: format!("syntax error\n{}:1: syntax error\n", combined.display()),
+            }
+        );
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                2,
+                &CommandInvocation::new("source-file", [hook_only.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 2,
+                output: "TRIGGER\nAFTER".to_owned(),
+                exit_code: 1,
+                stderr: "syntax error\nsyntax error\n".to_owned(),
+            }
+        );
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, context.session.expect("hook callback session id"))
+            .expect("attach Control client");
+        take_reliable_messages(&mailbox);
+
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [combined.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [combined.display().to_string()])
+            };
+            let request_id = if direct_argv { 4 } else { 3 };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:"),
+                    format!("guard:{flags}:false:false:TRIGGER"),
+                    "guard:0:false:false:".to_owned(),
+                    "raw:syntax error".to_owned(),
+                    format!("guard:{flags}:false:false:"),
+                    format!("raw:{}:1: syntax error", combined.display()),
+                    "complete".to_owned(),
+                ]
+            );
+        }
+
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [hook_only.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [hook_only.display().to_string()])
+            };
+            let request_id = if direct_argv { 6 } else { 5 };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:TRIGGER"),
+                    "guard:0:false:false:".to_owned(),
+                    "raw:syntax error".to_owned(),
+                    format!("guard:{flags}:false:false:AFTER"),
+                    "guard:0:false:false:".to_owned(),
+                    "raw:syntax error".to_owned(),
+                    "complete".to_owned(),
+                ]
+            );
+        }
+
+        let hook_source_child = directory.path().join("hook-source-child.conf");
+        fs::write(
+            &hook_source_child,
+            "run-shell -C \"{ display-message -p quoted }\"\n",
+        )
+        .expect("hook source child fixture");
+        let hook_source_outer = directory.path().join("hook-source-outer.conf");
+        fs::write(
+            &hook_source_outer,
+            "display-message -p SOURCE_HOOK_TRIGGER\n",
+        )
+        .expect("hook source outer fixture");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "after-display-message".to_owned(),
+                        format!("source-file '{}'", hook_source_child.display()),
+                    ],
+                ),
+            )
+            .expect("nested source hook");
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                7,
+                &CommandInvocation::new("source-file", [hook_source_outer.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 7,
+                output: "SOURCE_HOOK_TRIGGER".to_owned(),
+                exit_code: 1,
+                stderr: format!("{}:1: syntax error\n", hook_source_child.display()),
+            }
+        );
+
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [hook_source_outer.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [hook_source_outer.display().to_string()])
+            };
+            let request_id = if direct_argv { 9 } else { 8 };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:SOURCE_HOOK_TRIGGER"),
+                    "guard:0:false:false:".to_owned(),
+                    "guard:0:false:false:".to_owned(),
+                    format!("raw:{}:1: syntax error", hook_source_child.display()),
+                    "complete".to_owned(),
+                    "complete".to_owned(),
+                ]
+            );
+        }
+
+        let hook_group = directory.path().join("hook-callback-group.conf");
+        fs::write(&hook_group, "display-message -p HOOK_GROUP_TRIGGER\n")
+            .expect("hook callback group fixture");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "after-display-message",
+                        "run-shell -C \"{ display-message -p quoted }\" ; set-option -g @hook-after yes",
+                    ],
+                ),
+            )
+            .expect("continuing callback hook group");
+
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                10,
+                &CommandInvocation::new("source-file", [hook_group.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 10,
+                output: "HOOK_GROUP_TRIGGER".to_owned(),
+                exit_code: 1,
+                stderr: "syntax error\n".to_owned(),
+            }
+        );
+        assert_eq!(read_global_option(&shared, "@hook-after"), "yes");
+
+        for (direct_argv, flags) in [(false, 1), (true, 0)] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-gu", "@hook-after"]),
+                )
+                .expect("clear hook continuation marker");
+            let command = if direct_argv {
+                CommandInvocation::new("source-file", [hook_group.display().to_string()])
+            } else {
+                control_stdin_command("source-file", [hook_group.display().to_string()])
+            };
+            let request_id = if direct_argv { 12 } else { 11 };
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &command,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    format!("guard:{flags}:false:false:HOOK_GROUP_TRIGGER"),
+                    "guard:0:false:false:".to_owned(),
+                    "raw:syntax error".to_owned(),
+                    "guard:0:false:false:".to_owned(),
+                    "complete".to_owned(),
+                ]
+            );
+            assert_eq!(read_global_option(&shared, "@hook-after"), "yes");
+        }
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "command-error",
+                        "set-option -g @wrapper-command-error yes",
+                    ],
+                ),
+            )
+            .expect("wrapper command-error marker hook");
+        let hook_child = directory.path().join("hook-continuation-child.conf");
+        fs::write(&hook_child, "display-message -p HOOK_CONTINUATION_CHILD\n")
+            .expect("hook continuation child fixture");
+        let hook_outer = directory.path().join("hook-continuation-outer.conf");
+        fs::write(
+            &hook_outer,
+            format!(
+                "run-shell -C \"set-option -g @hook-continuation-before yes ; source-file '{}' ; set-option -g @hook-continuation-after yes\"\n\
+                 set-option -g @hook-continuation-later yes\n",
+                hook_child.display()
+            ),
+        )
+        .expect("hook continuation outer fixture");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                15,
+                &CommandInvocation::new("source-file", [hook_outer.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 15,
+                output: "HOOK_CONTINUATION_CHILD".to_owned(),
+                exit_code: 1,
+                stderr: "syntax error\n".to_owned(),
+            }
+        );
+        for marker in [
+            "@hook-continuation-before",
+            "@hook-continuation-after",
+            "@hook-continuation-later",
+        ] {
+            assert_eq!(read_global_option(&shared, marker), "yes", "{marker}");
+        }
+        assert_eq!(read_global_option(&shared, "@wrapper-command-error"), "");
+
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("set-hook", ["-gu", "after-display-message"]),
+            )
+            .expect("clear display hook");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g",
+                        "command-error",
+                        "run-shell -C \"{ display-message -p quoted }\"",
+                    ],
+                ),
+            )
+            .expect("callback command-error hook");
+        let runtime_error = directory.path().join("command-error-hook-runtime.conf");
+        fs::write(
+            &runtime_error,
+            "kill-session -t missing-indirect\ndisplay-message -p AFTER_RUNTIME_ERROR\n",
+        )
+        .expect("runtime command-error hook fixture");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                13,
+                &CommandInvocation::new("source-file", [runtime_error.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 13,
+                output: "AFTER_RUNTIME_ERROR".to_owned(),
+                exit_code: 1,
+                stderr: "can't find session: missing-indirect\nsyntax error\n".to_owned(),
+            }
+        );
+
+        let callback_error = directory.path().join("command-error-hook-callback.conf");
+        fs::write(
+            &callback_error,
+            "if-shell -F 1 \"{ display-message -p quoted }\"\n",
+        )
+        .expect("callback command-error hook fixture");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                14,
+                &CommandInvocation::new("source-file", [callback_error.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 14,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!(
+                    "{}:1: syntax error\nsyntax error\n",
+                    callback_error.display()
+                ),
+            }
+        );
+
+        let command_error_child = directory.path().join("command-error-hook-child.conf");
+        fs::write(
+            &command_error_child,
+            "run-shell -C \"{ display-message -p quoted }\"\n",
+        )
+        .expect("command-error hook child fixture");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "command-error".to_owned(),
+                        format!("source-file '{}'", command_error_child.display()),
+                    ],
+                ),
+            )
+            .expect("sourced callback command-error hook");
+        let nested_hook_error = directory.path().join("command-error-hook-outer.conf");
+        fs::write(
+            &nested_hook_error,
+            "if-shell -F 1 \"{ display-message -p quoted }\"\n",
+        )
+        .expect("nested command-error hook fixture");
+        assert_eq!(
+            shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                16,
+                &CommandInvocation::new("source-file", [nested_hook_error.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 16,
+                output: String::new(),
+                exit_code: 1,
+                stderr: format!(
+                    "{}:1: syntax error\n{}:1: syntax error\n",
+                    nested_hook_error.display(),
+                    command_error_child.display()
+                ),
+            }
+        );
+
+        for (request_id, hook, stderr) in [
+            (
+                17,
+                format!(
+                    "source-file '{}' ; run-shell -C \"{{ display-message -p quoted }}\"",
+                    command_error_child.display()
+                ),
+                format!(
+                    "{}:1: syntax error\n{}:1: syntax error\nsyntax error\n",
+                    nested_hook_error.display(),
+                    command_error_child.display()
+                ),
+            ),
+            (
+                18,
+                format!(
+                    "run-shell -C \"{{ display-message -p quoted }}\" ; source-file '{}'",
+                    command_error_child.display()
+                ),
+                format!(
+                    "{}:1: syntax error\nsyntax error\n{}:1: syntax error\n",
+                    nested_hook_error.display(),
+                    command_error_child.display()
+                ),
+            ),
+        ] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", ["-g", "command-error", &hook]),
+                )
+                .expect("ordered command-error hook");
+            assert_eq!(
+                shared.execute_command_request(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    request_id,
+                    &CommandInvocation::new(
+                        "source-file",
+                        [nested_hook_error.display().to_string()],
+                    ),
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn control_argv_source_status_and_frames_compose_through_groups() {
+        fn timeline(messages: Vec<ProtocolMessage>) -> Vec<String> {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandGuard { output, .. },
+                        ..
+                    }) => Some(format!("guard:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandOutput { output },
+                        ..
+                    }) => Some(format!("raw:{output}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::Complete,
+                            },
+                        ..
+                    }) => Some("complete".to_owned()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("control-wrapper-child.conf");
+        fs::write(
+            &child,
+            "run-shell -C \"{ display-message -p quoted }\"\n\
+             display-message -p CHILD_LATER\n",
+        )
+        .expect("Control wrapper child fixture");
+        let child = child.display().to_string();
+        let body = format!(
+            "display-message -p OUTER_BEFORE ; source-file '{child}' ; display-message -p OUTER_AFTER"
+        );
+        let runtime_child = directory.path().join("control-wrapper-runtime.conf");
+        fs::write(
+            &runtime_child,
+            "kill-session -t missing-control-runtime\n\
+             display-message -p RUNTIME_CHILD_LATER\n",
+        )
+        .expect("Control wrapper runtime fixture");
+        let runtime_child = runtime_child.display().to_string();
+        let runtime_body = format!(
+            "display-message -p RUNTIME_OUTER_BEFORE ; source-file '{runtime_child}' ; display-message -p RUNTIME_OUTER_AFTER"
+        );
+
+        let shared = Arc::new(Shared::new(64));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "control-wrapper-status"]),
+            )
+            .expect("Control wrapper session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[110]".to_owned(),
+                        format!("controlwrap={body}"),
+                    ],
+                ),
+            )
+            .expect("Control wrapper alias");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[111]".to_owned(),
+                        format!("controlruntime={runtime_body}"),
+                    ],
+                ),
+            )
+            .expect("Control wrapper runtime alias");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(
+                control,
+                context.session.expect("Control wrapper session id"),
+            )
+            .expect("attach Control wrapper client");
+        take_reliable_messages(&mailbox);
+
+        for (request_id, invocation) in [
+            (
+                1,
+                CommandInvocation::new("run-shell", ["-C".to_owned(), body.clone()]),
+            ),
+            (
+                2,
+                CommandInvocation::new("if-shell", ["-F".to_owned(), "1".to_owned(), body.clone()]),
+            ),
+            (
+                3,
+                CommandInvocation::new("controlwrap", Vec::<String>::new()),
+            ),
+        ] {
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &invocation,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    "guard:OUTER_BEFORE".to_owned(),
+                    "guard:".to_owned(),
+                    "guard:".to_owned(),
+                    format!("raw:{child}:1: syntax error"),
+                    "guard:CHILD_LATER".to_owned(),
+                    "complete".to_owned(),
+                    "guard:OUTER_AFTER".to_owned(),
+                ],
+                "{}",
+                invocation.name,
+            );
+        }
+
+        let held_run_shell = control_stdin_command("run-shell", ["-C".to_owned(), body.clone()]);
+        assert_eq!(
+            shared.execute_command_request_with_prepared(
+                control,
+                ClientKind::Control,
+                &mut context,
+                20,
+                &held_run_shell,
+                true,
+            ),
+            CommandResponse::Success {
+                request_id: 20,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        let held_messages = take_reliable_messages(&mailbox);
+        assert!(
+            held_messages
+                .iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlCommandGuard { flags, .. },
+                        ..
+                    }) => Some(*flags),
+                    _ => None,
+                })
+                .all(|flags| flags == CONTROL_COMMAND_FRAME_FLAGS_CONTROL)
+        );
+        assert_eq!(
+            held_messages
+                .iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlCommandGuard {
+                                output,
+                                sticky_failure,
+                                ..
+                            },
+                        ..
+                    }) => Some((output.as_str(), *sticky_failure)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [
+                ("OUTER_BEFORE", false),
+                ("", true),
+                ("", false),
+                ("CHILD_LATER", false),
+                ("OUTER_AFTER", false),
+            ]
+        );
+        assert_eq!(
+            timeline(held_messages),
+            [
+                "guard:OUTER_BEFORE".to_owned(),
+                "guard:".to_owned(),
+                "guard:".to_owned(),
+                format!("raw:{child}:1: syntax error"),
+                "guard:CHILD_LATER".to_owned(),
+                "complete".to_owned(),
+                "guard:OUTER_AFTER".to_owned(),
+            ]
+        );
+
+        for (request_id, invocation) in [
+            (
+                4,
+                CommandInvocation::new("run-shell", ["-C".to_owned(), runtime_body.clone()]),
+            ),
+            (
+                5,
+                CommandInvocation::new(
+                    "if-shell",
+                    ["-F".to_owned(), "1".to_owned(), runtime_body.clone()],
+                ),
+            ),
+            (
+                6,
+                CommandInvocation::new("controlruntime", Vec::<String>::new()),
+            ),
+        ] {
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &invocation,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            assert_eq!(
+                timeline(take_reliable_messages(&mailbox)),
+                [
+                    "guard:RUNTIME_OUTER_BEFORE".to_owned(),
+                    "guard:".to_owned(),
+                    "guard:can't find session: missing-control-runtime".to_owned(),
+                    "guard:RUNTIME_CHILD_LATER".to_owned(),
+                    "complete".to_owned(),
+                    "guard:RUNTIME_OUTER_AFTER".to_owned(),
+                ],
+                "{}",
+                invocation.name,
+            );
+        }
+
+        let unreadable = directory.path().join("control-wrapper-unreadable");
+        fs::create_dir(&unreadable).expect("Control wrapper unreadable fixture");
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                7,
+                &CommandInvocation::new("source-file", [unreadable.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 7,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        let messages = take_reliable_messages(&mailbox);
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ReadError(_),
+                        },
+                        ..
+                    })
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::Complete,
+                        },
+                        ..
+                    })
+                ))
+                .count(),
+            1
+        );
+
+        let read_body = format!(
+            "source-file '{}' ; display-message -p READ_AFTER",
+            unreadable.display()
+        );
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-option",
+                    [
+                        "-s".to_owned(),
+                        "command-alias[112]".to_owned(),
+                        format!("controlread={read_body}"),
+                    ],
+                ),
+            )
+            .expect("Control wrapper read alias");
+        for (request_id, invocation) in [
+            (
+                8,
+                CommandInvocation::new("run-shell", ["-C".to_owned(), read_body.clone()]),
+            ),
+            (
+                9,
+                CommandInvocation::new(
+                    "if-shell",
+                    ["-F".to_owned(), "1".to_owned(), read_body.clone()],
+                ),
+            ),
+            (
+                10,
+                CommandInvocation::new("controlread", Vec::<String>::new()),
+            ),
+        ] {
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &invocation,
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            let messages = take_reliable_messages(&mailbox);
+            assert!(
+                timeline(messages.clone()).contains(&"guard:READ_AFTER".to_owned()),
+                "{}",
+                invocation.name
+            );
+            assert_eq!(
+                messages
+                    .iter()
+                    .filter(|message| matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::ReadError(_),
+                            },
+                            ..
+                        })
+                    ))
+                    .count(),
+                1,
+                "{}",
+                invocation.name
+            );
+        }
+
+        let parser = directory.path().join("control-wrapper-parser.conf");
+        fs::write(&parser, "%endif\ndisplay-message -p PARSE_LATER\n")
+            .expect("Control parser fixture");
+        let parser_diagnostic = format!("{}:1: syntax error", parser.display());
+        for (request_id, args, executes) in [
+            (11, vec![parser.display().to_string()], false),
+            (
+                12,
+                vec!["-n".to_owned(), parser.display().to_string()],
+                false,
+            ),
+        ] {
+            assert_eq!(
+                shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    &CommandInvocation::new("source-file", args),
+                ),
+                CommandResponse::Success {
+                    request_id,
+                    output: String::new(),
+                    exit_code: 1,
+                    stderr: String::new(),
+                }
+            );
+            let messages = take_reliable_messages(&mailbox);
+            assert_eq!(
+                messages
+                    .iter()
+                    .filter_map(|message| match message {
+                        ProtocolMessage::Event(Event {
+                            payload:
+                                EventPayload::ClientMessage {
+                                    kind: ClientMessageKind::Warning,
+                                    text,
+                                    ..
+                                },
+                            ..
+                        }) => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                [parser_diagnostic.as_str()]
+            );
+            assert_eq!(
+                timeline(messages).contains(&"guard:PARSE_LATER".to_owned()),
+                executes
+            );
+        }
+    }
+
+    #[test]
     fn source_file_replayed_runtime_errors_reach_each_client_channel() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let runtime = directory.path().join("runtime-errors.conf");
@@ -42924,7 +47170,7 @@ mod tests {
             CommandResponse::Success {
                 request_id: 1,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
@@ -43109,6 +47355,145 @@ mod tests {
     }
 
     #[test]
+    fn control_parse_warning_follows_nested_source_frame_once() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("nested-parser.conf");
+        let root = directory.path().join("nested-parser-root.conf");
+        fs::write(&child, "%endif\n").expect("nested parser source");
+        fs::write(
+            &root,
+            format!(
+                "source-file '{}'\n\
+                 display-message -p NESTED_PARSE_OUTER_AFTER\n",
+                child.display(),
+            ),
+        )
+        .expect("nested parser root");
+
+        let shared = Arc::new(Shared::new(76));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut command_context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "nested-control-parser"]),
+            )
+            .expect("nested parser session");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let mut control_context = ExecutionContext::default();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-t", "nested-control-parser"]),
+            )
+            .expect("attach nested parser client");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                1,
+                &control_stdin_command("source-file", [root.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 0,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            control_config_timeline(take_reliable_messages(&mailbox)),
+            [
+                "guard:1:false:false:".to_owned(),
+                format!("warning:{}:1: syntax error", child.display()),
+                "complete".to_owned(),
+                "guard:1:false:false:NESTED_PARSE_OUTER_AFTER".to_owned(),
+                "complete".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_hook_parse_warning_reaches_the_request_status() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("hook-parser.conf");
+        fs::write(&child, "%endif\n").expect("hook parser source");
+
+        let shared = Arc::new(Shared::new(76));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut command_context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "control-hook-parser"]),
+            )
+            .expect("hook parser session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    [
+                        "-g".to_owned(),
+                        "after-display-message".to_owned(),
+                        format!("source-file '{}'", child.display()),
+                    ],
+                ),
+            )
+            .expect("hook parser command");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let mut control_context = ExecutionContext::default();
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("attach-session", ["-t", "control-hook-parser"]),
+            )
+            .expect("attach hook parser client");
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                1,
+                &CommandInvocation::new("display-message", ["-p", "HOOK_PARSE_TRIGGER"]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: "HOOK_PARSE_TRIGGER".to_owned(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            control_config_timeline(take_reliable_messages(&mailbox)),
+            [
+                "guard:0:false:false:".to_owned(),
+                format!("warning:{}:1: syntax error", child.display()),
+                "complete".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
     fn control_source_name_failures_are_config_warnings_without_guards() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let source = directory.path().join("name-errors.conf");
@@ -43156,7 +47541,7 @@ mod tests {
             CommandResponse::Success {
                 request_id: 1,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
@@ -43243,7 +47628,7 @@ mod tests {
             CommandResponse::Success {
                 request_id: 1,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
@@ -43333,7 +47718,7 @@ mod tests {
             CommandResponse::Success {
                 request_id: 1,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
@@ -44132,6 +48517,131 @@ mod tests {
                 &CommandInvocation::new("has-session", ["-t", "hook-command"]),
             )
             .expect("command hook-created session");
+    }
+
+    #[test]
+    fn callback_group_action_uses_direct_source_depth_and_fail_priority() {
+        let failure = |group_action, owner, depth| CallbackParseFailure {
+            message: "syntax error".to_owned(),
+            group_action,
+            owner,
+            control_event: None,
+            depth,
+        };
+
+        for failures in [
+            vec![
+                failure(
+                    CallbackGroupAction::Continue,
+                    CallbackFailureOwner::Source,
+                    1,
+                ),
+                failure(CallbackGroupAction::Fail, CallbackFailureOwner::Source, 1),
+            ],
+            vec![
+                failure(CallbackGroupAction::Fail, CallbackFailureOwner::Source, 1),
+                failure(
+                    CallbackGroupAction::Continue,
+                    CallbackFailureOwner::Source,
+                    1,
+                ),
+            ],
+        ] {
+            assert!(
+                select_callback_group_action(&failures, "run-shell", 2)
+                    == Some(CallbackGroupAction::Fail)
+            );
+        }
+
+        assert!(
+            select_callback_group_action(
+                &[
+                    failure(CallbackGroupAction::Fail, CallbackFailureOwner::Source, 2,),
+                    failure(CallbackGroupAction::Fail, CallbackFailureOwner::Hook, 1,),
+                    failure(
+                        CallbackGroupAction::Handled,
+                        CallbackFailureOwner::Source,
+                        1,
+                    ),
+                    failure(
+                        CallbackGroupAction::Continue,
+                        CallbackFailureOwner::Source,
+                        1,
+                    ),
+                ],
+                "if-shell",
+                2,
+            ) == Some(CallbackGroupAction::Continue)
+        );
+        assert!(select_callback_group_action(&[], "if-shell", 2).is_none());
+        assert!(
+            select_callback_group_action(&[], "if-shell", 1) == Some(CallbackGroupAction::Fail)
+        );
+        assert!(
+            select_callback_group_action(&[], "run-shell", 1)
+                == Some(CallbackGroupAction::Continue)
+        );
+    }
+
+    #[test]
+    fn callback_parse_capture_qualifies_only_marked_events() {
+        let hook_event = Arc::new(());
+        let first_event = Arc::new(());
+        let second_event = Arc::new(());
+        let mut captured = CapturedControlCommandEvents {
+            events: vec![
+                EventPayload::ControlCommandOutput {
+                    output: "syntax error".to_owned(),
+                },
+                EventPayload::ControlCommandOutput {
+                    output: "syntax error".to_owned(),
+                },
+                EventPayload::ControlCommandOutput {
+                    output: "syntax error".to_owned(),
+                },
+                EventPayload::ControlCommandOutput {
+                    output: "syntax error".to_owned(),
+                },
+            ],
+            callback_parse_events: vec![
+                (0, hook_event),
+                (2, Arc::clone(&first_event)),
+                (3, Arc::clone(&second_event)),
+            ],
+        };
+
+        assert_eq!(
+            captured.qualify_callback_parse_events(&[
+                CallbackParseFailure {
+                    message: "source.conf:1: syntax error".to_owned(),
+                    group_action: CallbackGroupAction::Handled,
+                    owner: CallbackFailureOwner::Source,
+                    control_event: Some(first_event),
+                    depth: 1,
+                },
+                CallbackParseFailure {
+                    message: "source.conf:2: syntax error".to_owned(),
+                    group_action: CallbackGroupAction::Handled,
+                    owner: CallbackFailureOwner::Source,
+                    control_event: Some(second_event),
+                    depth: 1,
+                },
+            ]),
+            2
+        );
+        assert!(captured.callback_parse_events.is_empty());
+        assert!(matches!(
+            captured.events.as_slice(),
+            [
+                EventPayload::ControlCommandOutput { output: first },
+                EventPayload::ControlCommandOutput { output: second },
+                EventPayload::ControlCommandOutput { output: third },
+                EventPayload::ControlCommandOutput { output: fourth },
+            ] if first == "syntax error"
+                && second == "syntax error"
+                && third == "source.conf:1: syntax error"
+                && fourth == "source.conf:2: syntax error"
+        ));
     }
 
     #[test]
@@ -45677,7 +50187,7 @@ mod tests {
             CommandResponse::Success {
                 request_id: 7,
                 output: String::new(),
-                exit_code: 0,
+                exit_code: 1,
                 stderr: String::new(),
             }
         );
@@ -68033,6 +72543,202 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn confirm_before_reported_source_failure_keeps_inner_and_outer_groups() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("confirm-source-child.conf");
+        fs::write(
+            &child,
+            "run-shell -C \"{ display-message -p quoted }\"\n\
+             set-environment -g CONFIRM_CHILD_LATER yes\n",
+        )
+        .expect("confirm source child fixture");
+        let confirm_body = format!(
+            "source-file '{}' ; set-environment -g CONFIRM_INNER_AFTER yes",
+            child.display()
+        );
+        let outer_body = format!(
+            "confirm-before -t desktop \"{confirm_body}\" ; set-environment -g CONFIRM_OUTER_AFTER yes"
+        );
+        let (shared, interactive, _, context) = popup_test_workspace("desktop");
+        let sender = Arc::clone(&shared);
+        let mut command_context = context.clone();
+        let (send, receive) = crossbeam_channel::bounded(1);
+        let worker = thread::spawn(move || {
+            let result = sender.execute(
+                ClientId(901),
+                ClientKind::Command,
+                &mut command_context,
+                &CommandInvocation::new("run-shell", ["-C", &outer_body]),
+            );
+            send.send(result).expect("return nested confirm result");
+        });
+        wait_for_confirm_state(&shared, interactive);
+        shared.input_confirm(interactive, &context, ConfirmAction::Reply(true));
+        let result = receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("nested confirm result");
+        worker.join().expect("nested confirm worker");
+        assert!(matches!(
+            result,
+            Err(DaemonError::ReportedCommandExit { exit_code: 1, .. })
+        ));
+        let inner = shared.inner.lock();
+        for name in [
+            "CONFIRM_CHILD_LATER",
+            "CONFIRM_INNER_AFTER",
+            "CONFIRM_OUTER_AFTER",
+        ] {
+            assert_eq!(
+                inner.engine.global_environment_variable(name).as_deref(),
+                Some("yes"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn confirm_before_mixed_depth_callbacks_preserve_physical_groups() {
+        let (shared, interactive, _, context) = popup_test_workspace("desktop");
+        for (index, body, marker, expected) in [
+            (
+                0,
+                r#"if-shell -F 1 { if-shell -F 1 "{ display-message -p quoted }" } ; set-environment -g CONFIRM_NESTED_ONLY_SAME yes"#,
+                "CONFIRM_NESTED_ONLY_SAME",
+                Some("yes"),
+            ),
+            (
+                1,
+                r#"run-shell -C "run-shell -C \"{ display-message -p quoted }\"" ; if-shell -F 1 "{ display-message -p quoted }" ; set-environment -g CONFIRM_MIXED_DEPTH_SAME yes"#,
+                "CONFIRM_MIXED_DEPTH_SAME",
+                None,
+            ),
+        ] {
+            let sender = Arc::clone(&shared);
+            let mut command_context = context.clone();
+            let (send, receive) = crossbeam_channel::bounded(1);
+            let worker = thread::spawn(move || {
+                let result = sender.execute(
+                    ClientId(901 + index),
+                    ClientKind::Command,
+                    &mut command_context,
+                    &CommandInvocation::new("confirm-before", ["-t", "desktop", body]),
+                );
+                send.send(result)
+                    .expect("return mixed-depth confirm result");
+            });
+            wait_for_confirm_state(&shared, interactive);
+            shared.input_confirm(interactive, &context, ConfirmAction::Reply(true));
+            let error = receive
+                .recv_timeout(Duration::from_secs(5))
+                .expect("mixed-depth confirm result")
+                .expect_err("mixed-depth confirm callback failure");
+            worker.join().expect("mixed-depth confirm worker");
+            assert_eq!(post_admission_callback_parse_depth(&error), 3);
+            assert_eq!(
+                shared
+                    .inner
+                    .lock()
+                    .engine
+                    .global_environment_variable(marker)
+                    .as_deref(),
+                expected,
+                "{marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_control_confirm_source_failure_preserves_guard_order() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let child = directory.path().join("confirm-source-child.conf");
+        fs::write(
+            &child,
+            "run-shell -C \"{ display-message -p quoted }\"\n\
+             display-message -p CONFIRM_CHILD_LATER\n",
+        )
+        .expect("confirm source child fixture");
+        let body = format!(
+            "source-file '{}' ; display-message -p CONFIRM_INNER_AFTER",
+            child.display()
+        );
+        let (shared, interactive, _, context) = popup_test_workspace("desktop");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        shared
+            .attach(control, context.session.expect("popup test session"))
+            .expect("attach confirm Control client");
+        take_reliable_messages(&mailbox);
+
+        let sender = Arc::clone(&shared);
+        let mut control_context = context.clone();
+        let (send, receive) = crossbeam_channel::bounded(1);
+        let worker = thread::spawn(move || {
+            let response = sender.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                1,
+                &CommandInvocation::new("confirm-before", ["-t", "desktop", &body]),
+            );
+            send.send(response).expect("return direct confirm response");
+        });
+        wait_for_confirm_state(&shared, interactive);
+        shared.input_confirm(interactive, &context, ConfirmAction::Reply(true));
+        assert_eq!(
+            receive
+                .recv_timeout(Duration::from_secs(5))
+                .expect("direct confirm response"),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        worker.join().expect("direct confirm worker");
+
+        let timeline = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlCommandGuard {
+                            output,
+                            error,
+                            flags,
+                            ..
+                        },
+                    ..
+                }) => Some(format!("guard:{flags}:{error}:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlCommandOutput { output },
+                    ..
+                }) => Some(format!("raw:{output}")),
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::Complete,
+                        },
+                    ..
+                }) => Some("complete".to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            timeline,
+            [
+                "guard:0:false:".to_owned(),
+                "guard:0:false:".to_owned(),
+                format!("raw:{}:1: syntax error", child.display()),
+                "guard:0:false:CONFIRM_CHILD_LATER".to_owned(),
+                "complete".to_owned(),
+                "guard:0:false:CONFIRM_INNER_AFTER".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
     fn confirm_before_blocking_status_background_state_and_overlay_clearing_match_pin() {
         let (shared, interactive, _, mut context) = popup_test_workspace("desktop");
         shared
@@ -71568,6 +76274,45 @@ bind - split-window -v -c "#{pane_current_path}"
         );
     }
 
+    #[test]
+    fn control_foreground_callback_aggregates_only_after_forced_shutdown() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        take_reliable_messages(&mailbox);
+
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                62,
+                &CommandInvocation::new(
+                    "run-shell",
+                    ["-C", "display-message -F MATCH one ; kill-server"],
+                ),
+            ),
+            CommandResponse::Success {
+                request_id: 62,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+        assert_eq!(
+            control_command_frames(take_reliable_messages(&mailbox)),
+            [(
+                "only one of -F or argument must be given".to_owned(),
+                true,
+                false,
+                CONTROL_COMMAND_FRAME_FLAGS_NONE,
+            )]
+        );
+        assert!(!shared.stopping.load(Ordering::Acquire));
+    }
+
     #[cfg(unix)]
     #[test]
     fn command_alias_drains_children_before_server_shutdown() {
@@ -72344,13 +77089,17 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("kill-server", [] as [&str; 0]),
             )
             .expect("direct shutdown");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !shared.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shared.stopping.load(Ordering::Acquire));
         assert_eq!(
             fs::read_to_string(marker).expect("session close hook marker"),
             "hook"
         );
         assert!(!tail.exists());
         assert!(!unlinked.exists());
-        assert!(shared.stopping.load(Ordering::Acquire));
     }
 
     #[test]

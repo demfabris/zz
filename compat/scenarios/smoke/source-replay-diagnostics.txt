@@ -1,0 +1,61 @@
+corpus: none
+set-buffer -b zz-source-replay-if 'if-shell -F 1 "{ display-message -p quoted }"'
+save-buffer -b zz-source-replay-if /tmp/zz-source-replay-if.conf
+source-file /tmp/zz-source-replay-if.conf
+set-buffer -b zz-source-replay-run 'run-shell -C "{ display-message -p quoted }"'
+save-buffer -b zz-source-replay-run /tmp/zz-source-replay-run.conf
+source-file /tmp/zz-source-replay-run.conf
+delete-buffer -b zz-source-replay-if
+delete-buffer -b zz-source-replay-run
+run-shell 'rm -f /tmp/zz-source-replay-if.conf /tmp/zz-source-replay-run.conf'
+stage: fixtures/source-replay-diagnostics.sh ~/source-replay-diagnostics.sh
+run-shell 'sh ~/source-replay-diagnostics.sh'
+out: show-environment -g SOURCE_REPLAY_CONTROL_DIAGNOSTICS
+out: show-environment -g SOURCE_REPLAY_ALIAS_LEAF_POLICY
+out: show-environment -g SOURCE_REPLAY_MIXED_DEPTH_ALIAS_COMMAND
+out: show-environment -g SOURCE_REPLAY_NESTED_ONLY_ALIAS_COMMAND
+out: show-environment -g SOURCE_REPLAY_HOOK_CALLBACKS
+out: show-environment -g SOURCE_REPLAY_HOOK_NESTED_SOURCE
+out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_COMMAND
+out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ARGV
+out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_STDIN
+out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_COMMAND
+out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_ARGV
+out: show-environment -g SOURCE_REPLAY_PREPARED_RUNTIME_ALIAS_STDIN
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_RUN
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_IF
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ALIAS
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_ARGV
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_UNKNOWN_STDIN
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_ARGV
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ARITY_STDIN
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_ARGV
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ENVIRONMENT_STDIN
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_NESTED_STDIN
+out: show-environment -g SOURCE_REPLAY_MIXED_DEPTH_ALIAS_ARGV
+out: show-environment -g SOURCE_REPLAY_MIXED_DEPTH_ALIAS_STDIN
+out: show-environment -g SOURCE_REPLAY_NESTED_ONLY_ALIAS_ARGV
+out: show-environment -g SOURCE_REPLAY_NESTED_ONLY_ALIAS_STDIN
+out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_RUN_COMMAND
+out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_RUN_ARGV
+out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_RUN_STDIN
+out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_IF_COMMAND
+out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_IF_ARGV
+out: show-environment -g SOURCE_REPLAY_CALLBACK_HOOK_IF_STDIN
+out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_COMMAND
+out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_ARGV
+out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_PARSE_STDIN
+out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_FAILING_HOOK_COMMAND
+out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_ARGV
+out: show-environment -g SOURCE_REPLAY_CALLBACK_RUNTIME_ALIAS_STDIN
+out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_RUN
+out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_IF
+out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_ALIAS_RUN_SHELL
+out: show-environment -g SOURCE_REPLAY_CONTROL_READ_RUN
+out: show-environment -g SOURCE_REPLAY_CONTROL_READ_IF
+out: show-environment -g SOURCE_REPLAY_CONTROL_READ_ALIAS_RUN_SHELL
+out: show-environment -g SOURCE_REPLAY_CONTROL_MIXED_SOURCE_FIRST
+out: show-environment -g SOURCE_REPLAY_CONTROL_MIXED_DIRECT_FIRST
+out: show-environment -g SOURCE_REPLAY_CONTROL_PARSER
+out: show-environment -g SOURCE_REPLAY_CONTROL_PARSER_NO_EXECUTE
+out: show-environment -g SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED

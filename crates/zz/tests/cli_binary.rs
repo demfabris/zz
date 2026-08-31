@@ -4838,6 +4838,44 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn foreground_callback_error_prevents_later_shutdown_without_losing_guards() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let created = fixture.run(&["new-session", "-d", "-s", "callback-error"]);
+            assert_eq!(created.status.code(), Some(0));
+            let output = fixture.run_with_stdin(
+                &[
+                    "-C",
+                    "run-shell",
+                    "-C",
+                    "display-message -F MATCH one ; kill-server",
+                ],
+                b"",
+            );
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 2);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(
+                &stream.blocks[1],
+                2,
+                0,
+                &["only one of -F or argument must be given"],
+                true,
+            );
+            assert_eq!(stream.outside, ["%exit"]);
+
+            let listed = fixture.run(&["list-sessions"]);
+            assert_eq!(listed.status.code(), Some(0));
+            let stopped = fixture.run(&["kill-server"]);
+            assert_eq!(stopped.status.code(), Some(0));
+            fixture.assert_stopped();
+        }
+
+        #[test]
         fn draining_alias_shutdown_tears_down_panes_and_rejects_late_commands_cleanly() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {

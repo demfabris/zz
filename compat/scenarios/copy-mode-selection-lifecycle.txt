@@ -1,7 +1,7 @@
 # Every selection-lifecycle name in the pin's window-copy table reaches a typed
-# copy action, so a detached `send-keys -X` fails on both sides instead of
-# succeeding silently on zz. Unmapped names still exit zero here, which is what
-# this corpus measures.
+# copy action. A detached `send-keys -X` fails on both sides for a name zz maps
+# and exits zero on zz alone for one it does not, so the exit class is what this
+# corpus measures: presence in the vocabulary, not the action's semantics.
 send-keys -t =w:0.0 -X begin-selection
 send-keys -t =w:0.0 -X select-word
 send-keys -t =w:0.0 -X select-line

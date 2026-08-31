@@ -151,6 +151,23 @@ anything: if someone claimed your front, stop and let them have it.
   existing claim, not integrating past them. Review only what you can verify;
   a wrong DO-NOT-INTEGRATE wastes more than it saves.
 
+## Machine etiquette: the box is shared
+
+Several workers share one machine, and the integration gate's timing-sensitive
+tests fail under load: a starved gate wastes a full workspace-plus-corpus run
+and everyone's wall clock. The rules:
+
+- While MAIN is CLAIMED by someone else, run no workspace-scale builds or
+  tests. Focused package tests are fine; so is review and board work.
+- As a non-MAIN-holder, cap your parallelism: `cargo build/test --jobs 8` and
+  `-- --test-threads=4` (half and quarter of the 16 logical cores).
+- As the MAIN holder, build at full speed but run the workspace test stage
+  with `-- --test-threads=8`: determinism beats raw speed after any gate
+  failure, and deadline or backpressure assertions starve above that when
+  anything else breathes.
+- A timing assertion that fails in a loaded full run and passes exact-solo is
+  a load flake: re-run solo to classify, and re-gate rather than repair.
+
 ## Stopping mid-flight: rescue your work
 
 If you must abandon work you cannot finish (interrupt, dead end, lease about

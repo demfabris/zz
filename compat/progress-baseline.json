@@ -1,0 +1,700 @@
+{
+ "frozen_on": "2026-08-31",
+ "note": "agreed scope: every group unresolved at freeze time; an item is done when it has left every unresolved group",
+ "groups": {
+  "aliases.remote-client-preflight": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:command-alias-remote-client-preflight"
+   ]
+  },
+  "buffers.client-file-context": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:load-buffer-client-path-context",
+    "semantic:save-buffer-client-path-context"
+   ]
+  },
+  "buffers.clipboard-write": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:load-buffer:-w",
+    "flag:set-buffer:-w"
+   ]
+  },
+  "capture.rich-transports": {
+   "decision": "park",
+   "ease": "hardest",
+   "items": [
+    "flag:capture-pane:-C",
+    "flag:capture-pane:-F",
+    "flag:capture-pane:-H",
+    "flag:capture-pane:-L",
+    "flag:capture-pane:-P",
+    "flag:capture-pane:-R",
+    "semantic:capture-pane-saved-alternate",
+    "semantic:capture-pane-trailing-blank-rows"
+   ]
+  },
+  "choosers.command-flags": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:choose-buffer:-F",
+    "flag:choose-buffer:-k",
+    "flag:choose-buffer:-y",
+    "flag:choose-tree:-F",
+    "flag:choose-tree:-h",
+    "flag:choose-tree:-k",
+    "flag:choose-tree:-y",
+    "semantic:chooser-key-vocabulary"
+   ]
+  },
+  "clients.active-pane": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:per-client-active-pane"
+   ]
+  },
+  "clients.detach-exec": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:detach-client:-E",
+    "semantic:client-exit-exec"
+   ]
+  },
+  "clients.event-resize-context": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:client-resized-post-geometry-context"
+   ]
+  },
+  "clients.interactive-refresh": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "command:switch-mode",
+    "semantic:copy-mode-headless-target",
+    "semantic:refresh-client-interactive",
+    "semantic:switch-mode-transition"
+   ]
+  },
+  "clients.parent-hup-exit": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:attach-session:-x",
+    "flag:detach-client:-P",
+    "flag:new-session:-X",
+    "semantic:client-exit-parent-hup"
+   ]
+  },
+  "clients.path-encoding": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "semantic:client-cwd-non-utf8",
+    "semantic:client-environment-non-utf8"
+   ]
+  },
+  "config.non-utf8-file-bytes": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:config-file-byte-input"
+   ]
+  },
+  "config.tilde-home-path-encoding": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:config-tilde-home-non-utf8"
+   ]
+  },
+  "control-mode.diagnostic-typing": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "semantic:control-mode-typed-config-diagnostics"
+   ]
+  },
+  "control-mode.disconnect-cancels-command-queue": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:control-mode-disconnect-cancels-command-queue"
+   ]
+  },
+  "control-mode.local-parser-environment": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:control-mode-tilde-server-environment"
+   ]
+  },
+  "copy-mode.action-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:copy-mode-action-vocabulary",
+    "semantic:copy-mode-copy-format-and-destination",
+    "semantic:copy-mode-cursor-geometry",
+    "semantic:copy-mode-goto-line",
+    "semantic:copy-mode-jump-page-prompt-actions",
+    "semantic:copy-mode-logical-line-and-mode-keys",
+    "semantic:copy-mode-selection-lifecycle"
+   ]
+  },
+  "copy-mode.command-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:copy-mode:-k",
+    "flag:copy-mode:-s",
+    "semantic:copy-mode-command-counts",
+    "semantic:copy-mode-command-errors"
+   ]
+  },
+  "display-menu.behavior-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:display-menu-action-context-and-errors",
+    "semantic:display-menu-mouse-policy",
+    "semantic:display-menu-paste-close-ordering",
+    "semantic:display-menu-queue-ordering",
+    "semantic:display-menu-rendered-width",
+    "semantic:display-menu-resize-lifecycle",
+    "semantic:display-menu-shortcut-display",
+    "semantic:display-menu-shortcut-grammar",
+    "semantic:display-menu-style-refresh"
+   ]
+  },
+  "display-message.format-listing": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:display-message:-a",
+    "semantic:display-message-format-listing"
+   ]
+  },
+  "display-message.mouse-target-context": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:display-message-bare-mouse-target"
+   ]
+  },
+  "display-message.pane-target-grammar": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "semantic:display-message-relative-special-targets"
+   ]
+  },
+  "display-message.verbose-trace": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:display-message:-v",
+    "semantic:display-message-format-trace"
+   ]
+  },
+  "display-panes.command-template": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "semantic:display-panes-command-template"
+   ]
+  },
+  "display-panes.queue-semantics": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:display-panes-queue-blocking"
+   ]
+  },
+  "display-popup.behavior-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:display-popup-border-drag",
+    "semantic:display-popup-context-menu",
+    "semantic:display-popup-kitty-images",
+    "semantic:display-popup-resize-lifecycle",
+    "semantic:display-popup-style-refresh",
+    "semantic:display-popup-to-pane"
+   ]
+  },
+  "formats.context-producer-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:format-context-producer-fidelity"
+   ]
+  },
+  "formats.modifier-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:format-modifier-client-interrogation",
+    "semantic:format-modifier-client-loop",
+    "semantic:format-modifier-environment-loop",
+    "semantic:format-modifier-option-loop",
+    "semantic:format-modifier-width"
+   ]
+  },
+  "formats.mouse-context": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "format:mouse_hyperlink",
+    "format:mouse_line",
+    "format:mouse_pane",
+    "format:mouse_status_line",
+    "format:mouse_status_range",
+    "format:mouse_word",
+    "format:mouse_x",
+    "format:mouse_y"
+   ]
+  },
+  "formats.pane-process": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "format:pane_pb_progress",
+    "format:pane_pipe",
+    "format:pane_pipe_pid",
+    "format:pane_unseen_changes"
+   ]
+  },
+  "formats.pane-runtime": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "format:pane_in_mode",
+    "format:pane_key_mode",
+    "format:pane_mode",
+    "format:pane_search_string"
+   ]
+  },
+  "formats.terminal-cells": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "format:cursor_character",
+    "format:cursor_colour",
+    "format:pane_bg",
+    "format:pane_fg",
+    "format:pane_pb_state",
+    "format:pane_tabs"
+   ]
+  },
+  "formats.terminal-runtime": {
+   "decision": "park",
+   "ease": "hardest",
+   "items": [
+    "format:alternate_on",
+    "format:alternate_saved_x",
+    "format:alternate_saved_y",
+    "format:bracket_paste_flag",
+    "format:cursor_blinking",
+    "format:cursor_flag",
+    "format:cursor_shape",
+    "format:cursor_very_visible",
+    "format:cursor_x",
+    "format:cursor_y",
+    "format:history_all_bytes",
+    "format:history_bytes",
+    "format:history_size",
+    "format:insert_flag",
+    "format:keypad_cursor_flag",
+    "format:keypad_flag",
+    "format:mouse_all_flag",
+    "format:mouse_any_flag",
+    "format:mouse_button_flag",
+    "format:mouse_sgr_flag",
+    "format:mouse_standard_flag",
+    "format:mouse_utf8_flag",
+    "format:origin_flag",
+    "format:scroll_region_lower",
+    "format:scroll_region_upper",
+    "format:sixel_support",
+    "format:synchronized_output_flag",
+    "format:wrap_flag"
+   ]
+  },
+  "formats.window-runtime": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "format:window_bigger",
+    "format:window_cell_height",
+    "format:window_cell_width",
+    "format:window_offset_x",
+    "format:window_offset_y"
+   ]
+  },
+  "history.hyperlink-reset": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:clear-history:-H"
+   ]
+  },
+  "hooks.pane-events": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "hook:pane-focus-in",
+    "hook:pane-focus-out",
+    "hook:pane-set-clipboard"
+   ]
+  },
+  "hooks.shutdown-window-unlinked-order": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:shutdown-window-unlinked-rb-order"
+   ]
+  },
+  "jobs.environment": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:copy-pipe-job-environment",
+    "semantic:display-popup-job-environment"
+   ]
+  },
+  "jobs.run-shell-immediate-background-environment": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:run-shell-immediate-background-environment-ordering"
+   ]
+  },
+  "keys.copy-mode-binding-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "binding:copy-mode-vi:#",
+    "binding:copy-mode-vi:*",
+    "binding:copy-mode-vi:/",
+    "binding:copy-mode-vi::",
+    "binding:copy-mode-vi:?",
+    "binding:copy-mode-vi:F",
+    "binding:copy-mode-vi:T",
+    "binding:copy-mode-vi:f",
+    "binding:copy-mode-vi:t",
+    "binding:copy-mode:C-r",
+    "binding:copy-mode:C-s",
+    "binding:copy-mode:F",
+    "binding:copy-mode:T",
+    "binding:copy-mode:f",
+    "binding:copy-mode:t"
+   ]
+  },
+  "keys.copy-mode-prompt-defaults": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "key:copy-mode:M-1",
+    "key:copy-mode:M-2",
+    "key:copy-mode:M-3",
+    "key:copy-mode:M-4",
+    "key:copy-mode:M-5",
+    "key:copy-mode:M-6",
+    "key:copy-mode:M-7",
+    "key:copy-mode:M-8",
+    "key:copy-mode:M-9",
+    "key:copy-mode:g"
+   ]
+  },
+  "keys.copy-mode-unsupported-default-actions": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "key:copy-mode-vi:P",
+    "key:copy-mode-vi:r",
+    "key:copy-mode:C-M-b",
+    "key:copy-mode:C-l",
+    "key:copy-mode:M-l",
+    "key:copy-mode:P",
+    "key:copy-mode:r"
+   ]
+  },
+  "messages.tty-model": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "flag:show-messages:-J",
+    "flag:show-messages:-T",
+    "flag:show-messages:-t"
+   ]
+  },
+  "mouse.bound-context": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "flag:copy-mode:-S",
+    "flag:move-pane:-M",
+    "flag:resize-pane:-M",
+    "flag:send-keys:-M"
+   ]
+  },
+  "options.lock-program": {
+   "decision": "park",
+   "ease": "hardest",
+   "items": [
+    "option:lock-after-time",
+    "option:lock-command",
+    "semantic:lock-program-execution"
+   ]
+  },
+  "options.pane-chrome": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "option:pane-border-format",
+    "option:pane-border-indicators",
+    "option:pane-border-lines",
+    "option:pane-border-status",
+    "option:pane-colours",
+    "option:pane-scrollbars",
+    "option:pane-scrollbars-position",
+    "option:pane-scrollbars-style",
+    "option:pane-scrollbars-timeout",
+    "presentation:border-style-owner-granularity",
+    "presentation:renderer-style-residue"
+   ]
+  },
+  "options.remain-on-exit-format": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "option:remain-on-exit-format"
+   ]
+  },
+  "options.terminal-behavior": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "option:allow-rename",
+    "option:alternate-screen",
+    "option:assume-paste-time",
+    "option:backspace",
+    "option:codepoint-widths",
+    "option:default-client-command",
+    "option:editor",
+    "option:extended-keys",
+    "option:extended-keys-format",
+    "option:focus-follows-mouse",
+    "option:get-clipboard",
+    "option:input-buffer-size",
+    "option:scroll-on-clear",
+    "option:terminal-features",
+    "option:terminal-overrides",
+    "option:user-keys",
+    "option:variation-selector-always-wide",
+    "option:xterm-keys"
+   ]
+  },
+  "options.theme-palette": {
+   "decision": "park",
+   "ease": "medium",
+   "items": [
+    "option:dark-theme-black",
+    "option:dark-theme-blue",
+    "option:dark-theme-cyan",
+    "option:dark-theme-dark-grey",
+    "option:dark-theme-green",
+    "option:dark-theme-light-grey",
+    "option:dark-theme-magenta",
+    "option:dark-theme-red",
+    "option:dark-theme-white",
+    "option:dark-theme-yellow",
+    "option:light-theme-black",
+    "option:light-theme-blue",
+    "option:light-theme-cyan",
+    "option:light-theme-dark-grey",
+    "option:light-theme-green",
+    "option:light-theme-light-grey",
+    "option:light-theme-magenta",
+    "option:light-theme-red",
+    "option:light-theme-white",
+    "option:light-theme-yellow",
+    "option:theme"
+   ]
+  },
+  "pane.break-geometry": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:break-pane:-W",
+    "flag:break-pane:-X",
+    "flag:break-pane:-Y",
+    "flag:break-pane:-x",
+    "flag:break-pane:-y"
+   ]
+  },
+  "pane.command-completion": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:split-window:-W"
+   ]
+  },
+  "pane.floating-model": {
+   "decision": "park",
+   "ease": "hardest",
+   "items": [
+    "command:new-pane",
+    "flag:move-pane:-D",
+    "flag:move-pane:-L",
+    "flag:move-pane:-P",
+    "flag:move-pane:-R",
+    "flag:move-pane:-U",
+    "flag:move-pane:-X",
+    "flag:move-pane:-Y",
+    "flag:move-pane:-z",
+    "format:pane_floating_flag",
+    "semantic:floating-pane-model",
+    "semantic:move-pane-tiled-extension"
+   ]
+  },
+  "pane.selection-state": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:select-pane:-M",
+    "flag:select-pane:-P",
+    "flag:select-pane:-d",
+    "flag:select-pane:-e",
+    "flag:select-pane:-g",
+    "flag:select-pane:-m",
+    "format:pane_marked",
+    "format:pane_marked_set",
+    "format:session_marked",
+    "format:window_marked_flag",
+    "semantic:window-marked-pane-format"
+   ]
+  },
+  "pane.spawn-flags": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:split-window:-R",
+    "flag:split-window:-S",
+    "flag:split-window:-T",
+    "flag:split-window:-k",
+    "flag:split-window:-m",
+    "flag:split-window:-s"
+   ]
+  },
+  "prompt.command-fidelity": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:command-prompt:-F",
+    "flag:command-prompt:-l",
+    "flag:command-prompt:-t",
+    "option:status-keys",
+    "semantic:command-prompt-chain",
+    "semantic:command-prompt-key-spelling",
+    "semantic:command-prompt-labels",
+    "semantic:command-prompt-pass-order",
+    "semantic:command-prompt-vi-editing",
+    "semantic:prompt-message-freeze"
+   ]
+  },
+  "prompt.pane-rendered": {
+   "decision": "park",
+   "ease": "hard",
+   "items": [
+    "flag:command-prompt:-P"
+   ]
+  },
+  "protocol.binary-streams": {
+   "decision": "park",
+   "ease": "hardest",
+   "items": [
+    "flag:display-message:-I",
+    "flag:split-window:-I",
+    "protocol:command-stream",
+    "semantic:buffer-standard-streams",
+    "semantic:non-utf8-command-arguments",
+    "semantic:show-buffer-binary-policy",
+    "semantic:source-file-stdin"
+   ]
+  },
+  "protocol.socket-acl": {
+   "decision": "park",
+   "ease": "hardest",
+   "items": [
+    "command:server-access",
+    "semantic:multi-user-socket-acl"
+   ]
+  },
+  "rendering.geometry-residue": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "semantic:attached-gui-pane-width",
+    "semantic:manual-window-size-transition",
+    "semantic:split-window-zoom-hidden-width"
+   ]
+  },
+  "source-file.event-hook-client-cwd": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:source-file-event-hook-current-client-cwd"
+   ]
+  },
+  "source-file.sourced-hook-client-cwd": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "semantic:source-file-sourced-hook-client-cwd"
+   ]
+  },
+  "terminal.key-client-selection": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:send-keys:-c"
+   ]
+  },
+  "terminal.key-control": {
+   "decision": "adopt",
+   "ease": "hard",
+   "items": [
+    "flag:send-keys:-K",
+    "semantic:send-keys-copy-command-shape",
+    "semantic:send-keys-empty-copy-count",
+    "semantic:send-keys-high-hex",
+    "semantic:send-keys-no-key-count"
+   ]
+  },
+  "terminal.key-reset": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:send-keys:-R"
+   ]
+  },
+  "terminal.resize-pane-trim": {
+   "decision": "adopt",
+   "ease": "medium",
+   "items": [
+    "flag:resize-pane:-T"
+   ]
+  }
+ }
+}

@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v87)
+title: zz wire protocol (v88)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 87`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 88`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (87) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (88) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -608,9 +608,14 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 87`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 88`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v88 appends fifteen `CopyModeAction` variants at tail tags 50..64 (`SelectionMode` carrying the new
+  `CopySelectionMode` unit enum, `StopSelection`, the scroll-exit family, view-relative cursor and
+  scroll placements, `TogglePosition`, `RecentreTopBottom`, and `PreviousMatchingBracket`).
+  `CopyModeAction` rides the wire inside `TerminalViewAction`, so a v87 peer cannot decode the new
+  tail tags; every existing tag is unchanged.
 - v87 appends `ProtocolMessage::SetTerminalPreview { enabled }` at tail tag 33. An attached
   Interactive client can request low-priority viewport streams for every terminal pane across all
   windows of its attached session without changing `visible_terminals`, input authority, history
@@ -842,21 +847,21 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 87, client_instance_id: ClientInstanceId(0), kind: Interactive,
+`ClientHello { protocol_version: 88, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
 working_directory: None, environment: [], process_id: 0 }` is 20 bytes on the wire: an 8-byte
 envelope over a 12-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17 18 19
-      10 00 00 00  00     00      57 00         00 57 00 00 00 00 01 01 00 00 00 00
+      10 00 00 00  00     00      58 00         00 58 00 00 00 00 01 01 00 00 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 16  Control        (= 87)
+      length = 16  Control        (= 88)
 ```
 
 - **length `16`** = `ENVELOPE_BYTES` (4) + payload (12); it counts the four envelope bytes, not itself.
-- **payload** `00 57 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x57` (= 87), `client_instance_id` as varint `00`, `kind`
+- **payload** `00 58 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x58` (= 88), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` and `working_directory` as two `Option::None` tags (`00 00`), followed by the empty
@@ -890,11 +895,11 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 87, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 88, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None,
                        working_directory: Some("/home/demo"), environment: ["TERM=xterm-256color"],
                        process_id: 1234 }
-server → ServerHello { protocol_version: 87, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 88, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

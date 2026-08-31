@@ -91,10 +91,10 @@ def parse_time(s):
 
 
 def parse_lease(s):
-    m = re.fullmatch(r"(\d+)([hm])", s.strip())
+    m = re.fullmatch(r"(\d+)([hm]?)", s.strip())
     if not m:
         return None
-    n, unit = int(m.group(1)), m.group(2)
+    n, unit = int(m.group(1)), m.group(2) or "h"
     delta = timedelta(hours=n) if unit == "h" else timedelta(minutes=n)
     return min(delta, MAX_LEASE)
 
@@ -177,6 +177,7 @@ class Board:
         self.fronts = {}
         self.residuals = []
         self.notes_log = []
+        self.records = []
         self.warnings = []
 
     def expire(self, asof):
@@ -350,11 +351,21 @@ class Board:
 
         if verb in ("INTEGRATED", "REPAIR", "REJECTED"):
             main_holder = self.main_holder(created)
-            if arg == "MAIN":
-                self.warnings.append(f"comment {cid}: {verb} cannot target MAIN")
-                return
             if main_holder is None or holder != main_holder:
                 self.warnings.append(f"comment {cid}: {verb} on {arg} invalid (poster does not hold MAIN)")
+                return
+            if arg == "MAIN":
+                if verb == "INTEGRATED":
+                    self.records.append(
+                        {
+                            "comment": cid,
+                            "holder": holder,
+                            "merge": fields.get("merge"),
+                            "gate": fields.get("gate", []),
+                        }
+                    )
+                else:
+                    self.warnings.append(f"comment {cid}: {verb} cannot target MAIN")
                 return
             if verb == "INTEGRATED":
                 front.state = "INTEGRATED"
@@ -363,6 +374,11 @@ class Board:
                 front.expiry = None
                 return
             if verb == "REPAIR":
+                front.candidate = None
+                if front.active(created):
+                    front.state = "CLAIMED"
+                else:
+                    front.free()
                 return
             if verb == "REJECTED":
                 front.candidate = None
@@ -502,6 +518,7 @@ def cmd_status(args):
             },
             "residuals": board.residuals,
             "notes": board.notes_log,
+            "records": board.records,
             "warnings": board.warnings,
         }
         print(json.dumps(payload, indent=2))
@@ -518,6 +535,10 @@ def cmd_status(args):
         print("\nnotes:")
         for n in board.notes_log:
             print(f"- [{n['front']}] {n['note']} ({n['holder']}, comment {n['comment']})")
+    if board.records:
+        print("\nrecords-only merges:")
+        for r in board.records:
+            print(f"- {r['merge'] or 'unknown'} by {r['holder']} (comment {r['comment']})")
     if args.verbose and board.warnings:
         print("\nfold notes:")
         for w in board.warnings:
@@ -558,6 +579,8 @@ def adjudicate(args, front_id, holder, comment_id):
 
 def cmd_claim(args):
     holder = holder_or_die(args)
+    if parse_lease(args.lease) is None:
+        sys.exit(f"bad lease {args.lease!r}: use forms like 90m or 2h")
     board = fold(args)
     front = board.fronts.get(args.front)
     if front is None:
@@ -586,6 +609,8 @@ def cmd_claim(args):
 def cmd_simple_post(verb):
     def run(args):
         holder = holder_or_die(args)
+        if verb == "RENEW" and parse_lease(args.lease) is None:
+            sys.exit(f"bad lease {args.lease!r}: use forms like 90m or 2h")
         pairs = [("holder", holder)]
         lists = []
         if verb == "RENEW":

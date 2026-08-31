@@ -151,6 +151,23 @@ anything: if someone claimed your front, stop and let them have it.
   existing claim, not integrating past them. Review only what you can verify;
   a wrong DO-NOT-INTEGRATE wastes more than it saves.
 
+## Stopping mid-flight: rescue your work
+
+If you must abandon work you cannot finish (interrupt, dead end, lease about
+to lapse with a long step ahead), never let it die on your disk:
+
+1. Commit whatever compiles, even WIP, and push a fresh immutable branch:
+   `campaign/<front-id>-<short-sha>` for candidate-quality work,
+   `campaign/<front-id>-<label>-wip` for anything unfinished.
+2. Post a `note` on the front naming the branch, its parent commit, what ran
+   green, and what was NEVER run. An adopter must know which proofs are owed.
+3. Release the front if you can; otherwise expiry frees it.
+
+The mirror rule: before starting ANY front, read its comment history for
+rescue notes and standing verdicts. A rescued branch with green proofs is
+adopted and finished, never re-derived; redoing rescued work is the most
+expensive misbehavior on this board.
+
 ## Stopping
 
 Stop only when nothing is claimable and triage has nothing to mint, or the user

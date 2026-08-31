@@ -55,6 +55,77 @@ def test_release_after_candidate_frees_zones_and_goes_stale():
     assert b.fronts["F-B"].state == "CLAIMED", b.warnings
 
 
+MAIN_LOCK = [
+    comment(10, 8, "FRONT MAIN\nkind: lock\npriority: 1\ncontract: integration lock\nzones: main-lock"),
+]
+
+
+def test_repair_dissolves_candidate_and_keeps_active_claim():
+    b = fold(
+        BASE
+        + MAIN_LOCK
+        + [
+            comment(11, 9, "CLAIM F-A\nholder: w/one\nlease: 6h"),
+            comment(12, 10, "CANDIDATE F-A\nholder: w/one\nbase: abc\ncommit: def\nbranch: campaign/F-A"),
+            comment(13, 11, "CLAIM MAIN\nholder: w/one\nlease: 2h"),
+            comment(14, 12, "REPAIR F-A\nholder: w/one\nreason: gate red"),
+        ]
+    )
+    f = b.fronts["F-A"]
+    assert f.state == "CLAIMED", (f.state, b.warnings)
+    assert f.candidate is None
+    assert f.holder == "w/one"
+
+
+def test_repair_after_lease_expiry_frees_the_front():
+    b = fold(
+        BASE
+        + MAIN_LOCK
+        + [
+            comment(11, 9, "CLAIM F-A\nholder: w/one\nlease: 2m"),
+            comment(12, 10, "CANDIDATE F-A\nholder: w/one\nbase: abc\ncommit: def\nbranch: campaign/F-A"),
+            comment(13, 20, "CLAIM MAIN\nholder: w/two\nlease: 2h"),
+            comment(14, 21, "REPAIR F-A\nholder: w/two\nreason: gate red"),
+        ]
+    )
+    f = b.fronts["F-A"]
+    assert f.state == "READY", (f.state, b.warnings)
+    assert f.candidate is None
+
+
+def test_bare_number_lease_reads_as_hours():
+    b = fold(BASE + [comment(4, 3, "CLAIM F-A\nholder: w/one\nlease: 2")])
+    f = b.fronts["F-A"]
+    assert f.state == "CLAIMED", (f.state, b.warnings)
+    assert f.expiry == board_mod.parse_time("2026-08-30T12:03:00Z"), f.expiry
+
+
+def test_records_only_merge_lands_on_the_ledger():
+    b = fold(
+        BASE
+        + MAIN_LOCK
+        + [
+            comment(11, 9, "CLAIM MAIN\nholder: w/one\nlease: 2h"),
+            comment(12, 10, "INTEGRATED MAIN\nholder: w/one\nmerge: cafe1234"),
+        ]
+    )
+    assert b.records and b.records[0]["merge"] == "cafe1234", b.records
+    assert b.fronts["MAIN"].state == "CLAIMED", b.fronts["MAIN"].state
+
+
+def test_integrated_main_from_non_holder_is_ignored():
+    b = fold(
+        BASE
+        + MAIN_LOCK
+        + [
+            comment(11, 9, "CLAIM MAIN\nholder: w/one\nlease: 2h"),
+            comment(12, 10, "INTEGRATED MAIN\nholder: w/two\nmerge: cafe1234"),
+        ]
+    )
+    assert not b.records, b.records
+    assert any("does not hold MAIN" in w for w in b.warnings), b.warnings
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

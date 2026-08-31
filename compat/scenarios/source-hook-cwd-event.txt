@@ -1,0 +1,5 @@
+shim:
+stage: fixtures/source-hook-cwd-event.sh ~/source-hook-cwd-event.sh
+out: set-environment -gu SOURCE_HOOK_CWD_EVENT
+run-shell 'sh ~/source-hook-cwd-event.sh'
+out: show-environment -g SOURCE_HOOK_CWD_EVENT

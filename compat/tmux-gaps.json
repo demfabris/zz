@@ -2621,30 +2621,6 @@
       "reason": "One window belongs to one session in zz."
     },
     {
-      "id": "source-file.event-hook-client-cwd",
-      "title": "Select the current client cwd for event-hook sources",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:source-file-event-hook-current-client-cwd"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "An event hook that sources a relative path selects the same current or best attached client and session cwd as the pin, including when another client caused the event."
-      ],
-      "depends_on": [],
-      "reason": "The shared attached-client and session-cwd facts have shipped, but deferred event hooks still run through zz's sentinel client instead of selecting tmux's current or best attached client for relative source resolution."
-    },
-    {
       "id": "terminal.key-client-selection",
       "title": "Select the send-keys target client",
       "decision": "adopt",
@@ -4199,6 +4175,18 @@
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "resolution": "Runtime source-file no longer special-cases the active zz/mux.conf. At this close, every declared path expanded and matched in caller order, and each match entered the ordinary config loader immediately in glob order, producing DAD for default, after, and default. The later config.replayed-command-output closure changed that immediate replay timing: one invocation now parses all matches in declared and glob order, then replays them in the same order while preserving DAD and path order. A loud miss returns status 1 without preventing later matches from loading; quiet misses remain silent. Ordinary diagnostics and -v lines retain declared path and match order. That later closure also pins presentation as one complete verbose batch, then replay, then buffered command-name and parser diagnostics for each invocation. Source no-match, glob, and actual OS or path read failures retain their existing error channels. Explicit zz-native reload-config still rediscovers the first existing default candidate, replaces #{config_files}, resets key tables, rebuilds appearance, and reapplies stored mux overrides. Startup still discovers the first existing zz-owned candidate, while ordered explicit -f files remain the intentional startup roots. Parse-only and nested source paths keep their existing behavior. Focused CLI and daemon tests, strict daemon clippy, and fmt pass. The strict 12-step source-file-diagnostics and 40-step source-file-format differentials have zero differences and no skips. At this close the source-file-control row had five clean steps; the later nested-queue proof grew the current row to six clean steps. This closure makes no canonical-suite claim."
+    },
+    {
+      "id": "source-file.event-hook-client-cwd",
+      "title": "Select the current client cwd for event-hook sources",
+      "closed_on": "2026-08-31",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/source-hook-cwd-event.txt",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "Measured against the pin, a deferred event hook has no client to select: cmd_source_file_exec asks server_client_get_cwd with a NULL session, and notify_add appends the hook callback with a NULL client, so every event-hook source resolves against the server's own HOME no matter which client caused the event. zz's sentinel-client event-hook context already lands on the same directory, and the 4-check differential now pins it: session-created raised by a plain client and by a Control client, plus window-linked and pane-exited, each triggered from a client whose cwd holds a decoy leaf, against a session created with a third cwd that holds another decoy, and with a fourth decoy at the repository root. Both sides load the daemon-home leaf in all four cases. The registry's earlier suspicion that zz needed to select a current or best attached client did not reproduce, because the pin never consults one on this path."
     },
     {
       "id": "source-file.flags",

@@ -49,6 +49,18 @@ ios-test:
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-test requires macOS" >&2; exit 2; fi
     @scripts/ios-sim.sh --test
 
+ipad:
+    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ipad requires macOS" >&2; exit 2; fi
+    @ZZ_IOS_SIMULATOR_FAMILY=iPad scripts/ios-sim.sh
+
+ipad-build:
+    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ipad-build requires macOS" >&2; exit 2; fi
+    @ZZ_IOS_SIMULATOR_FAMILY=iPad scripts/ios-sim.sh --build-only
+
+ipad-test:
+    @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ipad-test requires macOS" >&2; exit 2; fi
+    @ZZ_IOS_SIMULATOR_FAMILY=iPad scripts/ios-sim.sh --test
+
 ios-device device="iphone":
     @if [[ "$(uname -s)" != "Darwin" ]]; then echo "just ios-device requires macOS" >&2; exit 2; fi
     @scripts/ios-device.sh {{ device }}

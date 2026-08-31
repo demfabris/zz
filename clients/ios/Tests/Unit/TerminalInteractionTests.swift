@@ -73,9 +73,113 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertEqual(TerminalFontZoom.pointSize(for: -100), 9)
         XCTAssertEqual(TerminalFontZoom.pointSize(for: 100), 23)
         XCTAssertEqual(TerminalFontZoom.targetStep(anchor: 0, scale: 16.0 / 13.0), 3)
+        XCTAssertEqual(TerminalFontZoom.pointSize(for: 3, basePointSize: 15), 18)
+        XCTAssertEqual(TerminalFontZoom.pointSize(for: -100, basePointSize: 18), 9)
+        XCTAssertEqual(TerminalFontZoom.targetStep(anchor: 0, scale: 18.0 / 15.0, basePointSize: 15), 3)
         XCTAssertEqual(TerminalFontZoom.crossedSteps(from: 0, to: 3), [1, 2, 3])
         XCTAssertEqual(TerminalFontZoom.crossedSteps(from: 3, to: 0), [2, 1, 0])
         XCTAssertEqual(TerminalFontZoom.crossedSteps(from: 3, to: 3), [])
+    }
+
+    func testCursorBlinkPreferenceDoesNotDisableBlinkingText() {
+        XCTAssertFalse(
+            TerminalBlinkPolicy.cursorShouldAnimate(
+                frameRequestsBlink: true,
+                cursorBlinking: false
+            )
+        )
+        XCTAssertTrue(
+            TerminalBlinkPolicy.shouldRunTimer(
+                interactive: true,
+                cursorRequestsBlink: true,
+                blinkingText: true,
+                cursorBlinking: false
+            )
+        )
+        XCTAssertFalse(
+            TerminalBlinkPolicy.shouldRunTimer(
+                interactive: true,
+                cursorRequestsBlink: true,
+                blinkingText: false,
+                cursorBlinking: false
+            )
+        )
+        XCTAssertFalse(
+            TerminalBlinkPolicy.shouldRunTimer(
+                interactive: true,
+                cursorRequestsBlink: false,
+                blinkingText: false,
+                cursorBlinking: true
+            )
+        )
+    }
+
+    func testAgentComposerActionTracksDaemonPhaseAndDraft() {
+        XCTAssertEqual(
+            ZZAgentComposerAction.resolve(
+                phase: .ready,
+                hasPrompt: true,
+                queuedPrompts: 0
+            ),
+            .send
+        )
+        XCTAssertEqual(
+            ZZAgentComposerAction.resolve(
+                phase: .running,
+                hasPrompt: true,
+                queuedPrompts: 3
+            ),
+            .queue
+        )
+        XCTAssertEqual(
+            ZZAgentComposerAction.resolve(
+                phase: .awaitingPermission,
+                hasPrompt: false,
+                queuedPrompts: 4
+            ),
+            .stop
+        )
+        XCTAssertEqual(
+            ZZAgentComposerAction.resolve(
+                phase: .running,
+                hasPrompt: true,
+                queuedPrompts: 4
+            ),
+            .unavailable
+        )
+        XCTAssertEqual(
+            ZZAgentComposerAction.resolve(
+                phase: .failed,
+                hasPrompt: true,
+                queuedPrompts: 0
+            ),
+            .unavailable
+        )
+    }
+
+    func testAgentDraftsStayIndependentAcrossPanes() {
+        var drafts = ZZAgentDrafts()
+        drafts.save("first", for: 11)
+        drafts.save("second", for: 22)
+
+        XCTAssertEqual(drafts.text(for: 11), "first")
+        XCTAssertEqual(drafts.text(for: 22), "second")
+
+        drafts.remove(pane: 11)
+        XCTAssertEqual(drafts.text(for: 11), "")
+        XCTAssertEqual(drafts.text(for: 22), "second")
+    }
+
+    func testAgentPromptCommandSeparatesOptionsAndPreservesText() {
+        XCTAssertEqual(
+            ZZAgentPromptCommand.arguments(pane: 42, text: "- fix the tests"),
+            ["-t", "%42", "--submit", "--", "- fix the tests"]
+        )
+        XCTAssertEqual(
+            ZZAgentPromptCommand.arguments(pane: 9, text: "  keep this spacing\n"),
+            ["-t", "%9", "--submit", "--", "  keep this spacing\n"]
+        )
+        XCTAssertNil(ZZAgentPromptCommand.arguments(pane: 1, text: " \n\t"))
     }
 
     func testReconnectBackoffCapsAtSixteenSeconds() {

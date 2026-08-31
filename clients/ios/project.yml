@@ -25,6 +25,15 @@ targets:
         LSApplicationCategoryType: public.app-category.developer-tools
         NSLocalNetworkUsageDescription: zz connects to your computer on the local network.
         UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     sources:
@@ -33,7 +42,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.zz.ios
         PRODUCT_NAME: ZZ
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         ARCHS: arm64
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Y4JYPG9TS8

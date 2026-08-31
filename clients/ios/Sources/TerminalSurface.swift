@@ -2,21 +2,44 @@ import SwiftUI
 import UIKit
 
 enum TerminalFontZoom {
-    static let minimumStep = -4
-    static let maximumStep = 10
+    static let minimumPointSize: CGFloat = 9
+    static let maximumPointSize: CGFloat = 23
     static let defaultPointSize: CGFloat = 13
 
-    static func clamped(_ step: Int) -> Int {
-        min(max(step, minimumStep), maximumStep)
+    static func clampedPointSize(_ pointSize: CGFloat) -> CGFloat {
+        min(max(pointSize, minimumPointSize), maximumPointSize)
     }
 
-    static func pointSize(for step: Int) -> CGFloat {
-        defaultPointSize + CGFloat(clamped(step))
+    static func clamped(
+        _ step: Int,
+        basePointSize: CGFloat = defaultPointSize
+    ) -> Int {
+        let basePointSize = clampedPointSize(basePointSize)
+        let minimumStep = Int(ceil(minimumPointSize - basePointSize))
+        let maximumStep = Int(floor(maximumPointSize - basePointSize))
+        return min(max(step, minimumStep), maximumStep)
     }
 
-    static func targetStep(anchor: Int, scale: CGFloat) -> Int {
-        let scaledPointSize = pointSize(for: anchor) * max(scale, 0.01)
-        return clamped(Int((scaledPointSize - defaultPointSize).rounded()))
+    static func pointSize(
+        for step: Int,
+        basePointSize: CGFloat = defaultPointSize
+    ) -> CGFloat {
+        let basePointSize = clampedPointSize(basePointSize)
+        return basePointSize + CGFloat(clamped(step, basePointSize: basePointSize))
+    }
+
+    static func targetStep(
+        anchor: Int,
+        scale: CGFloat,
+        basePointSize: CGFloat = defaultPointSize
+    ) -> Int {
+        let basePointSize = clampedPointSize(basePointSize)
+        let scaledPointSize = pointSize(for: anchor, basePointSize: basePointSize)
+            * max(scale, 0.01)
+        return clamped(
+            Int((scaledPointSize - basePointSize).rounded()),
+            basePointSize: basePointSize
+        )
     }
 
     static func crossedSteps(from current: Int, to target: Int) -> [Int] {
@@ -25,6 +48,29 @@ enum TerminalFontZoom {
         }
         let direction = target > current ? 1 : -1
         return Array(stride(from: current + direction, through: target, by: direction))
+    }
+}
+
+enum TerminalBlinkPolicy {
+    static func cursorShouldAnimate(
+        frameRequestsBlink: Bool,
+        cursorBlinking: Bool
+    ) -> Bool {
+        frameRequestsBlink && cursorBlinking
+    }
+
+    static func shouldRunTimer(
+        interactive: Bool,
+        cursorRequestsBlink: Bool,
+        blinkingText: Bool,
+        cursorBlinking: Bool
+    ) -> Bool {
+        interactive && (
+            blinkingText || cursorShouldAnimate(
+                frameRequestsBlink: cursorRequestsBlink,
+                cursorBlinking: cursorBlinking
+            )
+        )
     }
 }
 
@@ -53,6 +99,8 @@ final class TerminalGridView: UIView, UIKeyInput {
     private var interactive = false
     private var preview = false
     private var fontSize: CGFloat = 0
+    private var terminalFont: ZZTerminalFont?
+    private var basePointSize = TerminalFontZoom.defaultPointSize
     private var regularFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private var boldFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .bold)
     private var italicFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -65,6 +113,7 @@ final class TerminalGridView: UIView, UIKeyInput {
     private var pinchAnchorStep = 0
     private var pinchReportedStep = 0
     private var cursorVisible = true
+    private var cursorBlinking = true
     private var blinkTimer: Timer?
     private var colors: [UInt32: UIColor] = [:]
     private let fontFeedback = UISelectionFeedbackGenerator()
@@ -138,6 +187,9 @@ final class TerminalGridView: UIView, UIKeyInput {
         interactive: Bool,
         preview: Bool,
         fontSizeStep: Int,
+        terminalFont: ZZTerminalFont,
+        basePointSize: CGFloat,
+        cursorBlinking: Bool,
         inputRequested: Bool,
         sceneActive: Bool,
         inputActivation: UInt64
@@ -148,9 +200,15 @@ final class TerminalGridView: UIView, UIKeyInput {
             self.inputRequested != inputRequested ||
             self.sceneActive != sceneActive ||
             self.inputActivation != inputActivation
+        let basePointSize = TerminalFontZoom.clampedPointSize(basePointSize)
+        let fontChanged = self.terminalFont != terminalFont ||
+            abs(self.basePointSize - basePointSize) > 0.01
+        let previewChanged = self.preview != preview
+        let cursorBlinkingChanged = self.cursorBlinking != cursorBlinking
         viewport = frame
         self.interactive = interactive
         self.preview = preview
+        self.cursorBlinking = cursorBlinking
         self.inputRequested = inputRequested
         self.sceneActive = sceneActive
         self.inputActivation = inputActivation
@@ -160,7 +218,19 @@ final class TerminalGridView: UIView, UIKeyInput {
         } else if Self.softwareKeyboardVisible {
             viewportIsStable = false
         }
-        let nextFontSizeStep = TerminalFontZoom.clamped(fontSizeStep)
+        if fontChanged {
+            self.terminalFont = terminalFont
+            self.basePointSize = basePointSize
+            fontSize = 0
+            lastResize = nil
+        }
+        if previewChanged {
+            fontSize = 0
+        }
+        let nextFontSizeStep = TerminalFontZoom.clamped(
+            fontSizeStep,
+            basePointSize: basePointSize
+        )
         if self.fontSizeStep != nextFontSizeStep {
             self.fontSizeStep = nextFontSizeStep
             lastResize = nil
@@ -174,7 +244,9 @@ final class TerminalGridView: UIView, UIKeyInput {
         }
         updateMetrics()
         updateBlinkTimer()
-        if generationChanged, let frame, !frame.damage.all {
+        if fontChanged || previewChanged || cursorBlinkingChanged {
+            setNeedsDisplay()
+        } else if generationChanged, let frame, !frame.damage.all {
             let first = CGFloat(frame.damage.firstRow) * measuredCell.height
             let last = CGFloat(frame.damage.lastRow + 1) * measuredCell.height
             setNeedsDisplay(CGRect(x: 0, y: first, width: bounds.width, height: last - first))
@@ -339,7 +411,11 @@ final class TerminalGridView: UIView, UIKeyInput {
             pinchReportedStep = fontSizeStep
             fontFeedback.prepare()
         case .changed:
-            let target = TerminalFontZoom.targetStep(anchor: pinchAnchorStep, scale: gesture.scale)
+            let target = TerminalFontZoom.targetStep(
+                anchor: pinchAnchorStep,
+                scale: gesture.scale,
+                basePointSize: basePointSize
+            )
             for step in TerminalFontZoom.crossedSteps(from: pinchReportedStep, to: target) {
                 pinchReportedStep = step
                 fontSizeStep = step
@@ -361,8 +437,14 @@ final class TerminalGridView: UIView, UIKeyInput {
         guard let viewport, viewport.columns > 0, viewport.rows > 0 else {
             return
         }
-        let baseSize = TerminalFontZoom.pointSize(for: fontSizeStep)
-        let baseFont = UIFont.monospacedSystemFont(ofSize: baseSize, weight: .regular)
+        guard let terminalFont else {
+            return
+        }
+        let baseSize = TerminalFontZoom.pointSize(
+            for: fontSizeStep,
+            basePointSize: basePointSize
+        )
+        let baseFont = terminalFont.uiFont(size: baseSize, bold: false, italic: false)
         let baseWidth = ceil(("M" as NSString).size(withAttributes: [.font: baseFont]).width)
         let baseHeight = ceil(baseFont.lineHeight * 1.08)
         logicalCell = CGSize(width: baseWidth, height: baseHeight)
@@ -380,12 +462,10 @@ final class TerminalGridView: UIView, UIKeyInput {
             return
         }
         fontSize = nextSize
-        regularFont = UIFont.monospacedSystemFont(ofSize: nextSize, weight: .regular)
-        boldFont = UIFont.monospacedSystemFont(ofSize: nextSize, weight: .bold)
-        let descriptor = regularFont.fontDescriptor.withSymbolicTraits(.traitItalic)
-        italicFont = descriptor.map { UIFont(descriptor: $0, size: nextSize) } ?? regularFont
-        let boldDescriptor = boldFont.fontDescriptor.withSymbolicTraits([.traitBold, .traitItalic])
-        boldItalicFont = boldDescriptor.map { UIFont(descriptor: $0, size: nextSize) } ?? boldFont
+        regularFont = terminalFont.uiFont(size: nextSize, bold: false, italic: false)
+        boldFont = terminalFont.uiFont(size: nextSize, bold: true, italic: false)
+        italicFont = terminalFont.uiFont(size: nextSize, bold: false, italic: true)
+        boldItalicFont = terminalFont.uiFont(size: nextSize, bold: true, italic: true)
         measuredCell = CGSize(
             width: ceil(("M" as NSString).size(withAttributes: [.font: regularFont]).width),
             height: ceil(regularFont.lineHeight * 1.08)
@@ -449,13 +529,29 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 
     private func updateBlinkTimer() {
-        blinkTimer?.invalidate()
-        blinkTimer = nil
-        cursorVisible = true
         let blinkingText = viewport?.styles.contains {
             $0.attributes & UInt16(ZZ_ATTR_BLINK) != 0
         } ?? false
-        guard interactive, viewport?.cursor?.blinking != 0 || blinkingText else {
+        let cursorRequestsBlink = viewport?.cursor.map {
+            $0.visible != 0 && $0.blinking != 0
+        } ?? false
+        let shouldRun = TerminalBlinkPolicy.shouldRunTimer(
+            interactive: interactive,
+            cursorRequestsBlink: cursorRequestsBlink,
+            blinkingText: blinkingText,
+            cursorBlinking: cursorBlinking
+        )
+        guard shouldRun, window != nil else {
+            let needsRedraw = !cursorVisible
+            blinkTimer?.invalidate()
+            blinkTimer = nil
+            cursorVisible = true
+            if needsRedraw {
+                setNeedsDisplay()
+            }
+            return
+        }
+        guard blinkTimer == nil else {
             return
         }
         blinkTimer = Timer.scheduledTimer(
@@ -596,10 +692,16 @@ final class TerminalGridView: UIView, UIKeyInput {
     }
 
     private func drawCursor(_ viewport: TerminalFrame, context: CGContext) {
+        guard let cursor = viewport.cursor else {
+            return
+        }
+        let shouldAnimate = TerminalBlinkPolicy.cursorShouldAnimate(
+            frameRequestsBlink: cursor.blinking != 0,
+            cursorBlinking: cursorBlinking
+        )
         guard
-            let cursor = viewport.cursor,
             cursor.visible != 0,
-            cursor.blinking == 0 || cursorVisible
+            !shouldAnimate || cursorVisible
         else {
             return
         }
@@ -694,6 +796,7 @@ final class TerminalGridView: UIView, UIKeyInput {
 }
 
 struct TerminalSurface: UIViewRepresentable {
+    @Environment(\.zzTerminalPresentation) private var terminalPresentation
     @ObservedObject var store: ZZStore
     let pane: UInt64
     let frame: TerminalFrame?
@@ -740,6 +843,9 @@ struct TerminalSurface: UIViewRepresentable {
             interactive: interactive,
             preview: preview,
             fontSizeStep: store.terminalFontSizeStep(for: pane),
+            terminalFont: terminalPresentation.font,
+            basePointSize: terminalPresentation.pointSize,
+            cursorBlinking: terminalPresentation.cursorBlinking,
             inputRequested: interactive && store.terminalInput.owner.owns(pane),
             sceneActive: store.sceneIsActive,
             inputActivation: store.terminalInput.activation

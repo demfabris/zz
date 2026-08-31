@@ -14,9 +14,16 @@ if [[ "${CONFIGURATION:-Debug}" == "Release" ]]; then
 fi
 
 cd "$repo_root"
-if [[ "$profile" == "release" ]]; then
-    cargo build -p zz-client-ffi --target "$rust_target" --release
-else
-    cargo build -p zz-client-ffi --target "$rust_target"
+library="target/$rust_target/$profile/libzz_client_ffi.a"
+if [[ "${ZZ_IOS_REUSE_CLIENT_CORE:-0}" != "1" ]]; then
+    if [[ "$profile" == "release" ]]; then
+        cargo build -p zz-client-ffi --target "$rust_target" --release
+    else
+        cargo build -p zz-client-ffi --target "$rust_target"
+    fi
 fi
-cp "target/$rust_target/$profile/libzz_client_ffi.a" "$BUILT_PRODUCTS_DIR/libzz_client_ffi.a"
+[[ -f "$library" ]] || {
+    echo "error: reusable iOS client core is missing: $library" >&2
+    exit 1
+}
+cp "$library" "$BUILT_PRODUCTS_DIR/libzz_client_ffi.a"

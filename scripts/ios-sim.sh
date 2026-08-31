@@ -17,19 +17,22 @@ project="$project_dir/ZZMobile.xcodeproj"
 derived="$repo_root/target/ios-sim"
 app="$derived/Build/Products/Debug-iphonesimulator/ZZ.app"
 bundle_id="dev.zz.ios"
+simulator_family="${ZZ_IOS_SIMULATOR_FAMILY:-iPhone}"
 workspace_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$repo_root/Cargo.toml" | head -1)"
 marketing_version="${workspace_version%%[-+]*}"
 
+[[ "$simulator_family" == "iPhone" || "$simulator_family" == "iPad" ]] || die "ZZ_IOS_SIMULATOR_FAMILY must be iPhone or iPad"
+
 simulator_udid() {
     local udid
-    udid="$(xcrun simctl list devices booted | grep 'iPhone' | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1 || true)"
+    udid="$(xcrun simctl list devices booted | grep "$simulator_family" | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1 || true)"
     if [[ -z "$udid" ]]; then
         udid="$(xcrun simctl list devices available \
-            | grep 'iPhone' \
+            | grep "$simulator_family" \
             | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
             | head -1)"
     fi
-    [[ -n "$udid" ]] || die "no iPhone simulator is available"
+    [[ -n "$udid" ]] || die "no $simulator_family simulator is available"
     echo "$udid"
 }
 

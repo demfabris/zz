@@ -9,6 +9,7 @@
 
 mod chrome;
 mod core;
+mod layout;
 mod menu;
 mod status;
 
@@ -20,5 +21,6 @@ pub use core::{
     AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, Outbound, ViewportDamage,
     agent_attention_status,
 };
+pub use layout::{NormalizedPaneRect, pane_rects};
 pub use menu::{MenuKeyResult, resolve_menu_key};
 pub use status::{ComposedStatusRow, StatusHitRange, compose_status_row};

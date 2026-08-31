@@ -58,6 +58,13 @@ typedef struct zz_bytes {
     size_t len;
 } zz_bytes;
 
+typedef struct zz_pane_rect {
+    float x;
+    float y;
+    float width;
+    float height;
+} zz_pane_rect;
+
 typedef enum zz_connect_failure {
     ZZ_CONNECT_FAILURE_NONE = 0,
     ZZ_CONNECT_FAILURE_RETRYABLE = 1,
@@ -229,6 +236,38 @@ bool zz_snapshot_session_is_attached(const zz_mux_snapshot *snapshot,
                                      size_t session);
 uint64_t zz_snapshot_session_active_window(const zz_mux_snapshot *snapshot,
                                            size_t session);
+size_t zz_snapshot_session_window_count(const zz_mux_snapshot *snapshot,
+                                        size_t session);
+uint64_t zz_snapshot_session_window_id(const zz_mux_snapshot *snapshot,
+                                       size_t session, size_t window);
+uint32_t zz_snapshot_session_window_index(const zz_mux_snapshot *snapshot,
+                                          size_t session, size_t window);
+zz_bytes zz_snapshot_session_window_name(const zz_mux_snapshot *snapshot,
+                                         size_t session, size_t window);
+bool zz_snapshot_session_window_is_current(const zz_mux_snapshot *snapshot,
+                                           size_t session, size_t window);
+uint64_t zz_snapshot_session_window_active_pane(
+    const zz_mux_snapshot *snapshot, size_t session, size_t window);
+bool zz_snapshot_session_window_zoomed_pane(const zz_mux_snapshot *snapshot,
+                                            size_t session, size_t window,
+                                            uint64_t *out);
+size_t zz_snapshot_session_window_pane_count(const zz_mux_snapshot *snapshot,
+                                             size_t session, size_t window);
+uint64_t zz_snapshot_session_window_pane_id(const zz_mux_snapshot *snapshot,
+                                            size_t session, size_t window,
+                                            size_t pane);
+zz_bytes zz_snapshot_session_window_pane_title(const zz_mux_snapshot *snapshot,
+                                               size_t session, size_t window,
+                                               size_t pane);
+zz_pane_kind zz_snapshot_session_window_pane_kind(
+    const zz_mux_snapshot *snapshot, size_t session, size_t window, size_t pane);
+bool zz_snapshot_session_window_pane_is_active(
+    const zz_mux_snapshot *snapshot, size_t session, size_t window, size_t pane);
+bool zz_snapshot_session_window_pane_has_bell(
+    const zz_mux_snapshot *snapshot, size_t session, size_t window, size_t pane);
+bool zz_snapshot_session_window_pane_rect(const zz_mux_snapshot *snapshot,
+                                          size_t session, size_t window,
+                                          size_t pane, zz_pane_rect *out);
 size_t zz_snapshot_session_pane_count(const zz_mux_snapshot *snapshot,
                                       size_t session);
 uint64_t zz_snapshot_session_pane_id(const zz_mux_snapshot *snapshot,

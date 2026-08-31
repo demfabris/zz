@@ -8,20 +8,23 @@ command -v xcodegen >/dev/null 2>&1 || die "xcodegen not found (brew install xco
 command -v xcrun >/dev/null 2>&1 || die "xcrun not found (install Xcode)"
 
 device="${1:-iphone}"
+configuration="${ZZ_IOS_CONFIGURATION:-Debug}"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 spec="$repo_root/clients/ios/project.yml"
 project_dir="$repo_root/clients/ios"
 project="$project_dir/ZZMobile.xcodeproj"
 derived="$repo_root/target/ios-device"
-app="$derived/Build/Products/Release-iphoneos/ZZ.app"
+app="$derived/Build/Products/$configuration-iphoneos/ZZ.app"
 workspace_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$repo_root/Cargo.toml" | head -1)"
 marketing_version="${workspace_version%%[-+]*}"
+
+[[ "$configuration" == "Debug" || "$configuration" == "Release" ]] || die "ZZ_IOS_CONFIGURATION must be Debug or Release"
 
 xcodegen generate --spec "$spec" --project "$project_dir" >/dev/null
 xcodebuild \
     -project "$project" \
     -scheme ZZMobile \
-    -configuration Release \
+    -configuration "$configuration" \
     -destination "generic/platform=iOS" \
     -derivedDataPath "$derived" \
     -allowProvisioningUpdates \

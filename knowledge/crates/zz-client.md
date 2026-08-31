@@ -1,10 +1,10 @@
 ---
 type: Rust Crate
 title: zz-client crate
-description: The renderer-free client core that reduces protocol messages into shared state and typed effects, plus the client-local chrome keymap used by desktop and TUI skins.
+description: Renderer-free client state, effects, chrome keymaps, and normalized pane geometry shared by native and terminal skins.
 resource: crates/zz-client/src/lib.rs
 tags: [client, core, sans-io, keybindings, crate]
-timestamp: 2026-08-26T00:00:00-03:00
+timestamp: 2026-08-30T00:00:00-03:00
 ---
 
 # Overview
@@ -12,6 +12,10 @@ timestamp: 2026-08-26T00:00:00-03:00
 `zz-client` is the renderer-free client brain shared by the GPUI app, the raw-terminal client, and
 the C ABI. It depends only on `zz-protocol` and the model-only half of `zz-terminal`. It owns no
 socket, thread, clock, renderer, or toolkit type.
+
+The crate also resolves recursive `LayoutNode` ratios into normalized pane rectangles. Native
+toolkit shells consume those rectangles through the C ABI, keeping split semantics out of Swift,
+while each surface multiplies them by its current local bounds.
 
 `ClientCore` accepts decoded `ProtocolMessage`s and retains the current handshake data, mux
 snapshot, attachment, terminal viewports, daemon key-table snapshots, status, prefix state, and
@@ -86,6 +90,7 @@ are not errors because the daemon may supersede an unread terminal frame under b
 | `crates/zz-client/src/lib.rs` | Crate facade and public contract. |
 | `crates/zz-client/src/core.rs` | `ClientCore`, retained state, protocol reduction, `CoreEvent`, and `Outbound`. |
 | `crates/zz-client/src/chrome.rs` | `ChromeKeymap`, profiles, action names, chord grammar, defaults, and override API. |
+| `crates/zz-client/src/layout.rs` | Recursive split ratios projected into normalized pane rectangles. |
 | `crates/zz-client/tests/simulator.rs` | Real-daemon deterministic convergence harness. |
 
 # Related

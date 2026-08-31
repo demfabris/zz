@@ -2794,6 +2794,7 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "pane-died",
     "pane-exited",
     "pane-mode-changed",
+    "pane-set-clipboard",
     "pane-title-changed",
     "session-closed",
     "session-created",
@@ -18013,6 +18014,7 @@ impl Shared {
                                         text: copy.text,
                                     },
                                 );
+                                shared.raise_copy_mode_set_clipboard(pane);
                             }
                         }
                         TerminalEvent::OpenUri(open) if open.view == TerminalViewId(client.0) => {
@@ -18617,6 +18619,7 @@ impl Shared {
                                         text: copy.text,
                                     },
                                 );
+                                shared.raise_copy_mode_set_clipboard(pane);
                             }
                         }
                         TerminalEvent::OpenUri(open) => {
@@ -20126,9 +20129,11 @@ impl Shared {
             .lock()
             .engine
             .mux_option_value(MuxOptionKey::SetClipboard);
+        let mut clipboard_hook = false;
         match set_clipboard.as_str() {
             "off" => return,
             "on" => {
+                clipboard_hook = true;
                 self.store_copy_buffer(text.clone(), PasteBufferAction::Create { prefix: None });
             }
             _ => {}
@@ -20142,6 +20147,36 @@ impl Shared {
                 text,
             },
         );
+        if clipboard_hook {
+            self.raise_pane_set_clipboard(pane);
+        }
+    }
+
+    fn raise_pane_set_clipboard(self: &Arc<Self>, pane: PaneId) {
+        let event = {
+            let inner = self.inner.lock();
+            let snapshot = MuxHookSnapshot::capture(&inner.engine);
+            snapshot
+                .panes
+                .get(&pane)
+                .map(|state| PendingHookEvent::pane("pane-set-clipboard", pane, state, &snapshot))
+        };
+        if let Some(event) = event {
+            self.run_event_hooks(vec![event]);
+        }
+    }
+
+    fn raise_copy_mode_set_clipboard(self: &Arc<Self>, pane: PaneId) {
+        if self
+            .inner
+            .lock()
+            .engine
+            .mux_option_value(MuxOptionKey::SetClipboard)
+            == "off"
+        {
+            return;
+        }
+        self.raise_pane_set_clipboard(pane);
     }
 
     fn publish_window_alert_notifications(
@@ -32973,7 +33008,7 @@ mod tests {
         );
         assert_eq!(
             produced_non_after_hooks.len(),
-            27,
+            28,
             "explicit hook producer count changed"
         );
         assert!(
@@ -32998,7 +33033,7 @@ mod tests {
                 }
             }
         }
-        let expected_tracked_hooks = ["pane-focus-in", "pane-focus-out", "pane-set-clipboard"]
+        let expected_tracked_hooks = ["pane-focus-in", "pane-focus-out"]
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
@@ -33015,13 +33050,13 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
-        assert_eq!(produced_hooks.len(), 64, "produced hook count changed");
+        assert_eq!(produced_hooks.len(), 65, "produced hook count changed");
         assert_eq!(
             explicit_only_hooks.len(),
             1,
             "explicit-only hook count changed"
         );
-        assert_eq!(tracked_hooks.len(), 3, "tracked hook count changed");
+        assert_eq!(tracked_hooks.len(), 2, "tracked hook count changed");
         assert!(
             produced_hooks.is_disjoint(&tracked_hooks),
             "produced and tracked hooks overlap"

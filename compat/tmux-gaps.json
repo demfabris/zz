@@ -1277,19 +1277,19 @@
       "owner": "daemon",
       "items": [
         "hook:pane-focus-in",
-        "hook:pane-focus-out",
-        "hook:pane-set-clipboard"
+        "hook:pane-focus-out"
       ],
       "evidence": [
         "resource:knowledge/tmux/divergences.md",
         "resource:crates/zz-mux/src/tmux_options.rs",
-        "resource:crates/zz-daemon/src/daemon.rs"
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/hooks-pane-clipboard.txt"
       ],
       "acceptance": [
         "Each pane transition emits once with a defined client when multiple clients view the pane."
       ],
       "depends_on": [],
-      "reason": "Focus is per client and clipboard changes cross client ownership."
+      "reason": "Focus is per client and needs attached, focused clients to transition. pane-set-clipboard now fires from both pinned producers: an OSC 52 write from a pane under set-clipboard on (differential coverage in hooks-pane-clipboard), and a copy-mode copy that asks for the clipboard under any non-off set-clipboard."
     },
     {
       "id": "hooks.shutdown-window-unlinked-order",

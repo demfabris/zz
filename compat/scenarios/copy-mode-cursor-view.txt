@@ -1,0 +1,19 @@
+# The view-relative cursor and scroll placement names reach typed copy actions,
+# so a detached `send-keys -X` fails on both sides. The pin gives every one of
+# them the read-only flag, so a read-only client is allowed to send them.
+send-keys -t =w:0.0 -X cursor-centre-vertical
+send-keys -t =w:0.0 -X cursor-centre-horizontal
+send-keys -t =w:0.0 -X scroll-top
+send-keys -t =w:0.0 -X scroll-middle
+send-keys -t =w:0.0 -X scroll-bottom
+send-keys -t =w:0.0 -X toggle-position
+send-keys -t =w:0.0 -X top-line
+send-keys -t =w:0.0 -X middle-line
+send-keys -t =w:0.0 -X bottom-line
+
+# None of them consume the numeric prefix, and the count never changes the exit
+# class.
+send-keys -t =w:0.0 -N 4 -X cursor-centre-vertical
+send-keys -t =w:0.0 -N 4 -X scroll-top
+send-keys -t =w:0.0 -N 4 -X scroll-bottom
+send-keys -t =w:0.0 -N 4 -X toggle-position

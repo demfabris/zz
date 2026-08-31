@@ -13964,6 +13964,11 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::ScrollUp
             | CopyModeAction::ScrollDown
             | CopyModeAction::ScrollMiddle
+            | CopyModeAction::ScrollTop
+            | CopyModeAction::ScrollBottom
+            | CopyModeAction::CursorCentreVertical
+            | CopyModeAction::CursorCentreHorizontal
+            | CopyModeAction::TogglePosition
             | CopyModeAction::NextMatchingBracket
             | CopyModeAction::GotoLine(_)
             | CopyModeAction::PageDownScrollExit
@@ -14052,6 +14057,11 @@ fn copy_mode_action(
         "scroll-down" => Some(CopyModeAction::ScrollDown),
         "scroll-down-and-cancel" => Some(CopyModeAction::ScrollDownAndCancel),
         "scroll-middle" => Some(CopyModeAction::ScrollMiddle),
+        "scroll-top" => Some(CopyModeAction::ScrollTop),
+        "scroll-bottom" => Some(CopyModeAction::ScrollBottom),
+        "cursor-centre-vertical" => Some(CopyModeAction::CursorCentreVertical),
+        "cursor-centre-horizontal" => Some(CopyModeAction::CursorCentreHorizontal),
+        "toggle-position" => Some(CopyModeAction::TogglePosition),
         "scroll-exit-on" => Some(CopyModeAction::ScrollExitOn),
         "scroll-exit-off" => Some(CopyModeAction::ScrollExitOff),
         "scroll-exit-toggle" => Some(CopyModeAction::ScrollExitToggle),

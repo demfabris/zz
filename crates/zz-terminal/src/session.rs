@@ -7381,6 +7381,8 @@ fn apply_copy_mode_action(
         | CopyModeAction::GotoLine(_)
         | CopyModeAction::NextPrompt { .. }
         | CopyModeAction::PreviousPrompt { .. }
+        | CopyModeAction::CursorCentreVertical
+        | CopyModeAction::CursorCentreHorizontal
         | CopyModeAction::JumpToMark) => {
             let scroll_exit = match movement {
                 CopyModeAction::PageDownScrollExit | CopyModeAction::HalfPageDownScrollExit => true,
@@ -7448,13 +7450,24 @@ fn apply_copy_mode_action(
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
-        CopyModeAction::ScrollMiddle => {
-            let middle = u32::from(mode.revision.viewport_rows.saturating_sub(1)) / 2;
-            mode.viewport_offset = mode
-                .cursor
-                .y
-                .saturating_sub(middle)
-                .min(mode.revision.maximum_offset());
+        placement @ (CopyModeAction::ScrollTop
+        | CopyModeAction::ScrollMiddle
+        | CopyModeAction::ScrollBottom) => {
+            let last = u32::from(mode.revision.viewport_rows.saturating_sub(1));
+            let row = match placement {
+                CopyModeAction::ScrollTop => 0,
+                CopyModeAction::ScrollBottom => last,
+                _ => last / 2,
+            };
+            scroll_copy_view_to_screen_row(&mut mode, row);
+            if mode.selecting {
+                update_copy_selection(&mut mode, Some(word_separators));
+            }
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::TogglePosition => {
+            mode.hide_position = !mode.hide_position;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
@@ -7767,6 +7780,18 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
     reveal_copy_cursor(mode);
 }
 
+/// The pin's `window_copy_cmd_scroll_to`: move the view so the cursor's line
+/// lands on `row`, keeping the cursor on the same line, or do nothing when the
+/// retained revision cannot reach that far.
+fn scroll_copy_view_to_screen_row(mode: &mut CopyModeState, row: u32) {
+    let Some(target) = mode.cursor.y.checked_sub(row) else {
+        return;
+    };
+    if target <= mode.revision.maximum_offset() {
+        mode.viewport_offset = target;
+    }
+}
+
 fn cursor_down_and_cancel(
     terminal: &mut Terminal<'_, '_>,
     selection: &mut Option<SelectionState>,
@@ -7899,6 +7924,16 @@ fn move_copy_cursor(
             point.y = 0;
         }
         CopyModeAction::Bottom => point.y = total - 1,
+        CopyModeAction::CursorCentreVertical => {
+            let middle = u32::from(mode.revision.viewport_rows) / 2;
+            point.y = mode
+                .viewport_offset
+                .saturating_add(middle)
+                .min(total.saturating_sub(1));
+        }
+        CopyModeAction::CursorCentreHorizontal => {
+            point.x = (mode.revision.columns / 2).min(mode.revision.columns.saturating_sub(1));
+        }
         CopyModeAction::TopLine => {
             point.x = 0;
             point.y = mode.viewport_offset;
@@ -17674,5 +17709,155 @@ mod tests {
             copy_mode_after_counted_action(CopyModeAction::CursorDownAndCancel, 3, true).is_none(),
             "a run stuck at the bottom exits"
         );
+    }
+
+    #[test]
+    fn cursor_centre_actions_park_the_cursor_mid_view_and_mid_row() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 9,
+            rows: 4,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let mode = copy_mode.as_mut().expect("mode");
+        let viewport = mode.viewport_offset;
+        mode.cursor = PointCoordinate { x: 7, y: viewport };
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::CursorCentreVertical,
+            &WordSeparators::default(),
+        );
+        assert_eq!(
+            mode.cursor,
+            PointCoordinate {
+                x: 7,
+                y: viewport + 2,
+            }
+        );
+        assert_eq!(mode.viewport_offset, viewport);
+        move_copy_cursor(
+            mode,
+            &CopyModeAction::CursorCentreHorizontal,
+            &WordSeparators::default(),
+        );
+        assert_eq!(
+            mode.cursor,
+            PointCoordinate {
+                x: 4,
+                y: viewport + 2,
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_placement_moves_the_view_and_leaves_the_cursor_line_alone() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 32,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let mut unseen_output = 0;
+        let anchor = {
+            let mode = copy_mode.as_mut().expect("mode");
+            let maximum = mode.revision.maximum_offset();
+            assert!(maximum >= 4);
+            mode.viewport_offset = maximum - 2;
+            mode.cursor = PointCoordinate {
+                x: 0,
+                y: maximum - 1,
+            };
+            mode.cursor.y
+        };
+        for (action, screen_row) in [
+            (CopyModeAction::ScrollTop, 0),
+            (CopyModeAction::ScrollMiddle, 1),
+            (CopyModeAction::ScrollBottom, 2),
+        ] {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                action.clone(),
+                &WordSeparators::default(),
+            )
+            .expect("copy action");
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(mode.cursor.y, anchor, "{action:?} moved the cursor line");
+            assert_eq!(
+                mode.viewport_offset,
+                anchor - screen_row,
+                "{action:?} placed the wrong view"
+            );
+        }
+    }
+
+    #[test]
+    fn scroll_placement_does_nothing_when_the_revision_cannot_reach_that_far() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 32,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"a\r\nb\r\nc\r\nd\r\ne\r\nf");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let mut unseen_output = 0;
+        {
+            let mode = copy_mode.as_mut().expect("mode");
+            mode.viewport_offset = 0;
+            mode.cursor = PointCoordinate { x: 0, y: 0 };
+        }
+        for action in [CopyModeAction::ScrollMiddle, CopyModeAction::ScrollBottom] {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                action.clone(),
+                &WordSeparators::default(),
+            )
+            .expect("copy action");
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(mode.viewport_offset, 0, "{action:?}");
+            assert_eq!(mode.cursor.y, 0, "{action:?}");
+        }
+    }
+
+    #[test]
+    fn toggle_position_flips_the_published_position_readout() {
+        let hidden = run_copy_actions(
+            b"alpha beta",
+            20,
+            2,
+            PointCoordinate { x: 0, y: 0 },
+            &[CopyModeAction::TogglePosition],
+        );
+        assert!(hidden.hide_position);
+        let shown = run_copy_actions(
+            b"alpha beta",
+            20,
+            2,
+            PointCoordinate { x: 0, y: 0 },
+            &[
+                CopyModeAction::TogglePosition,
+                CopyModeAction::TogglePosition,
+            ],
+        );
+        assert!(!shown.hide_position);
     }
 }

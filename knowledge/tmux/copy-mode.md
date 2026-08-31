@@ -90,7 +90,8 @@ unsupported `window-copy` actions below remain open.
 | --- | --- |
 | Cursor | `cursor-left/right/up/down`, `start-of-line`, `back-to-indentation`, `end-of-line` |
 | Word/para | `next-word`, `previous-word`, `next-word-end`, `next-space`, `previous-space`, `next-space-end`, `next-paragraph`, `previous-paragraph` |
-| Page/history | `page-up/down`, `halfpage-up/down`, `scroll-up/down`, `scroll-middle`, `goto-line`, `history-top`, `history-bottom`, `top-line`, `middle-line`, `bottom-line` |
+| Page/history | `page-up/down`, `halfpage-up/down`, `scroll-up/down`, `goto-line`, `history-top`, `history-bottom` |
+| View geometry | `top-line`, `middle-line`, `bottom-line`, `cursor-centre-vertical`, `cursor-centre-horizontal`, `scroll-top`, `scroll-middle`, `scroll-bottom`, `toggle-position` |
 | Scroll exit | `scroll-exit-on/off/toggle`, `page-down-and-cancel`, `halfpage-down-and-cancel`, `scroll-down-and-cancel`, `cursor-down-and-cancel` |
 | Semantic prompt | `next-prompt`, `previous-prompt` (`-o` = output only, via OSC 133 marks) |
 | Search | `search-again`, `search-reverse`, cursor-word forward/backward actions used by `*`/`#` |
@@ -116,11 +117,17 @@ Because a detached `send-keys -X` fails on the pin with `not in a mode`, an acti
 exits zero where tmux exits one. `compat/scenarios/copy-mode-*.txt` measure exactly that: a name in
 one of those corpora is proof it reaches a typed action, not proof of its semantics.
 
-`top-line`, `middle-line`, and `bottom-line` now set the copy cursor's column to zero and place its
-row at the top, middle, or bottom of the current frozen viewport. They preserve the viewport offset
-and clamp to the retained revision. The full `zz-terminal` library suite passes 197 tests for this
-slice. That evidence does not cover `history-bottom`, logical-line behavior, wrapping, scrolling, or
-the other missing actions.
+View geometry splits in two. `top-line`, `middle-line`, and `bottom-line` move the cursor inside a
+fixed view: column zero, row at the top, middle, or bottom of the current viewport.
+`cursor-centre-vertical` and `cursor-centre-horizontal` do the same without touching the column or
+the row respectively, taking the pin's `sy / 2` and `sx / 2` rather than the `(sy - 1) / 2` the line
+placements use. `scroll-top`, `scroll-middle`, and `scroll-bottom` are the mirror image: the cursor
+keeps its line and the view moves so that line lands on screen row 0, the middle, or the last row.
+Like the pin's `window_copy_scroll_to`, they are all-or-nothing — a revision that cannot reach that
+far leaves both the view and the cursor untouched rather than clamping partway.
+`toggle-position` flips `hide_position`, the same bit `copy-mode -H` latches at entry, so the
+published position readout appears and disappears without leaving the mode. That evidence does not
+cover `history-bottom`, logical-line behavior, or the other missing actions.
 
 Copy/pipe actions build a `CopyModeCopy` whose flags mirror tmux: `clipboard` is set unless `-C` or
 `set-clipboard off`; a paste buffer is created unless `-P` (append variants append); `pipe` runs the

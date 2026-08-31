@@ -365,6 +365,12 @@ pub enum CopyModeAction {
     ScrollExitOn,
     ScrollExitOff,
     ScrollExitToggle,
+    CursorCentreVertical,
+    CursorCentreHorizontal,
+    ScrollTop,
+    ScrollBottom,
+    /// Flip the mode's position readout, the pin's `hide_position`.
+    TogglePosition,
 }
 
 /// The pin's `selflag`: the unit a live selection extends by.
@@ -457,6 +463,11 @@ impl CopyModeAction {
             | Self::ScrollExitOn
             | Self::ScrollExitOff
             | Self::ScrollExitToggle
+            | Self::CursorCentreVertical
+            | Self::CursorCentreHorizontal
+            | Self::ScrollTop
+            | Self::ScrollBottom
+            | Self::TogglePosition
             | Self::GotoLine(_) => CopyModeCountPolicy::Once,
         }
     }

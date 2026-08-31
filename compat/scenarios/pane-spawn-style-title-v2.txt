@@ -1,0 +1,21 @@
+# Pane-local spawn styles inherit from the window when omitted. Repeated
+# creation flags store their final raw value, and -T expands after spawn in
+# the original target pane's live active state.
+set-window-option -t w:0 window-style fg=colour10
+set-window-option -t w:0 window-active-style fg=colour11
+set-window-option -t w:0 pane-border-style fg=colour12
+set-window-option -t w:0 pane-active-border-style fg=colour13
+select-pane -t w:0.0 -T source-zero
+split-window -d -h -t w:0.0
+select-pane -t w:0.1 -T decoy-one
+out: show-options -pAv -t w:0.1 window-style
+out: show-options -pAv -t w:0.1 window-active-style
+out: show-options -pAv -t w:0.1 pane-border-style
+out: show-options -pAv -t w:0.1 pane-active-border-style
+out: split-window -d -t w:0.0 -s fg=red -s fg=not-a-colour -S fg=green -S fg=yellow -R fg=cyan -R fg=magenta -T ignored -T [detached:#{pane_title}:#{pane_index}:#{pane_active}:#{command}] -P -F #{pane_index}:[#{pane_title}]
+out: show-options -pv -t w:0.1 window-style
+out: show-options -pv -t w:0.1 window-active-style
+out: show-options -pv -t w:0.1 pane-border-style
+out: show-options -pv -t w:0.1 pane-active-border-style
+select-pane -t w:0.2
+out: splitw -t w:0.0 -T [selected:#{pane_title}:#{pane_index}:#{pane_active}:#{command}] -P -F #{pane_index}:[#{pane_title}]

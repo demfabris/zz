@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **`F-ALIASES-MULTI-BODY` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **`F-PANE-SPAWN-STYLE-TITLE-V2` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED)**
+> Live work: **67 UNRESOLVED GROUPS (47 OPEN, 20 BLOCKED)**
 >
-> Ledger settlement: **69.0% (145 of 210 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **68.5% (146 of 213 known groups); SECONDARY DIAGNOSTIC**
 >
 > Exit evidence: **106 SCENARIOS, 1,683 STEPS, ATTACHED-CLIENT PASS**
 >
@@ -50,6 +50,10 @@ per engine with no differing channel, and the attached fixture covers 24 Interac
 `run-shell` and `if-shell` cases across valid, missing, and omitted targets. The third chunk closes
 literal DEL identity across bindings, key options, and live prefix and backspace transport. Its
 40-step differential completes 196 fixture checks per engine with no differing channel.
+`F-PANE-SPAWN-STYLE-TITLE-V2` then closes pane-local creation styles and post-spawn title expansion
+while retaining `-k` and `-m` in `pane.spawn-flags`, retaining `-W` in the separate
+`pane.command-completion` group, and registering configured pane-title execution and the exact
+`after-select-pane` trigger boundary as two independent residuals.
 
 This file is the campaign rollup, not a second item-level backlog. Individual gap state lives only
 in [`compat/tmux-gaps.json`](compat/tmux-gaps.json). The readable
@@ -76,15 +80,15 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | `F-CONFIG-BYTE-LEXER` adds raw-byte parser entrypoints for startup-file and signed-buffer semantics plus the two-step byte matrix; `F-CONFIG-BYTE-ENGINE` and `F-CONFIG-BYTE-LOADERS` remain queued |
+| Delivery | `F-CONFIG-BYTE-LEXER` adds raw-byte parser entrypoints for startup-file and signed-buffer semantics; `F-PANE-SPAWN-STYLE-TITLE-V2` closes `pane.spawn-style-title`; `F-CONFIG-BYTE-ENGINE` and `F-CONFIG-BYTE-LOADERS` remain queued |
 | Campaign worktrees | Each editor creates a dedicated worktree after claiming its front; shared campaign artifacts remain coordinator-owned |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Config parsing preserves raw input bytes under separate startup-file and signed-buffer modes; MuxEngine adapters, filesystem loaders, Command, Control, if-shell, and source-path encoding remain open |
-| Live registry | 87 active groups, 586 active items, 123 closed records |
-| Active status | 45 open, 20 blocked, 22 accepted |
+| Campaign point | Config parsing preserves raw input bytes under separate startup-file and signed-buffer modes. Split-window pane style storage, title expansion, and shared title cleaning are closed; MuxEngine adapters, filesystem loaders, Command, Control, if-shell, source-path encoding, pane lifecycle flags, configured title hooks, and the exact selection-hook boundary remain open |
+| Live registry | 89 active groups, 585 active items, 124 closed records |
+| Active status | 47 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases plus 2 clean-main source-replay output and warning regressions under issue comment `5471998427` |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
@@ -104,13 +108,14 @@ found during that wave.
 | --- | --- |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
-| New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
+| New residual groups | `F-PANE-SPAWN-STYLE-TITLE-V2`: 2; `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
-| Live unresolved | 45 open + 20 blocked = 65 |
+| Live unresolved | 47 open + 20 blocked = 67 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 107 scenarios, 1,685 steps, attached-client `PASS`, 2 registered GEO rows, and 2 clean-main source-replay OUT/WARN rows |
+| Latest published differential | 107 scenarios, 1,685 steps, attached-client `PASS`, 2 registered GEO rows, and 2 clean-main source-replay OUT/WARN rows |
+| Pane reserved differential | 18 steps, zero differing TOPO/GEO/FMT/OUT/WARN channels |
 | Differential SHA-256 | `b7236c220735d917649fd4ce9e1ad0480479a3242779b0a38b98bdd90160afc8` |
-| Ledger settlement | 145 of 210 known groups = 69.0% |
+| Ledger settlement | 146 of 213 known groups = 68.5% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -124,7 +129,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(123 + 22) / (123 + 87) = 145 / 210 = 69.0%
+(124 + 22) / (124 + 89) = 146 / 213 = 68.5%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -980,9 +985,9 @@ fallback uses the host `wcwidth` policy. zz uses `unicode-width` 0.2.2. A bounde
 the style, malformed-input, control, override, cache, platform, and Unicode cases before changing
 runtime behavior. The tracker now rates the group later and hard.
 
-The live registry now has 84 active groups, 586 active items, and 123 closed records: 42 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 145 of 207 groups (70.0%).
-Priority has 62 `later` and 22 `none` groups. The next worker must claim the dispatch-board front.
+The live registry now has 89 active groups, 585 active items, and 124 closed records: 47 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 146 of 213 groups (68.5%).
+Priority has 67 `later` and 22 `none` groups. The next worker must claim the dispatch-board front.
 
 Slice 10ah closes
 `control-mode.kill-server-response-order/semantic:control-mode-kill-server-response-order`.
@@ -1218,6 +1223,46 @@ shutdown and the tested session-name grouping are exact, while complete multi-wi
 group and registering this residual leaves 84 active groups and 586 items, with 42 open, 20 blocked,
 22 accepted, and 123 closed records. The secondary ledger is 145 of 207 groups (70.0%); unresolved
 work remains 62.
+
+## Completed front: F-PANE-SPAWN-STYLE-TITLE-V2, 2026-08-30
+
+`pane.spawn-style-title` is closed as a bounded subrecord of the broader `pane.spawn-flags` board
+contract. `split-window -s` stores its final raw value as both pane-local `window-style` and
+`window-active-style`; `-S` and `-R` store their final raw values as pane-local active and inactive
+border styles. Omitted flags inherit the destination window values. `-T` expands once after spawn in
+the resolved original target pane's live context rather than the caller's current pane, then assigns
+the result to the new pane. Detached and non-detached creation therefore expose the target's live
+post-spawn `pane_active` value. Split and select share title cleaning: printable backslashes are
+doubled, and a title assignment containing an ASCII control byte or DEL is ignored without an
+error.
+
+The focused mux tests cover repeated-last storage, raw style values, title cleaning, inheritance, and
+both title activity states. The 18-step strict `pane-spawn-style-title-v2` differential separately
+covers an invalid-looking raw colour token, distinct caller and explicit target panes, `splitw` alias
+invocation with canonical `#{command}`, inheritance, and both activity states. It has zero topology,
+geometry, format, output, or warning differences. The existing oracle-derived command-flag fixture
+retains the required-value shapes and exact missing-value usage grammar, and `compat/check.sh`
+requires the focused semantic test by its exact fully qualified name. No protocol or snapshot field
+changed.
+
+Configured `pane-title-changed` hook execution for both split and select is outside this closure.
+Pinned split notifies after every post-spawn `-T` attempt, including when trusted title cleaning
+rejects the value, after `after-split-window`. Pinned select notifies whenever cleaning accepts the
+value, including an unchanged title, with format context from the original target and title-hook
+context from the direction-resolved destination. Its `-T` path does not emit `after-select-pane`.
+Snapshot diffing misses new panes and unchanged stored titles. `hooks.pane-title-change` retains this
+contract. Pinned `notify.c` emits no corresponding Control-mode notification, so the title residual
+is configured-hook-only. `hooks.after-select-pane-trigger` separately retains the broader requirement
+that only an ordinary selection path changing the invoking client's effective active pane emits
+`after-select-pane`; `-l`, title, mark, style-read, input-toggle, no-neighbor, already-active, and
+last-pane paths do not substitute that hook, even when `-l` changes the active pane.
+
+This front partially retires the original board contract. `pane.spawn-flags` remains active for the
+`-k` and `-m` remain-on-exit lifecycle; `pane.command-completion` separately owns `-W` queue
+blocking and exit-status propagation. The retained lifecycle group owns storing the `-m` format;
+`options.remain-on-exit-format` separately owns rendering it. The live registry has 89 active groups
+and 585 items, with 47 open, 20 blocked, 22 accepted, and 124 closed records. The secondary ledger is
+146 of 213 groups (68.5%); unresolved work remains 67.
 
 ## Validation and closure gates
 

@@ -621,10 +621,13 @@ closure is that exception.
 | Pending rerank | Prompt-backed copy defaults | `keys.copy-mode-prompt-defaults` | Unranked | Ten defaults land only after their generic prompt contract |
 
 Slices 9a through 9f and 10a through 10ai are closed, along with the Wave 2 shell-job cwd and
-literal DEL chunks.
+literal DEL chunks. `F-PANE-SPAWN-STYLE-TITLE-V2` closes the independent split style/title subset
+with an 18-step zero-difference proof. `pane.spawn-flags` retains lifecycle behavior, while
+`pane.spawn-flags` retains `-k` and `-m`, `pane.command-completion` retains `-W`, and
+`hooks.pane-title-change` and `hooks.after-select-pane-trigger` retain the two hook residuals.
 Commit `562b950c` contains cumulative slices 10w through 10ag; `4800255d` closes 10ah. The current
-ledger has 84 active groups with 586 items and 123 closed records: 42 open, 20 blocked, and 22
-accepted, resolving 145 of 207 groups (70.0%). Wave 2 is 3 of 3 complete, with no active group
+ledger has 89 active groups with 585 items and 124 closed records: 47 open, 20 blocked, and 22
+accepted, resolving 146 of 213 groups (68.5%). Wave 2 is 3 of 3 complete, with no active group
 marked `next`. Under
 `detach-on-destroy on`, only flagged clients use
 the newest remaining session; under `no-detached`, all clients use an existing detached survivor,

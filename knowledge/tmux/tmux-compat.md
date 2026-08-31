@@ -352,8 +352,8 @@ relative sources and literal metacharacter paths, then clears it before runtime 
 isolated differential passes exactly on both engines without a public protocol change. The full
 eight-case diagnostic then exposed queued pane output during Control exit, which slice 10ai closes.
 
-The live registry has 84 active groups, 586 items, and 123 closed records: 42 open, 20 blocked, and
-22 accepted. Closed records plus accepted active groups resolve 145 of 207 known groups (70.0%).
+The live registry has 89 active groups, 585 items, and 124 closed records: 47 open, 20 blocked, and
+22 accepted. Closed records plus accepted active groups resolve 146 of 213 known groups (68.5%).
 The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client `PASS`, exactly two approved GEO
 rows, every other channel clean, and SHA-256
 `a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Slice 10ai starts Control
@@ -372,6 +372,12 @@ multi-window `window-unlinked` order remains explicitly open under
 `hooks.shutdown-window-unlinked-order` because tmux derives it from winlink red-black-tree history
 that zz does not retain. Closure review advanced protocol v85 for typed post-admission callback
 provenance and daemon-authoritative `Attached` reconnect state, not for an alias child-vector field.
+
+`F-PANE-SPAWN-STYLE-TITLE-V2` closes raw pane-local style storage for `split-window -R`, `-s`, and
+`-S`, plus post-spawn `-T` expansion and the shared trusted title-cleaning path. The 18-step focused
+differential has zero differences. Lifecycle flags `-k` and `-m` remain under `pane.spawn-flags`,
+while `-W` remains under `pane.command-completion`. Configured split/select title-hook parity remains under `hooks.pane-title-change`,
+and `hooks.after-select-pane-trigger` retains the exact ordinary-selection trigger boundary.
 The next worker claims the dispatch-board front from published `origin/main`.
 
 Protocol v84 closes all six runtime rules

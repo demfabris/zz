@@ -44,7 +44,8 @@ just compat-check
 ```
 
 The recipe calls `compat/check.sh`, which fetches the pinned tmux binary once, validates the oracle
-and registry, requires nine named mux manifest tests, then runs the full `zz-mux` library suite.
+and registry, requires nine named mux manifest tests plus one focused split style/title semantic
+test, then runs the full `zz-mux` library suite.
 It also requires three named daemon tests: the hook-producer partition, delegated-format consumer,
 and scoped-context registration tests. Each required test runs through `--exact`.
 Linux CI runs the same command after restoring the pinned tmux cache. A full

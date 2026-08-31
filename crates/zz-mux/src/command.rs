@@ -5842,6 +5842,36 @@ impl MuxEngine {
             self.state.windows.get_mut(&window).unwrap().zoomed_pane =
                 options.has("-Z").then_some(active_pane);
         }
+        if options.value("-s").is_some()
+            || options.value("-S").is_some()
+            || options.value("-R").is_some()
+        {
+            let pane_options = self.scalar_table_mut_or_insert(TmuxOptionTarget::Pane(pane));
+            if let Some(style) = options.value("-s") {
+                pane_options.insert("window-style", style.to_owned());
+                pane_options.insert("window-active-style", style.to_owned());
+            }
+            if let Some(style) = options.value("-S") {
+                pane_options.insert("pane-active-border-style", style.to_owned());
+            }
+            if let Some(style) = options.value("-R") {
+                pane_options.insert("pane-border-style", style.to_owned());
+            }
+        }
+        if let Some(title) = options.value("-T") {
+            let target =
+                ExecutionContext::for_pane(&self.state, target).expect("resolved pane exists");
+            let title = self.expand_pane_format(
+                title,
+                &target,
+                active_session,
+                target_format_client,
+                hooks,
+            );
+            if let Some(title) = tmux_clean_title(&title) {
+                self.state.update_pane_title(pane, title)?;
+            }
+        }
         let session = self.state.windows[&window].session;
         let mut effects = vec![MuxEffect::PaneCreated {
             pane,
@@ -5994,7 +6024,9 @@ impl MuxEngine {
                 context.target_format_client(),
                 hooks,
             );
-            self.state.update_pane_title(pane, title)?;
+            if let Some(title) = tmux_clean_title(&title) {
+                self.state.update_pane_title(pane, title)?;
+            }
             return Ok(Execution::default());
         }
         self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
@@ -12078,6 +12110,13 @@ fn tmux_clean_name(name: &str, kind: &str) -> Result<String, ServerError> {
         )));
     }
     Ok(tmux_vis(name, false))
+}
+
+fn tmux_clean_title(title: &str) -> Option<String> {
+    if title.bytes().any(|byte| byte.is_ascii_control()) {
+        return None;
+    }
+    Some(tmux_vis(title, false))
 }
 
 fn tmux_flag(value: bool) -> &'static str {
@@ -21197,6 +21236,138 @@ mod tests {
     }
 
     #[test]
+    fn split_window_style_and_title_flags_match_pinned_spawn_semantics() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let first = context.pane.unwrap();
+        engine.state.update_pane_title(first, "origin").unwrap();
+
+        for (name, value) in [
+            ("window-style", "bg=colour236"),
+            ("window-active-style", "bg=colour237"),
+            ("pane-border-style", "fg=colour238"),
+            ("pane-active-border-style", "fg=colour239"),
+        ] {
+            engine
+                .execute(&mut context, &command("set-option", &["-w", name, value]))
+                .unwrap();
+        }
+        for (name, value) in [
+            ("window-style", "bg=red"),
+            ("window-active-style", "bg=blue"),
+            ("pane-border-style", "fg=green"),
+            ("pane-active-border-style", "fg=yellow"),
+        ] {
+            engine
+                .execute(
+                    &mut context,
+                    &command("set-option", &["-p", "-t", &first.to_string(), name, value]),
+                )
+                .unwrap();
+        }
+
+        let detached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "split-window",
+                    &[
+                        "-d",
+                        "-t",
+                        &first.to_string(),
+                        "-s",
+                        "fg=ignored",
+                        "-s",
+                        "fg=not-a-colour",
+                        "-S",
+                        "fg=active-first",
+                        "-S",
+                        "fg=active-last",
+                        "-R",
+                        "fg=not-a-colour",
+                        "-T",
+                        "ignored",
+                        "-T",
+                        r"from=#{pane_id},active=#{pane_active},old=#{pane_title}\tail",
+                    ],
+                ),
+            )
+            .unwrap();
+        let detached_pane = detached
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(context.pane, Some(first));
+        assert_eq!(
+            engine.state.pane(detached_pane).unwrap().title,
+            format!(r"from={first},active=1,old=origin\\tail")
+        );
+        assert_eq!(
+            engine.window_style_values(detached_pane),
+            WindowStyleValues {
+                style: Some("fg=not-a-colour".to_owned()),
+                active_style: Some("fg=not-a-colour".to_owned()),
+            }
+        );
+        assert_eq!(
+            engine.pane_border_style_values(detached_pane),
+            PaneBorderStyleValues {
+                border: Some("fg=not-a-colour".to_owned()),
+                active_border: Some("fg=active-last".to_owned()),
+            }
+        );
+
+        let attached = engine
+            .execute(
+                &mut context,
+                &command(
+                    "split-window",
+                    &[
+                        "-t",
+                        &first.to_string(),
+                        "-T",
+                        "from=#{pane_id},active=#{pane_active},old=#{pane_title}",
+                    ],
+                ),
+            )
+            .unwrap();
+        let attached_pane = attached
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(context.pane, Some(attached_pane));
+        assert_eq!(
+            engine.state.pane(attached_pane).unwrap().title,
+            format!("from={first},active=0,old=origin")
+        );
+        assert_eq!(
+            engine.window_style_values(attached_pane),
+            WindowStyleValues {
+                style: Some("bg=colour236".to_owned()),
+                active_style: Some("bg=colour237".to_owned()),
+            }
+        );
+        assert_eq!(
+            engine.pane_border_style_values(attached_pane),
+            PaneBorderStyleValues {
+                border: Some("fg=colour238".to_owned()),
+                active_border: Some("fg=colour239".to_owned()),
+            }
+        );
+    }
+
+    #[test]
     fn empty_pane_command_errors_follow_target_resolution() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -21735,11 +21906,14 @@ mod tests {
         let renamed = engine
             .execute(
                 &mut context,
-                &command("select-pane", &["-t", &first.to_string(), "-T", "~/src/zz"]),
+                &command(
+                    "select-pane",
+                    &["-t", &first.to_string(), "-T", r"~/src\zz"],
+                ),
             )
             .expect("set pane title");
         assert_eq!(renamed.effects, [MuxEffect::SnapshotChanged]);
-        assert_eq!(engine.state.pane(first).unwrap().title, "~/src/zz");
+        assert_eq!(engine.state.pane(first).unwrap().title, r"~/src\\zz");
         assert_eq!(context.pane, Some(second));
         assert_eq!(
             engine.state.windows[&context.window.unwrap()].active_pane,
@@ -21749,11 +21923,25 @@ mod tests {
         let unchanged = engine
             .execute(
                 &mut context,
-                &command("select-pane", &["-t", &first.to_string(), "-T", "~/src/zz"]),
+                &command(
+                    "select-pane",
+                    &["-t", &first.to_string(), "-T", r"~/src\zz"],
+                ),
             )
             .expect("same title is a no-op");
         assert!(unchanged.effects.is_empty());
         assert_eq!(context.pane, Some(second));
+
+        for title in ["bad\n", "bad\x7f"] {
+            let invalid = engine
+                .execute(
+                    &mut context,
+                    &command("select-pane", &["-t", &first.to_string(), "-T", title]),
+                )
+                .expect("invalid title is ignored");
+            assert!(invalid.effects.is_empty());
+            assert_eq!(engine.state.pane(first).unwrap().title, r"~/src\\zz");
+        }
     }
 
     #[test]

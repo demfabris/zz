@@ -7388,6 +7388,7 @@ fn apply_copy_mode_action(
         | CopyModeAction::NextParagraph
         | CopyModeAction::PreviousParagraph
         | CopyModeAction::NextMatchingBracket
+        | CopyModeAction::PreviousMatchingBracket
         | CopyModeAction::GotoLine(_)
         | CopyModeAction::NextPrompt { .. }
         | CopyModeAction::PreviousPrompt { .. }
@@ -7999,8 +8000,13 @@ fn move_copy_cursor(
         | CopyModeAction::NextSpaceEnd => {
             point = move_revision_word(&mode.revision, point, action, word_separators);
         }
+        CopyModeAction::PreviousMatchingBracket => {
+            if let Some(target) = revision_matching_bracket(&mode.revision, point, true) {
+                point = target;
+            }
+        }
         CopyModeAction::NextMatchingBracket => {
-            if let Some(target) = revision_matching_bracket(&mode.revision, point) {
+            if let Some(target) = revision_matching_bracket(&mode.revision, point, false) {
                 point = target;
             }
         }
@@ -8084,6 +8090,7 @@ fn revision_copy_line_end(revision: &ModeRevision, row: u32) -> u16 {
 fn revision_matching_bracket(
     revision: &ModeRevision,
     point: PointCoordinate,
+    backward: bool,
 ) -> Option<PointCoordinate> {
     let columns = u64::from(revision.columns);
     let total = columns.saturating_mul(u64::from(revision.total_rows()));
@@ -8098,16 +8105,29 @@ fn revision_matching_bracket(
         .min(total.saturating_sub(1));
 
     let mut bracket = origin;
-    while !matches!(char_at(bracket), Some('(' | ')' | '[' | ']' | '{' | '}')) {
-        let at = to_point(bracket);
-        let has_next_column = at.x.saturating_add(1) < revision.columns;
-        let has_wrapped_row =
-            revision.row(at.y).wrapped() && at.y.saturating_add(1) < revision.total_rows();
-        if has_next_column || has_wrapped_row {
-            bracket = bracket.saturating_add(1);
+    let is_target = |character: Option<char>| {
+        if backward {
+            matches!(character, Some(')' | ']' | '}'))
         } else {
+            matches!(character, Some('(' | ')' | '[' | ']' | '{' | '}'))
+        }
+    };
+    while !is_target(char_at(bracket)) {
+        let at = to_point(bracket);
+        let reaches_further = if backward {
+            at.x > 0 || (at.y > 0 && revision.row(at.y).continuation())
+        } else {
+            at.x.saturating_add(1) < revision.columns
+                || (revision.row(at.y).wrapped() && at.y.saturating_add(1) < revision.total_rows())
+        };
+        if !reaches_further {
             return None;
         }
+        bracket = if backward {
+            bracket.saturating_sub(1)
+        } else {
+            bracket.saturating_add(1)
+        };
     }
 
     let found = char_at(bracket)?;
@@ -17951,5 +17971,77 @@ mod tests {
         );
         assert_eq!(mode.viewport_offset, 0);
         assert_eq!(mode.cursor.y, mode.revision.maximum_offset());
+    }
+
+    #[test]
+    fn previous_matching_bracket_walks_back_from_the_nearest_bracket() {
+        let closer = run_copy_actions(
+            b"(alpha [beta] gamma)",
+            24,
+            2,
+            PointCoordinate { x: 12, y: 0 },
+            &[CopyModeAction::PreviousMatchingBracket],
+        );
+        assert_eq!(closer.cursor.x, 7);
+
+        let inside = run_copy_actions(
+            b"(alpha [beta] gamma)",
+            24,
+            2,
+            PointCoordinate { x: 10, y: 0 },
+            &[CopyModeAction::PreviousMatchingBracket],
+        );
+        assert_eq!(inside.cursor.x, 10);
+
+        let nested = run_copy_actions(
+            b"(alpha [beta] gamma)",
+            24,
+            2,
+            PointCoordinate { x: 19, y: 0 },
+            &[CopyModeAction::PreviousMatchingBracket],
+        );
+        assert_eq!(nested.cursor.x, 0);
+    }
+
+    #[test]
+    fn previous_matching_bracket_stops_at_the_start_of_the_logical_line() {
+        let stuck = run_copy_actions(
+            b"alpha beta",
+            24,
+            2,
+            PointCoordinate { x: 3, y: 0 },
+            &[CopyModeAction::PreviousMatchingBracket],
+        );
+        assert_eq!(stuck.cursor.x, 3);
+
+        let unmatched = run_copy_actions(
+            b"alpha) beta",
+            24,
+            2,
+            PointCoordinate { x: 8, y: 0 },
+            &[CopyModeAction::PreviousMatchingBracket],
+        );
+        assert_eq!(unmatched.cursor.x, 8);
+    }
+
+    #[test]
+    fn the_matching_bracket_pair_scans_in_opposite_directions() {
+        let forward = run_copy_actions(
+            b"one (two) three",
+            24,
+            2,
+            PointCoordinate { x: 1, y: 0 },
+            &[CopyModeAction::NextMatchingBracket],
+        );
+        assert_eq!(forward.cursor.x, 8);
+
+        let backward = run_copy_actions(
+            b"one (two) three",
+            24,
+            2,
+            PointCoordinate { x: 12, y: 0 },
+            &[CopyModeAction::PreviousMatchingBracket],
+        );
+        assert_eq!(backward.cursor.x, 4);
     }
 }

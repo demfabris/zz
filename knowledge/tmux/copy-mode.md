@@ -98,7 +98,7 @@ unsupported `window-copy` actions below remain open.
 | Selection | `begin-selection`, `select-word`, `select-line`, `selection-mode`, `clear-selection`, `stop-selection`, `clear-selection-or-cancel`, `other-end` |
 | Rectangle | `rectangle-toggle`, `rectangle-on`, `rectangle-off` |
 | Marks | `set-mark`, `jump-to-mark` |
-| Character jump | `jump-forward`, `jump-backward`, `jump-to-forward`, `jump-to-backward` (capture one target key), `jump-again`, `jump-reverse`, `next-matching-bracket` |
+| Character jump | `jump-forward`, `jump-backward`, `jump-to-forward`, `jump-to-backward` (capture one target key), `jump-again`, `jump-reverse`, `next-matching-bracket`, `previous-matching-bracket` |
 | Copy | `copy-selection`, `copy-selection-no-clear`, `copy-selection-and-cancel`, `copy-end-of-line`, `copy-end-of-line-and-cancel`, `append-selection`, `append-selection-and-cancel` |
 | Pipe | `copy-pipe`, `copy-pipe-no-clear`, `copy-pipe-and-cancel`, `pipe`, `pipe-no-clear`, `pipe-and-cancel` |
 | Exit | `cancel`, `clear-selection-or-cancel` (exits only with no selection) |
@@ -165,6 +165,16 @@ selection is live, `scroll-down-and-cancel` exits either way, and `cursor-down-a
 only when the cursor could not move at all and the viewport is at the bottom. That last one is the
 only counted action whose exit test runs once for the whole run instead of once per step, which is
 why it carries its own count policy.
+
+## Matching brackets
+
+The two bracket actions share one scan and differ only in direction. `next-matching-bracket` walks
+forward from the cursor to the nearest of the six bracket characters, then follows its depth to the
+partner. `previous-matching-bracket` walks backward and accepts only a closing bracket, then follows
+the depth back to its opener; with none before the start of the logical line, or an unbalanced one,
+the cursor stays put. That is the pin's emacs branch with its one-column lookback widened to the
+whole logical line: the pin also carries a `previous-word` fallback and a vi branch that does
+nothing, and neither is reachable from the terminal actor, which does not see `mode-keys`.
 
 ## Selection lifecycle
 

@@ -209,7 +209,7 @@ mod tests {
             .iter()
             .filter(|entry| copy_mode_action_is_mapped(entry.name))
             .count();
-        assert_eq!(mapped, 80);
+        assert_eq!(mapped, 81);
         for entry in PINNED_COPY_MODE_ACTIONS {
             let Some(action) = copy_mode_probe_action(entry.name) else {
                 continue;
@@ -244,10 +244,6 @@ mod tests {
                     "search-forward-incremental",
                     "search-forward-text",
                 ],
-            ),
-            (
-                CopyActionCategory::JumpPagePrompt,
-                vec!["previous-matching-bracket"],
             ),
             (
                 CopyActionCategory::CopyFormatAndDestination,

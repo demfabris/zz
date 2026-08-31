@@ -1,0 +1,30 @@
+# previous-matching-bracket closes the pinned jump, page, and prompt vocabulary,
+# so every name in that family now reaches a typed copy action and a detached
+# `send-keys -X` fails on both sides.
+send-keys -t =w:0.0 -X previous-matching-bracket
+send-keys -t =w:0.0 -X next-matching-bracket
+send-keys -t =w:0.0 -N 3 -X previous-matching-bracket
+send-keys -t =w:0.0 -X jump-again
+send-keys -t =w:0.0 -X jump-reverse
+send-keys -t =w:0.0 -X jump-forward x
+send-keys -t =w:0.0 -X jump-backward x
+send-keys -t =w:0.0 -X jump-to-forward x
+send-keys -t =w:0.0 -X jump-to-backward x
+send-keys -t =w:0.0 -X jump-to-mark
+send-keys -t =w:0.0 -X set-mark
+send-keys -t =w:0.0 -X next-prompt
+send-keys -t =w:0.0 -X next-prompt -o
+send-keys -t =w:0.0 -X previous-prompt
+send-keys -t =w:0.0 -X previous-prompt -o
+send-keys -t =w:0.0 -X page-up
+send-keys -t =w:0.0 -X halfpage-up
+send-keys -t =w:0.0 -X cancel
+
+# A user binding on either table renders the same command on both sides. The
+# pin's stock emacs C-M-b for this action is an omitted default key tracked
+# outside this group, so it is not asserted here.
+bind-key -T copy-mode-vi B send-keys -X previous-matching-bracket
+out: list-keys -T copy-mode-vi -1 B
+bind-key -T copy-mode B send-keys -X previous-matching-bracket
+out: list-keys -T copy-mode -1 B
+out: list-keys -T copy-mode-vi -1 %

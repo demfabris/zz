@@ -32,7 +32,8 @@ actor executes both against the frozen revision. `-X` actions never reach the PT
   the live selection overlay. The daemon dispatches the freeze and the client's key-table switch together
   (`enter_copy_session`), so the two can never move independently.
 - **Exit:** `cancel` (`q` and `C-c` in vi; Escape, `q`, and `C-c` in emacs), any `-and-cancel`
-  copy action, pane death, focusing another pane, or detaching. Stock vi Escape is
+  copy action, the four `-and-cancel` movement actions and an armed scroll-exit latch (see
+  [Scroll exit](#scroll-exit)), pane death, focusing another pane, or detaching. Stock vi Escape is
   `clear-selection`, matching the pinned tmux table; it does not exit. The separate
   `clear-selection-or-cancel` action remains available to custom bindings.
 - **Reconciliation:** copy mode lives on the terminal actor while the key table lives on the client, and a
@@ -130,8 +131,8 @@ the middle, then the top, then the bottom of the view, and the cycle restarts at
 the cursor changed line since the last press. Unlike the scroll placements it clamps rather than
 refusing, matching the pin's partial scroll. `toggle-position` flips `hide_position`, the same bit
 `copy-mode -H` latches at entry, so the published position readout appears and disappears without
-leaving the mode. That evidence does not
-cover `history-bottom`, logical-line behavior, or the other missing actions.
+leaving the mode. None of that covers `history-bottom`, logical-line behavior, or the actions still
+missing from the vocabulary.
 
 Copy/pipe actions build a `CopyModeCopy` whose flags mirror tmux: `clipboard` is set unless `-C` or
 `set-clipboard off`; a paste buffer is created unless `-P` (append variants append); `pipe` runs the

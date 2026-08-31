@@ -1,0 +1,30 @@
+name: Nightly compat corpus
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: Full differential corpus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Install pinned tmux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libevent-dev libncurses-dev bison automake pkg-config
+
+      - name: Run the full strict corpus with the attached fixture
+        run: script -e -c "compat/run.sh --strict-geometry --attached-client" /dev/null
+
+      - name: Check registry and report freshness
+        run: |
+          python3 compat/tmux-tracker.py check
+          python3 compat/board_test.py

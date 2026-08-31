@@ -89,9 +89,11 @@ commit with `git ls-remote origin`, which fails elsewhere.
    a new candidate record. Never force-update any campaign branch.
 6. Integrate it yourself: `claim MAIN --lease 2h`. Holding MAIN, rebase onto
    fresh origin/main, run the full gate from the issue (workspace tests, clippy,
-   strict corpus with the attached fixture, registry close + tracker
-   check/write-report, rollup counts), `git push origin HEAD:main`, post
-   `integrated`, `release MAIN`. Only ever push `campaign/*` branches, plus
+   the DELTA corpus per the issue's gate rules — `compat/run.sh --delta
+   <base>..HEAD --commands <touched> --strict-geometry`, full corpus only for
+   harness-touching or wide candidates; nightly CI runs the full corpus —
+   registry close + tracker check/write-report, rollup counts),
+   `git push origin HEAD:main`, post `integrated`, `release MAIN`. Only ever push `campaign/*` branches, plus
    main while holding MAIN, and never force-push anything.
    Gate stages are long and verdicts land while they run: re-read your front's
    comments between stages (after the workspace tests, before the corpus, and

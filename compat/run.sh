@@ -7,6 +7,8 @@
 #   compat/run.sh windows panes
 #   compat/run.sh --strict-geometry
 #   compat/run.sh --check-summary | --strict-geometry --attached-client
+#   compat/run.sh --delta origin/main..HEAD --commands split-window,new-window
+#   compat/run.sh --delta origin/main..HEAD --list   (print selection, run nothing)
 set -euo pipefail
 
 COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,12 +25,29 @@ TMUX_TRACKER="$COMPAT_DIR/tmux-tracker.py"
 STRICT_GEOMETRY=0
 CHECK_SUMMARY=0
 ATTACHED_CLIENT=0
+DELTA_RANGE=""
+DELTA_COMMANDS=""
+LIST_ONLY=0
 requested=()
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
   --strict-geometry)
     STRICT_GEOMETRY=1
+    shift
+    ;;
+  --delta)
+    [ "$#" -ge 2 ] || { echo "run.sh: --delta needs a git range" >&2; exit 2; }
+    DELTA_RANGE="$2"
+    shift 2
+    ;;
+  --commands)
+    [ "$#" -ge 2 ] || { echo "run.sh: --commands needs a comma-separated list" >&2; exit 2; }
+    DELTA_COMMANDS="$2"
+    shift 2
+    ;;
+  --list)
+    LIST_ONLY=1
     shift
     ;;
   --check-summary)
@@ -92,7 +111,39 @@ resolve_scenario() {
 }
 
 scenarios=()
-if [ "${#requested[@]}" -gt 0 ]; then
+if [ -n "$DELTA_RANGE" ] && [ "${#requested[@]}" -eq 0 ]; then
+  delta_list=""
+  smoke_n=0
+  changed_n=0
+  matched_n=0
+  shopt -s nullglob
+  for f in "$SCENARIOS_DIR"/smoke/*.txt; do
+    delta_list="$delta_list$(canonical_file "$f")"$'\n'
+    smoke_n=$((smoke_n + 1))
+  done
+  shopt -u nullglob
+  while IFS= read -r rel; do
+    [ -f "$REPO_DIR/$rel" ] || continue
+    case "$rel" in *.txt) ;; *) continue ;; esac
+    delta_list="$delta_list$(canonical_file "$REPO_DIR/$rel")"$'\n'
+    changed_n=$((changed_n + 1))
+  done < <(git -C "$REPO_DIR" diff --name-only "$DELTA_RANGE" -- compat/scenarios/)
+  if [ -n "$DELTA_COMMANDS" ]; then
+    IFS=',' read -ra delta_cmds <<<"$DELTA_COMMANDS"
+    for cmd in "${delta_cmds[@]}"; do
+      cmd="$(printf '%s' "$cmd" | tr -d '[:space:]')"
+      [ -n "$cmd" ] || continue
+      while IFS= read -r f; do
+        delta_list="$delta_list$(canonical_file "$f")"$'\n'
+        matched_n=$((matched_n + 1))
+      done < <(grep -rlF --include='*.txt' -- "$cmd" "$SCENARIOS_DIR" | sort)
+    done
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] && scenarios+=("$f")
+  done < <(printf '%s' "$delta_list" | sort -u)
+  [ "$LIST_ONLY" -eq 1 ] || log "delta corpus for $DELTA_RANGE: ${#scenarios[@]} unique scenarios (smoke $smoke_n, changed $changed_n, command-matched $matched_n)"
+elif [ "${#requested[@]}" -gt 0 ]; then
   for name in "${requested[@]}"; do
     scenario="$(resolve_scenario "$name" || true)"
     [ -n "$scenario" ] || die "scenario not found: $name"
@@ -108,6 +159,13 @@ else
   shopt -u nullglob
 fi
 [ "${#scenarios[@]}" -gt 0 ] || die "no scenarios found under $SCENARIOS_DIR"
+
+if [ "$LIST_ONLY" -eq 1 ]; then
+  for s in "${scenarios[@]}"; do
+    printf '%s\n' "${s#"$SCENARIOS_DIR/"}"
+  done
+  exit 0
+fi
 
 scenario_step_count() {
   awk '

@@ -1063,7 +1063,7 @@ These ten keys require command-prompt behavior and stored command blocks, not an
 
 ### `keys.copy-mode-unsupported-default-actions`: Implement missing stock copy-mode actions
 
-These seven absent default keys name five of the 29 actions tracked under `copy-mode.action-fidelity`. Installing the bindings before those five actions have typed behavior would create silent no-ops; the other 24 missing action names do not belong to this default-key group.
+These seven absent default keys name five actions tracked under `copy-mode.action-fidelity`. Four now have typed terminal behavior (previous-matching-bracket, recentre-top-bottom, cursor-centre-horizontal, and toggle-position), so `copy-mode:C-M-b`, `copy-mode:C-l`, `copy-mode:M-l`, `copy-mode:P`, and `copy-mode-vi:P` are ready to install. The two `r` keys still wait on refresh-toggle, which stays unmapped because a frozen copy revision has no live refresh to switch off.
 
 - Decision: `adopt`
 - Status: `open`

@@ -3,14 +3,14 @@ type: Rust Crate
 title: zz-client-ffi crate
 description: Unix C ABI over zz-client for native shells, with interactive SSH, Agent supervision, pollable events, mux snapshots, semantic terminal actions, and caller-owned styled viewports.
 resource: crates/zz-client-ffi/include/zz-client.h
-tags: [client, ffi, c-abi, unix, ios, crate]
-timestamp: 2026-08-26T00:00:00-03:00
+tags: [client, ffi, c-abi, unix, ios, ipad, crate]
+timestamp: 2026-08-30T00:00:00-03:00
 ---
 
 # Overview
 
 `zz-client-ffi` exports a Unix C ABI over `ClientCore` and `InteractiveClient`. It builds as a Rust
-library, static library, and dynamic library. The native iPhone app links the static library and
+library, static library, and dynamic library. The native Apple app links the static library and
 imports the hand-maintained `include/zz-client.h` contract through a Swift bridging header.
 
 One `zz_client` owns the daemon connection, blocking reader thread, reduced core, event queue, and
@@ -30,8 +30,9 @@ The header exposes:
 - attach, literal text, raw key press/repeat/release, tmux-style command execution, terminal resize,
   client-window focus, terminal pane/application focus, line scrolling, semantic selection, and
   asynchronous copy requests with typed clipboard results;
-- caller-owned mux snapshots with generation, session identity/name/attachment, active window, and
-  ordered active-window pane metadata;
+- caller-owned mux snapshots with generation, session identity/name/attachment, compatibility
+  accessors for the active window, the full window and pane hierarchy, zoom state, and normalized
+  visible pane rectangles;
 - caller-owned Agent summaries with phase, attention, title, error, queue count, permission request
   and options, and git summary, plus permission-response and cancellation actions;
 - caller-owned terminal viewports with dimensions, generation counters, default colors, raw cells,
@@ -43,9 +44,11 @@ the attachment. A shell sends `zz_client_set_focused` after that event. The func
 client-window signal. `zz_client_focus_terminal` remains the independent pane/application signal and
 may accompany it when an owned terminal follows the outer scene transition.
 
-Mux snapshots own an `Arc<MuxSnapshot>`. Pane order comes from the active window's layout tree, so a
-client can present a stable visual order without rebuilding target resolution. Viewport snapshots
-share the core's immutable planes and remain valid until explicit release.
+Mux snapshots own an `Arc<MuxSnapshot>`. Pane order comes from each window's layout tree. The shared
+client layout solver turns that tree into normalized rectangles, so native shells do not reproduce
+split semantics. A zoomed pane occupies the full rectangle while its siblings remain available as
+tree metadata. Viewport snapshots share the core's immutable planes and remain valid until explicit
+release.
 
 `zz_client_connect_endpoint_interactive()` accepts the same endpoint strings as
 `zz_daemon::Endpoint`. On iOS, SSH stays in process and calls the native shell with the server's
@@ -69,11 +72,12 @@ Graphical clients should consume the cell/style/grapheme planes directly.
 
 # Scope boundary
 
-The ABI is renderer-neutral and sufficient for the native iPhone terminal and Agent-supervision
-slice. It still does not export the command catalog, live chrome key tables/actions, layout
-rectangles, history chunk access, Kitty image extraction, multi-host selection, the heavy Agent
-transcript stream, or Browser and Editor viewport data. Those remain shared-core work rather than
-Swift responsibilities.
+The ABI is renderer-neutral and sufficient for the native iPhone terminal, iPad split workspace,
+and Agent-supervision slices. It still does not export the command catalog, live chrome key
+tables/actions, history chunk access, Kitty image extraction, multi-host selection, the retained
+daemon-expanded status payload, the heavy Agent transcript stream, or Browser and Editor viewport
+data. `ZZ_EVENT_STATUS_CHANGED` can wake a shell, but no status snapshot accessors currently let it
+read the formatted fields. Those remain shared-core work rather than Swift responsibilities.
 
 # Testing
 
@@ -86,9 +90,9 @@ detached snapshot, explicitly reattaches the surviving session, recovers its ter
 frees and reconnects in the same C process. `zz_client_focus_terminal` remains the separate
 pane/application signal.
 
-Rust tests cover endpoint failure classification, SSH prompt mapping, interned graphemes, wide-cell
-spacers, UTF-8-safe truncation, and the real-daemon link boundary. The iPhone build cross-compiles the
-crate for `aarch64-apple-ios-sim` on every Xcode build.
+Rust tests cover endpoint failure classification, SSH prompt mapping, normalized split geometry,
+interned graphemes, wide-cell spacers, UTF-8-safe truncation, and the real-daemon link boundary. The
+Apple build cross-compiles the crate for `aarch64-apple-ios-sim` on every Xcode build.
 
 # Key files
 
@@ -103,5 +107,5 @@ crate for `aarch64-apple-ios-sim` on every Xcode build.
 # Related
 
 - [zz-client](/crates/zz-client.md) supplies the reduced state and event model.
-- [Native iPhone client](/designs/ios-client.md) is the first graphical consumer.
+- [Native Apple client](/designs/ios-client.md) is the first graphical consumer.
 - [Packed terminal lanes](/protocol/terminal-lanes.md) describe the viewport representation.

@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Decision record for the shared client contract - protocol-owned commands and keys, sans-IO reduction, typed Agent attention, and a native-shell C ABI.
-status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native iPhone ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, then interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26. History, Kitty, multi-host selection, Browser and Editor viewports, and the Agent transcript stream remain open. GPUI cross-surface rebinding still needs a restart
+status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, then full window trees and normalized visible pane geometry on 2026-08-30. History, Kitty, multi-host selection, Browser and Editor viewports, and the Agent transcript stream remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -24,9 +24,10 @@ messages into shared state and typed effects, while `ChromeKeymap` owns client-s
 uses both directly. The GPUI `MuxClient` sends non-frame messages through the core but keeps terminal
 frames in `RetainedTerminalViewport`, avoiding a second patch application on the paint hot path.
 
-`zz-client-ffi` proves the C integration shape with a pollable wake fd and a from-scratch smoke
-client. The native iPhone client extended the hand-maintained header with raw key forwarding,
-style/grapheme tables, generation counters, mux/session/pane snapshots, damage rows, terminal focus
+`zz-client-ffi` proves the C integration shape with a pollable wake fd and a from-scratch link
+client. The native Apple client extended the hand-maintained header with raw key forwarding,
+style/grapheme tables, generation counters, mux/session/window/pane snapshots, normalized visible
+pane geometry, damage rows, terminal focus
 and scrolling, semantic selection and typed clipboard delivery, appearance, disconnect events,
 interactive endpoint connection with typed failures and SSH prompts, its iOS SSH public identity, and
 retained Agent summaries, attention edges, permission responses, and cancellation. Catalog/table
@@ -165,7 +166,8 @@ is not chrome and not part of the contract.
 ## Pillar 6 - zz-client-ffi target and shipped proof
 
 The shipped `#[no_mangle]` shim and hand-maintained header now cover interactive connection with
-typed SSH prompts and failures, pollable event wake/drain, attach, typed mux snapshots, caller-owned
+typed SSH prompts and failures, pollable event wake/drain, attach, typed mux snapshots with full
+window trees and normalized visible pane rectangles, caller-owned
 styled terminal viewports, raw key and text input, command execution, resize, separate client-window
 and terminal pane focus, scrolling, semantic selection, typed clipboard delivery, retained Agent
 summaries and actions, attention edges, damage, appearance, and disconnect events. The
@@ -174,7 +176,7 @@ and generation counters remain alive until the caller releases the handle. The r
 the core and toolkits integrate its wake fd with GSource, `QSocketNotifier`, or DispatchSource; Rust
 threads never call toolkit code.
 
-The C smoke compiles and links the contract, rejects an invalid interactive endpoint with a typed
+The C link client compiles and links the contract, rejects an invalid interactive endpoint with a typed
 failure, creates sessions and panes, renders styled content, types through the raw-key path, exercises
 the selection, clipboard, and Agent symbols, reports client focus and blur, kills the attached
 session, reattaches a survivor and recovers its viewport, then frees and reconnects in one process.
@@ -213,7 +215,7 @@ retain pane focus when the active pane is a terminal.
 - **The zz-ui editor vim layer** — an editor engine behind a config flag, not a
   binding surface.
 - **gpui anything.** The core must build for a musl target with no display
-  server as its CI smoke.
+  server as its CI integration check.
 
 # Performance
 
@@ -293,13 +295,15 @@ API emit identical event sequences.
 2. **Publish key tables: shipped in v52.** `ServerHello.key_tables` and `KeyTablesChanged` replaced
    prefix-only publication.
 3. **Overlay tables daemon-side: shipped.** Chooser keys resolve through daemon tables.
-4. **Extract `zz-client`: partially shipped.** `ClientCore` owns shared protocol reduction and the
-   simulator covers convergence. Connection lifecycle, layout, history, key encoding, and Kitty
-   assembly remain in their shells; desktop keeps its retained terminal frame path.
+4. **Extract `zz-client`: partially shipped.** `ClientCore` owns shared protocol reduction, the
+   normalized pane-rectangle solver serves native shells, and the simulator covers convergence.
+   Connection lifecycle, interactive divider layout, history, key encoding, and Kitty assembly
+   remain in their shells; desktop keeps its retained terminal frame path.
 5. **Chrome keymap: shipped.** Desktop and TUI resolve client-owned actions through profile tables;
    desktop config supports `chrome-keybind` and `chrome-unbind`.
-6. **`zz-client-ffi`: proof surface shipped.** The C smoke client validates typed interactive
-   endpoint errors, attaches through a parsed endpoint, reads rows, types, selects, copies, references
+6. **`zz-client-ffi`: proof surface shipped.** The C integration client validates typed interactive
+   endpoint errors, attaches through a parsed endpoint, reads the window tree and layout, reads rows,
+   types, selects, copies, references
    Agent supervision actions, creates a session and pane, frees, and reconnects. The iPhone shell
    consumes the in-process SSH identity plus explicit trust and keyboard-interactive prompt path. The
    full catalog/action contract above remains open, and the header is hand-maintained rather than

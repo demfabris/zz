@@ -55,6 +55,7 @@ final class ZZStore: ObservableObject {
     private var pendingNavigation: ZZNavigationTarget?
     private var navigationCommandSent = false
     private var unseenAgentCompletions: Set<UInt64> = []
+    private var agentDrafts = ZZAgentDrafts()
     private var clipboardRequestID: UInt64 = 1
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "zz-ios-network")
@@ -356,6 +357,7 @@ final class ZZStore: ObservableObject {
             sessions = []
             frames = [:]
             agentStates = [:]
+            agentDrafts = ZZAgentDrafts()
             unseenAgentCompletions = []
             selectedSessionID = nil
             selectedPaneID = nil
@@ -655,6 +657,20 @@ final class ZZStore: ObservableObject {
         }
     }
 
+    func selectPane(_ pane: ZZPane, in session: ZZSession) {
+        guard attachedSessionID == session.id,
+              session.panes.contains(where: { $0.id == pane.id }) else {
+            open(ZZNavigationTarget(session: session.id, pane: pane.id))
+            return
+        }
+        if !pane.isActive,
+           !execute("select-pane", args: ["-t", "%\(pane.id)"]) {
+            actionError = "zz couldn’t select that pane."
+            return
+        }
+        openPane(pane)
+    }
+
     func selectAdjacentPane(from pane: UInt64, offset: Int) {
         guard offset != 0, let panes = selectedSession?.panes,
               let current = panes.firstIndex(where: { $0.id == pane }) else {
@@ -673,11 +689,14 @@ final class ZZStore: ObservableObject {
         terminalModifierState.reset()
     }
 
-    func requestKeyboard(for pane: UInt64) {
-        guard selectedPaneID == pane, selectedPane?.kind == .terminal else {
+    func requestKeyboard(for paneID: UInt64) {
+        guard let session = selectedSession,
+              let pane = session.panes.first(where: {
+                  $0.id == paneID && $0.kind == .terminal
+              }) else {
             return
         }
-        acquireTerminalInput(pane)
+        selectPane(pane, in: session)
     }
 
     func frame(for pane: UInt64) -> TerminalFrame? {
@@ -689,7 +708,6 @@ final class ZZStore: ObservableObject {
     }
 
     func setTerminalFontSizeStep(_ step: Int, for pane: UInt64) {
-        let step = TerminalFontZoom.clamped(step)
         guard terminalFontSizeSteps[pane] != step else {
             return
         }
@@ -820,6 +838,27 @@ final class ZZStore: ObservableObject {
         agentStates[pane]
     }
 
+    func agentDraft(for pane: UInt64) -> String {
+        agentDrafts.text(for: pane)
+    }
+
+    func saveAgentDraft(_ text: String, for pane: UInt64) {
+        agentDrafts.save(text, for: pane)
+    }
+
+    @discardableResult
+    func submitAgentPrompt(_ text: String, pane: UInt64) -> Bool {
+        guard let args = ZZAgentPromptCommand.arguments(pane: pane, text: text) else {
+            return false
+        }
+        guard execute("agent-send", args: args) else {
+            actionError = "zz couldn’t send that Agent prompt."
+            return false
+        }
+        agentDrafts.remove(pane: pane)
+        return true
+    }
+
     func respondToPermission(pane: UInt64, request: UInt64, option: String?) {
         guard let client else {
             return
@@ -894,20 +933,42 @@ final class ZZStore: ObservableObject {
         }
     }
 
-    func newPane() {
+    func newPane(kind: ZZPaneKind = .terminal) {
         guard let session = selectedSession else {
             actionError = "Select a session before creating a pane."
             return
         }
         let terminal = session.panes.first { $0.isActive && $0.kind == .terminal }
             ?? session.panes.first { $0.kind == .terminal }
-        let created = if let terminal {
-            execute("split-window", args: ["-t", "%\(terminal.id)"])
-        } else {
-            execute("new-window", args: [])
+        let created: Bool
+        switch kind {
+        case .terminal:
+            created = if let terminal {
+                execute("split-window", args: ["-t", "%\(terminal.id)"])
+            } else {
+                execute("new-window", args: [])
+            }
+        case .agent:
+            guard let target = terminal?.id
+                ?? session.activeWindow?.activePane
+                ?? session.panes.first?.id else {
+                actionError = "Create a terminal before adding an Agent pane."
+                return
+            }
+            created = execute(
+                "if-shell",
+                args: [
+                    "-F",
+                    "1",
+                    "split-picker -t %\(target) ; select-pane-kind agent",
+                ]
+            )
+        case .picker, .browser, .editor:
+            actionError = "That pane type isn’t available in the iPad app yet."
+            return
         }
         if !created {
-            actionError = "zz couldn’t create a pane."
+            actionError = "zz couldn’t create that pane."
         }
     }
 
@@ -1001,6 +1062,7 @@ final class ZZStore: ObservableObject {
                 terminalGeometries.removeValue(forKey: event.pane)
                 terminalFontSizeSteps.removeValue(forKey: event.pane)
                 agentStates.removeValue(forKey: event.pane)
+                agentDrafts.remove(pane: event.pane)
                 unseenAgentCompletions.remove(event.pane)
                 agentNotifications.clear(pane: event.pane)
                 if terminalInput.owner.owns(event.pane) {
@@ -1039,18 +1101,96 @@ final class ZZStore: ObservableObject {
         var nextSessions: [ZZSession] = []
         nextSessions.reserveCapacity(sessionCount)
         for sessionIndex in 0..<sessionCount {
-            let paneCount = Int(zz_snapshot_session_pane_count(snapshot, sessionIndex))
-            var panes: [ZZPane] = []
-            panes.reserveCapacity(paneCount)
-            for paneIndex in 0..<paneCount {
-                let rawKind = zz_snapshot_session_pane_kind(snapshot, sessionIndex, paneIndex)
-                panes.append(
-                    ZZPane(
-                        id: zz_snapshot_session_pane_id(snapshot, sessionIndex, paneIndex),
-                        title: string(zz_snapshot_session_pane_title(snapshot, sessionIndex, paneIndex)),
-                        kind: ZZPaneKind(rawValue: UInt32(rawKind.rawValue)) ?? .picker,
-                        isActive: zz_snapshot_session_pane_is_active(snapshot, sessionIndex, paneIndex),
-                        hasBell: zz_snapshot_session_pane_has_bell(snapshot, sessionIndex, paneIndex)
+            let windowCount = Int(zz_snapshot_session_window_count(snapshot, sessionIndex))
+            var windows: [ZZWindow] = []
+            windows.reserveCapacity(windowCount)
+            for windowIndex in 0..<windowCount {
+                let paneCount = Int(
+                    zz_snapshot_session_window_pane_count(snapshot, sessionIndex, windowIndex)
+                )
+                var panes: [ZZPane] = []
+                panes.reserveCapacity(paneCount)
+                for paneIndex in 0..<paneCount {
+                    let rawKind = zz_snapshot_session_window_pane_kind(
+                        snapshot,
+                        sessionIndex,
+                        windowIndex,
+                        paneIndex
+                    )
+                    var rawLayout = zz_pane_rect()
+                    let layout = zz_snapshot_session_window_pane_rect(
+                        snapshot,
+                        sessionIndex,
+                        windowIndex,
+                        paneIndex,
+                        &rawLayout
+                    )
+                        ? ZZPaneLayout(
+                            x: rawLayout.x,
+                            y: rawLayout.y,
+                            width: rawLayout.width,
+                            height: rawLayout.height
+                        )
+                        : nil
+                    panes.append(
+                        ZZPane(
+                            id: zz_snapshot_session_window_pane_id(
+                                snapshot,
+                                sessionIndex,
+                                windowIndex,
+                                paneIndex
+                            ),
+                            title: string(
+                                zz_snapshot_session_window_pane_title(
+                                    snapshot,
+                                    sessionIndex,
+                                    windowIndex,
+                                    paneIndex
+                                )
+                            ),
+                            kind: ZZPaneKind(rawValue: UInt32(rawKind.rawValue)) ?? .picker,
+                            isActive: zz_snapshot_session_window_pane_is_active(
+                                snapshot,
+                                sessionIndex,
+                                windowIndex,
+                                paneIndex
+                            ),
+                            hasBell: zz_snapshot_session_window_pane_has_bell(
+                                snapshot,
+                                sessionIndex,
+                                windowIndex,
+                                paneIndex
+                            ),
+                            layout: layout
+                        )
+                    )
+                }
+                var rawZoomedPane: UInt64 = 0
+                let zoomedPane = zz_snapshot_session_window_zoomed_pane(
+                    snapshot,
+                    sessionIndex,
+                    windowIndex,
+                    &rawZoomedPane
+                ) ? rawZoomedPane : nil
+                windows.append(
+                    ZZWindow(
+                        id: zz_snapshot_session_window_id(snapshot, sessionIndex, windowIndex),
+                        index: zz_snapshot_session_window_index(snapshot, sessionIndex, windowIndex),
+                        name: string(
+                            zz_snapshot_session_window_name(snapshot, sessionIndex, windowIndex)
+                        ),
+                        isCurrent: zz_snapshot_session_window_is_current(
+                            snapshot,
+                            sessionIndex,
+                            windowIndex
+                        ),
+                        activePane: zz_snapshot_session_window_active_pane(
+                            snapshot,
+                            sessionIndex,
+                            windowIndex
+                        ),
+                        zoomedPane: zoomedPane,
+                        panes: panes
                     )
                 )
             }
@@ -1058,8 +1198,8 @@ final class ZZStore: ObservableObject {
                 ZZSession(
                     id: zz_snapshot_session_id(snapshot, sessionIndex),
                     name: string(zz_snapshot_session_name(snapshot, sessionIndex)),
-                    activeWindow: zz_snapshot_session_active_window(snapshot, sessionIndex),
-                    panes: panes,
+                    activeWindowID: zz_snapshot_session_active_window(snapshot, sessionIndex),
+                    windows: windows,
                     isAttached: zz_snapshot_session_is_attached(snapshot, sessionIndex)
                 )
             )
@@ -1105,12 +1245,12 @@ final class ZZStore: ObservableObject {
             nextSessions
                 .first(where: \.isAttached)?
                 .panes
-                .filter { $0.kind == .terminal }
+                .filter { $0.kind == .terminal && $0.layout != nil }
                 .map(\.id) ?? []
         )
         let knownTerminalPanes = Set(
             nextSessions
-                .flatMap(\.panes)
+                .flatMap(\.allPanes)
                 .filter { $0.kind == .terminal }
                 .map(\.id)
         )
@@ -1254,11 +1394,13 @@ final class ZZStore: ObservableObject {
             showOverview()
             return
         }
-        if let pane = sessions.lazy.flatMap(\.panes).first(where: { $0.id == paneID }) {
+        if let session = sessions.first(where: { session in
+            session.panes.contains { $0.id == paneID }
+        }), let pane = session.panes.first(where: { $0.id == paneID }) {
             pendingNavigation = nil
             navigationCommandSent = false
             rememberedPaneID = nil
-            openPane(pane)
+            selectPane(pane, in: session)
             return
         }
         guard !navigationCommandSent else {
@@ -1269,7 +1411,7 @@ final class ZZStore: ObservableObject {
         if !execute("select-window", args: ["-t", paneTarget])
             || !execute("select-pane", args: ["-t", paneTarget]) {
             navigationCommandSent = false
-            actionError = "zz couldn’t open that Agent pane."
+                actionError = "zz couldn’t open that pane."
         }
     }
 
@@ -1286,7 +1428,7 @@ final class ZZStore: ObservableObject {
     }
 
     private func paneTitle(_ pane: UInt64) -> String? {
-        sessions.lazy.flatMap(\.panes).first { $0.id == pane }?.title
+        sessions.lazy.flatMap(\.allPanes).first { $0.id == pane }?.title
     }
 
     private func optionalString(_ bytes: zz_bytes) -> String? {

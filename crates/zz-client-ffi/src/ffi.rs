@@ -12,8 +12,8 @@ use std::{
 #[cfg(target_os = "ios")]
 use zeroize::{Zeroize, Zeroizing};
 use zz_client::{
-    AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, Outbound, ViewportDamage,
-    agent_attention_status,
+    AgentAttentionEdge, AgentAttentionStatus, ClientCore, CoreEvent, NormalizedPaneRect, Outbound,
+    ViewportDamage, agent_attention_status, pane_rects,
 };
 #[cfg(target_os = "ios")]
 use zz_daemon::{AskpassPromptKind, AskpassReply, SshPrompts};
@@ -174,6 +174,26 @@ impl ZzBytes {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ZzPaneRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl From<NormalizedPaneRect> for ZzPaneRect {
+    fn from(rect: NormalizedPaneRect) -> Self {
+        Self {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }
+    }
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ZzCursor {
     pub color: u32,
@@ -235,6 +255,10 @@ fn session_at(snapshot: &ZzMuxSnapshot, index: usize) -> Option<&SessionSnapshot
     snapshot.snapshot.sessions.get(index)
 }
 
+fn window_at(snapshot: &ZzMuxSnapshot, session: usize, window: usize) -> Option<&WindowSnapshot> {
+    session_at(snapshot, session)?.windows.get(window)
+}
+
 fn active_window_at(snapshot: &ZzMuxSnapshot, session: usize) -> Option<&WindowSnapshot> {
     let session = session_at(snapshot, session)?;
     let window = snapshot.snapshot.focused_window_for(session);
@@ -254,6 +278,28 @@ fn pane_at(
     window.layout.panes(&mut panes);
     let pane = panes.get(pane)?;
     Some((window, window.panes.get(pane)?))
+}
+
+fn window_pane_at(
+    snapshot: &ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    pane: usize,
+) -> Option<(&WindowSnapshot, &PaneSnapshot)> {
+    let window = window_at(snapshot, session, window)?;
+    let mut panes = Vec::with_capacity(window.panes.len());
+    window.layout.panes(&mut panes);
+    let pane = panes.get(pane)?;
+    Some((window, window.panes.get(pane)?))
+}
+
+fn window_pane_rect(window: &WindowSnapshot, pane: PaneId) -> Option<NormalizedPaneRect> {
+    if let Some(zoomed) = window.zoomed_pane {
+        return (zoomed == pane).then_some(NormalizedPaneRect::FULL);
+    }
+    pane_rects(&window.layout)
+        .into_iter()
+        .find_map(|(candidate, rect)| (candidate == pane).then_some(rect))
 }
 
 fn pane_kind(kind: &PaneKindSnapshot) -> ZzPaneKind {
@@ -1160,6 +1206,193 @@ pub unsafe extern "C" fn zz_snapshot_session_active_window(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_count(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+) -> usize {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| session_at(snapshot, session))
+        .map_or(0, |session| session.windows.len())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_id(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+) -> u64 {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_at(snapshot, session, window))
+        .map_or(0, |window| window.id.0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_index(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+) -> u32 {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_at(snapshot, session, window))
+        .map_or(0, |window| window.index)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_name(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+) -> ZzBytes {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_at(snapshot, session, window))
+        .map_or(ZzBytes::EMPTY, |window| ZzBytes::new(&window.name))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_is_current(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+) -> bool {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        return false;
+    };
+    let Some(session) = session_at(snapshot, session) else {
+        return false;
+    };
+    session
+        .windows
+        .get(window)
+        .is_some_and(|window| snapshot.snapshot.focused_window_for(session) == window.id)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_active_pane(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+) -> u64 {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_at(snapshot, session, window))
+        .map_or(0, |window| window.active_pane.0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_zoomed_pane(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    out: *mut u64,
+) -> bool {
+    let (Some(snapshot), false) = (unsafe { snapshot.as_ref() }, out.is_null()) else {
+        return false;
+    };
+    let Some(pane) = window_at(snapshot, session, window).and_then(|window| window.zoomed_pane)
+    else {
+        return false;
+    };
+    unsafe { out.write(pane.0) };
+    true
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_pane_count(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+) -> usize {
+    let Some(window) = (unsafe { snapshot.as_ref() })
+        .and_then(|snapshot| window_at(snapshot, session, window))
+    else {
+        return 0;
+    };
+    let mut panes = Vec::with_capacity(window.panes.len());
+    window.layout.panes(&mut panes);
+    panes.len()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_pane_id(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    pane: usize,
+) -> u64 {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_pane_at(snapshot, session, window, pane))
+        .map_or(0, |(_, pane)| pane.id.0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_pane_title(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    pane: usize,
+) -> ZzBytes {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_pane_at(snapshot, session, window, pane))
+        .map_or(ZzBytes::EMPTY, |(_, pane)| ZzBytes::new(&pane.title))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_pane_kind(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    pane: usize,
+) -> ZzPaneKind {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_pane_at(snapshot, session, window, pane))
+        .map_or(ZzPaneKind::Picker, |(_, pane)| pane_kind(&pane.kind))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_pane_is_active(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    pane: usize,
+) -> bool {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_pane_at(snapshot, session, window, pane))
+        .is_some_and(|(window, pane)| window.active_pane == pane.id)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_pane_has_bell(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    pane: usize,
+) -> bool {
+    unsafe { snapshot.as_ref() }
+        .and_then(|snapshot| window_pane_at(snapshot, session, window, pane))
+        .is_some_and(|(_, pane)| pane.bell)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_snapshot_session_window_pane_rect(
+    snapshot: *const ZzMuxSnapshot,
+    session: usize,
+    window: usize,
+    pane: usize,
+    out: *mut ZzPaneRect,
+) -> bool {
+    let (Some(snapshot), false) = (unsafe { snapshot.as_ref() }, out.is_null()) else {
+        return false;
+    };
+    let Some((window, pane)) = window_pane_at(snapshot, session, window, pane) else {
+        return false;
+    };
+    let Some(rect) = window_pane_rect(window, pane.id) else {
+        return false;
+    };
+    unsafe { out.write(rect.into()) };
+    true
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn zz_snapshot_session_pane_count(
     snapshot: *const ZzMuxSnapshot,
     session: usize,
@@ -1740,8 +1973,9 @@ pub unsafe extern "C" fn zz_viewport_row_text(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{collections::BTreeMap, sync::Arc};
 
+    use zz_protocol::{Axis, LayoutNode, SplitId, WindowId};
     use zz_terminal::{GRAPHEME_TABLE_BIT, PackedCell, SessionStatus, TerminalDictionary};
 
     use super::*;
@@ -1755,6 +1989,84 @@ mod tests {
             .iter()
             .map(|byte| byte.to_ne_bytes()[0])
             .collect()
+    }
+
+    fn terminal_pane(id: u64) -> PaneSnapshot {
+        PaneSnapshot {
+            id: PaneId(id),
+            title: String::new(),
+            kind: PaneKindSnapshot::Terminal,
+            synchronized_input: false,
+            bell: false,
+            dead: false,
+            dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
+        }
+    }
+
+    #[test]
+    fn zoomed_window_only_exposes_the_zoomed_pane_rect() {
+        let first = terminal_pane(1);
+        let second = terminal_pane(2);
+        let window = WindowSnapshot {
+            id: WindowId(1),
+            index: 0,
+            name: String::new(),
+            automatic_rename: false,
+            active_pane: second.id,
+            zoomed_pane: Some(second.id),
+            layout: LayoutNode::Split {
+                id: SplitId(1),
+                axis: Axis::Horizontal,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::Pane(first.id)),
+                second: Box::new(LayoutNode::Pane(second.id)),
+            },
+            panes: BTreeMap::from([(first.id, first), (second.id, second)]),
+            layout_dump: String::new(),
+            visible_layout_dump: String::new(),
+            status_label: String::new(),
+        };
+
+        assert_eq!(window_pane_rect(&window, PaneId(1)), None);
+        assert_eq!(
+            window_pane_rect(&window, PaneId(2)),
+            Some(NormalizedPaneRect::FULL)
+        );
+
+        let snapshot = ZzMuxSnapshot {
+            snapshot: Arc::new(MuxSnapshot {
+                generation: 1,
+                sessions: vec![SessionSnapshot {
+                    id: SessionId(1),
+                    name: String::new(),
+                    active_window: window.id,
+                    windows: vec![window],
+                    viewers: Vec::new(),
+                }],
+                focused_window: None,
+            }),
+            attached: Some(SessionId(1)),
+        };
+        let mut rect = ZzPaneRect::default();
+
+        assert_eq!(
+            unsafe { zz_snapshot_session_window_pane_count(&snapshot, 0, 0) },
+            2
+        );
+        let mut zoomed = 0;
+        assert!(unsafe {
+            zz_snapshot_session_window_zoomed_pane(&snapshot, 0, 0, &mut zoomed)
+        });
+        assert_eq!(zoomed, 2);
+        assert!(!unsafe {
+            zz_snapshot_session_window_pane_rect(&snapshot, 0, 0, 0, &mut rect)
+        });
+        assert!(unsafe {
+            zz_snapshot_session_window_pane_rect(&snapshot, 0, 0, 1, &mut rect)
+        });
+        assert_eq!(rect, ZzPaneRect::from(NormalizedPaneRect::FULL));
     }
 
     #[test]

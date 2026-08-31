@@ -34,14 +34,48 @@ struct ZZPane: Identifiable, Equatable, Sendable {
     let kind: ZZPaneKind
     let isActive: Bool
     let hasBell: Bool
+    let layout: ZZPaneLayout?
+}
+
+struct ZZPaneLayout: Equatable, Sendable {
+    let x: Float
+    let y: Float
+    let width: Float
+    let height: Float
+}
+
+struct ZZWindow: Identifiable, Equatable, Sendable {
+    let id: UInt64
+    let index: UInt32
+    let name: String
+    let isCurrent: Bool
+    let activePane: UInt64
+    let zoomedPane: UInt64?
+    let panes: [ZZPane]
+
+    var visiblePanes: [ZZPane] {
+        panes.filter { $0.layout != nil }
+    }
 }
 
 struct ZZSession: Identifiable, Equatable, Sendable {
     let id: UInt64
     let name: String
-    let activeWindow: UInt64
-    let panes: [ZZPane]
+    let activeWindowID: UInt64
+    let windows: [ZZWindow]
     let isAttached: Bool
+
+    var activeWindow: ZZWindow? {
+        windows.first { $0.id == activeWindowID }
+    }
+
+    var panes: [ZZPane] {
+        activeWindow?.panes ?? []
+    }
+
+    var allPanes: [ZZPane] {
+        windows.flatMap(\.panes)
+    }
 }
 
 enum ZZConnectionState: Equatable, Sendable {
@@ -178,6 +212,62 @@ enum ZZAgentStatus: UInt32, Equatable, Sendable {
     case working = 1
     case needsInput = 2
     case failed = 3
+}
+
+enum ZZAgentComposerAction: Equatable, Sendable {
+    static let maximumQueuedPrompts: UInt32 = 4
+
+    case send
+    case queue
+    case stop
+    case unavailable
+
+    static func resolve(
+        phase: ZZAgentPhase,
+        hasPrompt: Bool,
+        queuedPrompts: UInt32
+    ) -> Self {
+        switch phase {
+        case .ready:
+            return hasPrompt ? .send : .unavailable
+        case .running, .awaitingPermission:
+            if !hasPrompt {
+                return .stop
+            }
+            return queuedPrompts < maximumQueuedPrompts ? .queue : .unavailable
+        case .starting, .failed:
+            return .unavailable
+        }
+    }
+}
+
+enum ZZAgentPromptCommand {
+    static func arguments(pane: UInt64, text: String) -> [String]? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return ["-t", "%\(pane)", "--submit", "--", text]
+    }
+}
+
+struct ZZAgentDrafts: Equatable, Sendable {
+    private var values: [UInt64: String] = [:]
+
+    func text(for pane: UInt64) -> String {
+        values[pane] ?? ""
+    }
+
+    mutating func save(_ text: String, for pane: UInt64) {
+        if text.isEmpty {
+            values.removeValue(forKey: pane)
+        } else {
+            values[pane] = text
+        }
+    }
+
+    mutating func remove(pane: UInt64) {
+        values.removeValue(forKey: pane)
+    }
 }
 
 enum ZZAgentAttentionKind: Int, Comparable, Sendable {

@@ -18,6 +18,11 @@ static int bytes_equal(zz_bytes value, const char *expected) {
            memcmp(value.ptr, expected, expected_len) == 0;
 }
 
+static int bytes_same(zz_bytes left, zz_bytes right) {
+    return left.len == right.len &&
+           (left.len == 0 || memcmp(left.ptr, right.ptr, left.len) == 0);
+}
+
 static int viewport_contains(zz_client *client, uint64_t pane, const char *needle) {
     zz_viewport *viewport = zz_client_viewport_acquire(client, pane);
     if (viewport == NULL) {
@@ -184,11 +189,36 @@ int main(int argc, char **argv) {
     int found_session = 0;
     for (size_t index = 0; index < zz_snapshot_session_count(snapshot); index++) {
         if (bytes_equal(zz_snapshot_session_name(snapshot, index), "smoke")) {
+            zz_pane_rect rect = {0};
+            uint64_t zoomed = 0;
             found_session = zz_snapshot_session_is_attached(snapshot, index) &&
                             zz_snapshot_session_pane_count(snapshot, index) == 1 &&
                             zz_snapshot_session_pane_id(snapshot, index, 0) == pane &&
                             zz_snapshot_session_pane_kind(snapshot, index, 0) ==
-                                ZZ_PANE_TERMINAL;
+                                ZZ_PANE_TERMINAL &&
+                            zz_snapshot_session_window_count(snapshot, index) == 1 &&
+                            zz_snapshot_session_window_is_current(snapshot, index, 0) &&
+                            zz_snapshot_session_window_id(snapshot, index, 0) ==
+                                zz_snapshot_session_active_window(snapshot, index) &&
+                            zz_snapshot_session_window_index(snapshot, index, 0) == 0 &&
+                            zz_snapshot_session_window_name(snapshot, index, 0).len > 0 &&
+                            zz_snapshot_session_window_active_pane(snapshot, index, 0) == pane &&
+                            zz_snapshot_session_window_pane_count(snapshot, index, 0) == 1 &&
+                            zz_snapshot_session_window_pane_id(snapshot, index, 0, 0) == pane &&
+                            bytes_same(
+                                zz_snapshot_session_window_pane_title(snapshot, index, 0, 0),
+                                zz_snapshot_session_pane_title(snapshot, index, 0)) &&
+                            zz_snapshot_session_window_pane_kind(snapshot, index, 0, 0) ==
+                                ZZ_PANE_TERMINAL &&
+                            zz_snapshot_session_window_pane_is_active(snapshot, index, 0, 0) &&
+                            zz_snapshot_session_window_pane_has_bell(snapshot, index, 0, 0) ==
+                                zz_snapshot_session_pane_has_bell(snapshot, index, 0) &&
+                            zz_snapshot_session_window_pane_rect(snapshot, index, 0, 0,
+                                                                 &rect) &&
+                            rect.x == 0.0f && rect.y == 0.0f &&
+                            rect.width == 1.0f && rect.height == 1.0f &&
+                            !zz_snapshot_session_window_zoomed_pane(snapshot, index, 0,
+                                                                    &zoomed);
         }
     }
     zz_snapshot_release(snapshot);

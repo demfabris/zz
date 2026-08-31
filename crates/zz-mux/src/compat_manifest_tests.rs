@@ -13,7 +13,7 @@ use zz_protocol::{
 };
 
 use crate::{
-    BEHAVES, COMMAND_SPECS, TMUX_OPTION_CONSUMERS,
+    BEHAVES, COMMAND_SPECS, CopyActionCategory, TMUX_OPTION_CONSUMERS,
     command::{
         accepted_native_literal_format_context_scopes, format_key_command,
         missing_derived_format_context_families, missing_literal_format_context_scopes,
@@ -1455,4 +1455,51 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
             .collect(),
         "structurally matching shared binding tables changed"
     );
+}
+
+#[test]
+fn missing_copy_actions_keep_their_behavior_item_open() {
+    let manifest: Manifest = read_json(&root().join("compat/tmux-gaps.json"));
+    let group = manifest
+        .gaps
+        .iter()
+        .find(|gap| gap.id == "copy-mode.action-fidelity")
+        .expect("copy-mode.action-fidelity is registered");
+    let open = group
+        .items
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut missing = BTreeSet::new();
+    for entry in crate::copy_actions::missing_copy_mode_actions() {
+        missing.insert(entry.category);
+    }
+    for (category, item) in [
+        (
+            CopyActionCategory::CursorGeometry,
+            "semantic:copy-mode-cursor-geometry",
+        ),
+        (
+            CopyActionCategory::LogicalLineAndModeKeys,
+            "semantic:copy-mode-logical-line-and-mode-keys",
+        ),
+        (CopyActionCategory::GotoLine, "semantic:copy-mode-goto-line"),
+        (
+            CopyActionCategory::SelectionLifecycle,
+            "semantic:copy-mode-selection-lifecycle",
+        ),
+        (
+            CopyActionCategory::JumpPagePrompt,
+            "semantic:copy-mode-jump-page-prompt-actions",
+        ),
+        (
+            CopyActionCategory::CopyFormatAndDestination,
+            "semantic:copy-mode-copy-format-and-destination",
+        ),
+    ] {
+        assert!(
+            !missing.contains(&category) || open.contains(item),
+            "{item} was closed while {category:?} still has unmapped pinned actions"
+        );
+    }
 }

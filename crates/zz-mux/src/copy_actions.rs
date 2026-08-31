@@ -209,7 +209,7 @@ mod tests {
             .iter()
             .filter(|entry| copy_mode_action_is_mapped(entry.name))
             .count();
-        assert_eq!(mapped, 74);
+        assert_eq!(mapped, 79);
         for entry in PINNED_COPY_MODE_ACTIONS {
             let Some(action) = copy_mode_probe_action(entry.name) else {
                 continue;
@@ -247,14 +247,7 @@ mod tests {
             ),
             (
                 CopyActionCategory::CursorGeometry,
-                vec![
-                    "cursor-centre-horizontal",
-                    "cursor-centre-vertical",
-                    "recentre-top-bottom",
-                    "scroll-bottom",
-                    "scroll-top",
-                    "toggle-position",
-                ],
+                vec!["recentre-top-bottom"],
             ),
             (
                 CopyActionCategory::JumpPagePrompt,

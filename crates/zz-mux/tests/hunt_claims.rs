@@ -2364,8 +2364,14 @@ fn the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions() {
             "halfpage-down-and-cancel",
             CopyModeAction::HalfPageDownScrollExit,
         ),
-        ("scroll-down-and-cancel", CopyModeAction::ScrollDownAndCancel),
-        ("cursor-down-and-cancel", CopyModeAction::CursorDownAndCancel),
+        (
+            "scroll-down-and-cancel",
+            CopyModeAction::ScrollDownAndCancel,
+        ),
+        (
+            "cursor-down-and-cancel",
+            CopyModeAction::CursorDownAndCancel,
+        ),
     ] {
         let execution = engine
             .execute(&mut context, &command("send-keys", &["-X", name]))
@@ -2379,7 +2385,10 @@ fn the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions() {
             "{name}"
         );
         let counted = engine
-            .execute(&mut context, &command("send-keys", &["-N", "3", "-X", name]))
+            .execute(
+                &mut context,
+                &command("send-keys", &["-N", "3", "-X", name]),
+            )
             .unwrap();
         let expected = if name.starts_with("scroll-exit-") {
             TerminalViewAction::CopyMode(action)

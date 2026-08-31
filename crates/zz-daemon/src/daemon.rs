@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, ExitStatus, Stdio},
     sync::{
-        Arc,
+        Arc, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
@@ -39,15 +39,16 @@ use zz_protocol::{
     ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState,
     Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES,
-    MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, MenuAction, MenuItem,
-    MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
+    MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
+    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
+    MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
     PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupState,
     PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS,
     ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
     canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
-    read_protocol_message_into, resolve_command,
+    read_protocol_message_into, resolve_command, terminal_patch_frame_len,
+    terminal_viewport_frame_len,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -107,6 +108,7 @@ const MAX_PENDING_AGENT_BYTES: usize = MAX_AGENT_UPDATES_BYTES + MAX_GUI_TEXT_BY
 #[cfg(feature = "agent")]
 const MAX_PENDING_AGENT_REPLAY_BYTES: usize = 5 * MAX_AGENT_UPDATES_BYTES + MAX_GUI_TEXT_BYTES;
 const MAX_OUTBOUND_BYTES: usize = 72 * 1024 * 1024;
+const MAX_PREVIEW_OUTBOUND_BYTES: usize = MAX_OUTBOUND_BYTES - MAX_ENCODED_FRAME_BYTES;
 const MAX_HISTORY_CHUNK_ROWS: u32 = 512;
 const MAX_RECYCLED_FRAME_BUFFERS: usize = 8;
 const MAX_RECYCLED_FRAME_CAPACITY: usize = 8 * 1024 * 1024;
@@ -1432,6 +1434,8 @@ struct OutboundState {
     delivered_images: BTreeMap<PaneId, BTreeMap<u32, u64>>,
     delivered_pasted_images: BTreeMap<PaneId, BTreeMap<u32, u64>>,
     terminal_order: VecDeque<PaneId>,
+    preview_refreshes: BTreeSet<PaneId>,
+    preview_refresh_order: VecDeque<PaneId>,
     recycled_frames: Vec<Vec<u8>>,
     recycled_capacity: usize,
     queued_bytes: usize,
@@ -1445,6 +1449,7 @@ struct OutboundState {
 enum TerminalEnqueue {
     Queued,
     NeedsFull,
+    Dropped,
     Closed,
 }
 
@@ -1474,6 +1479,7 @@ struct TerminalGeneration {
 struct PendingTerminal {
     encoded: Vec<u8>,
     current: TerminalGeneration,
+    preview: bool,
 }
 
 struct PendingCommandOutput {
@@ -1503,12 +1509,24 @@ enum TerminalFanout {
     Patch(zz_terminal::TerminalViewportPatch),
 }
 
+#[derive(Clone, Copy)]
+enum TerminalDelivery {
+    Foreground,
+    Preview { foreground_panes: usize },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TerminalGeometry {
     columns: u16,
     rows: u16,
     cell_width_px: u32,
     cell_height_px: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalStreamKind {
+    Foreground,
+    Preview,
 }
 
 fn viewport_generation(viewport: &TerminalViewport) -> TerminalGeneration {
@@ -1642,6 +1660,7 @@ impl OutboundMailbox {
         }
         if let Some(pane) = removed_pane {
             remove_pending_terminal(&mut state, pane);
+            clear_preview_refresh(&mut state, pane);
             clear_pending_agent(&mut state, pane);
             state.delivered_terminals.remove(&pane);
             state.delivered_images.remove(&pane);
@@ -1670,6 +1689,9 @@ impl OutboundMailbox {
             state.queued_bytes = state.queued_bytes.saturating_sub(pending.encoded.len());
             discard_outbound_frame(&mut state, pending.encoded);
         }
+        if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
+            shed_preview_terminals(&mut state);
+        }
         if state.reliable.len() >= MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
         {
@@ -1689,6 +1711,9 @@ impl OutboundMailbox {
         let mut state = self.state.lock();
         if state.closed {
             return false;
+        }
+        if !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
+            shed_preview_terminals(&mut state);
         }
         if state.reliable.len() >= MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
@@ -1731,6 +1756,9 @@ impl OutboundMailbox {
             self.ready.notify_all();
             return KittyImageEnqueue::Closed;
         };
+        if !reserve_outbound_bytes(&mut state, frame_bytes, 0) {
+            shed_preview_terminals(&mut state);
+        }
         if state.reliable.len().saturating_add(frames.len()) > MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, frame_bytes, 0)
         {
@@ -1801,6 +1829,9 @@ impl OutboundMailbox {
             self.ready.notify_all();
             return PastedImageEnqueue::Closed;
         };
+        if !reserve_outbound_bytes(&mut state, frame_bytes, 0) {
+            shed_preview_terminals(&mut state);
+        }
         if state.reliable.len().saturating_add(frames.len()) > MAX_RELIABLE_MESSAGES
             || !reserve_outbound_bytes(&mut state, frame_bytes, 0)
         {
@@ -1839,9 +1870,11 @@ impl OutboundMailbox {
                         queued.frames.front().map_or(first_seq, |(seq, _)| *seq),
                     )
                 });
-            if queued_bytes.saturating_add(encoded.len()) > MAX_PENDING_AGENT_BYTES
-                || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
-            {
+            let exceeds_lane = queued_bytes.saturating_add(encoded.len()) > MAX_PENDING_AGENT_BYTES;
+            if !exceeds_lane && !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
+                shed_preview_terminals(&mut state);
+            }
+            if exceeds_lane || !reserve_outbound_bytes(&mut state, encoded.len(), 0) {
                 clear_pending_agent(&mut state, pane);
                 Some(queued_first)
             } else {
@@ -1880,6 +1913,11 @@ impl OutboundMailbox {
             return false;
         }
         let replaced = state.agent.get(&pane).map_or(0, |queued| queued.bytes);
+        if bytes <= MAX_PENDING_AGENT_REPLAY_BYTES
+            && !reserve_outbound_bytes(&mut state, bytes, replaced)
+        {
+            shed_preview_terminals(&mut state);
+        }
         if bytes > MAX_PENDING_AGENT_REPLAY_BYTES
             || !reserve_outbound_bytes(&mut state, bytes, replaced)
         {
@@ -1913,9 +1951,46 @@ impl OutboundMailbox {
             log::error!("refusing a non-terminal update in the terminal mailbox for {pane}");
             return TerminalEnqueue::Closed;
         };
-        self.enqueue_terminal_with(pane, transition, |frame| {
-            encode_protocol_message_into(message, frame)
-        })
+        self.enqueue_terminal_with(
+            pane,
+            transition,
+            TerminalDelivery::Foreground,
+            None,
+            |frame| encode_protocol_message_into(message, frame),
+        )
+    }
+
+    fn enqueue_terminal_preview(
+        &self,
+        pane: PaneId,
+        message: &ProtocolMessage,
+        foreground_panes: usize,
+    ) -> TerminalEnqueue {
+        let Some(transition) = terminal_transition(pane, message) else {
+            log::error!("refusing a non-terminal preview in the terminal mailbox for {pane}");
+            return TerminalEnqueue::Closed;
+        };
+        let frame_len = match message {
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::TerminalViewport { viewport, .. },
+                ..
+            }) => terminal_viewport_frame_len(viewport),
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::TerminalPatch { patch, .. },
+                ..
+            }) => terminal_patch_frame_len(patch),
+            _ => unreachable!(),
+        };
+        let Ok(frame_len) = frame_len else {
+            return TerminalEnqueue::Dropped;
+        };
+        self.enqueue_terminal_with(
+            pane,
+            transition,
+            TerminalDelivery::Preview { foreground_panes },
+            Some(frame_len),
+            |frame| encode_protocol_message_into(message, frame),
+        )
     }
 
     fn enqueue_terminal_viewport(
@@ -1930,6 +2005,30 @@ impl OutboundMailbox {
                 base: None,
                 current: viewport_generation(viewport),
             },
+            TerminalDelivery::Foreground,
+            None,
+            |frame| encode_terminal_viewport_event_into(pane, sequence, viewport, frame),
+        )
+    }
+
+    fn enqueue_terminal_viewport_preview(
+        &self,
+        pane: PaneId,
+        sequence: u64,
+        viewport: &TerminalViewport,
+        foreground_panes: usize,
+    ) -> TerminalEnqueue {
+        let Ok(frame_len) = terminal_viewport_frame_len(viewport) else {
+            return TerminalEnqueue::Dropped;
+        };
+        self.enqueue_terminal_with(
+            pane,
+            TerminalTransition {
+                base: None,
+                current: viewport_generation(viewport),
+            },
+            TerminalDelivery::Preview { foreground_panes },
+            Some(frame_len),
             |frame| encode_terminal_viewport_event_into(pane, sequence, viewport, frame),
         )
     }
@@ -1938,20 +2037,47 @@ impl OutboundMailbox {
         &self,
         pane: PaneId,
         transition: TerminalTransition,
+        delivery: TerminalDelivery,
+        frame_len: Option<usize>,
         encode: impl FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError>,
     ) -> TerminalEnqueue {
         {
-            let state = self.state.lock();
+            let mut state = self.state.lock();
             if state.closed {
                 return TerminalEnqueue::Closed;
             }
+            if matches!(delivery, TerminalDelivery::Foreground) {
+                clear_preview_refresh(&mut state, pane);
+            }
             if state.terminals.contains_key(&pane) {
-                return TerminalEnqueue::NeedsFull;
+                return match delivery {
+                    TerminalDelivery::Foreground => TerminalEnqueue::NeedsFull,
+                    TerminalDelivery::Preview { .. } => {
+                        mark_preview_refresh(&mut state, pane);
+                        TerminalEnqueue::Dropped
+                    }
+                };
             }
             if transition.base.is_some()
                 && transition.base != state.delivered_terminals.get(&pane).copied()
             {
                 return TerminalEnqueue::NeedsFull;
+            }
+            if let TerminalDelivery::Preview { foreground_panes } = delivery
+                && (state.terminals.len() >= MAX_PENDING_TERMINALS.saturating_sub(foreground_panes)
+                    || frame_len.is_some_and(|frame_len| {
+                        state
+                            .queued_bytes
+                            .checked_add(frame_len)
+                            .is_none_or(|total| total > MAX_PREVIEW_OUTBOUND_BYTES)
+                    }))
+            {
+                if foreground_panes < MAX_PENDING_TERMINALS
+                    && frame_len.is_some_and(|frame_len| frame_len <= MAX_PREVIEW_OUTBOUND_BYTES)
+                {
+                    mark_preview_refresh(&mut state, pane);
+                }
+                return TerminalEnqueue::Dropped;
             }
         }
         let Ok(encoded) = self.encode_with(encode) else {
@@ -1962,9 +2088,18 @@ impl OutboundMailbox {
         if state.closed {
             return TerminalEnqueue::Closed;
         }
+        if matches!(delivery, TerminalDelivery::Foreground) {
+            clear_preview_refresh(&mut state, pane);
+        }
         if state.terminals.contains_key(&pane) {
             recycle_outbound_frame(&mut state, encoded);
-            return TerminalEnqueue::NeedsFull;
+            return match delivery {
+                TerminalDelivery::Foreground => TerminalEnqueue::NeedsFull,
+                TerminalDelivery::Preview { .. } => {
+                    mark_preview_refresh(&mut state, pane);
+                    TerminalEnqueue::Dropped
+                }
+            };
         }
         if transition.base.is_some()
             && transition.base != state.delivered_terminals.get(&pane).copied()
@@ -1972,12 +2107,40 @@ impl OutboundMailbox {
             recycle_outbound_frame(&mut state, encoded);
             return TerminalEnqueue::NeedsFull;
         }
-        if state.terminals.len() >= MAX_PENDING_TERMINALS
-            || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
-        {
-            close_outbound(&mut state);
-            self.ready.notify_all();
-            return TerminalEnqueue::Closed;
+        match delivery {
+            TerminalDelivery::Foreground => {
+                if state.terminals.len() >= MAX_PENDING_TERMINALS
+                    || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
+                {
+                    shed_preview_terminals(&mut state);
+                }
+                if state.terminals.len() >= MAX_PENDING_TERMINALS
+                    || !reserve_outbound_bytes(&mut state, encoded.len(), 0)
+                {
+                    close_outbound(&mut state);
+                    self.ready.notify_all();
+                    return TerminalEnqueue::Closed;
+                }
+            }
+            TerminalDelivery::Preview { foreground_panes } => {
+                if state.terminals.len() >= MAX_PENDING_TERMINALS.saturating_sub(foreground_panes)
+                    || state
+                        .queued_bytes
+                        .checked_add(encoded.len())
+                        .is_none_or(|total| total > MAX_PREVIEW_OUTBOUND_BYTES)
+                {
+                    if foreground_panes < MAX_PENDING_TERMINALS
+                        && encoded.len() <= MAX_PREVIEW_OUTBOUND_BYTES
+                    {
+                        mark_preview_refresh(&mut state, pane);
+                    }
+                    recycle_outbound_frame(&mut state, encoded);
+                    return TerminalEnqueue::Dropped;
+                }
+            }
+        }
+        if matches!(delivery, TerminalDelivery::Preview { .. }) {
+            clear_preview_refresh(&mut state, pane);
         }
         state.queued_bytes += encoded.len();
         state.terminals.insert(
@@ -1985,6 +2148,7 @@ impl OutboundMailbox {
             PendingTerminal {
                 encoded,
                 current: transition.current,
+                preview: matches!(delivery, TerminalDelivery::Preview { .. }),
             },
         );
         state.terminal_order.push_back(pane);
@@ -2033,10 +2197,20 @@ impl OutboundMailbox {
         if state.closed {
             return false;
         }
-        let replaced_len = state
+        clear_preview_refresh(&mut state, pane);
+        let mut replaced_len = state
             .terminals
             .get(&pane)
             .map_or(0, |pending| pending.encoded.len());
+        if replaced_len == 0 && state.terminals.len() >= MAX_PENDING_TERMINALS
+            || !reserve_outbound_bytes(&mut state, encoded.len(), replaced_len)
+        {
+            shed_preview_terminals(&mut state);
+            replaced_len = state
+                .terminals
+                .get(&pane)
+                .map_or(0, |pending| pending.encoded.len());
+        }
         if replaced_len == 0 && state.terminals.len() >= MAX_PENDING_TERMINALS
             || !reserve_outbound_bytes(&mut state, encoded.len(), replaced_len)
         {
@@ -2053,6 +2227,7 @@ impl OutboundMailbox {
             PendingTerminal {
                 encoded,
                 current: transition.current,
+                preview: false,
             },
         );
         if let Some(replaced) = replaced {
@@ -2102,6 +2277,9 @@ impl OutboundMailbox {
             .command_output
             .as_ref()
             .map_or(0, |pending| pending.encoded.len());
+        if !reserve_outbound_bytes(&mut state, encoded.len(), replaced_len) {
+            shed_preview_terminals(&mut state);
+        }
         if !reserve_outbound_bytes(&mut state, encoded.len(), replaced_len) {
             close_outbound(&mut state);
             self.ready.notify_all();
@@ -2213,10 +2391,15 @@ impl OutboundMailbox {
         self.ready.notify_all();
     }
 
+    fn take_preview_refresh(&self) -> Option<PaneId> {
+        take_preview_refresh(&mut self.state.lock())
+    }
+
     #[cfg(test)]
     fn cancel_terminal(&self, pane: PaneId) {
         let mut state = self.state.lock();
         remove_pending_terminal(&mut state, pane);
+        clear_preview_refresh(&mut state, pane);
         state.delivered_terminals.remove(&pane);
         state.delivered_images.remove(&pane);
         state.delivered_pasted_images.remove(&pane);
@@ -2225,6 +2408,7 @@ impl OutboundMailbox {
     fn suspend_terminal(&self, pane: PaneId) {
         let mut state = self.state.lock();
         remove_pending_terminal(&mut state, pane);
+        clear_preview_refresh(&mut state, pane);
         state.delivered_terminals.remove(&pane);
     }
 
@@ -2240,7 +2424,7 @@ impl OutboundMailbox {
         let state = self.state.lock();
         log::info!(
             target: "zz_daemon::diagnostics::outbound",
-            "snapshot reason={reason} client={client} reliable_messages={} command_output_bytes={} agent_panes={} agent_frames={} terminal_messages={} delivered_terminals={} delivered_image_panes={} terminal_order={} recycled_frames={} recycled_capacity={} queued_bytes={} closed={}",
+            "snapshot reason={reason} client={client} reliable_messages={} command_output_bytes={} agent_panes={} agent_frames={} terminal_messages={} delivered_terminals={} delivered_image_panes={} terminal_order={} preview_refreshes={} recycled_frames={} recycled_capacity={} queued_bytes={} closed={}",
             state.reliable.len(),
             state
                 .command_output
@@ -2252,6 +2436,7 @@ impl OutboundMailbox {
             state.delivered_terminals.len(),
             state.delivered_images.len(),
             state.terminal_order.len(),
+            state.preview_refreshes.len(),
             state.recycled_frames.len(),
             state.recycled_capacity,
             state.queued_bytes,
@@ -2259,7 +2444,7 @@ impl OutboundMailbox {
         );
         log::trace!(
             target: "zz_daemon::diagnostics::outbound",
-            "snapshot reason={reason} client={client} reliable_frame_lengths={:?} command_output_capacity={:?} terminals={:#?} delivered_terminals={:#?} terminal_order={:#?} recycled_frame_capacities={:?}",
+            "snapshot reason={reason} client={client} reliable_frame_lengths={:?} command_output_capacity={:?} terminals={:#?} delivered_terminals={:#?} terminal_order={:#?} preview_refresh_order={:#?} recycled_frame_capacities={:?}",
             state.reliable.iter().map(Vec::len).collect::<Vec<_>>(),
             state
                 .command_output
@@ -2268,6 +2453,7 @@ impl OutboundMailbox {
             state.terminals.iter().map(|(pane, pending)| (*pane, pending.encoded.len(), pending.encoded.capacity(), pending.current)).collect::<Vec<_>>(),
             state.delivered_terminals,
             state.terminal_order,
+            state.preview_refresh_order,
             state.recycled_frames.iter().map(Vec::capacity).collect::<Vec<_>>(),
         );
     }
@@ -2321,6 +2507,40 @@ fn remove_pending_terminal(state: &mut OutboundState, pane: PaneId) {
     state.terminal_order.retain(|queued| *queued != pane);
 }
 
+fn mark_preview_refresh(state: &mut OutboundState, pane: PaneId) {
+    if state.preview_refreshes.len() < MAX_PENDING_TERMINALS && state.preview_refreshes.insert(pane)
+    {
+        state.preview_refresh_order.push_back(pane);
+    }
+}
+
+fn clear_preview_refresh(state: &mut OutboundState, pane: PaneId) {
+    if state.preview_refreshes.remove(&pane) {
+        state.preview_refresh_order.retain(|queued| *queued != pane);
+    }
+}
+
+fn take_preview_refresh(state: &mut OutboundState) -> Option<PaneId> {
+    while let Some(pane) = state.preview_refresh_order.pop_front() {
+        if state.preview_refreshes.remove(&pane) {
+            return Some(pane);
+        }
+    }
+    None
+}
+
+fn shed_preview_terminals(state: &mut OutboundState) {
+    let panes = state
+        .terminals
+        .iter()
+        .filter_map(|(pane, pending)| pending.preview.then_some(*pane))
+        .collect::<Vec<_>>();
+    for pane in panes {
+        mark_preview_refresh(state, pane);
+        remove_pending_terminal(state, pane);
+    }
+}
+
 fn reserve_outbound_bytes(state: &mut OutboundState, incoming: usize, replaced: usize) -> bool {
     state
         .queued_bytes
@@ -2343,6 +2563,8 @@ fn close_outbound(state: &mut OutboundState) {
     state.delivered_images.clear();
     state.delivered_pasted_images.clear();
     state.terminal_order.clear();
+    state.preview_refreshes.clear();
+    state.preview_refresh_order.clear();
     state.recycled_frames.clear();
     state.recycled_capacity = 0;
     state.queued_bytes = 0;
@@ -4036,6 +4258,8 @@ impl Shared {
             inner.terminal_geometries.clear();
             inner.attached.clear();
             inner.visible_terminals.clear();
+            inner.streamed_terminals.clear();
+            inner.terminal_preview_clients.clear();
             inner.visible_agents.clear();
             inner.focused_windows.clear();
             let wakes = take_all_wait_wakes(&mut inner.wait_channels);
@@ -13083,6 +13307,11 @@ impl Shared {
             switches_session && inner.choose_buffers.remove(&client).is_some();
         let display_panes_closed =
             switches_session && take_display_panes(&mut inner, client).is_some();
+        let previous_streamed = inner
+            .streamed_terminals
+            .get(&client)
+            .map(|streamed| streamed.keys().copied().collect::<BTreeSet<_>>())
+            .unwrap_or_default();
         let mut affected_panes = inner
             .visible_terminals
             .get(&client)
@@ -13100,6 +13329,7 @@ impl Shared {
         }
         inner.attached.retain(|_, clients| !clients.is_empty());
         inner.attached.entry(session).or_default().insert(client);
+        inner.terminal_preview_clients.remove(&client);
         if previous_session != Some(session)
             && let Some(previous_session) = previous_session
             && inner.engine.state.sessions.contains_key(&previous_session)
@@ -13146,8 +13376,15 @@ impl Shared {
                 .set_window_silence_flag(active_window, false);
         }
         let visible = visible_terminal_panes(&inner, client, session);
+        let streamed = streamed_terminal_panes(&inner, client, session, &visible);
+        let next_streamed = streamed.keys().copied().collect::<BTreeSet<_>>();
+        let removed_streamed = previous_streamed
+            .difference(&next_streamed)
+            .copied()
+            .collect::<Vec<_>>();
         affected_panes.extend(visible.iter().copied());
         inner.visible_terminals.insert(client, visible);
+        inner.streamed_terminals.insert(client, streamed);
         mark_client_terminal_latest(&mut inner, client);
         affected_panes.extend(control_client_sized_panes(&inner, client));
         #[cfg(feature = "agent")]
@@ -13156,6 +13393,7 @@ impl Shared {
             inner.visible_agents.insert(client, visible);
         }
         let terminals = session_terminals(&inner, session);
+        let subscriber = inner.subscribers.get(&client).cloned();
         let unfocused_copy_mode_exits = unfocused_copy_sessions(&mut inner);
         write_back_terminal_geometries(&mut inner, &affected_panes, false);
         let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
@@ -13196,6 +13434,11 @@ impl Shared {
             }
         }
         drop(inner);
+        if let Some(subscriber) = subscriber {
+            for pane in removed_streamed {
+                subscriber.suspend_terminal(pane);
+            }
+        }
         if let Some(output) = command_output {
             Self::retire_command_output(client, output);
         }
@@ -13477,6 +13720,13 @@ impl Shared {
             }
         }
         inner.visible_terminals.remove(&client);
+        let streamed = inner
+            .streamed_terminals
+            .remove(&client)
+            .map(|streamed| streamed.into_keys().collect::<Vec<_>>())
+            .unwrap_or_default();
+        inner.terminal_preview_clients.remove(&client);
+        let subscriber = inner.subscribers.get(&client).cloned();
         inner.visible_agents.remove(&client);
         inner.focused_windows.remove(&client);
         inner.client_terminal_input_sequences.remove(&client);
@@ -13538,6 +13788,11 @@ impl Shared {
             }
         }
         drop(inner);
+        if let Some(subscriber) = subscriber {
+            for pane in streamed {
+                subscriber.suspend_terminal(pane);
+            }
+        }
         self.fail_gui_requests_for(client);
         let view = TerminalViewId(client.0);
         if let Some(command_output) = command_output {
@@ -13855,6 +14110,14 @@ impl Shared {
                         }
                         if !client_is_attached_to_pane(&inner, client, pane) {
                             return Err(ServerError::PaneNotAttached(pane).into());
+                        }
+                        if inner
+                            .streamed_terminals
+                            .get(&client)
+                            .and_then(|streamed| streamed.get(&pane))
+                            == Some(&TerminalStreamKind::Preview)
+                        {
+                            return Ok(());
                         }
                         inner.terminal_geometries.entry(pane).or_default().insert(
                             client,
@@ -17122,6 +17385,7 @@ impl Shared {
         let (
             snapshot,
             viewports,
+            foreground_panes,
             command_prompt,
             choose_tree,
             choose_buffer,
@@ -17162,24 +17426,34 @@ impl Shared {
                 .confirms
                 .get(&client)
                 .map(|confirm| confirm.state.clone());
-            let session = client_attached_session(&inner, client);
             let view = TerminalViewId(client.0);
             let viewports = if client_terminal_publication_frozen(&inner, client) {
                 Vec::new()
             } else {
-                session.map_or_else(Vec::new, |session| {
-                    visible_terminal_panes(&inner, client, session)
-                        .into_iter()
-                        .filter_map(|pane| {
-                            terminal_viewport_for_pane(&inner, pane, view)
-                                .map(|(terminal, viewport)| (pane, terminal, (*viewport).clone()))
-                        })
-                        .collect()
-                })
+                inner
+                    .streamed_terminals
+                    .get(&client)
+                    .map_or_else(Vec::new, |streamed| {
+                        streamed
+                            .iter()
+                            .filter_map(|(pane, kind)| {
+                                terminal_viewport_for_pane(&inner, *pane, view).map(
+                                    |(terminal, viewport)| {
+                                        (*pane, *kind, terminal, (*viewport).clone())
+                                    },
+                                )
+                            })
+                            .collect()
+                    })
             };
+            let foreground_panes = inner
+                .visible_terminals
+                .get(&client)
+                .map_or(0, BTreeSet::len);
             (
                 snapshot,
                 viewports,
+                foreground_panes,
                 command_prompt,
                 choose_tree,
                 choose_buffer,
@@ -17217,11 +17491,20 @@ impl Shared {
                 state: display_panes,
             },
         );
-        for (pane, terminal, viewport) in viewports {
-            self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
-            let viewport = Self::event(EventPayload::TerminalViewport { pane, viewport });
-            if outbound.enqueue_terminal(pane, &viewport) == TerminalEnqueue::NeedsFull {
-                let _ = outbound.replace_terminal(pane, &viewport);
+        for (pane, kind, terminal, viewport) in viewports {
+            if kind == TerminalStreamKind::Foreground {
+                self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
+            }
+            let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
+            match kind {
+                TerminalStreamKind::Foreground => {
+                    if outbound.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull {
+                        let _ = outbound.replace_terminal(pane, &message);
+                    }
+                }
+                TerminalStreamKind::Preview => {
+                    let _ = outbound.enqueue_terminal_preview(pane, &message, foreground_panes);
+                }
             }
         }
         if let Some((state, _terminal, viewport)) =
@@ -17285,19 +17568,46 @@ impl Shared {
         }
         let viewport = {
             let inner = self.inner.lock();
-            let Some(session) = client_attached_session(&inner, client) else {
+            let Some(kind) = inner
+                .streamed_terminals
+                .get(&client)
+                .and_then(|streamed| streamed.get(&pane))
+                .copied()
+            else {
                 return;
             };
-            if !visible_terminal_panes(&inner, client, session).contains(&pane) {
-                return;
-            }
+            let foreground_panes = if kind == TerminalStreamKind::Preview {
+                inner
+                    .visible_terminals
+                    .get(&client)
+                    .map_or(0, BTreeSet::len)
+            } else {
+                0
+            };
             let view = TerminalViewId(client.0);
             terminal_viewport_for_pane(&inner, pane, view)
+                .map(|(terminal, viewport)| (kind, foreground_panes, terminal, viewport))
         };
-        if let Some((terminal, viewport)) = viewport {
-            self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
-            let _ =
-                outbound.replace_terminal_viewport(pane, Self::next_sequence(), viewport.as_ref());
+        if let Some((kind, foreground_panes, terminal, viewport)) = viewport {
+            match kind {
+                TerminalStreamKind::Foreground => {
+                    self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport);
+                    let _ = outbound.replace_terminal_viewport(
+                        pane,
+                        Self::next_sequence(),
+                        viewport.as_ref(),
+                    );
+                }
+                TerminalStreamKind::Preview => {
+                    outbound.suspend_terminal(pane);
+                    let _ = outbound.enqueue_terminal_viewport_preview(
+                        pane,
+                        Self::next_sequence(),
+                        viewport.as_ref(),
+                        foreground_panes,
+                    );
+                }
+            }
         }
     }
 
@@ -18796,6 +19106,27 @@ impl Shared {
         }
     }
 
+    fn set_terminal_preview(&self, client: ClientId, kind: ClientKind, enabled: bool) {
+        if kind != ClientKind::Interactive {
+            return;
+        }
+        let changed = {
+            let mut inner = self.inner.lock();
+            if client_attached_session(&inner, client).is_none() {
+                inner.terminal_preview_clients.remove(&client);
+                return;
+            }
+            if enabled {
+                inner.terminal_preview_clients.insert(client)
+            } else {
+                inner.terminal_preview_clients.remove(&client)
+            }
+        };
+        if changed {
+            self.refresh_terminal_visibility();
+        }
+    }
+
     fn refresh_terminal_visibility(&self) {
         let (changes, resizes) = {
             let mut inner = self.inner.lock();
@@ -18807,44 +19138,92 @@ impl Shared {
             let mut changes = Vec::new();
             let mut affected_panes = BTreeSet::new();
             for (session, client) in attachments {
-                let next = visible_terminal_panes(&inner, client, session);
-                let previous = inner
+                let next_visible = visible_terminal_panes(&inner, client, session);
+                let next_streamed = streamed_terminal_panes(&inner, client, session, &next_visible);
+                let previous_visible = inner
                     .visible_terminals
                     .get(&client)
                     .cloned()
                     .unwrap_or_default();
-                if next == previous {
+                let previous_streamed = inner
+                    .streamed_terminals
+                    .get(&client)
+                    .cloned()
+                    .unwrap_or_default();
+                if next_visible == previous_visible && next_streamed == previous_streamed {
                     continue;
                 }
-                affected_panes.extend(previous.iter().copied());
-                affected_panes.extend(next.iter().copied());
-                let removed = previous.difference(&next).copied().collect::<Vec<_>>();
+                affected_panes.extend(previous_visible.iter().copied());
+                affected_panes.extend(next_visible.iter().copied());
+                let removed = previous_streamed
+                    .keys()
+                    .filter(|pane| !next_streamed.contains_key(pane))
+                    .copied()
+                    .collect::<Vec<_>>();
                 let view = TerminalViewId(client.0);
-                let newly_visible = next
-                    .difference(&previous)
-                    .filter_map(|pane| {
-                        terminal_viewport_for_pane(&inner, *pane, view)
-                            .map(|(terminal, viewport)| (*pane, terminal, (*viewport).clone()))
+                let viewport_for = |pane: &PaneId| {
+                    terminal_viewport_for_pane(&inner, *pane, view)
+                        .map(|(terminal, viewport)| (*pane, terminal, (*viewport).clone()))
+                };
+                let newly_streamed = next_streamed
+                    .iter()
+                    .filter(|(pane, _)| !previous_streamed.contains_key(pane))
+                    .filter_map(|(pane, kind)| {
+                        viewport_for(pane)
+                            .map(|(pane, terminal, viewport)| (pane, *kind, terminal, viewport))
                     })
                     .collect::<Vec<_>>();
+                let newly_foreground = next_streamed
+                    .iter()
+                    .filter(|(pane, kind)| {
+                        **kind == TerminalStreamKind::Foreground
+                            && previous_streamed.get(pane) == Some(&TerminalStreamKind::Preview)
+                    })
+                    .filter_map(|(pane, _)| viewport_for(pane))
+                    .collect::<Vec<_>>();
                 if let Some(subscriber) = inner.subscribers.get(&client).cloned() {
-                    changes.push((subscriber, removed, newly_visible));
+                    changes.push((
+                        subscriber,
+                        removed,
+                        newly_streamed,
+                        newly_foreground,
+                        next_visible.len(),
+                    ));
                 }
-                inner.visible_terminals.insert(client, next);
+                inner.visible_terminals.insert(client, next_visible);
+                inner.streamed_terminals.insert(client, next_streamed);
             }
             let resizes = terminal_resizes_for_panes(&inner, &affected_panes);
             (changes, resizes)
         };
 
-        for (subscriber, removed, newly_visible) in changes {
+        for (subscriber, removed, newly_streamed, newly_foreground, foreground_panes) in changes {
             for pane in removed {
                 subscriber.suspend_terminal(pane);
             }
-            for (pane, terminal, viewport) in newly_visible {
+            for (pane, terminal, viewport) in newly_foreground {
                 self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport);
                 let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
                 if subscriber.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull {
                     let _ = subscriber.replace_terminal(pane, &message);
+                }
+            }
+            for (pane, kind, terminal, viewport) in newly_streamed {
+                if kind == TerminalStreamKind::Foreground {
+                    self.enqueue_kitty_images_for_viewport(&subscriber, pane, &terminal, &viewport);
+                }
+                let message = Self::event(EventPayload::TerminalViewport { pane, viewport });
+                match kind {
+                    TerminalStreamKind::Foreground => {
+                        if subscriber.enqueue_terminal(pane, &message) == TerminalEnqueue::NeedsFull
+                        {
+                            let _ = subscriber.replace_terminal(pane, &message);
+                        }
+                    }
+                    TerminalStreamKind::Preview => {
+                        let _ =
+                            subscriber.enqueue_terminal_preview(pane, &message, foreground_panes);
+                    }
                 }
             }
         }
@@ -19571,11 +19950,11 @@ impl Shared {
         current: &TerminalViewport,
         terminal: &TerminalSession,
     ) {
-        let (subscriber, unclaimed, mode_event) = {
+        let (subscriber, kind, foreground_panes, unclaimed, mode_event) = {
             let mut inner = self.inner.lock();
             let (unclaimed, mode_changed) =
                 reconcile_copy_session(&mut inner, pane, client, current.mode);
-            let subscriber = inner
+            let kind = inner
                 .engine
                 .state
                 .window_for_pane(pane)
@@ -19585,13 +19964,24 @@ impl Shared {
                         .attached
                         .get(session)
                         .is_some_and(|clients| clients.contains(&client))
-                        && inner
-                            .visible_terminals
-                            .get(&client)
-                            .is_some_and(|visible| visible.contains(&pane))
                 })
                 .filter(|_| !client_terminal_publication_frozen(&inner, client))
-                .and_then(|_| inner.subscribers.get(&client).cloned());
+                .and_then(|_| {
+                    inner
+                        .streamed_terminals
+                        .get(&client)
+                        .and_then(|streamed| streamed.get(&pane))
+                        .copied()
+                });
+            let subscriber = kind.and_then(|_| inner.subscribers.get(&client).cloned());
+            let foreground_panes = if kind == Some(TerminalStreamKind::Preview) {
+                inner
+                    .visible_terminals
+                    .get(&client)
+                    .map_or(0, BTreeSet::len)
+            } else {
+                0
+            };
             let mode_event = mode_changed
                 .then(|| MuxHookSnapshot::capture(&inner.engine))
                 .and_then(|snapshot| {
@@ -19599,7 +19989,7 @@ impl Shared {
                         PendingHookEvent::pane("pane-mode-changed", pane, state, &snapshot)
                     })
                 });
-            (subscriber, unclaimed, mode_event)
+            (subscriber, kind, foreground_panes, unclaimed, mode_event)
         };
         if let Some(terminal) = unclaimed {
             terminal.view_action(
@@ -19608,22 +19998,50 @@ impl Shared {
             );
         }
         if let Some(subscriber) = subscriber {
-            self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current);
+            let kind = kind.expect("a terminal subscriber has a stream kind");
+            if kind == TerminalStreamKind::Foreground {
+                self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, current);
+            }
             let sequence = Self::next_sequence();
-            let result = match payload {
-                TerminalFanout::Full => {
+            let result = match (kind, payload) {
+                (TerminalStreamKind::Foreground, TerminalFanout::Full) => {
                     subscriber.enqueue_terminal_viewport(pane, sequence, current)
                 }
-                TerminalFanout::Patch(patch) => {
+                (TerminalStreamKind::Preview, TerminalFanout::Full) => subscriber
+                    .enqueue_terminal_viewport_preview(pane, sequence, current, foreground_panes),
+                (TerminalStreamKind::Foreground, TerminalFanout::Patch(patch)) => {
                     let message = ProtocolMessage::Event(Event {
                         sequence,
                         payload: EventPayload::TerminalPatch { pane, patch },
                     });
                     subscriber.enqueue_terminal(pane, &message)
                 }
+                (TerminalStreamKind::Preview, TerminalFanout::Patch(patch)) => {
+                    let message = ProtocolMessage::Event(Event {
+                        sequence,
+                        payload: EventPayload::TerminalPatch { pane, patch },
+                    });
+                    subscriber.enqueue_terminal_preview(pane, &message, foreground_panes)
+                }
             };
             if result == TerminalEnqueue::NeedsFull {
-                let _ = subscriber.replace_terminal_viewport(pane, Self::next_sequence(), current);
+                match kind {
+                    TerminalStreamKind::Foreground => {
+                        let _ = subscriber.replace_terminal_viewport(
+                            pane,
+                            Self::next_sequence(),
+                            current,
+                        );
+                    }
+                    TerminalStreamKind::Preview => {
+                        let _ = subscriber.enqueue_terminal_viewport_preview(
+                            pane,
+                            Self::next_sequence(),
+                            current,
+                            foreground_panes,
+                        );
+                    }
+                }
             }
         }
         if let Some(event) = mode_event {
@@ -19829,8 +20247,10 @@ impl Shared {
             let Some(outbound) = inner.subscribers.get(&client).cloned() else {
                 return;
             };
-            let mut panes = client_attached_session(&inner, client)
-                .map(|session| visible_terminal_panes(&inner, client, session))
+            let mut panes = inner
+                .streamed_terminals
+                .get(&client)
+                .map(|streamed| streamed.keys().copied().collect::<BTreeSet<_>>())
                 .unwrap_or_default();
             if let Some(pane) = inner.popups.get(&client).map(|popup| popup.state.pane) {
                 panes.insert(pane);
@@ -23174,6 +23594,8 @@ struct ServerState {
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
+    streamed_terminals: BTreeMap<ClientId, BTreeMap<PaneId, TerminalStreamKind>>,
+    terminal_preview_clients: BTreeSet<ClientId>,
     visible_agents: BTreeMap<ClientId, BTreeSet<PaneId>>,
     focused_windows: BTreeMap<ClientId, WindowId>,
     terminal_geometries: BTreeMap<PaneId, BTreeMap<ClientId, TerminalGeometry>>,
@@ -28093,6 +28515,21 @@ fn session_terminals(inner: &ServerState, session: SessionId) -> Vec<Arc<Termina
         .collect()
 }
 
+fn session_terminal_panes(inner: &ServerState, session: SessionId) -> BTreeSet<PaneId> {
+    inner
+        .engine
+        .state
+        .sessions
+        .get(&session)
+        .into_iter()
+        .flat_map(|session| session.windows.iter())
+        .filter_map(|window| inner.engine.state.windows.get(window))
+        .flat_map(|window| window.panes.keys())
+        .filter(|pane| inner.terminals.contains_key(pane))
+        .copied()
+        .collect()
+}
+
 fn terminal_viewport_for_pane(
     inner: &ServerState,
     pane: PaneId,
@@ -28135,6 +28572,25 @@ fn visible_terminal_panes(
         })
         .map(|(pane, _)| *pane)
         .collect()
+}
+
+fn streamed_terminal_panes(
+    inner: &ServerState,
+    client: ClientId,
+    session: SessionId,
+    visible: &BTreeSet<PaneId>,
+) -> BTreeMap<PaneId, TerminalStreamKind> {
+    let mut streamed = visible
+        .iter()
+        .copied()
+        .map(|pane| (pane, TerminalStreamKind::Foreground))
+        .collect::<BTreeMap<_, _>>();
+    if inner.terminal_preview_clients.contains(&client) {
+        for pane in session_terminal_panes(inner, session) {
+            streamed.entry(pane).or_insert(TerminalStreamKind::Preview);
+        }
+    }
+    streamed
 }
 
 /// The agent panes a client can actually see, derived exactly like the
@@ -31490,9 +31946,10 @@ fn handle_connection<S: TransportStream>(
     );
     let mut writer = stream.try_clone()?;
     let writer_mailbox = Arc::clone(&outbound);
+    let writer_shared = Arc::downgrade(shared);
     let writer_thread = thread::Builder::new()
         .name(format!("zz-client-writer-{}", client.0))
-        .spawn(move || write_outbound(&mut writer, &writer_mailbox))
+        .spawn(move || write_outbound(&mut writer, &writer_mailbox, &writer_shared, client))
         .map_err(|error| DaemonError::Thread(error.to_string()))?;
     let mut writer_registration =
         ClientWriterRegistrationGuard::new(shared, client, Arc::clone(&outbound));
@@ -31688,6 +32145,9 @@ fn handle_connection<S: TransportStream>(
             ProtocolMessage::SetConfigOverrides { entries } => {
                 shared.set_config_overrides(client, hello.kind, &entries);
             }
+            ProtocolMessage::SetTerminalPreview { enabled } => {
+                shared.set_terminal_preview(client, hello.kind, enabled);
+            }
             ProtocolMessage::Input(input) => {
                 if let Some(context) = context.as_mut() {
                     sync_context_with_attachment(&shared.inner.lock(), client, context);
@@ -31878,7 +32338,12 @@ fn best_effort_server_stopping_reply(stream: &mut impl Write) {
     }
 }
 
-fn write_outbound(stream: &mut impl TransportStream, outbound: &OutboundMailbox) {
+fn write_outbound(
+    stream: &mut impl TransportStream,
+    outbound: &OutboundMailbox,
+    shared: &Weak<Shared>,
+    client: ClientId,
+) {
     while let Some(frame) = outbound.recv() {
         let started = diagnostic_timer();
         let bytes = frame.len();
@@ -31903,6 +32368,11 @@ fn write_outbound(stream: &mut impl TransportStream, outbound: &OutboundMailbox)
         }
         outbound.note_written(bytes);
         outbound.recycle_frame(frame);
+        if let Some(pane) = outbound.take_preview_refresh()
+            && let Some(shared) = shared.upgrade()
+        {
+            shared.send_full(client, pane, outbound);
+        }
     }
     let _ = stream.shutdown();
     outbound.mark_writer_finished();
@@ -64009,6 +64479,50 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn outbound_mailbox_drops_preview_pressure_before_foreground() {
+        let mailbox = OutboundMailbox::new();
+        let oversized = terminal_test_message(PaneId(1), 1, 1);
+        let transition = terminal_transition(PaneId(1), &oversized).expect("terminal transition");
+        assert_eq!(
+            mailbox.enqueue_terminal_with(
+                PaneId(1),
+                transition,
+                TerminalDelivery::Preview {
+                    foreground_panes: 1,
+                },
+                Some(MAX_PREVIEW_OUTBOUND_BYTES + 1),
+                |_| panic!("oversized preview reached the encoder"),
+            ),
+            TerminalEnqueue::Dropped
+        );
+        assert!(!mailbox.state.lock().closed);
+
+        for index in 0..MAX_PENDING_TERMINALS - 1 {
+            let pane = PaneId(u64::try_from(index + 10).unwrap());
+            let message = terminal_test_message(pane, 2, 2);
+            assert_eq!(
+                mailbox.enqueue_terminal_preview(pane, &message, 1),
+                TerminalEnqueue::Queued
+            );
+        }
+        let rejected = PaneId(10_000);
+        assert_eq!(
+            mailbox.enqueue_terminal_preview(rejected, &terminal_test_message(rejected, 3, 3), 1,),
+            TerminalEnqueue::Dropped
+        );
+        let foreground = PaneId(20_000);
+        assert_eq!(
+            mailbox.enqueue_terminal(foreground, &terminal_test_message(foreground, 4, 4),),
+            TerminalEnqueue::Queued
+        );
+        let state = mailbox.state.lock();
+        assert_eq!(state.terminals.len(), MAX_PENDING_TERMINALS);
+        assert!(state.terminals.contains_key(&foreground));
+        assert!(state.queued_bytes <= MAX_OUTBOUND_BYTES);
+        assert!(!state.closed);
+    }
+
+    #[test]
     fn outbound_mailbox_delivers_kitty_pixels_before_viewports_and_resets_per_pane() {
         let mailbox = OutboundMailbox::new();
         let pane = PaneId(9);
@@ -64403,6 +64917,238 @@ bind - split-window -v -c "#{pane_current_path}"
 
         shared.send_full(client, PaneId(u64::MAX), &mailbox);
         assert_eq!(queued_fulls(), [first]);
+    }
+
+    #[test]
+    fn terminal_preview_streams_inactive_windows_without_owning_geometry() {
+        let shared = Arc::new(Shared::new(1));
+        let first_mailbox = OutboundMailbox::new();
+        let second_mailbox = OutboundMailbox::new();
+        let (first_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&first_mailbox),
+        );
+        let (second_client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            None,
+            None,
+            Arc::clone(&second_mailbox),
+        );
+        let (session, first, first_terminal) =
+            output_view_session_fixture(&shared, "preview-first", "first");
+        let (second_window, second) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_window(session, Some("second".to_owned()), PaneKind::Terminal)
+            .expect("second window");
+        let second_terminal = Arc::new(TerminalSession::spawn_output_view(
+            "preview-second".to_owned(),
+            "second".to_owned(),
+        ));
+        shared
+            .inner
+            .lock()
+            .terminals
+            .insert(second, Arc::clone(&second_terminal));
+        shared
+            .watch_terminal(second, &second_terminal)
+            .expect("watch second terminal");
+        shared
+            .attach(first_client, session)
+            .expect("attach first client");
+        shared
+            .attach(second_client, session)
+            .expect("attach second client");
+        let first_view = TerminalViewId(first_client.0);
+        let first_window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(first)
+            .expect("first window");
+        wait_for_viewport(
+            &first_terminal,
+            first_view,
+            "first preview viewport",
+            |_| true,
+        );
+        wait_for_viewport(
+            &second_terminal,
+            first_view,
+            "second foreground viewport",
+            |_| true,
+        );
+        first_mailbox.suspend_terminal(first);
+        first_mailbox.suspend_terminal(second);
+        second_mailbox.suspend_terminal(first);
+        second_mailbox.suspend_terminal(second);
+
+        let mut context = ExecutionContext::default();
+        shared
+            .input(
+                first_client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: second,
+                    columns: 120,
+                    rows: 40,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("foreground geometry");
+        let owner = terminal_geometry_owner(&shared.inner.lock(), second);
+
+        shared.set_terminal_preview(first_client, ClientKind::Interactive, true);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.visible_terminals[&first_client],
+                BTreeSet::from([second])
+            );
+            assert_eq!(
+                inner.streamed_terminals[&first_client],
+                BTreeMap::from([
+                    (first, TerminalStreamKind::Preview),
+                    (second, TerminalStreamKind::Foreground),
+                ])
+            );
+            assert_eq!(
+                inner.streamed_terminals[&second_client],
+                BTreeMap::from([(second, TerminalStreamKind::Foreground)])
+            );
+            assert!(inner.terminal_preview_clients.contains(&first_client));
+            assert!(!inner.terminal_preview_clients.contains(&second_client));
+            assert_eq!(terminal_geometry_owner(&inner, second), owner);
+        }
+        {
+            let state = first_mailbox.state.lock();
+            assert!(
+                state
+                    .terminals
+                    .get(&first)
+                    .is_some_and(|pending| pending.preview)
+            );
+            assert!(!state.closed);
+        }
+
+        shared
+            .inner
+            .lock()
+            .focused_windows
+            .insert(first_client, first_window);
+        shared.refresh_terminal_visibility();
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.visible_terminals[&first_client],
+                BTreeSet::from([first])
+            );
+            assert_eq!(
+                inner.streamed_terminals[&first_client],
+                BTreeMap::from([
+                    (first, TerminalStreamKind::Foreground),
+                    (second, TerminalStreamKind::Preview),
+                ])
+            );
+        }
+        {
+            let state = first_mailbox.state.lock();
+            let pending = state
+                .terminals
+                .get(&first)
+                .expect("preview promoted to foreground full");
+            assert!(!pending.preview);
+            assert!(matches!(
+                decode_protocol_frame(&pending.encoded),
+                Ok(ProtocolMessage::Event(Event {
+                    payload: EventPayload::TerminalViewport { pane, .. },
+                    ..
+                })) if pane == first
+            ));
+        }
+        shared
+            .inner
+            .lock()
+            .focused_windows
+            .insert(first_client, second_window);
+        shared.refresh_terminal_visibility();
+        assert_eq!(
+            shared.inner.lock().visible_terminals[&first_client],
+            BTreeSet::from([second])
+        );
+
+        first_mailbox.suspend_terminal(first);
+        shared.send_full(first_client, first, &first_mailbox);
+        {
+            let state = first_mailbox.state.lock();
+            assert!(
+                state
+                    .terminals
+                    .get(&first)
+                    .is_some_and(|pending| pending.preview)
+            );
+            assert!(!state.closed);
+        }
+
+        shared
+            .input(
+                first_client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: first,
+                    columns: 20,
+                    rows: 5,
+                    cell_width_px: 2,
+                    cell_height_px: 4,
+                },
+            )
+            .expect("preview geometry is ignored");
+        {
+            let inner = shared.inner.lock();
+            assert!(
+                !inner
+                    .terminal_geometries
+                    .get(&first)
+                    .is_some_and(|geometries| geometries.contains_key(&first_client))
+            );
+            assert_eq!(terminal_geometry_owner(&inner, second), owner);
+        }
+
+        shared.set_terminal_preview(first_client, ClientKind::Interactive, false);
+        {
+            let inner = shared.inner.lock();
+            assert_eq!(
+                inner.visible_terminals[&first_client],
+                BTreeSet::from([second])
+            );
+            assert_eq!(
+                inner.streamed_terminals[&first_client],
+                BTreeMap::from([(second, TerminalStreamKind::Foreground)])
+            );
+            assert!(!inner.terminal_preview_clients.contains(&first_client));
+            assert_eq!(terminal_geometry_owner(&inner, second), owner);
+        }
+        {
+            let state = first_mailbox.state.lock();
+            assert!(!state.terminals.contains_key(&first));
+            assert!(!state.terminal_order.contains(&first));
+            assert!(!state.closed);
+        }
+
+        shared.set_terminal_preview(first_client, ClientKind::Interactive, true);
+        shared.detach(first_client);
+        let inner = shared.inner.lock();
+        assert!(!inner.visible_terminals.contains_key(&first_client));
+        assert!(!inner.streamed_terminals.contains_key(&first_client));
+        assert!(!inner.terminal_preview_clients.contains(&first_client));
     }
 
     fn history_chunk_text(
@@ -65851,7 +66597,9 @@ bind - split-window -v -c "#{pane_current_path}"
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("overflow read timeout");
         let writer_mailbox = Arc::clone(&mailbox);
-        let writer = thread::spawn(move || write_outbound(&mut server, &writer_mailbox));
+        let writer = thread::spawn(move || {
+            write_outbound(&mut server, &writer_mailbox, &Weak::new(), ClientId(0));
+        });
 
         assert_eq!(
             zz_protocol::read_protocol_message(&mut client).expect("control overflow exit"),

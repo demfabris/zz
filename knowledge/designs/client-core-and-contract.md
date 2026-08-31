@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Decision record for the shared client contract - protocol-owned commands and keys, sans-IO reduction, typed Agent attention, and a native-shell C ABI.
-status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, then full window trees and normalized visible pane geometry on 2026-08-30. History, Kitty, multi-host selection, Browser and Editor viewports, and the Agent transcript stream remain open. GPUI cross-surface rebinding still needs a restart
+status: Contract consolidation, live key tables, daemon chooser tables, ClientCore reduction, ChromeKeymap, and desktop/TUI adoption shipped 2026-08-14. The native Apple ABI gained mux and styled terminal surfaces on 2026-08-15, endpoint connection and its iOS SSH identity on 2026-08-25, interactive SSH trust and authentication, Agent supervision, semantic selection, and clipboard delivery on 2026-08-26, full window trees and normalized visible pane geometry on 2026-08-30, then passive attached-session terminal preview control on 2026-08-31. History, Kitty, multi-host selection, Browser and Editor viewports, and the Agent transcript stream remain open. GPUI cross-surface rebinding still needs a restart
 tags:
 - client
 - ffi
@@ -10,7 +10,7 @@ tags:
 - protocol
 - architecture
 - multi-client
-timestamp: 2026-08-28T00:00:00-03:00
+timestamp: 2026-08-31T00:00:00-03:00
 ---
 
 # Overview
@@ -28,7 +28,8 @@ frames in `RetainedTerminalViewport`, avoiding a second patch application on the
 client. The native Apple client extended the hand-maintained header with raw key forwarding,
 style/grapheme tables, generation counters, mux/session/window/pane snapshots, normalized visible
 pane geometry, damage rows, terminal focus
-and scrolling, semantic selection and typed clipboard delivery, appearance, disconnect events,
+and scrolling, passive attached-session terminal preview control, semantic selection and typed
+clipboard delivery, appearance, disconnect events,
 interactive endpoint connection with typed failures and SSH prompts, its iOS SSH public identity, and
 retained Agent summaries, attention edges, permission responses, and cancellation. Catalog/table
 access, chrome actions, history, Kitty images, multi-host presentation, Browser and Editor viewports,
@@ -54,10 +55,10 @@ the parts that shipped and the parts that remain design intent.
 - **Commands travel tokenized-but-unparsed** (`CommandInvocation`); parsing,
   aliases, flags, and target resolution are daemon-side
   (`crates/zz-mux/src/command.rs`).
-- **Two composition seams existed**: `zz::engine` + `AppProfile` let the former GPUI iPad app
+- **Two composition paths existed**: `zz::engine` + `AppProfile` let the former GPUI iPad app
   recompile the desktop client on another backend, while `zz-daemon` with
-  `default-features = false` supplied a pure client SDK. The GPUI iOS seam was deleted when the
-  [native iPhone client](/designs/ios-client.md) moved onto `zz-client-ffi`.
+  `default-features = false` supplied a pure client SDK. The GPUI iOS path was deleted when the
+  [native Apple client](/designs/ios-client.md) moved onto `zz-client-ffi`.
 
 # The gap - what every new client re-hand-rolls today
 
@@ -137,12 +138,12 @@ New crate sitting between the contract and any skin. Contents (lifted from
 - the chrome `KeyEngine` instance (Pillar 5) and action emission
 - kitty image assembly
 
-The API discipline is the load-bearing decision: **a handle, messages in, events
+The API discipline is the central decision: **a handle, messages in, events
 + snapshots out; no async types, no gpui types, no generics on the public
-surface**. Desktop and TUI consume this same C-shaped API natively — if the
-desktop grows a Rust-only convenience layer the core does not export, the
-GTK/Qt/Swift clients become second-class again, so the FFI shim doubles as the
-API's conformance test. The native iPhone app consumes that same surface through
+surface**. Desktop and TUI consume this same C-shaped API natively. If the desktop grows a Rust-only
+convenience layer the core does not export, the
+GTK/Qt/Swift clients become second-class again, so the FFI surface doubles as the
+API's conformance test. The native Apple app consumes that same surface through
 `zz-client-ffi`; it does not import desktop GPUI modules.
 
 ## Pillar 5 - chrome bindings are data, resolved by the same engine
@@ -167,7 +168,8 @@ is not chrome and not part of the contract.
 
 The shipped `#[no_mangle]` shim and hand-maintained header now cover interactive connection with
 typed SSH prompts and failures, pollable event wake/drain, attach, typed mux snapshots with full
-window trees and normalized visible pane rectangles, caller-owned
+window trees and normalized visible pane rectangles, passive attached-session terminal previews,
+caller-owned
 styled terminal viewports, raw key and text input, command execution, resize, separate client-window
 and terminal pane focus, scrolling, semantic selection, typed clipboard delivery, retained Agent
 summaries and actions, attention edges, damage, appearance, and disconnect events. The
@@ -175,6 +177,10 @@ viewport is the render contract: a flat cell plane plus style table, grapheme ar
 and generation counters remain alive until the caller releases the handle. The reader stays inside
 the core and toolkits integrate its wake fd with GSource, `QSocketNotifier`, or DispatchSource; Rust
 threads never call toolkit code.
+
+`zz_client_set_terminal_preview` changes only which retained terminal viewports the daemon delivers.
+It adds every terminal pane across all windows of the attached session while enabled; selection,
+input, history, and resize continue through the existing foreground-only calls.
 
 The C link client compiles and links the contract, rejects an invalid interactive endpoint with a typed
 failure, creates sessions and panes, renders styled content, types through the raw-key path, exercises
@@ -192,8 +198,8 @@ session attach restores the old ready epoch and flushes a focus change cached du
 An unrelated request-zero error leaves both pending and ready focus epochs unchanged.
 `zz_client_attach` returning true confirms that the client wrote the request, not that the daemon
 attached it. FFI shells wait for `ZZ_EVENT_ATTACHED` before calling `zz_client_set_focused`. The
-iPhone client follows that contract for initial, selected-session, recovery, and recreated-session
-attachments without replaying pane focus.
+native Apple client follows that contract for initial, selected-session, recovery, and
+recreated-session attachments without replaying pane focus.
 
 The TUI assumes its outer terminal is foregrounded when it enters focus-reporting mode. It caches
 later `FocusGained` and `FocusLost` events while attachment is pending, then sends the latest
@@ -304,8 +310,8 @@ API emit identical event sequences.
 6. **`zz-client-ffi`: proof surface shipped.** The C integration client validates typed interactive
    endpoint errors, attaches through a parsed endpoint, reads the window tree and layout, reads rows,
    types, selects, copies, references
-   Agent supervision actions, creates a session and pane, frees, and reconnects. The iPhone shell
-   consumes the in-process SSH identity plus explicit trust and keyboard-interactive prompt path. The
+   Agent supervision actions, creates a session and pane, frees, and reconnects. The native Apple
+   shell consumes the in-process SSH identity plus explicit trust and keyboard-interactive prompt path. The
    full catalog/action contract above remains open, and the header is hand-maintained rather than
    generated by cbindgen.
 

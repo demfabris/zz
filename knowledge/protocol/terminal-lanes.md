@@ -4,7 +4,7 @@ title: Packed terminal lanes (terminal_codec.rs)
 description: The hand-packed, fixed-width Terminal envelope lane that fans immutable terminal viewports and row patches out to clients with deduplicated style and grapheme dictionaries over one ordered stream, local or ssh-forwarded.
 resource: crates/zz-protocol/src/terminal_codec.rs
 tags: [protocol, terminal, wire, packing, fanout]
-timestamp: 2026-08-13T00:00:00Z
+timestamp: 2026-08-31T00:00:00-03:00
 ---
 
 # Overview
@@ -215,7 +215,7 @@ whitespace characters; the working directory (a decoded path reported through OS
 # Delivery
 
 Terminal frames share one ordered stream with the Control lane and arrive in order, over a Unix
-socket, a named pipe, or an `ssh -L` forward of the same socket. Frames are never compressed: the
+socket, a named pipe, or an SSH-carried byte stream. Frames are never compressed: the
 envelope flags byte is reserved, and the zstd bit that only the QUIC writer ever set went with QUIC
 at protocol v43.
 
@@ -223,6 +223,21 @@ Supersession therefore lives entirely in the daemon's outbound mailbox rather th
 pending frame per pane, newest replacing stale under backpressure (see
 [zz-daemon](/crates/zz-daemon.md)). A stalled client still converges on the latest frame; what it no
 longer does is discard bytes already in flight.
+
+Protocol v87 separates terminal delivery scope from foreground authority. `visible_terminals` still
+contains only the attached client's focused window, after zoom filtering, and remains the source for
+input, history, and PTY geometry. When an attached Interactive client sends
+`SetTerminalPreview { enabled: true }`, `streamed_terminals` also includes every terminal pane in
+every window of that attached session as `Preview`. Each pane keeps the same client-specific
+`TerminalViewId`, so enabling previews adds frame delivery without selecting a window or resizing a
+PTY. Disabling previews suspends those extra streams. Panes in other sessions are not streamed until
+the client attaches that session.
+
+Preview frames are bounded and lower priority. Their pending slots and bytes reserve room for the
+foreground pane set; reliable messages and foreground terminal frames can discard queued previews,
+which are retried as a latest full viewport after the writer makes progress. The daemon does not
+enqueue Kitty image payloads for preview panes. Foreground frames retain their existing Kitty image
+delivery and full terminal behavior.
 
 Command output uses one separate coalesced slot. The mailbox retains the actor ID beside the encoded
 frame, refuses an older actor frame after a newer one is pending, and lets a reliable close discard
@@ -233,9 +248,10 @@ daemon with a fresh ID lifetime; reconnecting to the same daemon does not restar
 
 Recovery is per pane. When a client receives a patch it cannot apply, or a patch for a pane it has no
 base frame for, it sends `ProtocolMessage::RequestFull { pane }` and the daemon replies with that
-client's latest full viewport for the pane. The daemon drops the request when the pane is not
-currently visible to that client, and every snapshot re-arms the client's recovery window, so a
-visibility race cannot wedge a pane.
+client's latest full viewport for the pane. The daemon drops the request when the pane is neither
+foreground nor preview-streamed to that client, and every snapshot re-arms the client's recovery
+window, so a delivery-scope race cannot wedge a pane. `HistoryRequest` remains limited to foreground
+panes.
 
 # Scrollback backfill
 

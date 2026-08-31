@@ -65,7 +65,7 @@ Agent panes, settings, reconnect presentation, or accessibility.
   first responder and one input owner. Setting both `interactive: true` and `preview: true` makes
   miniature UIKit bounds eligible for resize reporting and can shrink the real PTY.
 - While Panorama is open, the app retains a pane-local frame slot for every terminal across every
-  window of the attached session. The v86 preview stream carries inactive-window frames separately
+  window of the attached session. The v87 preview stream carries inactive-window frames separately
   from foreground geometry and input. Other sessions keep pane-kind placeholders until navigation
   attaches them. Do not create hidden interactive terminals to fill those cards.
 - Live thumbnails for multiple sessions at once would require extending the daemon/client preview

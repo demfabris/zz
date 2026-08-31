@@ -26,7 +26,7 @@ use crate::{
     agent_update_batch_bytes,
     framing::{
         Lane, MAX_ENCODED_FRAME_BYTES, ProtocolError, begin_enveloped_into, decode_enveloped,
-        finish_enveloped_in_place, read_enveloped_into,
+        enveloped_capacity, finish_enveloped_in_place, read_enveloped_into,
     },
     message::{
         MAX_CONFIG_OVERRIDE_ENTRIES, MAX_CONFIG_OVERRIDE_KEY_BYTES,
@@ -125,6 +125,24 @@ pub fn encode_terminal_viewport_event_into(
         output.clear();
     }
     result
+}
+
+pub fn terminal_viewport_frame_len(viewport: &TerminalViewport) -> Result<usize, ProtocolError> {
+    enveloped_capacity(viewport_payload_capacity(
+        viewport,
+        viewport.title().len(),
+        viewport.working_directory().map_or(0, str::len),
+        viewport.hovered_uri().map_or(0, str::len),
+    )?)
+}
+
+pub fn terminal_patch_frame_len(patch: &TerminalViewportPatch) -> Result<usize, ProtocolError> {
+    enveloped_capacity(patch_payload_capacity(
+        patch,
+        patch.title().len(),
+        patch.working_directory().map_or(0, str::len),
+        patch.hovered_uri().map_or(0, str::len),
+    )?)
 }
 
 /// Encode a protocol message into a caller-owned frame buffer.
@@ -2872,6 +2890,20 @@ mod tests {
     }
 
     #[test]
+    fn terminal_preview_toggle_round_trips_on_the_control_lane() {
+        for enabled in [false, true] {
+            let message = ProtocolMessage::SetTerminalPreview { enabled };
+            let frame = encode_protocol_message(&message).expect("encode terminal preview toggle");
+            assert_eq!(frame[4], Lane::Control as u8);
+            assert_eq!(&frame[6..8], &PROTOCOL_VERSION.to_le_bytes());
+            assert_eq!(
+                decode_protocol_frame(&frame).expect("decode terminal preview toggle"),
+                message
+            );
+        }
+    }
+
+    #[test]
     fn rejects_truncated_frames() {
         assert!(matches!(
             decode_protocol_frame(&[1, 0, 0]),
@@ -3043,6 +3075,10 @@ mod tests {
         });
 
         let owned_frame = encode_protocol_message(&owned).expect("owned viewport frame");
+        assert_eq!(
+            terminal_viewport_frame_len(&viewport).expect("viewport frame length"),
+            owned_frame.len()
+        );
         let borrowed_frame = encode_terminal_viewport_event(pane, sequence, &viewport)
             .expect("borrowed viewport frame");
 

@@ -10,6 +10,7 @@
 #include "zz-client.h"
 
 static const char READY[] = "zz-smoke-ready";
+static const char PREVIEW_READY[] = "zz-preview-ready";
 static const char TYPED[] = "hello-from-c";
 
 static int bytes_equal(zz_bytes value, const char *expected) {
@@ -162,20 +163,25 @@ int main(int argc, char **argv) {
 
     uint64_t panes[8];
     size_t pane_count = 0;
-    for (int attempt = 0; attempt < 200 && pane_count == 0; attempt++) {
+    for (int attempt = 0; attempt < 200 && pane_count < 2; attempt++) {
         zz_client_event event;
         while (zz_client_next_event(client, &event)) {
         }
         pane_count = zz_client_terminal_panes(client, panes, 8);
-        if (pane_count == 0) {
+        if (pane_count < 2) {
             usleep(50 * 1000);
         }
     }
-    if (pane_count == 0) {
-        fprintf(stderr, "smoke: no terminal pane appeared\n");
+    if (pane_count < 2) {
+        fprintf(stderr, "smoke: both terminal windows did not appear\n");
         return 1;
     }
-    uint64_t pane = panes[0];
+    if (!zz_client_set_terminal_preview(client, true)) {
+        fprintf(stderr, "smoke: terminal preview enable failed\n");
+        return 1;
+    }
+    uint64_t pane = 0;
+    uint64_t preview_pane = 0;
     zz_mux_snapshot *snapshot = zz_client_snapshot_acquire(client);
     if (snapshot == NULL || zz_snapshot_session_count(snapshot) == 0) {
         fprintf(stderr, "smoke: no mux snapshot appeared\n");
@@ -189,36 +195,51 @@ int main(int argc, char **argv) {
     int found_session = 0;
     for (size_t index = 0; index < zz_snapshot_session_count(snapshot); index++) {
         if (bytes_equal(zz_snapshot_session_name(snapshot, index), "smoke")) {
-            zz_pane_rect rect = {0};
-            uint64_t zoomed = 0;
-            found_session = zz_snapshot_session_is_attached(snapshot, index) &&
-                            zz_snapshot_session_pane_count(snapshot, index) == 1 &&
-                            zz_snapshot_session_pane_id(snapshot, index, 0) == pane &&
-                            zz_snapshot_session_pane_kind(snapshot, index, 0) ==
-                                ZZ_PANE_TERMINAL &&
-                            zz_snapshot_session_window_count(snapshot, index) == 1 &&
-                            zz_snapshot_session_window_is_current(snapshot, index, 0) &&
-                            zz_snapshot_session_window_id(snapshot, index, 0) ==
-                                zz_snapshot_session_active_window(snapshot, index) &&
-                            zz_snapshot_session_window_index(snapshot, index, 0) == 0 &&
-                            zz_snapshot_session_window_name(snapshot, index, 0).len > 0 &&
-                            zz_snapshot_session_window_active_pane(snapshot, index, 0) == pane &&
-                            zz_snapshot_session_window_pane_count(snapshot, index, 0) == 1 &&
-                            zz_snapshot_session_window_pane_id(snapshot, index, 0, 0) == pane &&
-                            bytes_same(
-                                zz_snapshot_session_window_pane_title(snapshot, index, 0, 0),
-                                zz_snapshot_session_pane_title(snapshot, index, 0)) &&
-                            zz_snapshot_session_window_pane_kind(snapshot, index, 0, 0) ==
-                                ZZ_PANE_TERMINAL &&
-                            zz_snapshot_session_window_pane_is_active(snapshot, index, 0, 0) &&
-                            zz_snapshot_session_window_pane_has_bell(snapshot, index, 0, 0) ==
-                                zz_snapshot_session_pane_has_bell(snapshot, index, 0) &&
-                            zz_snapshot_session_window_pane_rect(snapshot, index, 0, 0,
-                                                                 &rect) &&
-                            rect.x == 0.0f && rect.y == 0.0f &&
-                            rect.width == 1.0f && rect.height == 1.0f &&
-                            !zz_snapshot_session_window_zoomed_pane(snapshot, index, 0,
-                                                                    &zoomed);
+            int session_shape =
+                zz_snapshot_session_is_attached(snapshot, index) &&
+                zz_snapshot_session_pane_count(snapshot, index) == 1 &&
+                zz_snapshot_session_window_count(snapshot, index) == 2;
+            int current_windows = 0;
+            int inactive_windows = 0;
+            for (size_t window = 0; window < 2 && session_shape; window++) {
+                zz_pane_rect rect = {0};
+                uint64_t zoomed = 0;
+                uint64_t window_pane =
+                    zz_snapshot_session_window_pane_id(snapshot, index, window, 0);
+                session_shape =
+                    zz_snapshot_session_window_name(snapshot, index, window).len > 0 &&
+                    zz_snapshot_session_window_active_pane(snapshot, index, window) ==
+                        window_pane &&
+                    zz_snapshot_session_window_pane_count(snapshot, index, window) == 1 &&
+                    zz_snapshot_session_window_pane_kind(snapshot, index, window, 0) ==
+                        ZZ_PANE_TERMINAL &&
+                    zz_snapshot_session_window_pane_is_active(snapshot, index, window, 0) &&
+                    zz_snapshot_session_window_pane_rect(snapshot, index, window, 0, &rect) &&
+                    rect.x == 0.0f && rect.y == 0.0f && rect.width == 1.0f &&
+                    rect.height == 1.0f &&
+                    !zz_snapshot_session_window_zoomed_pane(snapshot, index, window,
+                                                            &zoomed);
+                if (zz_snapshot_session_window_is_current(snapshot, index, window)) {
+                    current_windows++;
+                    pane = window_pane;
+                    session_shape =
+                        session_shape &&
+                        zz_snapshot_session_window_id(snapshot, index, window) ==
+                            zz_snapshot_session_active_window(snapshot, index) &&
+                        zz_snapshot_session_pane_id(snapshot, index, 0) == window_pane &&
+                        zz_snapshot_session_pane_kind(snapshot, index, 0) ==
+                            ZZ_PANE_TERMINAL &&
+                        bytes_same(
+                            zz_snapshot_session_window_pane_title(snapshot, index, window, 0),
+                            zz_snapshot_session_pane_title(snapshot, index, 0)) &&
+                        zz_snapshot_session_window_pane_has_bell(snapshot, index, window, 0) ==
+                            zz_snapshot_session_pane_has_bell(snapshot, index, 0);
+                } else {
+                    inactive_windows++;
+                    preview_pane = window_pane;
+                }
+            }
+            found_session = session_shape && current_windows == 1 && inactive_windows == 1;
         }
     }
     zz_snapshot_release(snapshot);
@@ -232,6 +253,10 @@ int main(int argc, char **argv) {
     }
     if (!wait_for_text(client, pane, READY)) {
         fprintf(stderr, "smoke: fixture text never arrived\n");
+        return 1;
+    }
+    if (!wait_for_text(client, preview_pane, PREVIEW_READY)) {
+        fprintf(stderr, "smoke: inactive-window preview never arrived\n");
         return 1;
     }
     zz_viewport *viewport = zz_client_viewport_acquire(client, pane);
@@ -331,6 +356,10 @@ int main(int argc, char **argv) {
 
     if (!zz_client_set_focused(client, false)) {
         fprintf(stderr, "smoke: client blur failed\n");
+        return 1;
+    }
+    if (!zz_client_set_terminal_preview(client, false)) {
+        fprintf(stderr, "smoke: terminal preview disable failed\n");
         return 1;
     }
     zz_client_free(client);

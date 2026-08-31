@@ -111,6 +111,17 @@ fn a_c_client_attaches_reads_and_types_through_the_abi() {
             ],
         ))
         .expect("create the smoke session");
+    commands
+        .execute(CommandInvocation::new(
+            "new-window",
+            [
+                "-d",
+                "-t",
+                "smoke",
+                "printf 'zz-preview-ready\\r\\n'; exec /bin/cat",
+            ],
+        ))
+        .expect("create the inactive preview window");
 
     let run = Command::new(&binary)
         .arg(&socket)

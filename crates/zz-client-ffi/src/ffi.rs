@@ -892,6 +892,17 @@ pub unsafe extern "C" fn zz_client_attach(client: *mut ZzClient, session: *const
     client.client.attach(session).is_ok()
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_set_terminal_preview(
+    client: *mut ZzClient,
+    enabled: bool,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    client.client.set_terminal_preview(enabled).is_ok()
+}
+
 /// Send literal text to a pane; the daemon routes it through its key tables.
 ///
 /// # Safety

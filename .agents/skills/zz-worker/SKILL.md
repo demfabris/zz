@@ -128,8 +128,12 @@ anything: if someone claimed your front, stop and let them have it.
   under the front claim, and re-claim MAIN when candidate-ready. A held MAIN
   starves every queued candidate. If the repair is wrong-shaped, post
   `rejected` on your own front instead and release both.
-- Push of main rejected as non-fast-forward: the lock was violated somewhere.
-  Never force; re-rebase, re-gate, push again.
+- Push of main rejected as non-fast-forward: check who moved it before
+  assuming a lock violation. Owner-authored commits landing mid-gate are
+  normal; follow the issue's "Owner pushes during a gate" rule (conflict-free
+  rebase + disjoint paths = bounded rerun of your package tests and reserved
+  scenario, then push). A non-owner push means the lock was violated: never
+  force; re-rebase, re-gate, push again.
 - `pick` says `NOTHING-CLAIMABLE`: claim TRIAGE, mint fronts from open registry
   groups per the issue's triage section (bounded to one 6h lease each, unique
   scenario path, deps where needed), release, and continue. Mint for the

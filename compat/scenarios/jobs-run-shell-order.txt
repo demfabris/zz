@@ -1,0 +1,5 @@
+shim:
+stage: fixtures/jobs-run-shell-order.sh ~/jobs-run-shell-order.sh
+out: set-environment -gu JOBS_RUN_SHELL_ORDER
+run-shell 'sh ~/jobs-run-shell-order.sh'
+out: show-environment -g JOBS_RUN_SHELL_ORDER

@@ -5491,6 +5491,7 @@ impl Shared {
                 yield_boundary: false,
                 shutdown_blocker: RefCell::new(shutdown_blocker),
                 pending_event_hooks: RefCell::new(Vec::new()),
+                deferred_shell_jobs: RefCell::new(Vec::new()),
                 callback_parse_failures: RefCell::new(Vec::new()),
                 deferred_config_replay_issues: RefCell::new(Vec::new()),
                 reported_failures: Cell::new(false),
@@ -5680,6 +5681,10 @@ impl Shared {
                 .borrow_mut()
                 .extend(execution.pending_event_hooks.borrow_mut().drain(..));
             parent
+                .deferred_shell_jobs
+                .borrow_mut()
+                .extend(execution.deferred_shell_jobs.borrow_mut().drain(..));
+            parent
                 .callback_parse_failures
                 .borrow_mut()
                 .extend(execution.callback_parse_failures.borrow_mut().drain(..));
@@ -5701,8 +5706,16 @@ impl Shared {
             .borrow_mut()
             .drain(..)
             .collect::<Vec<_>>();
+        let deferred_shell_jobs = execution
+            .deferred_shell_jobs
+            .borrow_mut()
+            .drain(..)
+            .collect::<Vec<_>>();
         if deferred_shutdown != DeferredShutdown::Force {
             self.run_event_hooks(pending_event_hooks);
+            for launch in deferred_shell_jobs {
+                launch(self);
+            }
         }
         let shutdown_requested = match deferred_shutdown {
             DeferredShutdown::None => false,
@@ -6009,6 +6022,7 @@ impl Shared {
                 yield_boundary: true,
                 shutdown_blocker: RefCell::new(shutdown_blocker),
                 pending_event_hooks: RefCell::new(Vec::new()),
+                deferred_shell_jobs: RefCell::new(Vec::new()),
                 callback_parse_failures: RefCell::new(Vec::new()),
                 deferred_config_replay_issues: RefCell::new(Vec::new()),
                 reported_failures: Cell::new(false),
@@ -9792,6 +9806,79 @@ impl Shared {
                     let shared = Arc::clone(self);
                     let background_command = command.clone();
                     let worker_context = command_context.clone();
+                    let policy = ShellJobSpawnPolicy {
+                        wait_for_start: draining && !parsed.background && delay.is_zero(),
+                        shutdown_blocking: draining && !parsed.background && delay.is_zero(),
+                        detached,
+                    };
+                    let callback = move |result: Result<ShellJobResult, ()>| {
+                        if draining {
+                            return;
+                        }
+                        if let Ok(result) = result {
+                            let _ = shared.finish_run_shell(route, &background_command, &result);
+                        } else {
+                            let error = ServerError::InvalidCommand(format!(
+                                "failed to run command: {background_command}"
+                            ))
+                            .into();
+                            shared.publish_background_command_error(
+                                route.client,
+                                &worker_context,
+                                &error,
+                                false,
+                            );
+                        }
+                    };
+                    if parsed.background
+                        && !draining
+                        && delay.is_zero()
+                        && let Some(queue_execution) = queue_execution
+                    {
+                        let session_environment = command_context.session.and_then(|session| {
+                            self.inner
+                                .lock()
+                                .engine
+                                .retain_session_job_environment(session)
+                        });
+                        let show_stderr = parsed.show_stderr;
+                        let error_context = command_context.clone();
+                        queue_execution
+                            .deferred_shell_jobs
+                            .borrow_mut()
+                            .push(Box::new(move |shared: &Arc<Self>| {
+                                let (environment, default_terminal) = {
+                                    let inner = shared.inner.lock();
+                                    (
+                                        inner.engine.job_environment_with_retained_session(
+                                            session_environment.as_ref(),
+                                        ),
+                                        inner.engine.default_terminal_for_spawn().to_owned(),
+                                    )
+                                };
+                                if let Err(error) = shared.spawn_shell_job(
+                                    command,
+                                    cwd,
+                                    tmux,
+                                    environment,
+                                    default_terminal,
+                                    ShellJobEnvironmentTiming::CommandTime,
+                                    show_stderr,
+                                    delay,
+                                    policy,
+                                    None,
+                                    callback,
+                                ) {
+                                    shared.publish_background_command_error(
+                                        client,
+                                        &error_context,
+                                        &error,
+                                        false,
+                                    );
+                                }
+                            }));
+                        return Ok(Execution::default());
+                    }
                     if let Err(error) = self.spawn_shell_job(
                         command,
                         cwd,
@@ -9801,32 +9888,9 @@ impl Shared {
                         environment_timing,
                         parsed.show_stderr,
                         delay,
-                        ShellJobSpawnPolicy {
-                            wait_for_start: draining && !parsed.background && delay.is_zero(),
-                            shutdown_blocking: draining && !parsed.background && delay.is_zero(),
-                            detached,
-                        },
+                        policy,
                         queue_execution,
-                        move |result| {
-                            if draining {
-                                return;
-                            }
-                            if let Ok(result) = result {
-                                let _ =
-                                    shared.finish_run_shell(route, &background_command, &result);
-                            } else {
-                                let error = ServerError::InvalidCommand(format!(
-                                    "failed to run command: {background_command}"
-                                ))
-                                .into();
-                                shared.publish_background_command_error(
-                                    route.client,
-                                    &worker_context,
-                                    &error,
-                                    false,
-                                );
-                            }
-                        },
+                        callback,
                     ) {
                         self.publish_background_command_error(
                             client,
@@ -10258,6 +10322,7 @@ impl Shared {
             yield_boundary: false,
             shutdown_blocker: RefCell::new(shutdown_blocker),
             pending_event_hooks: RefCell::new(Vec::new()),
+            deferred_shell_jobs: RefCell::new(Vec::new()),
             callback_parse_failures: RefCell::new(Vec::new()),
             deferred_config_replay_issues: RefCell::new(Vec::new()),
             reported_failures: Cell::new(false),
@@ -14564,6 +14629,7 @@ impl Shared {
                 yield_boundary: false,
                 shutdown_blocker: RefCell::new(None),
                 pending_event_hooks: RefCell::new(Vec::new()),
+                deferred_shell_jobs: RefCell::new(Vec::new()),
                 callback_parse_failures: RefCell::new(Vec::new()),
                 deferred_config_replay_issues: RefCell::new(Vec::new()),
                 reported_failures: Cell::new(false),
@@ -21253,6 +21319,7 @@ impl Shared {
             yield_boundary: false,
             shutdown_blocker: RefCell::new(shutdown_blocker),
             pending_event_hooks: RefCell::new(Vec::new()),
+            deferred_shell_jobs: RefCell::new(Vec::new()),
             callback_parse_failures: RefCell::new(Vec::new()),
             deferred_config_replay_issues: RefCell::new(Vec::new()),
             reported_failures: Cell::new(false),
@@ -29619,12 +29686,15 @@ struct CommandQueueExecution {
     yield_boundary: bool,
     shutdown_blocker: RefCell<Option<ShutdownBlocker>>,
     pending_event_hooks: RefCell<Vec<PendingHookEvent>>,
+    deferred_shell_jobs: RefCell<Vec<DeferredShellJob>>,
     callback_parse_failures: RefCell<Vec<CallbackParseFailure>>,
     deferred_config_replay_issues: RefCell<Vec<DeferredConfigReplayIssue>>,
     reported_failures: Cell<bool>,
     suppress_after_hooks: Cell<bool>,
     suppress_output: Cell<bool>,
 }
+
+type DeferredShellJob = Box<dyn FnOnce(&Arc<Shared>)>;
 
 impl CommandQueueExecution {
     fn is_draining(&self) -> bool {

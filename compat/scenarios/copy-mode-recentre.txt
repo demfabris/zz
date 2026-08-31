@@ -1,0 +1,13 @@
+# recentre-top-bottom closes the pinned cursor-geometry vocabulary: every
+# view-relative name now reaches a typed copy action, so a detached
+# `send-keys -X` fails on both sides instead of exiting zero on zz.
+send-keys -t =w:0.0 -X recentre-top-bottom
+send-keys -t =w:0.0 -X recentre-top-bottom
+send-keys -t =w:0.0 -X recentre-top-bottom
+send-keys -t =w:0.0 -N 3 -X recentre-top-bottom
+
+# It takes no arguments and repeats through bindings the same way.
+bind-key -T copy-mode R send-keys -X recentre-top-bottom
+out: list-keys -T copy-mode -1 R
+bind-key -T copy-mode-vi R send-keys -X recentre-top-bottom
+out: list-keys -T copy-mode-vi -1 R

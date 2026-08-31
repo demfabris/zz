@@ -371,6 +371,7 @@ pub enum CopyModeAction {
     ScrollBottom,
     /// Flip the mode's position readout, the pin's `hide_position`.
     TogglePosition,
+    RecentreTopBottom,
 }
 
 /// The pin's `selflag`: the unit a live selection extends by.
@@ -468,6 +469,7 @@ impl CopyModeAction {
             | Self::ScrollTop
             | Self::ScrollBottom
             | Self::TogglePosition
+            | Self::RecentreTopBottom
             | Self::GotoLine(_) => CopyModeCountPolicy::Once,
         }
     }

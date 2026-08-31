@@ -91,7 +91,7 @@ unsupported `window-copy` actions below remain open.
 | Cursor | `cursor-left/right/up/down`, `start-of-line`, `back-to-indentation`, `end-of-line` |
 | Word/para | `next-word`, `previous-word`, `next-word-end`, `next-space`, `previous-space`, `next-space-end`, `next-paragraph`, `previous-paragraph` |
 | Page/history | `page-up/down`, `halfpage-up/down`, `scroll-up/down`, `goto-line`, `history-top`, `history-bottom` |
-| View geometry | `top-line`, `middle-line`, `bottom-line`, `cursor-centre-vertical`, `cursor-centre-horizontal`, `scroll-top`, `scroll-middle`, `scroll-bottom`, `toggle-position` |
+| View geometry | `top-line`, `middle-line`, `bottom-line`, `cursor-centre-vertical`, `cursor-centre-horizontal`, `scroll-top`, `scroll-middle`, `scroll-bottom`, `recentre-top-bottom`, `toggle-position` |
 | Scroll exit | `scroll-exit-on/off/toggle`, `page-down-and-cancel`, `halfpage-down-and-cancel`, `scroll-down-and-cancel`, `cursor-down-and-cancel` |
 | Semantic prompt | `next-prompt`, `previous-prompt` (`-o` = output only, via OSC 133 marks) |
 | Search | `search-again`, `search-reverse`, cursor-word forward/backward actions used by `*`/`#` |
@@ -125,8 +125,12 @@ placements use. `scroll-top`, `scroll-middle`, and `scroll-bottom` are the mirro
 keeps its line and the view moves so that line lands on screen row 0, the middle, or the last row.
 Like the pin's `window_copy_scroll_to`, they are all-or-nothing — a revision that cannot reach that
 far leaves both the view and the cursor untouched rather than clamping partway.
-`toggle-position` flips `hide_position`, the same bit `copy-mode -H` latches at entry, so the
-published position readout appears and disappears without leaving the mode. That evidence does not
+`recentre-top-bottom` is the cycling form of those three: repeated presses park the cursor line at
+the middle, then the top, then the bottom of the view, and the cycle restarts at the middle whenever
+the cursor changed line since the last press. Unlike the scroll placements it clamps rather than
+refusing, matching the pin's partial scroll. `toggle-position` flips `hide_position`, the same bit
+`copy-mode -H` latches at entry, so the published position readout appears and disappears without
+leaving the mode. That evidence does not
 cover `history-bottom`, logical-line behavior, or the other missing actions.
 
 Copy/pipe actions build a `CopyModeCopy` whose flags mirror tmux: `clipboard` is set unless `-C` or

@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; F-ALIASES-MULTI-BODY closed 2026-08-30
+status: Original nine phases shipped 2026-08-20; F-CONTROL-DIAGNOSTICS-V2 closed 2026-08-30
 tags:
 - tmux
 - compatibility
@@ -534,8 +534,9 @@ Control exit pane-output discard. The 2026-08-30 shell-job cwd front closes comm
 working-directory selection with focused and attached evidence, and the DEL front closes the three
 distinct DEL spellings with live transport proof. `F-ALIASES-MULTI-BODY` then closes executable
 empty and multi-command user aliases while registering forced-shutdown multi-window hook order as a
-separate residual. The registry has 84 active groups, 586 classified active items, and 123 closed
-records: 42 open, 20 blocked, and 22 accepted; 145 of 207 groups are resolved (70.0%). The current
+separate residual. `F-CONTROL-DIAGNOSTICS-V2` closes typed config-diagnostic identity without a
+residual. The registry has 83 active groups, 585 classified active items, and 124 closed records: 41
+open, 20 blocked, and 22 accepted; 146 of 207 groups are resolved (70.5%). The current
 198-name partition
 has 95 direct mux values, 32 daemon-delegated values, and 71 live gaps. Slice 10x gives existing
 `new-session -A -c` targets the attach cwd path and preserves fresh explicit-empty session state.
@@ -1308,12 +1309,11 @@ matches: the chain stops on a response `Error`, a nonzero exit lets the chain co
 the LAST nonzero exit wins. Keeping the stop-on-nonzero rule would have opened a brand-new
 divergence in the very command this wave fixed.
 
-Two audit facts shape this wave: Command clients are never subscribed to the event stream
-at all (`daemon.rs` subscribes Interactive and Control only), so the CLI cannot receive
-warning events even in principle — the stderr field is required, not convenient. And
-control-mode `%config-error` is reconstructed by a prose sniffer (`is_config_message` in
-`control_mode.rs` pattern-matches warning text), so any rewording of config diagnostics
-must either move to a typed marker or pin the wording with a test.
+Two audit facts shaped this wave. Command clients do not subscribe to the event stream
+(`daemon.rs` subscribes Interactive and Control), so the CLI cannot receive warning events. The
+stderr field carries that output. At this checkpoint, control-mode reconstructed `%config-error`
+through `is_config_message`, which matched warning text. Protocol v86 later replaced that path with
+typed `ConfigDiagnostic` identity.
 
 For an explicit `source-file` issued by a Command client, append invalid-line diagnostics to
 stdout and return exit 1. Interactive clients keep warning events, while Control renders parser
@@ -1343,7 +1343,8 @@ frame boundaries. It does not refresh the stored canonical row, which remains at
 Protocol v76 now emits one tail-tag-47 `SourcedCommandGuard` for each parser-owned
 replayed command that survives command-name resolution. An alias resolved to `source-file` before
 replay retains the same recursion path. Unknown or ambiguous command names and malformed alias names
-publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary success
+send a located `ConfigDiagnostic` to Control, which renders `%config-error` without a guard.
+Interactive receives a Warning. Ordinary success
 and quiet all-miss use an empty flags-1 `%end`; a mixed hit and miss keeps
 its diagnostic inside `%end`; and all-miss, flag or arity failure, runtime failure, or depth refusal
 ends `%error`. Runtime failures alone set `client_failure`. The writer defers these guards FIFO until
@@ -1405,22 +1406,19 @@ outer-line continuation, reached depth, containing-file continuation, the leaf t
 and the detached client's status instead of frame boundaries, because a 50-file chain would
 otherwise be dominated by the tracked per-sourced-command guard difference.
 
-The prose sniffers are pinned from both sides rather than retired:
-`config_diagnostics_pin_the_control_mode_sniffer_wording` (zz-daemon) locks what the config
-loader emits and `daemon_diagnostics_are_partitioned_between_config_and_source_channels`
-(`control_mode.rs`) keeps parser causes on `%config-error` while source misses become plain error
-frames. `route_config_source_errors` now marks grouped Control source diagnostics with the existing
+At this checkpoint, tests pinned the prose classifier from both sides. Protocol v86 later retired
+it: the daemon sends config summaries and lexer-owned diagnostics as typed
+`ControlSourceFileEvent::ConfigDiagnostic` events to Control, and the writer selects
+`%config-error` from that type. `route_config_source_errors` marks grouped Control source diagnostics with the existing
 Error kind, and the Control client routes that kind without inspecting text. Matched child OS and
 path read failures such as numeric OS errors and colon-space paths use typed standalone Error events.
 Invalid UTF-8 config content is separate: pinned tmux accepts the measured lone-`0xff` file without a
 visible diagnostic, while zz emits `stream did not contain valid UTF-8` and status 1.
 `config.non-utf8-file-bytes` owns the byte matrix. No-match, glob, and depth diagnostics now travel
 inside their protocol v76 sourced guard.
-Both paths avoid prose classification. Config
-summaries and lexer-owned diagnostics remain Warning events, so the active
-`control-mode.diagnostic-typing` gap now contains only config identity. The known-family Warning
-fallback remains for legacy producers, while the exact protocol handshake rejects v75 and v76
-client-daemon skew before either event path can mix.
+Both v78 source-read identity and v86 config-diagnostic identity avoid prose classification.
+Interactive clients retain Warning messages, and the exact protocol handshake rejects older
+client-daemon shapes before either event path can mix.
 
 Protocol v72 later closed the top-level relative-path residue with a bounded local caller cwd,
 glob-escaped cwd prefix, and declared-path diagnostics. The generated tracker keeps the related
@@ -1443,8 +1441,9 @@ the caller cwd. Control hook framing clears the replay client before the hook ru
 the post-`-F` declared argument on the invoking client's diagnostic stream, and nested quiet
 no-match stays silent. For Control, protocol v76 carries one sourced guard for each parser-owned
 replayed command that survives command-name resolution. Alias recursion resolved before replay keeps
-the same path. Unknown or ambiguous command names and malformed alias names
-publish a located Warning that Control renders as `%config-error`, without a guard. Ordinary and
+the same path. Unknown or ambiguous command names and malformed alias names send a located
+`ConfigDiagnostic` to Control, which renders `%config-error` without a guard. Interactive receives a
+Warning. Ordinary and
 quiet commands get an empty `%end`, nested partial matches retain diagnostics inside
 `%end`, and all-miss or execution failures end `%error`. Guards stay in FIFO order after the direct
 outer frame. The existing per-command preflight publishes the containing command's guards before

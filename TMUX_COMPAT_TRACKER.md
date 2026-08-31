@@ -1,10 +1,10 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **`F-ALIASES-MULTI-BODY` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **`F-CONTROL-DIAGNOSTICS-V2` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **62 UNRESOLVED GROUPS (42 OPEN, 20 BLOCKED)**
+> Live work: **61 UNRESOLVED GROUPS (41 OPEN, 20 BLOCKED)**
 >
-> Ledger settlement: **70.0% (145 of 207 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **70.5% (146 of 207 known groups); SECONDARY DIAGNOSTIC**
 >
 > Exit evidence: **106 SCENARIOS, 1,683 STEPS, ATTACHED-CLIENT PASS**
 >
@@ -76,15 +76,15 @@ percentage is a ledger health metric, not a compatibility claim.
 | Repository | `$HOME/dev/zz` |
 | Published branch | `origin/main` |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | `F-ALIASES-MULTI-BODY` closes `aliases.command-bodies`; the next worker claims the dispatch-board front from published `origin/main` |
+| Delivery | `F-CONTROL-DIAGNOSTICS-V2` closes `control-mode.diagnostic-typing` with protocol v86 typed config diagnostics |
 | Campaign worktrees | Each editor creates a dedicated worktree after claiming its front; shared campaign artifacts remain coordinator-owned |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Multi-command and empty alias bodies are closed; forced-shutdown multi-window hook order is a separate registered residual |
-| Live registry | 84 active groups, 586 active items, 123 closed records |
-| Active status | 42 open, 20 blocked, 22 accepted |
+| Campaign point | Control routes config diagnostics to `%config-error` by protocol type; English wording no longer affects routing |
+| Live registry | 83 active groups, 585 active items, 124 closed records |
+| Active status | 41 open, 20 blocked, 22 accepted |
 | Known differentials | 2 registered geometry cases |
 
 The trial branched from commit `562b950c`; its three closures reach local `main` through
@@ -104,12 +104,12 @@ found during that wave.
 | --- | --- |
 | Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed |
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
-| New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
-| Unresolved movement | Wave 2: 65 at freeze, 62 at close |
-| Live unresolved | 42 open + 20 blocked = 62 |
+| New residual groups | `F-CONTROL-DIAGNOSTICS-V2`: 0; `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
+| Unresolved movement | `F-CONTROL-DIAGNOSTICS-V2`: 62 to 61; Wave 2: 65 at freeze, 62 at close |
+| Live unresolved | 41 open + 20 blocked = 61 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
 | Accepted differential | 106 scenarios, 1,683 steps, attached-client `PASS`, 2 registered GEO rows |
-| Ledger settlement | 145 of 207 known groups = 70.0% |
+| Ledger settlement | 146 of 207 known groups = 70.5% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -123,7 +123,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(123 + 22) / (123 + 84) = 145 / 207 = 70.0%
+(124 + 22) / (124 + 83) = 146 / 207 = 70.5%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -1205,6 +1205,30 @@ shutdown and the tested session-name grouping are exact, while complete multi-wi
 group and registering this residual leaves 84 active groups and 586 items, with 42 open, 20 blocked,
 22 accepted, and 123 closed records. The secondary ledger is 145 of 207 groups (70.0%); unresolved
 work remains 62.
+
+## Completed front: F-CONTROL-DIAGNOSTICS-V2, 2026-08-30
+
+`control-mode.diagnostic-typing/semantic:control-mode-typed-config-diagnostics` is closed. Protocol
+v86 appends `ControlSourceFileEvent::ConfigDiagnostic(String)` at nested tag 2 while keeping outer
+`EventPayload::ControlSourceFile` tag 48. The daemon sends config summaries and located command
+diagnostics through that event to Control clients. Interactive clients keep Warning messages.
+Control renders `%config-error` from the event type, so diagnostic wording no longer affects routing.
+Placement, ordering, retained status, and hidden source-completion numbering keep their prior behavior.
+
+Protocol, daemon, Control, and CLI tests cover arbitrary prose, multiline placement, retained status,
+generic Warning suppression, and the nested tag. The three-step `control-diagnostics` differential
+has zero topology, geometry, format, output, or warning differences. Workspace clippy, formatting,
+tracker generation, OKF validation, and attached-client compatibility pass. The complete differential
+run also passes the new row and all other rows except two callback result-marker rows that fail the
+same way on clean `origin/main`; the accepted 106-scenario artifact therefore remains unchanged. The
+workspace test run reaches 771 of 774 daemon tests: two load-sensitive cases pass alone, while
+`direct_shutdown_runs_session_close_hooks` fails alone on both the candidate and five consecutive
+clean `origin/main` runs. No source outside the claimed protocol, daemon, Control, and proof zones
+changed for those baseline failures.
+
+Closing the group leaves 83 active groups and 585 items, with 41 open, 20 blocked, 22 accepted, and
+124 closed records. Closed records plus accepted groups resolve 146 of 207 groups (70.5%); unresolved
+work is 61.
 
 ## Validation and closure gates
 

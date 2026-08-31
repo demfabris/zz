@@ -140,9 +140,9 @@ without leaking literal `R` syntax into either row.
 ## Current compatibility checkpoint
 
 At the current 2026-08-30 checkpoint, zz implements 31 of the pin's 36 format modifiers. Five active
-tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 84 active groups, 586 active items,
-and 123 closed records: 42 open, 20 blocked, and 22 accepted. Closed records plus accepted active
-groups resolve 145 of 207 known groups (70.0%). The persisted accepted artifact covers 106 scenarios
+tokens remain: `I`, `L`, `O`, `V`, and `w`. The live registry has 83 active groups, 585 active items,
+and 124 closed records: 41 open, 20 blocked, and 22 accepted. Closed records plus accepted active
+groups resolve 146 of 207 known groups (70.5%). The persisted accepted artifact covers 106 scenarios
 and 1,683 steps with attached-client `PASS`, exactly two approved GEO rows, every other
 channel clean, and SHA-256
 `a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. The 45-step

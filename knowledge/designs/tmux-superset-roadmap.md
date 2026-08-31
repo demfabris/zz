@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; F-ALIASES-MULTI-BODY closed; dispatch board active
+status: In Progress; F-CONTROL-DIAGNOSTICS-V2 closed; dispatch board active
 tags:
 - tmux
 - compatibility
@@ -40,9 +40,9 @@ records the source-anchored baseline used to build this plan.
 
 The three-front trial closed all 3 frozen chunks and registered 3 residual groups. Wave 2 then
 closed slice 10ai, shell-job cwd, and literal DEL identity as 3 of 3 frozen chunks without a new
-residual. Unresolved work moved from 65 to 62: 42 open and 20 blocked. The tracker has 84 active
-groups, 586 classified active items, 123 closed groups, and 22 accepted active groups. Its secondary
-ledger settlement is 145 of 207 known groups (70.0%). The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client
+residual. The typed Control diagnostic front then moves unresolved work from 62 to 61: 41 open and
+20 blocked. The tracker has 83 active groups, 585 classified active items, 124 closed groups, and 22
+accepted active groups. Its secondary ledger settlement is 146 of 207 known groups (70.5%). The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client
 `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
 `a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
@@ -377,8 +377,8 @@ engine with no differing channel. The attached fixture keeps pane cwd separate f
 proves status cwd, and covers 24 Interactive and Control `run-shell` and `if-shell` cases across
 valid, missing, and omitted targets. No protocol or snapshot field changed.
 
-The registry now has 84 active groups and 586 active items, with 123 closed records: 42 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 145 of 207 groups (70.0%). The
+The registry now has 83 active groups and 585 active items, with 124 closed records: 41 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 146 of 207 groups (70.5%). The
 persisted accepted artifact covers 106 scenarios and 1,683 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
 `a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Focused mux and
@@ -1070,15 +1070,15 @@ Control all-miss aborts its line; a direct partial match ends with `%end` and co
 parser errors remain `%config-error`. Protocol v76 now gives each parser-owned replayed command that
 survives command-name resolution a tail-tag-47 `SourcedCommandGuard`. An alias resolved to
 `source-file` before replay retains the same recursion path. Unknown or ambiguous command names and
-malformed alias names publish a located Warning that Control renders as `%config-error`, without a
-guard. Ordinary success and quiet all-miss use an empty flags-1 `%end`; a mixed hit and miss keeps the
+malformed alias names send a located `ConfigDiagnostic` to Control, which renders `%config-error`
+without a guard. Interactive receives a Warning. Ordinary success and quiet all-miss use an empty flags-1 `%end`; a mixed hit and miss keeps the
 declared-path diagnostic inside `%end`; and all-miss, flag or arity failure, runtime failure, or depth
 refusal ends `%error`. Runtime failures alone set `client_failure`, and the Control writer defers
 guards FIFO until the direct outer frame closes. Matched OS and path read failures follow as typed
 standalone Error events, including numeric OS errors and colon-space paths. Invalid UTF-8 config
 content remains under `config.non-utf8-file-bytes`: pinned tmux accepts the measured lone-`0xff`
-file without a visible diagnostic where zz emits a typed Error and status 1. Config and lexer
-Warning prose remains under `control-mode.diagnostic-typing`. The existing loader preflights every
+file without a visible diagnostic where zz emits a typed Error and status 1. Protocol v86 later
+gave config and lexer diagnostics typed Control identity while keeping Interactive warnings. The existing loader preflights every
 declared path for one source command before recursion. A focused regression and the then-six-step
 Control differential prove root missing-path guard, then middle missing-path guard, then leaf output
 guard, each exactly once.
@@ -1188,11 +1188,10 @@ format, and then-six-step Control differentials pass with zero differences and n
 Control return-status close grows that focused row to eight. Neither focused run refreshes the stored
 canonical row, which remains at three steps.
 Control source diagnostics now use the existing Error kind and reach standalone `%error` frames
-without text classification. Config summaries still use Warning events, so
-`control-mode.diagnostic-typing` retains only future or localized config wording.
-The new client accepts the old daemon's known source Warning families. The reverse version mix can
-hide source diagnostics because the old client ignores Error events; downgrading the app requires a
-matching daemon restart.
+without text classification. Protocol v86 gives config summaries and lexer diagnostics typed
+`ConfigDiagnostic` identity for `%config-error`; arbitrary wording follows that path and generic
+Warning events do not. Exact version matching rejects old and new event shapes before they mix, so
+downgrading the app requires a matching daemon restart.
 Byte-preserving non-UTF-8 Unix cwd transport remains separately visible under
 `clients.path-encoding` instead of making such a path a connection failure.
 
@@ -1882,6 +1881,15 @@ permanent product decision has been recorded for them.
   84 active groups and 586 items, with 123 closed records and 145 of 207 groups resolved (70.0%).
   Closure review advanced protocol v85 for typed post-admission callback provenance and
   daemon-authoritative `Attached` reconnect state, not for an alias child-vector field.
+- 2026-08-30: `F-CONTROL-DIAGNOSTICS-V2` closed `control-mode.diagnostic-typing`. Protocol v86
+  appends `ControlSourceFileEvent::ConfigDiagnostic(String)` at nested tag 2. The daemon sends
+  config summaries and located command diagnostics through that typed event to Control clients;
+  Interactive clients retain Warning messages. Control selects `%config-error` from the type, so
+  arbitrary wording follows the same placement and status rules. The focused three-step
+  differential has zero mismatches. The full corpus reaches the same two callback result-marker
+  failures on clean `origin/main`, so the prior 106-scenario accepted artifact remains published.
+  The registry now has 83 active groups and 585 items, with 124 closed records and 146 of 207
+  groups resolved (70.5%).
 
 # Related
 

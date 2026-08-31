@@ -631,8 +631,8 @@ replay. Protocol v77 renames that tag in place to
 `load_config_file_with_report_for_terminal_and_options` emits one guard for each
 parser-owned replayed command that survives command-name resolution before it recurses to later
 commands. An alias resolved to `source-file` before replay retains that path. Unknown or ambiguous
-command names and malformed alias names publish a located Warning that Control renders as
-`%config-error`, without a guard. Ordinary success and quiet misses carry an empty success guard. A
+command names and malformed alias names send a located `ConfigDiagnostic` to Control, which renders
+`%config-error` without a guard. Interactive receives a Warning. Ordinary success and quiet misses carry an empty success guard. A
 partial source match carries its misses but still ends `%end`; an all-miss, flag or arity failure,
 runtime failure, or depth refusal ends `%error`. Runtime failures set `sticky_failure`, which sets
 Control retval 1 independently of the frame terminator. Parser replay uses flags 1.
@@ -683,9 +683,10 @@ or flag rejection publish no completion.
 Invalid UTF-8 config content remains under `config.non-utf8-file-bytes` after
 the pinned lone-`0xff` case disproved the earlier zz-side typed-error assumption.
 
-Generic config and lexer warnings still use the Control client's prose classifier under
-`control-mode.diagnostic-typing`, and the existing loader preflights all paths for one source command
-before recursion. A focused regression, the 601-test daemon suite, and the then-six-step Control
+Protocol v86 sends config summaries and lexer diagnostics to Control through typed
+`ControlSourceFileEvent::ConfigDiagnostic` events. Interactive clients retain Warning messages, and
+Control no longer classifies those diagnostics by wording. The existing loader preflights all paths
+for one source command before recursion. A focused regression, the 601-test daemon suite, and the then-six-step Control
 differential prove that a three-level replay publishes the root missing-path guard, the middle
 missing-path guard, and the leaf output guard in that order, each once. No production change was
 required for that closure. The Control front end combines direct runtime errors, source guards,
@@ -738,8 +739,8 @@ ID, leaving unrelated output intact. A daemon restart constructs a fresh set.
 The v80 startup closure adds a separate checksum-attested seven-case differential against pinned
 tmux `d77c9dc6`; it passes with no skips and does not rewrite the canonical scenario summary.
 The multi-body alias closure adds an eight-step zero-difference scenario across CLI, Control,
-binding, empty-body, caller-argument, and option-boundary cases. Generic config Warning typing,
-hard-disconnect queue cancellation, config byte input, source stdin transport, parser abort
+binding, empty-body, caller-argument, and option-boundary cases. Protocol v86 closes config
+diagnostic typing. Hard-disconnect queue cancellation, config byte input, source stdin transport, parser abort
 semantics, and hook cwd selection remain open. Deferred event-hook client selection remains under
 `source-file.event-hook-client-cwd`; the alias queue's event buffering and shutdown order are
 closed except for `hooks.shutdown-window-unlinked-order`.

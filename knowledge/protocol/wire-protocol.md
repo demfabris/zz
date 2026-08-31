@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v85)
+title: zz wire protocol (v86)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 85`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 86`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (85) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (86) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -209,8 +209,10 @@ offset: u32, columns: u16, rows: Vec<Vec<PackedCell>>, dictionary: TerminalDicti
 `KittyImageChunk { pane, image_id, generation, bytes }`
 (each chunk ≤ `MAX_KITTY_IMAGE_CHUNK_BYTES`, 1 MiB), and
 `KittyImagesRemoved { pane, image_ids }`,
-`StartupConfigCauses { causes: Vec<String> }`, and
-`ControlCommandOutput { output: String }`.
+`StartupConfigCauses { causes: Vec<String> }`,
+`ControlCommandOutput { output: String }`, and
+`ControlSourceFile { event: ControlSourceFileEvent }`. The nested source event is
+`ReadError(String)` at tag 0, `Complete` at tag 1, or v86's `ConfigDiagnostic(String)` at tag 2.
 
 The agent lane added at v53 carries four more: `AgentUpdates { pane, first_seq: u64, items: Vec<Vec<u8>> }`
 carries one coalesced batch of JSON agent stream items numbered by the pane's fanout lane
@@ -347,8 +349,10 @@ stdin transport, Control sourced-hook cwd, and deferred event-hook client select
 separate gaps. The `aliases.command-bodies` closure covers the alias queue's source and hook yield
 boundaries.
 Slice 10z closes config file-unit construction in daemon-local state without a protocol field.
-Config command-name and lexer diagnostics remain generic Warning events on the
-`%config-error` classification path.
+Protocol v86 appends `ControlSourceFileEvent::ConfigDiagnostic(String)` at nested tag 2 without
+changing outer `EventPayload::ControlSourceFile` tag 48. The daemon uses this Control-only event for
+config summaries and located command diagnostics. The Control writer renders `%config-error` from
+the event type without inspecting text, while Interactive clients retain Warning messages.
 
 `zz-client::ClientCore` accepts and ignores `ControlCommandGuard` and `ControlSourceFile`;
 `crates/zz/src/control_mode.rs` renders both Control-only events. The daemon preflights every declared
@@ -601,9 +605,13 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 85`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 86`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v86 appends `ControlSourceFileEvent::ConfigDiagnostic(String)` at nested tag 2. The outer
+  `EventPayload::ControlSourceFile` tag remains 48. Control routes config summaries and located
+  command diagnostics to `%config-error` by type without changing placement, retained status, or
+  invisible source-completion numbering.
 - v85 appends `ServerError::PostAdmissionCallback` and the `read_only` / `client_flags` fields on
   `ProtocolMessage::Attached`. Control can distinguish selected synchronous callback failures from
   direct wrapper errors without inspecting names or prose, and TUI reconnect uses the attachment
@@ -825,21 +833,21 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 85, client_instance_id: ClientInstanceId(0), kind: Interactive,
+`ClientHello { protocol_version: 86, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
 working_directory: None, environment: [], process_id: 0 }` is 20 bytes on the wire: an 8-byte
 envelope over a 12-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17 18 19
-      10 00 00 00  00     00      55 00         00 55 00 00 00 00 01 01 00 00 00 00
+      10 00 00 00  00     00      56 00         00 56 00 00 00 00 01 01 00 00 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 16  Control        (= 85)
+      length = 16  Control        (= 86)
 ```
 
 - **length `16`** = `ENVELOPE_BYTES` (4) + payload (12); it counts the four envelope bytes, not itself.
-- **payload** `00 55 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x55` (= 85), `client_instance_id` as varint `00`, `kind`
+- **payload** `00 56 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x56` (= 86), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` and `working_directory` as two `Option::None` tags (`00 00`), followed by the empty
@@ -873,11 +881,11 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 85, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 86, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None,
                        working_directory: Some("/home/demo"), environment: ["TERM=xterm-256color"],
                        process_id: 1234 }
-server → ServerHello { protocol_version: 85, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 86, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],

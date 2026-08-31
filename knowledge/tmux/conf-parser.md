@@ -95,8 +95,9 @@ format and replay target. Command and Interactive
 clients receive those diagnostics directly. Protocol v77 gives Control one
 `ControlCommandGuard { output, error, sticky_failure, flags }` for each parser-owned replay command
 that survives command-name resolution. An alias resolved to `source-file` before replay stays on
-this path. Unknown or ambiguous command names and malformed alias names publish a located Warning
-that Control renders as `%config-error`, without a guard. Ordinary success and a quiet all-miss
+this path. Unknown or ambiguous command names and malformed alias names send a located
+`ConfigDiagnostic` to Control, which renders `%config-error` without a guard. Interactive receives
+a Warning. Ordinary success and a quiet all-miss
 produce an empty flags-1 `%end` guard. A nested hit plus miss carries its declared-path diagnostic
 inside `%end`; an all-miss, flag or arity failure, runtime failure, or depth refusal ends `%error`.
 `sticky_failure` is separate from the terminator, so runtime failures set Control retval 1 while
@@ -114,8 +115,8 @@ The parser-owned path now uses the v77 event shape; its command frames remain fl
 An unsupported zz-only command in an inserted list receives an empty success guard and later
 inserted siblings continue. It does not join `ConfigLoadReport`'s skipped summary, so existing
 unimplemented command and semantic groups still own reporting parity. An unknown command in a child
-file follows the pin: the parent and source guards succeed, then a `%config-error` Warning appears
-without its own command guard.
+file follows the pin: the parent and source guards succeed, then a typed `%config-error` diagnostic
+appears without its own command guard.
 
 Immediate `after-*` and `command-error` hooks retain the originating Control recipient but clear the
 parser replay client and enter a no-hooks context. Every hook command, hook source, and sourced child
@@ -164,12 +165,11 @@ before later root commands run. zz currently rejects that byte during
 The `source-file -` completion number agrees, but caller stdin transport remains open under
 `protocol.binary-streams`. Control sourced-hook cwd, deferred event-hook cwd and routing, and
 hard-disconnect queue cancellation also remain under their named gaps.
-No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
-summaries and lexer-owned diagnostics remain generic Warning events
-behind the prose classifier in `control-mode.diagnostic-typing`. The known-family Warning fallback
-remains for legacy producers, while the exact protocol handshake rejects v76 and v77 client-daemon
-skew before either event path can mix. Protocol v78 peers reject both older shapes, and protocol
-v79 peers also reject the pre-actor-ID command-output shape. Counting
+No-match, glob, and located depth diagnostics stay inside the source command's guard. Protocol v86
+sends config summaries and lexer-owned diagnostics to Control as typed
+`ControlSourceFileEvent::ConfigDiagnostic` events. Control renders `%config-error` from the event
+type without inspecting wording; Interactive retains Warning messages. The exact protocol
+handshake rejects older client-daemon shapes before either path can mix. Counting
 the initial `source-file` as invocation 1, both sides run 50 concurrent
 source invocations and refuse invocation 51 with `too many nested files` before any of its
 paths are matched or loaded: Command stderr at rc 1, the same lowercase text on the Control

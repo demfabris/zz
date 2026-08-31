@@ -5262,6 +5262,7 @@ impl Shared {
                 wait_yields: queue_execution.is_some_and(|execution| execution.wait_yields),
                 detached,
                 deferred_shutdown: Cell::new(DeferredShutdown::None),
+                deferred_control_exit: Cell::new(None),
                 yielded: Cell::new(CommandQueueYield::None),
                 yield_boundary: false,
                 shutdown_blocker: RefCell::new(shutdown_blocker),
@@ -5429,6 +5430,11 @@ impl Shared {
                     .get()
                     .max(execution.deferred_shutdown.get()),
             );
+            if parent.deferred_control_exit.get().is_none() {
+                parent
+                    .deferred_control_exit
+                    .set(execution.deferred_control_exit.take());
+            }
             if execution.has_yielded() {
                 if execution.yield_boundary {
                     parent.yield_locally();
@@ -5465,6 +5471,7 @@ impl Shared {
             return;
         }
         let deferred_shutdown = execution.deferred_shutdown.get();
+        let deferred_control_exit = execution.deferred_control_exit.take();
         let pending_event_hooks = execution
             .pending_event_hooks
             .borrow_mut()
@@ -5478,6 +5485,14 @@ impl Shared {
             DeferredShutdown::Recheck => self.should_shutdown_if_empty(&self.inner.lock()),
             DeferredShutdown::Force => true,
         };
+        if let Some(control) = deferred_control_exit {
+            self.publish_to_client(
+                control,
+                EventPayload::ControlExit {
+                    reason: String::new(),
+                },
+            );
+        }
         if shutdown_requested {
             if deferred_shutdown == DeferredShutdown::Force {
                 self.enter_queue_shutdown_phase();
@@ -5765,6 +5780,7 @@ impl Shared {
                 wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
                 detached,
                 deferred_shutdown: Cell::new(DeferredShutdown::None),
+                deferred_control_exit: Cell::new(None),
                 yielded: Cell::new(CommandQueueYield::None),
                 yield_boundary: true,
                 shutdown_blocker: RefCell::new(shutdown_blocker),
@@ -7640,12 +7656,16 @@ impl Shared {
 
         if force_shutdown_requested {
             if let Some((control, _)) = context.control_command_target() {
-                self.publish_to_client(
-                    control,
-                    EventPayload::ControlExit {
-                        reason: String::new(),
-                    },
-                );
+                if let Some(queue_execution) = queue_execution {
+                    queue_execution.deferred_control_exit.set(Some(control));
+                } else {
+                    self.publish_to_client(
+                        control,
+                        EventPayload::ControlExit {
+                            reason: String::new(),
+                        },
+                    );
+                }
             }
             if let Some(queue_execution) = queue_execution
                 && !queue_execution.ensure_shutdown_blocker(self)
@@ -10007,6 +10027,7 @@ impl Shared {
             wait_yields: parent_queue.is_some_and(|execution| execution.wait_yields),
             detached,
             deferred_shutdown: Cell::new(DeferredShutdown::None),
+            deferred_control_exit: Cell::new(None),
             yielded: Cell::new(CommandQueueYield::None),
             yield_boundary: false,
             shutdown_blocker: RefCell::new(shutdown_blocker),
@@ -10112,6 +10133,7 @@ impl Shared {
                 .len();
             let command_control_target = control_target.filter(|(client, _)| {
                 !matches!(mode, InsertedCommandMode::Standard(_))
+                    || mode.queue_execution().detached
                     || self.is_capturing_control_command_events(*client)
                     || mode.queue_execution().deferred_shutdown.get() != DeferredShutdown::Force
             });
@@ -10444,6 +10466,7 @@ impl Shared {
         bool,
     ) {
         let aggregate_forced_shutdown = matches!(mode, InsertedCommandMode::Standard(_))
+            && !mode.queue_execution().detached
             && !self.is_capturing_control_command_events(target.0);
         let deferred_shutdown_before = mode.queue_execution().deferred_shutdown.get();
         let capture = self.begin_control_command_event_capture(target.0);
@@ -14271,6 +14294,7 @@ impl Shared {
                 wait_yields: false,
                 detached: false,
                 deferred_shutdown: Cell::new(DeferredShutdown::None),
+                deferred_control_exit: Cell::new(None),
                 yielded: Cell::new(CommandQueueYield::None),
                 yield_boundary: false,
                 shutdown_blocker: RefCell::new(None),
@@ -20802,6 +20826,7 @@ impl Shared {
             wait_yields: true,
             detached,
             deferred_shutdown: Cell::new(DeferredShutdown::None),
+            deferred_control_exit: Cell::new(None),
             yielded: Cell::new(CommandQueueYield::None),
             yield_boundary: false,
             shutdown_blocker: RefCell::new(shutdown_blocker),
@@ -29131,6 +29156,7 @@ struct CommandQueueExecution {
     wait_yields: bool,
     detached: bool,
     deferred_shutdown: Cell<DeferredShutdown>,
+    deferred_control_exit: Cell<Option<ClientId>>,
     yielded: Cell<CommandQueueYield>,
     yield_boundary: bool,
     shutdown_blocker: RefCell<Option<ShutdownBlocker>>,

@@ -6381,6 +6381,45 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn held_control_detached_shutdown_drains_callback_guards_before_exit() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let session = "control-background-shutdown";
+            assert!(
+                fixture
+                    .run(&["new-session", "-d", "-s", session, "exec /bin/cat"])
+                    .status
+                    .success()
+            );
+            let output_path = fixture._directory.path().join("control.raw");
+            let (child, mut stdin) = spawn_control_to_file(
+                &fixture,
+                &["-C", "attach-session", "-t", &format!("={session}")],
+                &output_path,
+            );
+            writeln!(
+                stdin,
+                "run-shell -bC -d 0.1 'kill-server ; display-message -p AFTER'"
+            )
+            .expect("write detached shutdown command");
+            stdin.flush().expect("flush detached shutdown command");
+
+            let output = collect_control_process(child, Some(stdin), "detached shutdown callback");
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stdout = std::fs::read(&output_path).expect("read detached shutdown output");
+            let stream = parse_stream(&stdout, false);
+            assert_eq!(stream.blocks.len(), 4, "{stream:?}");
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 0, &[], false);
+            assert_block(&stream.blocks[3], 4, 0, &["AFTER"], false);
+            assert_eq!(stream.outside.last().map(String::as_str), Some("%exit"));
+        }
+
+        #[test]
         fn control_background_malformed_lists_and_shell_jobs_stay_unframed() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {

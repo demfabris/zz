@@ -14,6 +14,16 @@ if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
             "$ZZ_SMOKE_ZZ_BIN" --socket "$ZZ_SMOKE_ZZ_SOCKET" \
             -C attach-session -t =w
     }
+    shutdown_socket="/tmp/zz-source-replay-shutdown-$$.sock"
+    shutdown_create() {
+        "$ZZ_SMOKE_ZZ_BIN" --socket "$shutdown_socket" -f /dev/null \
+            new-session -d -s shutdown 'exec /bin/cat'
+    }
+    shutdown_control_client() {
+        env -u TMUX -u TMUX_PANE \
+            "$ZZ_SMOKE_ZZ_BIN" --socket "$shutdown_socket" \
+            -C attach-session -t =shutdown
+    }
 else
     main_client() {
         "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" "$@"
@@ -26,6 +36,16 @@ else
         env -u TMUX -u TMUX_PANE \
             "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" \
             -C attach-session -t =w
+    }
+    shutdown_label="zz-source-replay-shutdown-$$"
+    shutdown_create() {
+        "$ZZ_SMOKE_TMUX_BIN" -L "$shutdown_label" -f /dev/null \
+            new-session -d -s shutdown 'exec /bin/cat'
+    }
+    shutdown_control_client() {
+        env -u TMUX -u TMUX_PANE \
+            "$ZZ_SMOKE_TMUX_BIN" -L "$shutdown_label" \
+            -C attach-session -t =shutdown
     }
 fi
 
@@ -819,6 +839,32 @@ run_held_exact_control_probe() {
         "$exact_transcript"
 }
 
+run_detached_shutdown_probe() {
+    exact_name=$1
+    exact_raw="$work/$exact_name.raw"
+    exact_error="$work/$exact_name.err"
+    exact_input="$work/$exact_name.in"
+    : >"$exact_raw"
+    : >"$exact_error"
+    rm -f -- "$exact_input"
+    mkfifo "$exact_input"
+    shutdown_create
+    shutdown_control_client \
+        <"$exact_input" >"$exact_raw" 2>"$exact_error" &
+    exact_pid=$!
+    exec 3>"$exact_input"
+    printf '%s\n' \
+        "run-shell -bC -d 0.1 'kill-server ; display-message -p AFTER'" >&3
+    exact_status=0
+    wait_for_process "$exact_pid" || exact_status=$?
+    exec 3>&-
+    exact_transcript="$(normalize_exact_control_transcript "$exact_raw")"
+    exact_stderr="$(normalize_exact_control_stderr "$exact_error")"
+    exact_exit="$(tail -n 1 "$exact_raw")"
+    printf 'rc:%s,stderr:%s,exit:%s,events:%s' \
+        "$exact_status" "$exact_stderr" "$exact_exit" "$exact_transcript"
+}
+
 publish_exact_control_probe() {
     exact_environment=$1
     shift
@@ -1245,6 +1291,10 @@ run_exact_control_probes() {
         parser source-file "$control_parser_path"
     publish_exact_control_probe SOURCE_REPLAY_CONTROL_PARSER_NO_EXECUTE \
         parser-no-execute source-file -n "$control_parser_path"
+
+    detached_shutdown_result="$(run_detached_shutdown_probe detached-shutdown)"
+    main_client set-environment -g SOURCE_REPLAY_CONTROL_DETACHED_SHUTDOWN \
+        "$detached_shutdown_result"
 
     confirm_result="$(run_confirm_control_probe)"
     main_client set-environment -g SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED \

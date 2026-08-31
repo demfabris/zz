@@ -10,8 +10,9 @@ timestamp: 2026-08-30T00:00:00-03:00
 # Overview
 
 The zz wire protocol is a **versioned, framed, `serde`/`postcard`-encoded** control protocol spoken
-over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daemon is reached over
-the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
+over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). macOS and Linux reach a remote
+daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the same framed stream
+through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
 **`PROTOCOL_VERSION = 86`** (`crates/zz-protocol/src/message.rs`).
@@ -28,7 +29,7 @@ lives in `crates/zz-protocol/src/framing.rs`, the message vocabulary in
 There are two lanes sharing one envelope: **Control** (lane `0`, `postcard`-encoded
 `ProtocolMessage`) and **Terminal** (lane `1`, hand-packed; see
 [packed terminal lanes](/protocol/terminal-lanes.md)). Both lanes ride one ordered stream, local or
-forwarded, and every frame is delivered reliably and in order. This concept documents the Control
+SSH-tunneled, and every frame is delivered reliably and in order. This concept documents the Control
 lane and the shared framing.
 
 # Framing
@@ -522,12 +523,16 @@ record/fetch round-trip for numbered placeholders.
 
 # Remote transport
 
-A remote daemon speaks the identical envelope over the identical Unix socket; the only difference is
-that `ssh -N -L` forwards it. `Endpoint::parse` accepts `unix://`, a bare path, and
-`ssh://[user@]host[:port][/remote/socket]`, and nothing else . a `quic://` string is rejected with a
-pointer at `ssh://`. There is no second stream shape, no compression, no unidirectional supersession,
-and no client-opened tunnel: every frame is reliable and ordered, exactly as it is locally, which is
-what makes the protocol location-transparent.
+Remote carriers preserve the identical envelope but are platform-specific. macOS and Linux desktop
+clients use OpenSSH `ssh -N -L` to forward the daemon's Unix socket (`crates/zz-daemon/src/endpoint.rs`
+`ssh_forward_command`). iOS selects `RusshForward` in `crates/zz-daemon/src/client.rs`
+`connect_endpoint_with_prompts_and_terminal`; it opens an in-process `russh` session, runs
+`zz proxy --socket ...`, and pumps frames over the SSH channel's stdio
+(`crates/zz-daemon/src/russh_client.rs` `establish`). `Endpoint::parse` accepts `unix://`, a bare
+path, and `ssh://[user@]host[:port][/remote/socket]`, and nothing else . a `quic://` string is
+rejected with a pointer at `ssh://`. Both carriers expose one reliable ordered byte stream to the
+protocol, with no alternate frame shape, compression, or unidirectional supersession. That keeps
+the protocol location-transparent.
 
 The old QUIC transport was deleted on 2026-08-01 along with the per-frame unidirectional streams,
 the negotiated zstd envelope flag, and the mux `browser-egress` option / QUIC splice. Remote browser
@@ -537,10 +542,11 @@ egress itself is current: a client-local `browser-egress` key in `zz/config` poi
 time, and the daemon's frame supersession now happens entirely in the outbound mailbox (see
 [zz-daemon](/crates/zz-daemon.md)).
 
-When a forward dies, the client reconnects with a backoff of 1, 2, 4, 8, 16, then 30 seconds, and
-re-attaches the same session. Every reconnect timer is guarded by a connection generation counter, so
-a fast reconnect cannot be undone by a stale timer firing later. The daemon sees an ordinary
-disconnect followed by an ordinary attach.
+When a remote connection dies, the GPUI client backs off for 1, 2, 4, 8, 16, then 30 seconds. The
+native Apple client uses 1, 2, 4, 8, then a 16-second cap and starts the next attempt when network
+service returns. Both retain the intended session and guard connection attempts so a stale timer
+cannot replace a newer connection. The daemon sees an ordinary disconnect followed by an ordinary
+attach.
 
 # Appearance and mux overrides with provenance
 

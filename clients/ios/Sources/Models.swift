@@ -82,7 +82,7 @@ enum ZZConnectionState: Equatable, Sendable {
     case idle
     case needsHost(String?)
     case connecting
-    case reconnecting(attempt: Int, delay: Int)
+    case reconnecting(attempt: Int, delay: Int, error: String?)
     case connected
     case disconnected
     case failed(String)

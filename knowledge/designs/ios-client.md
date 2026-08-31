@@ -47,9 +47,10 @@ batches and password method. Password, passphrase, verification-code, and other 
 server's own wording and echo policy. Cancelling any prompt stops that connection attempt.
 
 After authentication, the client probes the remote socket, starts the remote daemon when necessary,
-then carries the normal zz protocol through `zz proxy`. The host must already have a compatible `zz`
-in its login-shell `PATH`. SSH establishment runs away from the main actor, so the native connection
-screen remains responsive during DNS, authentication, and startup.
+then carries the normal zz protocol through `zz proxy`. The host must have a compatible `zz` in its
+login-shell `PATH`, `$HOME/.local/bin`, `/opt/homebrew/bin`, or `/usr/local/bin`; the remote scripts
+append those standard install locations before lookup. SSH establishment runs away from the main
+actor, so the native connection screen remains responsive during DNS, authentication, and startup.
 
 An established connection that drops retains the immutable terminal frames and selected session and
 pane while a quiet reconnect banner counts through a capped 1, 2, 4, 8, 16-second retry ladder.

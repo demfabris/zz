@@ -1,16 +1,16 @@
 ---
 type: Architecture
 title: zz system overview
-description: zz multiplexes terminal, Chromium browser, and Agent panes over a persistent daemon shared by native desktop, iPhone, and terminal clients.
+description: zz multiplexes terminal, Chromium browser, and Agent panes over a persistent daemon shared by desktop, native Apple, and terminal clients.
 resource: crates/zz/src/lib.rs
 tags: [architecture, overview, gpui, multiplexer, daemon]
-timestamp: 2026-08-14T00:00:00Z
+timestamp: 2026-08-31T00:00:00-03:00
 ---
 
 # Overview
 
-`zz` is a multiplexer with a GPUI desktop client, a native Swift iPhone client, and a raw-terminal
-client over one persistent daemon. Its model contains three pane surfaces:
+`zz` is a multiplexer with a GPUI desktop client, a native Swift client for iPhone and iPad, and a
+raw-terminal client over one persistent daemon. Its model contains three pane surfaces:
 
 - a **live local terminal** powered by `libghostty-vt` and a daemon-owned PTY worker
   (see [zz-terminal](/crates/zz-terminal.md));
@@ -30,12 +30,13 @@ default path is a shared GPU texture (Linux wgpu `external_texture`, macOS Metal
 resize, navigation, and cursor state travel through browser-neutral types.
 
 Sessions, windows, and binary split-pane layouts live in a **persistent daemon**
-([server](/crates/zz-daemon.md)) reached over an owner-only local socket . directly, or forwarded by
-`ssh -L` when the daemon is on another machine. Every device the user owns can attach to one session
-at the same time, each with its
-own viewport, scroll position, and focused window, while the layout tree, pane focus, and PTYs stay
-shared. Closing every GPUI window detaches that client without stopping
-terminal processes; see [session persistence](/concepts/session-persistence.md). Browser panes
+([server](/crates/zz-daemon.md)) reached over owner-only local IPC. Desktop clients reach a remote
+daemon through an OpenSSH `ssh -L` Unix-socket forward. The native Apple client uses in-process
+`russh` and carries the protocol through `zz proxy` over SSH channel stdio. Every device the user
+owns can attach to one session at the same time, each with its own viewport, scroll position, and
+focused window, while the layout tree, pane focus, and PTYs stay shared. Closing every GPUI window
+detaches that client without stopping terminal processes; see
+[session persistence](/concepts/session-persistence.md). Browser panes
 restore their last URL and zz [profile](/browser/profile.md) when a GUI reattaches, and transient
 Chromium state does not survive without a GUI. Agent panes are the other way round: the daemon owns
 the ACP adapter child the same way it owns a PTY, so a turn keeps running with every window closed,
@@ -50,7 +51,7 @@ stream.
 | Heterogeneous panes | terminal, browser, and Agent panes are uniform for layout/focus/targeting/lifecycle | [split-pane layout](/concepts/split-pane-layout.md) |
 | Renderer-free core | mux state machine has no UI/renderer dependency | [mux](/crates/zz-mux.md) |
 | Persistent daemon | PTYs + mux state outlive GUI detach; every device attaches to one session at once | [session persistence](/concepts/session-persistence.md) |
-| Portable transport | Unix-domain socket on Linux/macOS, named pipe on Windows, and the same socket forwarded over ssh for remote hosts | [fleet attach](/designs/fleet-attach.md) |
+| Portable transport | Unix-domain socket on Linux/macOS, named pipe on Windows, OpenSSH forwarding on desktop, and `zz proxy` over in-process SSH on iOS | [fleet attach](/designs/fleet-attach.md) |
 | Reimplemented, not linked | tmux behavior ported to safe Rust against a pinned upstream | [tmux upstream](/references/tmux-upstream.md) |
 
 # Crate map
@@ -65,21 +66,22 @@ stream.
 | [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |
 | [zz-client-ffi](/crates/zz-client-ffi.md) | Unix C ABI proof surface over the shared client core |
 | [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal and CEF runtimes and the Agent pane's viewport |
-| [native iPhone client](/designs/ios-client.md) | SwiftUI/UIKit shell over `zz-client-ffi`; session rail, pane cards, and fullscreen terminal |
+| [native Apple client](/designs/ios-client.md) | Adaptive SwiftUI/UIKit shell over `zz-client-ffi`; compact phone navigation and a regular-width iPad workspace |
 | [zz-chrome-import](/crates/zz-chrome-import.md) | Chrome profile discovery, cookie decryption, read-only history extraction |
 | [zz-xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
 
 Workspace members without a dedicated page here: `zz-ui` (widget fork) and `zz-tui` (`zz attach`).
-The native iPhone app lives outside the Cargo workspace under `clients/ios`. See
+The native Apple app lives outside the Cargo workspace under `clients/ios`. See
 [crates](/crates/index.md).
 
 # Platform status
 
 Linux/Wayland remains the most extensively runtime-validated host. On macOS, the release CEF bundle
-and daemon PTY detach/reattach lifecycle are runtime-validated; a full interactive GUI PTY/browser
-smoke remains outstanding. Windows maps the protocol to a local named pipe and has CI bundle coverage,
-but its full host smoke remains outstanding. The native iPhone app is runtime-validated on an iOS 26
-simulator against a live local daemon; physical-device and remote-host attach remain open.
+and daemon PTY detach/reattach lifecycle are runtime-validated; full interactive GUI PTY/browser
+validation remains outstanding. Windows maps the protocol to a local named pipe and has CI bundle
+coverage, but full host validation remains outstanding. As of 2026-08-31, the native Apple app is
+runtime-validated on iPhone and iPad simulators, and remote SSH attach is verified on a physical
+iPad against a live macOS daemon.
 
 # External pins
 

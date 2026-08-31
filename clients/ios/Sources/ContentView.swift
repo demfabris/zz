@@ -21,13 +21,13 @@ struct ContentView: View {
                 ConnectionFailure(message: "The daemon disconnected.")
             case .connected:
                 workspace
-            case let .reconnecting(attempt, delay):
+            case let .reconnecting(attempt, delay, error):
                 if store.sessions.isEmpty {
-                    ReconnectingView(attempt: attempt, delay: delay)
+                    ReconnectingView(attempt: attempt, delay: delay, error: error)
                 } else {
                     workspace
                         .overlay(alignment: .top) {
-                            ReconnectBanner(attempt: attempt, delay: delay)
+                            ReconnectBanner(attempt: attempt, delay: delay, error: error)
                                 .padding(.horizontal, 14)
                                 .padding(.top, 8)
                         }
@@ -87,6 +87,7 @@ private struct ReconnectingView: View {
     @EnvironmentObject private var store: ZZStore
     let attempt: Int
     let delay: Int
+    let error: String?
 
     var body: some View {
         VStack(spacing: 18) {
@@ -96,6 +97,14 @@ private struct ReconnectingView: View {
                 .font(.title2.weight(.semibold))
             Text(delay > 0 ? "Attempt \(attempt) retries in \(delay) seconds." : "Attempt \(attempt) is starting now.")
                 .foregroundStyle(.secondary)
+            if let error, !error.isEmpty {
+                Text(error)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
             Button("Retry Now") {
                 store.retry()
             }
@@ -115,6 +124,7 @@ private struct ReconnectBanner: View {
     @EnvironmentObject private var store: ZZStore
     let attempt: Int
     let delay: Int
+    let error: String?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -126,6 +136,13 @@ private struct ReconnectBanner: View {
                 Text(delay > 0 ? "Attempt \(attempt) · retry in \(delay)s" : "Attempt \(attempt) · connecting")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let error, !error.isEmpty {
+                    Text(error)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
             }
             Spacer(minLength: 8)
             Button("Now") {
@@ -143,7 +160,17 @@ private struct ReconnectBanner: View {
         .frame(minHeight: 54)
         .glassEffect(.regular, in: Capsule())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Reconnecting to zz, attempt \(attempt)")
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        var label = delay > 0
+            ? "Reconnecting to zz, attempt \(attempt), retry in \(delay) seconds"
+            : "Reconnecting to zz, attempt \(attempt), connecting"
+        if let error, !error.isEmpty {
+            label += ", \(error)"
+        }
+        return label
     }
 }
 

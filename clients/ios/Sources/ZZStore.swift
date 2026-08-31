@@ -395,8 +395,14 @@ final class ZZStore: ObservableObject {
         connectionEndpoint = endpoint
         connectionSavesHost = savesHost
         connectionReturnsToHostSetup = returnsToHostSetup
+        let reconnectError: String?
+        if case let .reconnecting(_, _, error) = connectionState {
+            reconnectError = error
+        } else {
+            reconnectError = nil
+        }
         connectionState = reconnecting
-            ? .reconnecting(attempt: max(reconnectAttempt, 1), delay: 0)
+            ? .reconnecting(attempt: max(reconnectAttempt, 1), delay: 0, error: reconnectError)
             : .connecting
         connectionAttempt &+= 1
         let attempt = connectionAttempt
@@ -492,7 +498,7 @@ final class ZZStore: ObservableObject {
         }
         reconnectAttempt += 1
         let delay = ZZReconnectPolicy.delay(for: reconnectAttempt)
-        connectionState = .reconnecting(attempt: reconnectAttempt, delay: delay)
+        connectionState = .reconnecting(attempt: reconnectAttempt, delay: delay, error: message)
         guard sceneIsActive, networkAvailable else {
             return
         }

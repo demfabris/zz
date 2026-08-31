@@ -209,7 +209,7 @@ mod tests {
             .iter()
             .filter(|entry| copy_mode_action_is_mapped(entry.name))
             .count();
-        assert_eq!(mapped, 67);
+        assert_eq!(mapped, 74);
         for entry in PINNED_COPY_MODE_ACTIONS {
             let Some(action) = copy_mode_probe_action(entry.name) else {
                 continue;
@@ -258,16 +258,7 @@ mod tests {
             ),
             (
                 CopyActionCategory::JumpPagePrompt,
-                vec![
-                    "cursor-down-and-cancel",
-                    "halfpage-down-and-cancel",
-                    "page-down-and-cancel",
-                    "previous-matching-bracket",
-                    "scroll-down-and-cancel",
-                    "scroll-exit-off",
-                    "scroll-exit-on",
-                    "scroll-exit-toggle",
-                ],
+                vec!["previous-matching-bracket"],
             ),
             (
                 CopyActionCategory::CopyFormatAndDestination,

@@ -355,6 +355,16 @@ pub enum CopyModeAction {
     SelectionMode(CopySelectionMode),
     /// Stop the selection following the cursor without clearing it.
     StopSelection,
+    HalfPageDownScrollExit,
+    /// Scroll one row toward the bottom and leave copy mode once the viewport
+    /// lands there, selection or not.
+    ScrollDownAndCancel,
+    /// Move the cursor down and leave copy mode only when the whole run was
+    /// stuck at the bottom of the retained history.
+    CursorDownAndCancel,
+    ScrollExitOn,
+    ScrollExitOff,
+    ScrollExitToggle,
 }
 
 /// The pin's `selflag`: the unit a live selection extends by.
@@ -372,6 +382,7 @@ pub enum CopyModeCountPolicy {
     OtherEnd,
     SelectLine,
     CopyEndOfLine,
+    CursorDownAndCancel,
     Once,
 }
 
@@ -409,12 +420,15 @@ impl CopyModeAction {
             | Self::NextParagraph
             | Self::PreviousParagraph
             | Self::NextMatchingBracket
+            | Self::HalfPageDownScrollExit
+            | Self::ScrollDownAndCancel
             | Self::Jump(_)
             | Self::RepeatJump { .. }
             | Self::SearchAgain { .. } => CopyModeCountPolicy::Repeat,
             Self::OtherEnd => CopyModeCountPolicy::OtherEnd,
             Self::SelectLine => CopyModeCountPolicy::SelectLine,
             Self::CopyEndOfLine(_) => CopyModeCountPolicy::CopyEndOfLine,
+            Self::CursorDownAndCancel => CopyModeCountPolicy::CursorDownAndCancel,
             Self::Top
             | Self::Bottom
             | Self::TopLine
@@ -440,6 +454,9 @@ impl CopyModeAction {
             | Self::SearchCursorWord { .. }
             | Self::SelectionMode(_)
             | Self::StopSelection
+            | Self::ScrollExitOn
+            | Self::ScrollExitOff
+            | Self::ScrollExitToggle
             | Self::GotoLine(_) => CopyModeCountPolicy::Once,
         }
     }

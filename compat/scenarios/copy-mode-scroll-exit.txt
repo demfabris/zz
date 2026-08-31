@@ -1,0 +1,14 @@
+# The scroll-exit latch and the four forced-exit action names reach typed copy
+# actions, so a detached `send-keys -X` fails on both sides. Bare and counted
+# forms carry the same exit class.
+send-keys -t =w:0.0 -X scroll-exit-on
+send-keys -t =w:0.0 -X scroll-exit-off
+send-keys -t =w:0.0 -X scroll-exit-toggle
+send-keys -t =w:0.0 -X cursor-down-and-cancel
+send-keys -t =w:0.0 -X halfpage-down-and-cancel
+send-keys -t =w:0.0 -X page-down-and-cancel
+send-keys -t =w:0.0 -X scroll-down-and-cancel
+send-keys -t =w:0.0 -N 3 -X cursor-down-and-cancel
+send-keys -t =w:0.0 -N 2 -X page-down-and-cancel
+send-keys -t =w:0.0 -N 2 -X scroll-down-and-cancel
+send-keys -t =w:0.0 -N 5 -X scroll-exit-toggle

@@ -16,7 +16,8 @@ timestamp: 2026-08-14T00:00:00Z
 
 The GUI process loads the first existing `zz/config` file from the user's platform configuration
 roots. `crates/zz/src/config/mod.rs` resolves the candidates when `run_app` enters the GPUI application
-closure, parses thirty-three client-local behavior/layout/diagnostic/theme/browser knobs into typed
+closure, parses 35 named client-local behavior/layout/diagnostic/theme/browser knobs plus six
+chrome-color entries into typed
 `AppConfig` and `BrowserConfig` values, parses the one app-owned ACP key into `AgentConfig`,
 collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
@@ -31,8 +32,8 @@ preserving every other byte, comments included; the GUI fields reject a duplicat
 call it. `zz fleet list` prints name and endpoint; `zz fleet remove <name>` deletes every matching
 host line, as does a remote row's **Close host** . which additionally republishes `FleetHosts`
 (`config::remove_fleet_host_live`) so the running fleet drops the machine immediately. There is no bootstrap step, no key pinning, and no daemon-side setup . ssh already owns
-identity. The thirty-three local
-knobs retain `Default`/`Override` provenance. Daemon-owned value grammar deliberately stays in the zz-terminal appearance loader or
+identity. These 41 local schema entries retain `Default`/`Override` provenance. Daemon-owned value
+grammar deliberately stays in the zz-terminal appearance loader or
 mux `set-option` engine.
 
 The GUI polls candidate paths every 500ms (path, mtime, and size) and live-applies edits, file
@@ -78,14 +79,12 @@ candidate exists, edits continue to target the first existing file selected by n
 `chrome-unbind = <table>:<key>` removes one. The allowed tables are `ui`, `sidebar`, `browser`, and
 `terminal`; action names come from `zz_client::ChromeAction`. Keys use the chrome grammar from
 `zz-client`, including `D-` for Command/Super and `S-` for Shift. These directives may appear more
-than once, preserve file order, and stay client-side. They are separate from the thirty-three scalar
+than once, preserve file order, and stay client-side. They are separate from the 35 named scalar
 knobs below and from the daemon-owned tmux tables in `zz/mux.conf`.
 
 ## Client-local keys
 
-The client-local schema is **thirty-three keys: fifteen switches, six logical-pixel geometry
-controls, one pane-opacity factor, four enumerated selectors (theme mode, app icon, chrome preset,
-and browser search engine), one browser-local hotkey, and six chrome colors.**
+The client-local schema has **41 entries: 35 named scalar keys plus six chrome colors.**
 
 | Key | Default | Valid range | Consumer |
 | --- | ---: | --- | --- |
@@ -98,6 +97,13 @@ and browser search engine), one browser-local hotkey, and six chrome colors.**
 | `quit-daemon-on-exit` | `false` | `true` or `false` | Whether quitting the app stops the daemon even while sessions are live |
 | `auto-restart-stale-daemon` | `false` | `true` or `false` | Whether a protocol-mismatched local daemon is terminated and replaced on connect. Off by default because it ends every running session |
 | `check-for-updates` | `true` | `true` or `false` | Whether the GUI fetches the GitHub release list ten seconds after launch and daily after that, offering a newer release as a toast. The channel follows the running build (a `-beta.N` version takes prereleases). One anonymous request; nothing else is sent. Release builds only unless `ZZ_UPDATE_CHECK=1`; `ZZ_UPDATE_CHECK=0` silences every build. Surfaced in Settings under About |
+| `status-show-session` | `true` | `true` or `false` | Whether the native desktop status bar shows the attached session chip. Clicking the chip focuses the session picker in the sidebar |
+| `status-badges` | `true` | `true` or `false` | Whether window entries show bell, activity, and Agent markers. The window strip remains visible when this is off |
+| `status-align` | `left` | `left` or `center` | Align the native window strip at the left edge or center it in the available status-bar space |
+| `status-agents` | `true` | `true` or `false` | Whether the bar may show the count of non-dead Agent panes in the attached session. The item stays hidden at zero |
+| `status-host` | `true` | `true` or `false` | Whether the bar shows the host name while attached to a remote host. Local attachment has no host item |
+| `status-update` | `true` | `true` or `false` | Whether an available release appears in the bar with its version and an install action. `check-for-updates` separately controls the release check |
+| `status-clock` | `24-hour` | `24-hour`, `12-hour`, `time-date`, or `off` | Select the desktop clock format. It has no seconds; `time-date` renders 24-hour time plus abbreviated month and day |
 | `experimental-agent-pane` | `false` | `true` or `false` | Whether new Agent panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind agent` |
 | `experimental-editor-pane` | `false` | `true` or `false` | Whether new Editor panes can be created at all . picker row, palette completion, and the daemon's `select-pane-kind editor` |
 | `pane-gaps` | `false` | `true` or `false` | Whether panes use the gapped border, radius, surface ring, and divider treatment |
@@ -123,6 +129,11 @@ and browser search engine), one browser-local hotkey, and six chrome colors.**
 | `chrome-success` | unset | same | `ThemeColor::success` |
 | `chrome-warning` | unset | same | `ThemeColor::warning` |
 | `chrome-danger` | unset | same | `ThemeColor::danger` |
+
+The status settings project directly into `zz_client::StatusBarSettings` and apply through the
+normal watched-config refresh. The clock never shows seconds. `AppShell` aligns its first wake to
+the next minute boundary, then requests one redraw per minute while the bar and clock are visible;
+`time-date` renders `%H:%M · %b %d`.
 
 `widget-corner-radius` and the theme keys land on the **zz-ui theme** rather than being read
 per-frame by a renderer: `zz::theme::apply_zz_overrides` pushes them onto the `Theme` global, and
@@ -508,7 +519,7 @@ always-live inactive-opacity factor.
 
 | Page | Groups |
 | --- | --- |
-| Interface | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Tweaks** (`animations`, `widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
+| Interface | **Theme** (`theme-mode` as three drawn window previews, transient `UI zoom`, macOS `app-icon` as three icon tiles) · **Chroma Colors** (paired `chrome-preset`, the six `chrome-*` pickers) · **Status bar** (`status-show-session`, `status-badges`, `status-align`, `status-agents`, `status-host`, `status-update`, `status-clock`) · **Tweaks** (`animations`, `widget-corner-radius`, `window-background-blur` as "Window blur", Linux `window-corner-radius` and `use-system-titlebar`) |
 | Browser | **Search** (`browser-search-provider`) · **Shortcuts** (`browser-element-selector-hotkey`) |
 | Editor | **Typography** (`editor-font-size`) · **Display** (`editor-line-numbers`, `editor-relative-line-numbers`, `editor-soft-wrap`, `editor-vim-mode`) |
 | Panes | **Layout** (`pane-gaps`) · **Focus** (`pane-inactive-opacity`) · **Frame** (`pane-margin`, `pane-corner-radius`, `pane-border-width` . all disabled without gaps) |

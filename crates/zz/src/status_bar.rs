@@ -1,30 +1,34 @@
 use std::ops::Range;
 
+use chrono::Local;
 use gpui::{
     AnyElement, App, Entity, IntoElement, MouseButton, Pixels, SharedString, Stateful, Window,
     WindowControlArea, div, prelude::*, px,
 };
-use zz_mux::parse_styled_segments;
-use zz_protocol::{MuxSnapshot, SessionId, StatusLine, TmuxAlign, TmuxList, WindowId};
+use zz_client::{StatusBarAlignment, StatusBarClock, StatusBarModel, StatusBarWindow};
 use zz_ui::{
     ActiveTheme as _, Disableable as _, IconName, Sizable as _, TITLE_BAR_HEIGHT,
     button::{Button, ButtonVariants as _},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     navigation::{
         WORKSPACE_STATUS_CONTENT_HEIGHT, WorkspaceStatusWindowState,
-        workspace_controls_leading_inset, workspace_status_item, workspace_status_window,
+        workspace_controls_leading_inset, workspace_row_highlight, workspace_status_item,
+        workspace_status_window,
     },
+    tooltip::Tooltip,
 };
 
 use crate::{
     mux::{
         client::MuxClient,
+        hosts::HostId,
         nav::{
             MuxTreeModel, TreeNode, TreeTarget, activate_nav, kill_target_command,
             select_window_command,
         },
     },
     theme::chrome_background,
+    workspace::sidebar::WorkspaceSidebar,
 };
 
 const TITLEBAR_CONTROLS_GAP: Pixels = px(6.0);
@@ -37,34 +41,10 @@ pub(crate) enum GuiStatusPlacement {
     Titlebar,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum NativeStatusAlignment {
-    #[default]
-    Left,
-    Centre,
-    Right,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct NativeStatusWindow {
-    id: WindowId,
-    index: u32,
-    name: String,
-    active: bool,
-    zoomed: bool,
-    bell: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct NativeStatusChunk {
-    icon: Option<IconName>,
-    text: String,
-}
-
 pub(crate) fn render_gui_status_bar(
     placement: GuiStatusPlacement,
-    status: &StatusLine,
     mux: &Entity<MuxClient>,
+    sidebar: &Entity<WorkspaceSidebar>,
     titlebar_controls: Option<(AnyElement, Pixels)>,
     window_controls: Option<AnyElement>,
     _window: &mut Window,
@@ -72,7 +52,6 @@ pub(crate) fn render_gui_status_bar(
 ) -> Stateful<gpui::Div> {
     let background = chrome_background(cx);
     let foreground = cx.theme().foreground;
-    let status_enabled = !status.is_empty();
     let (snapshot, attached_host, attached, connected) = {
         let mux = mux.read(cx);
         (
@@ -82,27 +61,38 @@ pub(crate) fn render_gui_status_bar(
             mux.is_connected(),
         )
     };
-    let model = MuxTreeModel::from_mux(mux.read(cx));
-    let windows = if status_enabled {
-        native_status_windows(&snapshot, attached)
+    let tree_model = MuxTreeModel::from_mux(mux.read(cx));
+    let host_name = if attached_host == HostId::LOCAL {
+        None
     } else {
-        Vec::new()
+        tree_model
+            .host(attached_host)
+            .map(|host| host.name.as_str())
     };
-    let alignment = native_status_alignment(status);
-    let active_index = windows.iter().position(|window| window.active).unwrap_or(0);
-    let visible_range = visible_window_range(windows.len(), active_index, MAX_VISIBLE_WINDOWS);
-    let visible_windows = windows[visible_range]
+    let model = StatusBarModel::from_snapshot(
+        &snapshot,
+        attached,
+        host_name,
+        crate::config::status_bar_settings(cx),
+    );
+    let active_index = model
+        .windows
         .iter()
-        .map(|window| render_status_window(window, connected, attached_host, &model, mux, cx))
+        .position(|window| window.active)
+        .unwrap_or(0);
+    let visible_range =
+        visible_window_range(model.windows.len(), active_index, MAX_VISIBLE_WINDOWS);
+    let visible_windows = model.windows[visible_range]
+        .iter()
+        .map(|window| render_status_window(window, connected, attached_host, &tree_model, mux, cx))
         .collect::<Vec<_>>();
-    let overflow = (windows.len() > MAX_VISIBLE_WINDOWS)
-        .then(|| render_window_overflow(&windows, connected, mux, cx));
-    let left = status_enabled
-        .then(|| render_status_chunks("gui-status-left", &status.left, cx))
-        .flatten();
-    let right = status_enabled
-        .then(|| render_status_chunks("gui-status-right", &status.right, cx))
-        .flatten();
+    let overflow = (model.windows.len() > MAX_VISIBLE_WINDOWS)
+        .then(|| render_window_overflow(&model.windows, connected, mux, cx));
+    let session = model
+        .session_name
+        .as_deref()
+        .map(|name| render_session(name, sidebar, cx));
+    let right = render_right_items(&model, cx);
     let window_strip = div()
         .flex()
         .flex_1()
@@ -111,11 +101,8 @@ pub(crate) fn render_gui_status_bar(
         .items_center()
         .gap(STATUS_GAP)
         .overflow_hidden()
-        .when(alignment == NativeStatusAlignment::Centre, |strip| {
+        .when(model.alignment == StatusBarAlignment::Center, |strip| {
             strip.justify_center()
-        })
-        .when(alignment == NativeStatusAlignment::Right, |strip| {
-            strip.justify_end()
         })
         .children(visible_windows)
         .children(overflow);
@@ -130,7 +117,7 @@ pub(crate) fn render_gui_status_bar(
         .when(placement == GuiStatusPlacement::Titlebar, |content| {
             content.window_control_area(WindowControlArea::Drag)
         })
-        .children(left)
+        .children(session)
         .child(window_strip)
         .children(right);
     let leading = (placement == GuiStatusPlacement::Titlebar).then(|| {
@@ -183,32 +170,123 @@ pub(crate) fn render_gui_status_bar(
         .children(window_controls)
 }
 
-fn render_status_chunks(id: &'static str, value: &str, cx: &App) -> Option<AnyElement> {
-    let chunks = native_status_chunks(value);
-    if chunks.is_empty() {
+fn render_session(name: &str, sidebar: &Entity<WorkspaceSidebar>, cx: &App) -> AnyElement {
+    let foreground = cx.theme().foreground;
+    let highlight = workspace_row_highlight(cx);
+    let focus_sidebar = sidebar.clone();
+    workspace_status_item(
+        "gui-status-session",
+        Some(IconName::SquareTerminal),
+        name.to_owned().into(),
+        cx,
+    )
+    .flex_none()
+    .px(px(8.0))
+    .rounded(cx.theme().radius)
+    .bg(highlight)
+    .text_color(foreground)
+    .cursor_pointer()
+    .hover(move |item| item.bg(highlight).text_color(foreground))
+    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+    .on_click(move |_, window, cx| {
+        cx.stop_propagation();
+        focus_sidebar.update(cx, |sidebar, cx| sidebar.focus(window, cx));
+    })
+    .into_any_element()
+}
+
+fn render_right_items(model: &StatusBarModel, cx: &App) -> Vec<AnyElement> {
+    let mut items = Vec::new();
+    if let Some(count) = model.agent_count {
+        let label = if count == 1 {
+            "1 agent".to_owned()
+        } else {
+            format!("{count} agents")
+        };
+        items.push(
+            workspace_status_item("gui-status-agents", Some(IconName::Bot), label.into(), cx)
+                .into_any_element(),
+        );
+    }
+    if let Some(host) = &model.host_name {
+        items.push(
+            workspace_status_item(
+                "gui-status-host",
+                Some(IconName::Globe),
+                host.clone().into(),
+                cx,
+            )
+            .into_any_element(),
+        );
+    }
+    if let Some(update) = render_update(model.show_update, cx) {
+        items.push(update);
+    }
+    if let Some(clock) = render_clock(model.clock, cx) {
+        items.push(clock);
+    }
+    items
+}
+
+fn render_update(show: bool, cx: &App) -> Option<AnyElement> {
+    if !show {
         return None;
     }
+    let status = crate::update::status(cx)?;
+    let crate::update::CheckState::Available(release) = status.check else {
+        return None;
+    };
+    let foreground = cx.theme().foreground;
+    let highlight = workspace_row_highlight(cx);
+    let tooltip: SharedString = format!("Install zz {}", release.version).into();
     Some(
-        div()
-            .flex()
-            .flex_shrink_1()
-            .min_w_0()
-            .h(WORKSPACE_STATUS_CONTENT_HEIGHT)
-            .items_center()
-            .gap(px(10.0))
-            .overflow_hidden()
-            .children(chunks.into_iter().enumerate().map(|(index, chunk)| {
-                workspace_status_item((id, index), chunk.icon, chunk.text.into(), cx)
-            }))
+        workspace_status_item(
+            "gui-status-update",
+            None,
+            format!("v{}", release.version).into(),
+            cx,
+        )
+        .flex_none()
+        .px(px(6.0))
+        .rounded(cx.theme().radius)
+        .cursor_pointer()
+        .hover(move |item| item.bg(highlight).text_color(foreground))
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .child(
+            div()
+                .flex_none()
+                .size(px(5.0))
+                .rounded_full()
+                .bg(cx.theme().success),
+        )
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(|_, window, cx| {
+            cx.stop_propagation();
+            crate::update::install(window, cx);
+        })
+        .into_any_element(),
+    )
+}
+
+fn render_clock(clock: StatusBarClock, cx: &App) -> Option<AnyElement> {
+    let now = Local::now();
+    let label = match clock {
+        StatusBarClock::TwentyFourHour => now.format("%H:%M").to_string(),
+        StatusBarClock::TwelveHour => now.format("%I:%M %p").to_string(),
+        StatusBarClock::TimeAndDate => now.format("%H:%M · %b %d").to_string(),
+        StatusBarClock::Off => return None,
+    };
+    Some(
+        workspace_status_item("gui-status-clock", Some(IconName::Clock), label.into(), cx)
             .into_any_element(),
     )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn render_status_window(
-    window: &NativeStatusWindow,
+    window: &StatusBarWindow,
     connected: bool,
-    attached_host: crate::mux::hosts::HostId,
+    attached_host: HostId,
     model: &MuxTreeModel,
     mux: &Entity<MuxClient>,
     cx: &App,
@@ -230,8 +308,9 @@ fn render_status_window(
         WorkspaceStatusWindowState {
             connected,
             active: window.active,
-            zoomed: window.zoomed,
             bell: window.bell,
+            activity: window.activity,
+            agent: window.agent,
         },
         cx,
     )
@@ -269,7 +348,7 @@ fn render_status_window(
 }
 
 fn render_window_overflow(
-    windows: &[NativeStatusWindow],
+    windows: &[StatusBarWindow],
     connected: bool,
     mux: &Entity<MuxClient>,
     cx: &App,
@@ -281,7 +360,7 @@ fn render_window_overflow(
         .xsmall()
         .compact()
         .icon(IconName::Ellipsis)
-        .hover_bg(zz_ui::navigation::workspace_row_highlight(cx))
+        .hover_bg(workspace_row_highlight(cx))
         .tooltip("All windows")
         .disabled(!connected)
         .dropdown_menu(move |menu, _, _| {
@@ -304,49 +383,6 @@ fn render_window_overflow(
         .into_any_element()
 }
 
-fn native_status_windows(
-    snapshot: &MuxSnapshot,
-    attached: Option<SessionId>,
-) -> Vec<NativeStatusWindow> {
-    let Some(session) = snapshot
-        .sessions
-        .iter()
-        .find(|session| Some(session.id) == attached)
-    else {
-        return Vec::new();
-    };
-    let focused_window = snapshot.focused_window_for(session);
-    session
-        .windows
-        .iter()
-        .map(|window| NativeStatusWindow {
-            id: window.id,
-            index: window.index,
-            name: window.name.clone(),
-            active: window.id == focused_window,
-            zoomed: window.zoomed_pane.is_some(),
-            bell: window.panes.values().any(|pane| pane.bell),
-        })
-        .collect()
-}
-
-fn native_status_alignment(status: &StatusLine) -> NativeStatusAlignment {
-    status
-        .rows
-        .iter()
-        .flat_map(|row| parse_styled_segments(row))
-        .find_map(|segment| {
-            (segment.style.list == Some(TmuxList::On))
-                .then_some(segment.style.align)
-                .flatten()
-        })
-        .map_or(NativeStatusAlignment::Left, |align| match align {
-            TmuxAlign::Centre | TmuxAlign::AbsoluteCentre => NativeStatusAlignment::Centre,
-            TmuxAlign::Right => NativeStatusAlignment::Right,
-            TmuxAlign::Default | TmuxAlign::Left => NativeStatusAlignment::Left,
-        })
-}
-
 fn visible_window_range(total: usize, active: usize, limit: usize) -> Range<usize> {
     if total <= limit || limit == 0 {
         return 0..total;
@@ -356,161 +392,13 @@ fn visible_window_range(total: usize, active: usize, limit: usize) -> Range<usiz
     start..start + limit
 }
 
-fn native_status_chunks(value: &str) -> Vec<NativeStatusChunk> {
-    let text = parse_styled_segments(value)
-        .into_iter()
-        .map(|segment| segment.text)
-        .collect::<String>();
-    text.split(is_powerline_separator)
-        .filter_map(native_status_chunk)
-        .collect()
-}
-
-fn native_status_chunk(value: &str) -> Option<NativeStatusChunk> {
-    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = normalized.chars();
-    let first = chars.next()?;
-    if let Some(icon) = native_status_icon(first) {
-        return Some(NativeStatusChunk {
-            icon: Some(icon),
-            text: chars.as_str().trim_start().to_owned(),
-        });
-    }
-    Some(NativeStatusChunk {
-        icon: None,
-        text: normalized,
-    })
-}
-
-fn native_status_icon(value: char) -> Option<IconName> {
-    match value {
-        '\u{f120}' => Some(IconName::SquareTerminal),
-        '\u{e0a0}' => Some(IconName::GitBranch),
-        '\u{f017}' => Some(IconName::Clock),
-        '\u{f073}' => Some(IconName::Calendar),
-        '\u{f00e}' => Some(IconName::ZoomIn),
-        _ => None,
-    }
-}
-
-fn is_powerline_separator(value: char) -> bool {
-    ('\u{e0b0}'..='\u{e0d4}').contains(&value)
-}
-
-fn native_window_label(window: &NativeStatusWindow) -> SharedString {
+fn native_window_label(window: &StatusBarWindow) -> SharedString {
     format!("{} {}", window.index, window.name).into()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
-    use zz_protocol::{LayoutNode, PaneId, SessionSnapshot, WindowSnapshot};
-
-    fn window(id: u64, active_pane: u64) -> WindowSnapshot {
-        WindowSnapshot {
-            id: WindowId(id),
-            index: u32::try_from(id).expect("fixture window index"),
-            name: format!("window-{id}"),
-            automatic_rename: true,
-            active_pane: PaneId(active_pane),
-            zoomed_pane: None,
-            layout: LayoutNode::Pane(PaneId(active_pane)),
-            panes: BTreeMap::new(),
-            layout_dump: String::new(),
-            visible_layout_dump: String::new(),
-            status_label: format!("{id}:window-{id}"),
-        }
-    }
-
-    #[test]
-    fn native_windows_follow_the_attached_session_and_focused_window() {
-        let mut second = window(2, 12);
-        second.zoomed_pane = Some(PaneId(12));
-        let snapshot = MuxSnapshot {
-            generation: 1,
-            sessions: vec![SessionSnapshot {
-                id: SessionId(4),
-                name: "work".to_owned(),
-                active_window: WindowId(1),
-                windows: vec![window(1, 11), second],
-                viewers: Vec::new(),
-            }],
-            focused_window: Some(WindowId(2)),
-        };
-        let windows = native_status_windows(&snapshot, Some(SessionId(4)));
-        assert_eq!(windows.len(), 2);
-        assert!(!windows[0].active);
-        assert!(windows[1].active);
-        assert!(windows[1].zoomed);
-        assert!(native_status_windows(&snapshot, Some(SessionId(9))).is_empty());
-    }
-
-    #[test]
-    fn native_chunks_ignore_tmux_styles_and_promote_known_icons() {
-        let styled = native_status_chunks(
-            "#[fg=black,bg=white,bold]  0 #[fg=red]#[reverse] macbook #[none] \
-             #[fg=blue]  main #[fg=yellow]#[italics]  20:57 #[underscore]  23 Aug ",
-        );
-
-        assert_eq!(
-            styled,
-            vec![
-                NativeStatusChunk {
-                    icon: Some(IconName::SquareTerminal),
-                    text: "0".to_owned(),
-                },
-                NativeStatusChunk {
-                    icon: None,
-                    text: "macbook".to_owned(),
-                },
-                NativeStatusChunk {
-                    icon: Some(IconName::GitBranch),
-                    text: "main".to_owned(),
-                },
-                NativeStatusChunk {
-                    icon: Some(IconName::Clock),
-                    text: "20:57".to_owned(),
-                },
-                NativeStatusChunk {
-                    icon: Some(IconName::Calendar),
-                    text: "23 Aug".to_owned(),
-                },
-            ]
-        );
-        assert_eq!(
-            native_status_chunks("#[fg=black,bg=black]same"),
-            native_status_chunks("#[fg=white,bg=white,reverse,bold]same")
-        );
-    }
-
-    #[test]
-    fn native_chunks_preserve_unknown_content() {
-        assert_eq!(
-            native_status_chunks("  λ   custom output  "),
-            vec![NativeStatusChunk {
-                icon: None,
-                text: "λ custom output".to_owned(),
-            }]
-        );
-    }
-
-    #[test]
-    fn native_alignment_reads_the_status_list_marker() {
-        for (align, expected) in [
-            ("left", NativeStatusAlignment::Left),
-            ("centre", NativeStatusAlignment::Centre),
-            ("absolute-centre", NativeStatusAlignment::Centre),
-            ("right", NativeStatusAlignment::Right),
-        ] {
-            let status = StatusLine {
-                rows: vec![format!("#[list=on align={align}]window")],
-                ..StatusLine::default()
-            };
-            assert_eq!(native_status_alignment(&status), expected);
-        }
-    }
 
     #[test]
     fn visible_windows_stay_centered_on_the_active_window() {

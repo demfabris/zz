@@ -12,6 +12,7 @@ mod core;
 mod layout;
 mod menu;
 mod status;
+mod status_bar;
 
 pub use chrome::{
     BROWSER_TABLE, CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, ChromeProfile,
@@ -24,3 +25,6 @@ pub use core::{
 pub use layout::{NormalizedPaneRect, pane_rects};
 pub use menu::{MenuKeyResult, resolve_menu_key};
 pub use status::{ComposedStatusRow, StatusHitRange, compose_status_row};
+pub use status_bar::{
+    StatusBarAlignment, StatusBarClock, StatusBarModel, StatusBarSettings, StatusBarWindow,
+};

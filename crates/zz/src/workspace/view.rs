@@ -506,7 +506,6 @@ struct AppRevision {
     sidebar_focus: u64,
     bell: u64,
     pending_commands: u64,
-    status: u64,
 }
 
 impl AppRevision {
@@ -532,7 +531,6 @@ impl AppRevision {
             sidebar_focus: mux.sidebar_focus_revision(),
             bell: mux.bell_revision(),
             pending_commands: mux.pending_commands_revision(),
-            status: mux.status_revision(),
         }
     }
 }
@@ -600,7 +598,6 @@ pub struct AppView {
     dialog_prefix_cancel_sent: bool,
     dialog_prefix_cancel_pending: Option<u64>,
     synchronized_signature: Option<SynchronizeSignature>,
-    applied_window_title: Option<String>,
 }
 
 impl AppView {
@@ -811,7 +808,6 @@ impl AppView {
             dialog_prefix_cancel_sent: false,
             dialog_prefix_cancel_pending: None,
             synchronized_signature: None,
-            applied_window_title: None,
         };
         view.register_agent_panes(cx);
         view
@@ -2573,23 +2569,6 @@ impl AppView {
     }
 }
 
-impl AppView {
-    /// Decision 6: the GUI adopts the daemon-expanded `set-titles` title only
-    /// when the option is explicitly on — the daemon publishes a non-empty
-    /// title exactly then — and reverts to the native title otherwise.
-    fn sync_window_title(&mut self, title: &str, window: &mut Window) {
-        let desired = (!title.is_empty()).then(|| title.to_owned());
-        if self.applied_window_title == desired {
-            return;
-        }
-        match &desired {
-            Some(title) => window.set_window_title(title),
-            None => window.set_window_title("zz"),
-        }
-        self.applied_window_title = desired;
-    }
-}
-
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
@@ -2744,8 +2723,6 @@ impl Render for AppView {
         } else {
             pane_margin
         };
-        let status = self.mux.read(cx).status().clone();
-        self.sync_window_title(&status.title, window);
         let canvas_origin = gpui::point(pane_margin, canvas_top);
         let mut overlays = if route == WorkspaceRoute::Settings {
             Vec::new()
@@ -3267,6 +3244,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         };
         let attached = SessionId(1);
         let session = zz_protocol::SessionSnapshot {
@@ -3316,7 +3294,6 @@ mod tests {
             sidebar_focus: 0,
             bell: 0,
             pending_commands: 0,
-            status: 0,
         };
         assert_ne!(
             revision,
@@ -3702,6 +3679,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         };
         MuxSnapshot {
             generation,
@@ -4047,6 +4025,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         };
         MuxSnapshot {
             generation: 10 + active.0 + generation_bias,
@@ -4895,6 +4874,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         };
 
         assert!(pending.still_predicts(Some(&window), 12));

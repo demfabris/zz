@@ -18,13 +18,15 @@ use zz_daemon::{
     AskpassPrompt, AskpassReply, DaemonError, Endpoint, EndpointError, InteractiveClient,
     terminate_incompatible_daemon,
 };
+#[cfg(test)]
+use zz_protocol::StatusLine;
 use zz_protocol::{
     AgentCommand, BrowserCommand, ChooseBufferState, ChooseTreeState, ClientMessageKind,
     CommandInvocation, CommandPromptState, CommandResponse, ConfirmState, DisplayPanesState, Event,
     EventPayload, GuiResponse, InputMessage, KeyBindingSnapshot, LayoutNode, MenuState,
     MuxOptionKey, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId,
     PaneKindSnapshot, PastedImageFormat, PopupState, ProtocolError, ProtocolMessage, ServerError,
-    ServerHello, SessionId, StatusLine, TerminalUiCommand, WindowSnapshot,
+    ServerHello, SessionId, TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME,
@@ -935,7 +937,6 @@ pub struct MuxClient {
     attached_host: HostId,
     color_scheme: TerminalColorScheme,
     appearance: Arc<TerminalAppearance>,
-    status_revision: u64,
     terminal_font_size_offset_points: f32,
     #[cfg(test)]
     input_sink: Option<std::rc::Rc<std::cell::RefCell<Vec<InputMessage>>>>,
@@ -1047,7 +1048,6 @@ impl MuxClient {
             attached_host: HostId::LOCAL,
             color_scheme,
             appearance: Arc::new(TerminalAppearance::default()),
-            status_revision: 0,
             terminal_font_size_offset_points: 0.0,
             #[cfg(test)]
             input_sink: None,
@@ -1905,7 +1905,6 @@ impl MuxClient {
         let session = connection.last_attached_session;
 
         self.ingest_server_hello(hello, cx);
-        self.status_revision = self.status_revision.saturating_add(1);
         self.error = None;
         self.error_after_next_attach = None;
         self.connections
@@ -2040,19 +2039,6 @@ impl MuxClient {
     #[must_use]
     pub fn snapshot(&self) -> Arc<MuxSnapshot> {
         Arc::clone(self.core.snapshot())
-    }
-
-    /// The rendered tmux status line for this client, expanded by the daemon.
-    #[must_use]
-    pub(crate) const fn status(&self) -> &StatusLine {
-        self.core.status()
-    }
-
-    /// Bumped on every status change, so a view can observe the status without
-    /// comparing its text.
-    #[must_use]
-    pub(crate) const fn status_revision(&self) -> u64 {
-        self.status_revision
     }
 
     /// The daemon-published prefix in the form a keystroke is compared
@@ -2777,7 +2763,6 @@ impl MuxClient {
         self.error_after_next_attach = None;
         self.attached_host = host;
         self.ingest_server_hello(hello, cx);
-        self.status_revision = self.status_revision.saturating_add(1);
         let attach_result = if let Some(client) = client {
             crate::config::register_config_override_client(&client, host != HostId::LOCAL, cx);
             client.attach(session.map_or_else(String::new, |session| session.to_string()))
@@ -2822,7 +2807,6 @@ impl MuxClient {
             .current_hello()
             .expect("a connected host has an interactive client");
         self.ingest_server_hello(hello, cx);
-        self.status_revision = self.status_revision.saturating_add(1);
         let result = if let Some(client) = client {
             crate::config::register_config_override_client(&client, false, cx);
             client.attach("")
@@ -3541,6 +3525,13 @@ impl MuxClient {
             return;
         }
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
+        let status_only = matches!(
+            &message,
+            ProtocolMessage::Event(Event {
+                payload: EventPayload::StatusChanged { .. },
+                ..
+            })
+        );
         log::trace!(
             target: "zz::diagnostics::mux",
             "handle_message begin message={message:#?}"
@@ -3587,7 +3578,9 @@ impl MuxClient {
             self.viewports.len(),
             self.attached_connection().resync_pending,
         );
-        cx.notify();
+        if !status_only {
+            cx.notify();
+        }
     }
 
     /// Run the GPUI half of one reduced change: revisions, toasts, clipboard
@@ -3622,9 +3615,6 @@ impl MuxClient {
             }
             CoreEvent::AppearanceChanged => self.adopt_core_appearance(cx),
             CoreEvent::MuxOptionsChanged => self.backfill_retained_history(),
-            CoreEvent::StatusChanged => {
-                self.status_revision = self.status_revision.saturating_add(1);
-            }
             CoreEvent::PrefixArmed { armed } => log::info!(
                 target: "zz::diagnostics::input",
                 "prefix_armed_received armed={armed}"
@@ -3832,6 +3822,7 @@ impl MuxClient {
             CoreEvent::KeyTablesChanged
             | CoreEvent::HelloReceived
             | CoreEvent::ViewportChanged { .. }
+            | CoreEvent::StatusChanged
             | CoreEvent::CommandOutputChanged => {}
         }
     }
@@ -8155,6 +8146,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         }
     }
 

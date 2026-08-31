@@ -1301,8 +1301,8 @@ pub unsafe extern "C" fn zz_snapshot_session_window_pane_count(
     session: usize,
     window: usize,
 ) -> usize {
-    let Some(window) = (unsafe { snapshot.as_ref() })
-        .and_then(|snapshot| window_at(snapshot, session, window))
+    let Some(window) =
+        (unsafe { snapshot.as_ref() }).and_then(|snapshot| window_at(snapshot, session, window))
     else {
         return 0;
     };
@@ -2027,6 +2027,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         };
 
         assert_eq!(window_pane_rect(&window, PaneId(1)), None);
@@ -2056,16 +2057,10 @@ mod tests {
             2
         );
         let mut zoomed = 0;
-        assert!(unsafe {
-            zz_snapshot_session_window_zoomed_pane(&snapshot, 0, 0, &mut zoomed)
-        });
+        assert!(unsafe { zz_snapshot_session_window_zoomed_pane(&snapshot, 0, 0, &mut zoomed) });
         assert_eq!(zoomed, 2);
-        assert!(!unsafe {
-            zz_snapshot_session_window_pane_rect(&snapshot, 0, 0, 0, &mut rect)
-        });
-        assert!(unsafe {
-            zz_snapshot_session_window_pane_rect(&snapshot, 0, 0, 1, &mut rect)
-        });
+        assert!(!unsafe { zz_snapshot_session_window_pane_rect(&snapshot, 0, 0, 0, &mut rect) });
+        assert!(unsafe { zz_snapshot_session_window_pane_rect(&snapshot, 0, 0, 1, &mut rect) });
         assert_eq!(rect, ZzPaneRect::from(NormalizedPaneRect::FULL));
     }
 

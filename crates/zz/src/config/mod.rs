@@ -15,6 +15,7 @@ use gpui::{
     px,
 };
 use zz_browser::SearchProvider;
+use zz_client::{StatusBarAlignment, StatusBarClock, StatusBarSettings};
 use zz_daemon::{Endpoint, InteractiveClient};
 pub(crate) use zz_daemon::{HostEntry, RejectedHost, configured_fleet_hosts, validate_fleet_host};
 use zz_protocol::{
@@ -131,6 +132,13 @@ pub enum ConfigKey {
     QuitDaemonOnExit,
     AutoRestartStaleDaemon,
     CheckForUpdates,
+    StatusShowSession,
+    StatusBadges,
+    StatusAlign,
+    StatusAgents,
+    StatusHost,
+    StatusUpdate,
+    StatusClock,
     ExperimentalAgentPane,
     ExperimentalEditorPane,
     PaneGaps,
@@ -165,6 +173,13 @@ impl ConfigKey {
             Self::QuitDaemonOnExit => "quit-daemon-on-exit",
             Self::AutoRestartStaleDaemon => "auto-restart-stale-daemon",
             Self::CheckForUpdates => "check-for-updates",
+            Self::StatusShowSession => "status-show-session",
+            Self::StatusBadges => "status-badges",
+            Self::StatusAlign => "status-align",
+            Self::StatusAgents => "status-agents",
+            Self::StatusHost => "status-host",
+            Self::StatusUpdate => "status-update",
+            Self::StatusClock => "status-clock",
             Self::ExperimentalAgentPane => "experimental-agent-pane",
             Self::ExperimentalEditorPane => "experimental-editor-pane",
             Self::PaneGaps => "pane-gaps",
@@ -199,6 +214,13 @@ impl ConfigKey {
             "quit-daemon-on-exit" => Some(Self::QuitDaemonOnExit),
             "auto-restart-stale-daemon" => Some(Self::AutoRestartStaleDaemon),
             "check-for-updates" => Some(Self::CheckForUpdates),
+            "status-show-session" => Some(Self::StatusShowSession),
+            "status-badges" => Some(Self::StatusBadges),
+            "status-align" => Some(Self::StatusAlign),
+            "status-agents" => Some(Self::StatusAgents),
+            "status-host" => Some(Self::StatusHost),
+            "status-update" => Some(Self::StatusUpdate),
+            "status-clock" => Some(Self::StatusClock),
             "experimental-agent-pane" => Some(Self::ExperimentalAgentPane),
             "experimental-editor-pane" => Some(Self::ExperimentalEditorPane),
             "pane-gaps" => Some(Self::PaneGaps),
@@ -243,6 +265,13 @@ impl ConfigKey {
             | Self::QuitDaemonOnExit
             | Self::AutoRestartStaleDaemon
             | Self::CheckForUpdates
+            | Self::StatusShowSession
+            | Self::StatusBadges
+            | Self::StatusAlign
+            | Self::StatusAgents
+            | Self::StatusHost
+            | Self::StatusUpdate
+            | Self::StatusClock
             | Self::ExperimentalAgentPane
             | Self::ExperimentalEditorPane
             | Self::PaneGaps
@@ -313,6 +342,13 @@ pub struct AppConfig {
     pub quit_daemon_on_exit: ConfigValue<bool>,
     pub auto_restart_stale_daemon: ConfigValue<bool>,
     pub check_for_updates: ConfigValue<bool>,
+    pub status_show_session: ConfigValue<bool>,
+    pub status_badges: ConfigValue<bool>,
+    pub status_alignment: ConfigValue<StatusBarAlignment>,
+    pub status_agents: ConfigValue<bool>,
+    pub status_host: ConfigValue<bool>,
+    pub status_update: ConfigValue<bool>,
+    pub status_clock: ConfigValue<StatusBarClock>,
     pub experimental_agent_pane: ConfigValue<bool>,
     pub experimental_editor_pane: ConfigValue<bool>,
     pub pane_gaps: ConfigValue<bool>,
@@ -339,6 +375,7 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
+        let status_bar = StatusBarSettings::default();
         Self {
             use_system_titlebar: ConfigValue::from_default(DEFAULT_USE_SYSTEM_TITLEBAR),
             window_corner_radius: ConfigValue::from_default(DEFAULT_WINDOW_CORNER_RADIUS),
@@ -349,6 +386,13 @@ impl Default for AppConfig {
             quit_daemon_on_exit: ConfigValue::from_default(DEFAULT_QUIT_DAEMON_ON_EXIT),
             auto_restart_stale_daemon: ConfigValue::from_default(DEFAULT_AUTO_RESTART_STALE_DAEMON),
             check_for_updates: ConfigValue::from_default(DEFAULT_CHECK_FOR_UPDATES),
+            status_show_session: ConfigValue::from_default(status_bar.show_session),
+            status_badges: ConfigValue::from_default(status_bar.badges),
+            status_alignment: ConfigValue::from_default(status_bar.alignment),
+            status_agents: ConfigValue::from_default(status_bar.show_agents),
+            status_host: ConfigValue::from_default(status_bar.show_host),
+            status_update: ConfigValue::from_default(status_bar.show_update),
+            status_clock: ConfigValue::from_default(status_bar.clock),
             experimental_agent_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_AGENT_PANE),
             experimental_editor_pane: ConfigValue::from_default(DEFAULT_EXPERIMENTAL_EDITOR_PANE),
             pane_gaps: ConfigValue::from_default(DEFAULT_PANE_GAPS),
@@ -384,6 +428,11 @@ impl AppConfig {
             ConfigKey::QuitDaemonOnExit => Some(&mut self.quit_daemon_on_exit),
             ConfigKey::AutoRestartStaleDaemon => Some(&mut self.auto_restart_stale_daemon),
             ConfigKey::CheckForUpdates => Some(&mut self.check_for_updates),
+            ConfigKey::StatusShowSession => Some(&mut self.status_show_session),
+            ConfigKey::StatusBadges => Some(&mut self.status_badges),
+            ConfigKey::StatusAgents => Some(&mut self.status_agents),
+            ConfigKey::StatusHost => Some(&mut self.status_host),
+            ConfigKey::StatusUpdate => Some(&mut self.status_update),
             ConfigKey::ExperimentalAgentPane => Some(&mut self.experimental_agent_pane),
             ConfigKey::ExperimentalEditorPane => Some(&mut self.experimental_editor_pane),
             ConfigKey::PaneGaps => Some(&mut self.pane_gaps),
@@ -401,6 +450,8 @@ impl AppConfig {
             | ConfigKey::EditorFontSize
             | ConfigKey::BrowserElementSelectorHotkey
             | ConfigKey::BrowserSearchProvider
+            | ConfigKey::StatusAlign
+            | ConfigKey::StatusClock
             | ConfigKey::ThemeMode
             | ConfigKey::AppIcon
             | ConfigKey::ChromePreset
@@ -887,6 +938,19 @@ pub(crate) fn observe_window_background<T: 'static>(
 
 pub fn resolved_config(cx: &App) -> AppConfig {
     cx.try_global::<AppConfig>().copied().unwrap_or_default()
+}
+
+pub(crate) fn status_bar_settings(cx: &App) -> StatusBarSettings {
+    let config = resolved_config(cx);
+    StatusBarSettings {
+        show_session: config.status_show_session.value,
+        badges: config.status_badges.value,
+        alignment: config.status_alignment.value,
+        show_agents: config.status_agents.value,
+        show_host: config.status_host.value,
+        show_update: config.status_update.value,
+        clock: config.status_clock.value,
+    }
 }
 
 pub(crate) fn browser_config(cx: &App) -> BrowserConfig {
@@ -1383,6 +1447,35 @@ fn parse_config(source: &str) -> ParsedConfig {
             continue;
         }
 
+        if key == ConfigKey::StatusAlign {
+            let target = &mut parsed.config.status_alignment;
+            target.provenance = ConfigProvenance::Override;
+            match parse_status_bar_alignment(value) {
+                Some(alignment) => target.value = alignment,
+                None => parsed.diagnostics.push(ConfigDiagnostic {
+                    line: line_number,
+                    message: format!("invalid `{}`: expected left or center", key.as_str()),
+                }),
+            }
+            continue;
+        }
+
+        if key == ConfigKey::StatusClock {
+            let target = &mut parsed.config.status_clock;
+            target.provenance = ConfigProvenance::Override;
+            match parse_status_bar_clock(value) {
+                Some(clock) => target.value = clock,
+                None => parsed.diagnostics.push(ConfigDiagnostic {
+                    line: line_number,
+                    message: format!(
+                        "invalid `{}`: expected 24-hour, 12-hour, time-date or off",
+                        key.as_str(),
+                    ),
+                }),
+            }
+            continue;
+        }
+
         if let Some(diagnostic) = apply_theme_key(&mut parsed.config, key, value, line_number) {
             parsed.diagnostics.push(diagnostic);
             continue;
@@ -1413,6 +1506,8 @@ fn parse_config(source: &str) -> ParsedConfig {
             | ConfigKey::QuitDaemonOnExit
             | ConfigKey::AutoRestartStaleDaemon
             | ConfigKey::CheckForUpdates
+            | ConfigKey::StatusShowSession
+            | ConfigKey::StatusBadges
             | ConfigKey::ExperimentalAgentPane
             | ConfigKey::ExperimentalEditorPane
             | ConfigKey::PaneGaps
@@ -1423,6 +1518,11 @@ fn parse_config(source: &str) -> ParsedConfig {
             | ConfigKey::BrowserElementSelectorHotkey
             | ConfigKey::BrowserSearchProvider
             | ConfigKey::BrowserEgress
+            | ConfigKey::StatusAlign
+            | ConfigKey::StatusAgents
+            | ConfigKey::StatusHost
+            | ConfigKey::StatusUpdate
+            | ConfigKey::StatusClock
             | ConfigKey::ThemeMode
             | ConfigKey::AppIcon
             | ConfigKey::ChromePreset
@@ -1664,6 +1764,40 @@ fn parse_boolean(value: &str) -> Result<bool, String> {
         "on" | "yes" | "1" | "true" => Ok(true),
         "off" | "no" | "0" | "false" => Ok(false),
         _ => Err("expected a boolean (`true`/`on`/`yes`/`1` or `false`/`off`/`no`/`0`)".to_owned()),
+    }
+}
+
+pub(crate) const fn status_bar_alignment_value(alignment: StatusBarAlignment) -> &'static str {
+    match alignment {
+        StatusBarAlignment::Left => "left",
+        StatusBarAlignment::Center => "center",
+    }
+}
+
+fn parse_status_bar_alignment(value: &str) -> Option<StatusBarAlignment> {
+    match value {
+        "left" => Some(StatusBarAlignment::Left),
+        "center" => Some(StatusBarAlignment::Center),
+        _ => None,
+    }
+}
+
+pub(crate) const fn status_bar_clock_value(clock: StatusBarClock) -> &'static str {
+    match clock {
+        StatusBarClock::TwentyFourHour => "24-hour",
+        StatusBarClock::TwelveHour => "12-hour",
+        StatusBarClock::TimeAndDate => "time-date",
+        StatusBarClock::Off => "off",
+    }
+}
+
+fn parse_status_bar_clock(value: &str) -> Option<StatusBarClock> {
+    match value {
+        "24-hour" => Some(StatusBarClock::TwentyFourHour),
+        "12-hour" => Some(StatusBarClock::TwelveHour),
+        "time-date" => Some(StatusBarClock::TimeAndDate),
+        "off" => Some(StatusBarClock::Off),
+        _ => None,
     }
 }
 
@@ -2600,6 +2734,65 @@ mod tests {
             ConfigProvenance::Override
         );
         assert!(AppConfig::default().check_for_updates.value);
+    }
+
+    #[test]
+    fn status_bar_settings_parse_with_typed_defaults() {
+        let defaults = AppConfig::default();
+        assert!(defaults.status_show_session.value);
+        assert!(defaults.status_badges.value);
+        assert_eq!(defaults.status_alignment.value, StatusBarAlignment::Left);
+        assert!(defaults.status_agents.value);
+        assert!(defaults.status_host.value);
+        assert!(defaults.status_update.value);
+        assert_eq!(defaults.status_clock.value, StatusBarClock::TwentyFourHour);
+
+        let parsed = parse_config(
+            "status-show-session = false\n\
+             status-badges = false\n\
+             status-align = center\n\
+             status-agents = false\n\
+             status-host = false\n\
+             status-update = false\n\
+             status-clock = time-date\n",
+        );
+
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert!(!parsed.config.status_show_session.value);
+        assert!(!parsed.config.status_badges.value);
+        assert_eq!(
+            parsed.config.status_alignment.value,
+            StatusBarAlignment::Center
+        );
+        assert!(!parsed.config.status_agents.value);
+        assert!(!parsed.config.status_host.value);
+        assert!(!parsed.config.status_update.value);
+        assert_eq!(
+            parsed.config.status_clock.value,
+            StatusBarClock::TimeAndDate
+        );
+        for provenance in [
+            parsed.config.status_show_session.provenance,
+            parsed.config.status_badges.provenance,
+            parsed.config.status_alignment.provenance,
+            parsed.config.status_agents.provenance,
+            parsed.config.status_host.provenance,
+            parsed.config.status_update.provenance,
+            parsed.config.status_clock.provenance,
+        ] {
+            assert_eq!(provenance, ConfigProvenance::Override);
+        }
+
+        let invalid = parse_config("status-align = right\nstatus-clock = seconds\n");
+        assert_eq!(invalid.diagnostics.len(), 2);
+        assert_eq!(
+            invalid.config.status_alignment.value,
+            StatusBarAlignment::Left
+        );
+        assert_eq!(
+            invalid.config.status_clock.value,
+            StatusBarClock::TwentyFourHour
+        );
     }
 
     #[test]
@@ -3546,6 +3739,43 @@ mod tests {
     }
 
     #[test]
+    fn status_bar_enums_round_trip_through_the_config_writer() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+
+        for alignment in [StatusBarAlignment::Left, StatusBarAlignment::Center] {
+            write_config_edit_at(
+                &path,
+                ConfigKey::StatusAlign.as_str(),
+                Some(status_bar_alignment_value(alignment)),
+            )
+            .expect("write status bar alignment");
+            let source = fs::read_to_string(&path).expect("read status bar alignment");
+            let parsed = parse_config(&source);
+            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+            assert_eq!(parsed.config.status_alignment.value, alignment);
+        }
+
+        for clock in [
+            StatusBarClock::TwentyFourHour,
+            StatusBarClock::TwelveHour,
+            StatusBarClock::TimeAndDate,
+            StatusBarClock::Off,
+        ] {
+            write_config_edit_at(
+                &path,
+                ConfigKey::StatusClock.as_str(),
+                Some(status_bar_clock_value(clock)),
+            )
+            .expect("write status bar clock");
+            let source = fs::read_to_string(&path).expect("read status bar clock");
+            let parsed = parse_config(&source);
+            assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+            assert_eq!(parsed.config.status_clock.value, clock);
+        }
+    }
+
+    #[test]
     fn resetting_a_chrome_color_returns_it_to_inherited() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join(CONFIG_FILE_NAME);
@@ -3714,6 +3944,34 @@ mod tests {
         let resolved = cx.update(|cx| resolved_config(cx));
         assert_f32_eq(resolved.pane_corner_radius.value, 9.0);
         assert_f32_eq(resolved.pane_margin.value, 6.0);
+    }
+
+    #[gpui::test]
+    fn status_bar_settings_project_from_the_live_app_config(cx: &mut gpui::TestAppContext) {
+        let config = parse_config(
+            "status-show-session = false\n\
+             status-badges = false\n\
+             status-align = center\n\
+             status-agents = false\n\
+             status-host = false\n\
+             status-update = false\n\
+             status-clock = off\n",
+        )
+        .config;
+        cx.update(|cx| cx.set_global(config));
+
+        assert_eq!(
+            cx.update(|cx| status_bar_settings(cx)),
+            StatusBarSettings {
+                show_session: false,
+                badges: false,
+                alignment: StatusBarAlignment::Center,
+                show_agents: false,
+                show_host: false,
+                show_update: false,
+                clock: StatusBarClock::Off,
+            }
+        );
     }
 
     #[gpui::test]
@@ -4134,7 +4392,7 @@ mod tests {
     }
 
     #[test]
-    fn config_key_surface_is_twenty_seven_named_keys_plus_six_chrome_colors() {
+    fn config_key_surface_is_thirty_five_named_keys_plus_six_chrome_colors() {
         let named = [
             "use-system-titlebar",
             "window-corner-radius",
@@ -4144,6 +4402,14 @@ mod tests {
             "show-fps",
             "quit-daemon-on-exit",
             "auto-restart-stale-daemon",
+            "check-for-updates",
+            "status-show-session",
+            "status-badges",
+            "status-align",
+            "status-agents",
+            "status-host",
+            "status-update",
+            "status-clock",
             "experimental-agent-pane",
             "experimental-editor-pane",
             "pane-gaps",
@@ -4164,7 +4430,7 @@ mod tests {
             "app-icon",
             "chrome-preset",
         ];
-        assert_eq!(named.len(), 27);
+        assert_eq!(named.len(), 35);
         assert_eq!(ChromeColor::ALL.len(), 6);
         for key in named {
             assert!(ConfigKey::from_str(key).is_some(), "{key}");

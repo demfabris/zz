@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-08-31
+* **Update**: Replaced the desktop GUI's daemon-expanded tmux status presentation with a native bar built from `StatusBarModel`, mux snapshots, app update state, and seven live `zz/config` settings. Protocol v86 appends the window activity latch to `WindowSnapshot`; the cell-faithful TUI status path is unchanged. FFI, mobile-client, and optional custom-text work remain deferred.
+
 ## 2026-08-30
 * **Update**: Aligned the iPad Panorama exit with the live workspace navigation-bar inset, removing the final 54-point pane jump.
 * **Update**: Added the native iPad Terminal and Agent pane creation menu, using one daemon command list to split and materialize the Agent picker.

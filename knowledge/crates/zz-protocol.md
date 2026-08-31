@@ -21,7 +21,7 @@ The crate is small and dependency-light: five dependencies, `postcard`, `serde`,
 `thiserror`, and `zz-terminal` (for `TerminalViewport`, `TerminalAppearance`, `PackedCell`, and
 friends that ride the terminal lane). It has no cargo features at all since v43 retired `compress` and its optional
 `zstd`. Because it encodes the wire format, **any encoding-affecting change requires bumping
-`PROTOCOL_VERSION`**, currently 85. See [the wire protocol](/protocol/wire-protocol.md).
+`PROTOCOL_VERSION`**, currently 86. See [the wire protocol](/protocol/wire-protocol.md).
 
 # What it exports
 
@@ -34,7 +34,7 @@ friends that ride the terminal lane). It has no cargo features at all since v43 
 | `id` | `ClientId`, `PaneId`, `SessionId`, `SplitId`, `WindowId` | [stable IDs](/protocol/ids.md) |
 | `key` | `Binding`, `KeyTables`, `KeyEngine`, `KeyDecision`, `canonical_key`, `input_key_name`, `input_typed_text`, `is_key_name`, `KeyEngine::handle_synthetic_any_with_repeat_metadata`, `KeyEngine::handle_transient_mode_synthetic_any` | [key tables](/tmux/key-tables.md) |
 | `message` | `ProtocolMessage`, `CommandInvocation` with v84 typed command-block positions, `ProtocolMessage::Attached` with v85 effective reconnect state, `Event`, `EventPayload` including v81 `ControlCommandOutput`, v80 `StartupConfigCauses`, v79 command-output actor IDs, v77 `ControlCommandGuard`, and v78 `ControlSourceFile`, `ControlSourceFileEvent`, `InputMessage`, v83 `ClientHello.process_id`, v82 `ClientHello.environment`, `ServerHello`, `ServerError` including v76 `CommandParse` and v85 `PostAdmissionCallback`, `ConfigOverrideEntry`, `MuxOptions`/`MuxOptionKey`/`MuxOptionValue`, `StatusLine`/`StatusPosition`, `CommandPromptType`/`CommandPromptMode`, `PROTOCOL_VERSION`, `NEW_SESSION_ATTACH_CAPABILITY`, the terminal-fact constants exposed through `ClientHello`, `SPLIT_RATIO_BASIS`, choose-tree / choose-buffer / display-panes types | [wire protocol](/protocol/wire-protocol.md) |
-| `snapshot` | `MuxSnapshot`, `SessionSnapshot`, `SessionViewer`, `WindowSnapshot`, `PaneSnapshot`, `LayoutNode`, `Axis`, `BrowserDescriptor`, `AgentDescriptor`, `AgentProvider`, `EditorDescriptor`, `PaneKindSnapshot` | [snapshots](/protocol/snapshots.md) |
+| `snapshot` | `MuxSnapshot`, `SessionSnapshot`, `SessionViewer`, `WindowSnapshot` with the v86 activity tail, `PaneSnapshot`, `LayoutNode`, `Axis`, `BrowserDescriptor`, `AgentDescriptor`, `AgentProvider`, `EditorDescriptor`, `PaneKindSnapshot` | [snapshots](/protocol/snapshots.md) |
 | `style` | `StyledSegment`, `TmuxAlign`, `TmuxAttributeState`, `TmuxAttributes`, `TmuxColour`, `TmuxDefaultType`, `TmuxList`, `TmuxRange`, `TmuxStyle`, `TmuxWidth`, and the style and colour parsers | [wire protocol](/protocol/wire-protocol.md) |
 | `terminal_codec` | `encode_protocol_message`, `decode_protocol_frame`, `read_protocol_message`, `write_protocol_message`, and their `_into` buffer-reusing variants | [packed terminal lanes](/protocol/terminal-lanes.md) |
 
@@ -81,7 +81,8 @@ additional `=` bytes. The client sorts and deduplicates before sending, while en
 enforce the same limits. Debug output reports the environment entry count and numeric process ID.
 A caller that cannot report a process uses zero.
 `ServerHello` answers with the assigned `ClientId`, the daemon's own capabilities, resolved
-appearance plus provenance, the effective `MuxOptions`, the rendered status line, and
+appearance plus provenance, the effective `MuxOptions`, the rendered status line for terminal
+clients, and
 `key_tables` (every live table, refreshed later by `KeyTablesChanged`). Both capability
 vectors deserialize through one bounded visitor: at most 64 entries of at most 256 bytes, rejected
 before the strings materialize. The top-level capability-name constant is
@@ -213,6 +214,8 @@ flag cannot hide the pin's too-few or too-many diagnostic.
 `Vec<SessionViewer>` of device name, focused window, and an `is_self` flag.
 `MuxSnapshot::focused_window_for` falls back to the session's active window when the stamp is absent
 or names a window that no longer exists, so removing a focused window needs no snapshot repair pass.
+Protocol v86 appends `WindowSnapshot.activity` after `status_label`; the mux copies its latched
+window activity flag into that final field for structured native presentation.
 
 # Key files
 
@@ -222,10 +225,10 @@ or names a window that no longer exists, so removing a focused window needs no s
 | `crates/zz-protocol/src/catalog.rs` | Canonical command names, aliases, descriptions, accepted options, and completion value kinds |
 | `crates/zz-protocol/src/framing.rs` | Length-prefixed envelope, `Lane` tag, reserved flags byte, version check, `ProtocolError`, control-lane `encode/decode/read/write` |
 | `crates/zz-protocol/src/key.rs` | Shared `KeyTables`/`KeyEngine` model, default pane and overlay tables, key folding, typed-text precedence, bind/unbind, synthetic `Any` dispatch with repeat and transient-mode handling, and snapshots |
-| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 85`, `CommandInvocation` with typed command-block positions, authoritative effective reconnect state on `ProtocolMessage::Attached`, `MAX_BROWSER_KEY_REPEAT = 9,999`, the client-environment and startup-cause limits, `ProtocolMessage` (including the request-correlated command-prepare tail, `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `CommandRequest.prepared` plus typed prepared-command results, bounded client working-directory, environment, and process context, durable chooser static-filter fallback state, `MuxOptionKey`/`MuxOptions` (seventeen keys, including the three agent adapter options and the v71 `Mouse`/`EscapeTime`/`Prefix2` tail), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including v81 `ControlCommandOutput` at tail tag 50, v80 `StartupConfigCauses` at tail tag 49, the v79 `CommandOutput.output_id` field on stable tag 11, v77 `ControlCommandGuard` at tail tag 47 with command-frame flags and independent sticky status, v78 `ControlSourceFile` at tail tag 48 with typed raw-read and invisible-completion events, `TimedClientMessage` with its v71 `message_id`, `TimedClientMessageCleared`, `PrefixCancelled`, `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` plus `AgentGitSummary` and their validation, `InputMessage` (including `CancelPrefix`, `ClientTerminalSize`, and v73 `ClientFocus`), `ServerError::CommandParse` with its v76 tail tag 12, `ServerError::PostAdmissionCallback` with its v85 tail tag 13, hello/command/error/UI-state types, and their byte bounds |
+| `crates/zz-protocol/src/message.rs` | `PROTOCOL_VERSION = 86`, `CommandInvocation` with typed command-block positions, authoritative effective reconnect state on `ProtocolMessage::Attached`, `MAX_BROWSER_KEY_REPEAT = 9,999`, the client-environment and startup-cause limits, `ProtocolMessage` (including the request-correlated command-prepare tail, `RequestFull`, `HistoryRequest`, stable client identity, and the Agent runtime messages), `CommandRequest.prepared` plus typed prepared-command results, bounded client working-directory, environment, and process context, durable chooser static-filter fallback state, `MuxOptionKey`/`MuxOptions` (seventeen keys, including the three agent adapter options and the v71 `Mouse`/`EscapeTime`/`Prefix2` tail), ordered configuration override entries, appearance provenance payloads, `Event`/`EventPayload` (including v81 `ControlCommandOutput` at tail tag 50, v80 `StartupConfigCauses` at tail tag 49, the v79 `CommandOutput.output_id` field on stable tag 11, v77 `ControlCommandGuard` at tail tag 47 with command-frame flags and independent sticky status, v78 `ControlSourceFile` at tail tag 48 with typed raw-read and invisible-completion events, `TimedClientMessage` with its v71 `message_id`, `TimedClientMessageCleared`, `PrefixCancelled`, `KeyTablesChanged`, `HistoryChunk`, `Detached`, and the Agent payloads), `AgentPaneWire` plus `AgentGitSummary` and their validation, `InputMessage` (including `CancelPrefix`, `ClientTerminalSize`, and v73 `ClientFocus`), `ServerError::CommandParse` with its v76 tail tag 12, `ServerError::PostAdmissionCallback` with its v85 tail tag 13, hello/command/error/UI-state types, and their byte bounds |
 | `crates/zz-protocol/src/id.rs` | The `stable_id!` macro and the five sigil-prefixed `u64` newtype IDs |
 | `crates/zz-protocol/src/terminal_codec.rs` | Terminal-lane packer/unpacker for viewports and patches, plus lane-selecting encode/decode entrypoints and validation |
-| `crates/zz-protocol/src/snapshot.rs` | `MuxSnapshot` and the session/window/pane/layout tree it carries, including automatic-rename and retained-dead metadata, plus per-client window focus and `SessionViewer` presence |
+| `crates/zz-protocol/src/snapshot.rs` | `MuxSnapshot` and the session/window/pane/layout tree it carries, including automatic-rename, retained-dead metadata, the v86 window-activity tail, per-client window focus, and `SessionViewer` presence |
 | `crates/zz-protocol/src/style.rs` | Shared tmux style, colour, alignment, range, list, width, parsing, and serialization vocabulary |
 | `crates/zz-protocol/Cargo.toml` | Deps: `postcard`, `serde`, `smallvec`, `thiserror`, `zz-terminal`. No features |
 

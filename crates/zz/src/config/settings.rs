@@ -76,6 +76,13 @@ const ABOUT_LOGO_SIZE: f32 = 88.0;
 const REPOSITORY_URL: &str = "https://github.com/demfabris/zz";
 const RELEASES_URL: &str = "https://github.com/demfabris/zz/releases";
 const ISSUES_URL: &str = "https://github.com/demfabris/zz/issues/new";
+const STATUS_ALIGNMENT_CHOICES: [(&str, &str); 2] = [("Left", "left"), ("Center", "center")];
+const STATUS_CLOCK_CHOICES: [(&str, &str); 4] = [
+    ("24-hour", "24-hour"),
+    ("12-hour", "12-hour"),
+    ("Time and date", "time-date"),
+    ("Off", "off"),
+];
 
 pub fn init(cx: &mut App) {
     crate::keymap::bind(cx, UI_TABLE, key_bindings);
@@ -138,6 +145,13 @@ enum AppearancePageItem {
     AppIcon,
     Preset,
     ChromeColor(ChromeColor),
+    StatusShowSession,
+    StatusBadges,
+    StatusAlignment,
+    StatusAgents,
+    StatusHost,
+    StatusUpdate,
+    StatusClock,
     Animations,
     WidgetCornerRadius,
     WindowBackgroundBlur,
@@ -183,6 +197,19 @@ fn appearance_page_items(has_window_blur: bool) -> Vec<AppearancePageItem> {
     );
     items.extend([
         AppearancePageItem::Group {
+            title: "Status bar",
+            description: None,
+        },
+        AppearancePageItem::StatusShowSession,
+        AppearancePageItem::StatusBadges,
+        AppearancePageItem::StatusAlignment,
+        AppearancePageItem::StatusAgents,
+        AppearancePageItem::StatusHost,
+        AppearancePageItem::StatusUpdate,
+        AppearancePageItem::StatusClock,
+    ]);
+    items.extend([
+        AppearancePageItem::Group {
             title: "Tweaks",
             description: None,
         },
@@ -206,6 +233,8 @@ pub(crate) struct SettingsView {
     observed_browser: BrowserConfig,
     browser_element_selector_hotkey: Entity<InputState>,
     browser_search_provider: Entity<SelectState<Vec<SettingsSelectItem>>>,
+    status_alignment: Entity<SelectState<Vec<SettingsSelectItem>>>,
+    status_clock: Entity<SelectState<Vec<SettingsSelectItem>>>,
     ui_zoom: Entity<InputState>,
     observed_ui_zoom: u32,
     pane_inactive_opacity: Entity<InputState>,
@@ -235,6 +264,18 @@ impl SettingsView {
             text_value_input(&observed_browser.element_selector_hotkey.value, window, cx);
         let browser_search_provider =
             search_provider_select(observed_browser.search_provider.value, window, cx);
+        let status_alignment = settings_select_state(
+            &STATUS_ALIGNMENT_CHOICES,
+            config::status_bar_alignment_value(observed.status_alignment.value),
+            window,
+            cx,
+        );
+        let status_clock = settings_select_state(
+            &STATUS_CLOCK_CHOICES,
+            config::status_bar_clock_value(observed.status_clock.value),
+            window,
+            cx,
+        );
         let ui_zoom = ui_zoom_input(window, cx);
         let pane_inactive_opacity = numeric_value_input(
             ConfigKey::PaneInactiveOpacity,
@@ -293,6 +334,8 @@ impl SettingsView {
             cx.observe_global::<crate::update::UpdateState>(|_, cx| cx.notify()),
             browser_hotkey_subscription(&browser_element_selector_hotkey, window, cx),
             search_provider_subscription(&browser_search_provider, window, cx),
+            config_select_subscription(&status_alignment, ConfigKey::StatusAlign, window, cx),
+            config_select_subscription(&status_clock, ConfigKey::StatusClock, window, cx),
             ui_zoom_subscription(&ui_zoom, window, cx),
             numeric_input_subscription(
                 &pane_inactive_opacity,
@@ -329,6 +372,8 @@ impl SettingsView {
             observed_browser,
             browser_element_selector_hotkey,
             browser_search_provider,
+            status_alignment,
+            status_clock,
             ui_zoom,
             observed_ui_zoom: crate::ui_scale::percent(cx),
             pane_inactive_opacity,
@@ -483,6 +528,14 @@ impl SettingsView {
         let resolved = config::resolved_config(cx);
         if resolved != self.observed {
             self.observed = resolved;
+            let alignment = config::status_bar_alignment_value(resolved.status_alignment.value);
+            self.status_alignment.update(cx, |select, cx| {
+                select.set_selected_value(&alignment.to_owned(), window, cx);
+            });
+            let clock = config::status_bar_clock_value(resolved.status_clock.value);
+            self.status_clock.update(cx, |select, cx| {
+                select.set_selected_value(&clock.to_owned(), window, cx);
+            });
             synchronize_f32_input(
                 &self.pane_inactive_opacity,
                 resolved.pane_inactive_opacity.value,
@@ -759,6 +812,57 @@ impl SettingsView {
             AppearancePageItem::ChromeColor(color) => {
                 self.chrome_color_setting(color, resolved, inherited)
             }
+            AppearancePageItem::StatusShowSession => Self::boolean_setting(
+                ConfigKey::StatusShowSession,
+                "Session name",
+                "Show the current session as a chip.",
+                resolved.status_show_session,
+                cx,
+            ),
+            AppearancePageItem::StatusBadges => Self::boolean_setting(
+                ConfigKey::StatusBadges,
+                "Window badges",
+                "Show bell, activity, and agent markers on window items.",
+                resolved.status_badges,
+                cx,
+            ),
+            AppearancePageItem::StatusAlignment => Self::select_setting(
+                ConfigKey::StatusAlign,
+                "Alignment",
+                "Align the window strip to the left or center.",
+                resolved.status_alignment.provenance,
+                &self.status_alignment,
+                cx,
+            ),
+            AppearancePageItem::StatusAgents => Self::boolean_setting(
+                ConfigKey::StatusAgents,
+                "Agents",
+                "Show the number of running agent panes.",
+                resolved.status_agents,
+                cx,
+            ),
+            AppearancePageItem::StatusHost => Self::boolean_setting(
+                ConfigKey::StatusHost,
+                "Host",
+                "Show the attached host when it is remote.",
+                resolved.status_host,
+                cx,
+            ),
+            AppearancePageItem::StatusUpdate => Self::boolean_setting(
+                ConfigKey::StatusUpdate,
+                "Update",
+                "Show an available version and install it from the bar.",
+                resolved.status_update,
+                cx,
+            ),
+            AppearancePageItem::StatusClock => Self::select_setting(
+                ConfigKey::StatusClock,
+                "Clock",
+                "Choose the clock format, or hide it.",
+                resolved.status_clock.provenance,
+                &self.status_clock,
+                cx,
+            ),
             AppearancePageItem::Animations => Self::boolean_setting(
                 ConfigKey::Animations,
                 "Animations",
@@ -944,6 +1048,24 @@ impl SettingsView {
             .control(
                 ColorPicker::new(&self.chrome_pickers[&color], color.read(inherited))
                     .label(color.title()),
+            )
+    }
+
+    fn select_setting(
+        key: ConfigKey,
+        title: &'static str,
+        description: &'static str,
+        provenance: ConfigProvenance,
+        select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
+        cx: &Context<Self>,
+    ) -> SettingEntry {
+        SettingEntry::new(title, description)
+            .title_actions(key_annotations(key, provenance))
+            .control(
+                div()
+                    .w(px(CONTROL_WIDTH))
+                    .flex_none()
+                    .child(Select::new(select).small().bg(settings_control_fill(cx))),
             )
     }
 
@@ -2079,6 +2201,26 @@ fn search_provider_subscription(
     )
 }
 
+fn config_select_subscription(
+    select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
+    key: ConfigKey,
+    window: &mut Window,
+    cx: &mut Context<SettingsView>,
+) -> Subscription {
+    cx.subscribe_in(
+        select,
+        window,
+        move |_, _, event: &SelectEvent<Vec<SettingsSelectItem>>, _, cx| {
+            let SelectEvent::Confirm(Some(value)) = event else {
+                return;
+            };
+            if let Err(error) = set_config_key(key, value) {
+                report_write_error("set", key.as_str(), &error, cx);
+            }
+        },
+    )
+}
+
 fn numeric_value_input(
     key: ConfigKey,
     value: f32,
@@ -2199,6 +2341,13 @@ fn numeric_config_value(config: AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::QuitDaemonOnExit
         | ConfigKey::AutoRestartStaleDaemon
         | ConfigKey::CheckForUpdates
+        | ConfigKey::StatusShowSession
+        | ConfigKey::StatusBadges
+        | ConfigKey::StatusAlign
+        | ConfigKey::StatusAgents
+        | ConfigKey::StatusHost
+        | ConfigKey::StatusUpdate
+        | ConfigKey::StatusClock
         | ConfigKey::ExperimentalAgentPane
         | ConfigKey::ExperimentalEditorPane
         | ConfigKey::PaneGaps
@@ -2632,6 +2781,36 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn status_bar_group_contains_the_bounded_controls() {
+        let items = appearance_page_items(true);
+        let status_bar = items
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    AppearancePageItem::Group {
+                        title: "Status bar",
+                        ..
+                    }
+                )
+            })
+            .expect("Status bar group");
+
+        assert!(matches!(
+            &items[status_bar + 1..status_bar + 8],
+            [
+                AppearancePageItem::StatusShowSession,
+                AppearancePageItem::StatusBadges,
+                AppearancePageItem::StatusAlignment,
+                AppearancePageItem::StatusAgents,
+                AppearancePageItem::StatusHost,
+                AppearancePageItem::StatusUpdate,
+                AppearancePageItem::StatusClock,
+            ]
+        ));
+    }
+
     #[gpui::test]
     fn heavy_section_state_is_initialized_on_first_visit(cx: &mut gpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
@@ -2705,6 +2884,57 @@ mod tests {
             })
         });
         assert!(!initialized);
+    }
+
+    #[gpui::test]
+    fn status_bar_selects_follow_live_config_reloads(cx: &mut gpui::TestAppContext) {
+        use std::{cell::RefCell, rc::Rc};
+        use zz_client::{StatusBarAlignment, StatusBarClock};
+
+        cx.update(zz_ui::init);
+        let captured = Rc::new(RefCell::new(None));
+        let captured_for_window = Rc::clone(&captured);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_for_window.replace(Some(cx.entity()));
+            SettingsView::new(mux, window, cx)
+        });
+        let settings = captured.borrow().clone().expect("captured settings view");
+        let mut config = AppConfig::default();
+        config.status_alignment.value = StatusBarAlignment::Center;
+        config.status_clock.value = StatusBarClock::Off;
+
+        cx.update(|window, cx| {
+            cx.set_global(config);
+            settings.update(cx, |settings, cx| {
+                settings.synchronize_numeric_inputs(window, cx);
+            });
+        });
+
+        settings.read_with(cx, |settings, cx| {
+            assert_eq!(
+                settings
+                    .status_alignment
+                    .read(cx)
+                    .selected_value()
+                    .map(String::as_str),
+                Some("center")
+            );
+            assert_eq!(
+                settings
+                    .status_clock
+                    .read(cx)
+                    .selected_value()
+                    .map(String::as_str),
+                Some("off")
+            );
+        });
     }
 
     #[gpui::test]

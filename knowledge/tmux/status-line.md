@@ -1,42 +1,34 @@
 ---
 type: Concept
 title: tmux status rows and format expansion
-description: The daemon expands tmux status formats per client; the TUI draws terminal rows while the GUI maps their semantic regions onto native widgets.
+description: The daemon expands tmux status formats per client for the cell-faithful TUI; GUI clients build native bars from snapshots and app settings without consuming StatusLine.
 resource: crates/zz-mux/src/formats.rs
 tags: [tmux, status-line, formats, gui, tui, options]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 last_updated_by: Codex
 ---
 
 # Overview
 
 tmux draws status rows with terminal cells. zz expands the same format language in the daemon and
-publishes client-specific styled data. Each client decides how to present it:
+publishes client-specific styled data for terminal clients:
 
 - The TUI renders the authoritative `status-format[]` block at `status-position`, shifts or shrinks
   the pane canvas, and places messages/prompts on `message-line`.
-- The GUI always owns one native status surface. Sidebar mode places it across the full window
-  bottom, below both the sidebar and workspace. Titlebar mode places it across the full window top
-  and replaces the old session/window tab group.
-- GUI placement follows the app chrome mode, not `status-position`. The TUI remains the client for
-  exact terminal placement semantics.
-- The GUI does not paint `status-format[]` as terminal cells. It strips every tmux style directive,
-  uses Powerline separators only to divide expanded `status-left` and `status-right` into native
-  content chunks, and promotes recognized terminal, branch, clock, calendar, and zoom glyphs to
-  zz-ui icons. Arbitrary text and `#()` output survive without tmux-authored appearance.
-- Window controls come from the attached session's snapshot index, name, zoom, focus, and bell
-  state rather than `WindowSnapshot.status_label`. They retain stable-id selection, rename/close,
-  truncation, focused overflow, and menus while GPUI owns every visible state. Their active and
-  hover surfaces use the translucent workspace wash, so blurred chroma keeps reading through them.
-- Settings and the sidebar toggle stay together in the top chrome in both modes. In titlebar mode that cluster
-  and the platform window controls take space from the native rail; the bottom bar in sidebar
-  mode remains tmux-only. There is no agent rollup in the status surface.
+- GUI clients ignore `StatusLine`, including its title, rows, halves, styles, alignment, placement,
+  and `customized` bit. They contain no tmux style parser in the status-bar path.
+- The desktop builds its native bar from `zz_client::StatusBarModel`, the attached
+  `MuxSnapshot`, the host tree, update state, and seven app-side settings. Sidebar mode places it
+  below the workspace; titlebar mode places it above the workspace with the native controls.
+- The desktop window strip uses snapshot index, name, per-client focus, bell, activity, and pane
+  kind. It keeps stable-id selection, rename/close menus, five-window focus centering, and an
+  overflow menu. The right side can show a live Agent-pane count, remote host, update, and clock.
 - Prompts, choosers, and copy mode remain native surfaces. Compatibility covers their state and
   input behavior, not terminal escape output.
 
 `StatusLine.customized` records whether an explicit status-related write is active for the
-recipient's scope. It does not gate GUI status rendering and has no appearance effect there.
+recipient's scope. GUI clients do not read it.
 
 # Who expands the format
 
@@ -48,10 +40,11 @@ The **daemon**. Three reasons, strongest first:
 2. A client renders; it does not own mux state. `#S` is a daemon fact.
 3. The wire then carries finished text, so the client needs no format engine.
 
-Clients receive `StatusLine` in `ServerHello` on connect and in
-`EventPayload::StatusChanged` afterwards. It carries `left`, `right`, expanded rows, title,
-position, message-line selection, and the customized bit. Each client gets its own value because a
-format names that client's view: two clients attached to different sessions disagree about `#S`.
+The daemon sends `StatusLine` in `ServerHello` on connect and in `EventPayload::StatusChanged`
+afterwards. It carries `left`, `right`, expanded rows, title, position, message-line selection, and
+the customized bit. Each client gets its own value because a format names that client's view: two
+clients attached to different sessions disagree about `#S`. The TUI consumes that value; GUI
+clients leave it to the compatibility path.
 
 # Options
 
@@ -73,18 +66,14 @@ The behavior-producing set includes:
 
 `status-interval` controls periodic `#()` refresh. `0` disables the timer. Sparse
 `status-format[]` indices publish blank rows, and a session array overrides the global array as one
-unit. `status off` removes the formatted tmux rows. In sidebar mode the GUI drops the now-empty
-bottom bar; titlebar mode keeps its top chrome for settings, layout, and platform controls. The TUI
-gives the terminal cells back to the pane canvas.
+unit. `status off` removes the formatted tmux rows and gives those terminal cells back to the TUI
+pane canvas.
 
-The GUI translates the main status options rather than emulating the terminal layout. `status-left`
-and `status-right` become bounded borderless UI-font chunks, and `status-justify` aligns the native
-window group. Length limits and `status-interval` remain daemon-owned. `status-style`, every
-left/right/window style, and the window-status format family remain accepted and TUI-visible but
-have zero visual authority in the GUI. This includes `window-status-separator`: the daemon expands
-it into authoritative rows for the TUI, while the GUI builds window controls from snapshot state.
-Arbitrary `status-format[]` row geometry, multiple status
-rows, `message-line`, and exact `status-position` remain TUI-only.
+Every tmux status option affects the TUI and format consumers only. GUI status placement, items,
+badges, alignment, and clock come from `zz/config`; `status off`, `status-left`, `status-right`,
+`status-justify`, the style family, and the window-status family do not change the GUI bar. The
+desktop still uses snapshot facts that also feed tmux formats, but it never reads the expanded
+status product.
 
 # Supported format language
 
@@ -117,7 +106,7 @@ whole body as a variable name, or expands a nested `#{...}` body as plain format
 | `#{C:text}`, `#{C/ri:pattern}` | return the one-based visible pane row matching a glob substring or ERE; no match is `0` |
 | `#{R:value,count}` | expand both operands through the recursive engine, then repeat the value `count` times |
 | `#(uptime)` | shell command output, first line only |
-| `#[fg=green,bold]` | style directives, preserved as markers (inner `#{…}`/`#()` expand like the pin); clients parse them into terminal or GPUI styled runs |
+| `#[fg=green,bold]` | style directives, preserved as markers (inner `#{…}`/`#()` expand like the pin); the TUI parses them into styled terminal runs |
 
 The parser accepts semicolon modifier chains and nested bodies. It evaluates modifier arguments
 before the body, uses tmux truthiness (empty and exact `0` are false), and stops recursion at 100
@@ -158,8 +147,8 @@ counter. Window creation, parsed nonempty pane output, and the pinned current-wi
 paths refresh it. Same-window selection, pane selection, pane creation, splits, and layout-only
 changes without output leave it unchanged. An independent audit found the direct daemon
 `switch-client` path and added its missing engine-clock refresh before selection. Plain, boolean,
-comparison, list-row, and time-modified forms all read the same stored seconds. No protocol or
-snapshot field changed.
+comparison, list-row, and time-modified forms all read the same stored seconds. That format change
+did not alter the protocol or snapshot schema.
 
 Slice 10ac closes clean child environments for shell-form `run-shell`, shell-form `if-shell`, and
 status `#()`. Status jobs start from an empty process environment and receive the modeled global
@@ -394,8 +383,8 @@ Two format rules preserve the status renderer's contract:
   style values deferring validation and `-a` appending with commas like the pin. Per-window
   expanded labels ride `WindowSnapshot.status_label` (protocol v69). The TUI's shared row compositor
   combines these labels with `status-left` and `status-right`, applies tmux cell alignment and
-  truncation, and emits semantic hit ranges. The GUI parses only the left/right text, removes every
-  style, and takes window labels and states from the semantic snapshot instead.
+  truncation, and emits semantic hit ranges. GUI clients ignore all three expanded products and
+  build native window items from snapshot fields instead.
 
 # When the status re-renders
 
@@ -430,8 +419,9 @@ valid home directory and then `/` when that path does not exist.
 | `crates/zz-daemon/src/status.rs` | `StatusRenderer`, strftime, bounded `#()` execution, buffer facts, visible-row search, and per-client diffing. |
 | `crates/zz-daemon/src/daemon.rs` | Pane runtime-fact feeds, buffer-row hooks, `refresh_status`, the sampler thread, and status publication. |
 | `crates/zz-client/src/status.rs` | Cell-accurate row composition, style runs, alignment, list truncation, and semantic hit ranges. |
-| `crates/zz-ui/src/navigation.rs` | Shared GPUI status readout and window-control geometry. |
-| `crates/zz/src/status_bar.rs` | Builds the native left/window/right model, actions, alignment, overflow, chrome-mode placement, and titlebar reservations. |
+| `crates/zz-client/src/status_bar.rs` | Pure native status-bar projection from snapshot data and typed settings. |
+| `crates/zz-ui/src/navigation.rs` | Shared GPUI native status-item and window-control geometry. |
+| `crates/zz/src/status_bar.rs` | Renders the desktop session, window, Agent, host, update, and clock items with actions, alignment, overflow, and chrome-mode placement. |
 | `crates/zz/src/app_shell.rs` | Mounts the status surface above titlebar mode or below the full sidebar/workspace shell. |
 
 # Related
@@ -439,7 +429,8 @@ valid home directory and then `/` when that path does not exist.
 - Options arrive through the [`.tmux.conf` parser](/tmux/conf-parser.md) and
   [`set-option`](/tmux/commands.md); the rest of the emulated surface is scoped in
   [tmux compatibility](/tmux/tmux-compat.md).
-- Rendered by the [app](/crates/zz.md) around the workspace shell; the independent sidebar tree is
-  described in [sidebar navigation](/tmux/choose-tree.md).
+- The [TUI](/designs/tui-client.md) renders tmux rows. The desktop boundary lives in the
+  [native status bar design](/designs/native-status-bar.md).
+- The independent sidebar tree is described in [sidebar navigation](/tmux/choose-tree.md).
 - Carried by the [wire protocol](/protocol/wire-protocol.md) as `ServerHello::status` and
   `EventPayload::StatusChanged`.

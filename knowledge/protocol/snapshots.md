@@ -11,7 +11,7 @@ timestamp: 2026-08-21T12:00:00-03:00
 
 A **`MuxSnapshot`** is the complete, renderer-neutral picture of the daemon's session/window/pane/split
 tree at a point in time. Defined in `crates/zz-protocol/src/snapshot.rs`, it is what an interactive client
-receives on attachment and whenever it must **resynchronize** after a dropped or out-of-order event.
+receives on attachment, on ordinary mux-state changes, and during an explicit repair.
 The snapshot carries *structure and metadata* (layout, titles, active/zoomed panes, pane kind). It
 deliberately does **not** carry terminal cell contents, which stream separately over the
 [packed terminal lanes](/protocol/terminal-lanes.md). A monotonically increasing `generation` counter
@@ -25,9 +25,11 @@ entities, reusing them by stable [`PaneId`](/protocol/ids.md).
   stay attached.
 - **Event push**: also delivered as `EventPayload::Snapshot(MuxSnapshot)` inside an ordered `Event`.
   Each subscriber gets its own copy, stamped with that client's focus and presence.
-- **Resync**: an interactive client detecting a sequence gap sends `ProtocolMessage::Resync`; the
-  daemon answers with a fresh full snapshot. Overlays like the command prompt, choose-tree, and buffer
-  chooser *survive* a resync by re-reconciling against the new snapshot.
+- **Resync**: an interactive client can send `ProtocolMessage::Resync` on an error path, and the
+  daemon answers with a fresh full snapshot. Clients do not treat a sequence gap as loss because
+  the daemon can consume sequence numbers while superseding stale terminal frames. Overlays like
+  the command prompt, choose-tree, and buffer chooser survive a resync by reconciling against the
+  new snapshot.
 - Produced by [zz-daemon](/crates/zz-daemon.md) from [the mux state machine](/crates/zz-mux.md); consumed by
   every attached client.
 
@@ -42,7 +44,7 @@ deserializer so hostile nesting is rejected before it can exhaust the receiving 
 | `MuxSnapshot` | `generation: u64`, `sessions: Vec<SessionSnapshot>`, `focused_window: Option<WindowId>` |
 | `SessionSnapshot` | `id: SessionId`, `name: String`, `active_window: WindowId`, `windows: Vec<WindowSnapshot>`, `viewers: Vec<SessionViewer>` |
 | `SessionViewer` | `name: String`, `window: WindowId`, `is_self: bool` |
-| `WindowSnapshot` | `id: WindowId`, `index: u32`, `name: String`, `automatic_rename: bool`, `active_pane: PaneId`, `zoomed_pane: Option<PaneId>`, `layout: LayoutNode`, `panes: BTreeMap<PaneId, PaneSnapshot>` |
+| `WindowSnapshot` | `id: WindowId`, `index: u32`, `name: String`, `automatic_rename: bool`, `active_pane: PaneId`, `zoomed_pane: Option<PaneId>`, `layout: LayoutNode`, `panes: BTreeMap<PaneId, PaneSnapshot>`, `layout_dump: String`, `visible_layout_dump: String`, `status_label: String`, `activity: bool` |
 | `PaneSnapshot` | `id: PaneId`, `title: String`, `kind: PaneKindSnapshot`, `synchronized_input: bool`, `bell: bool`, `dead: bool`, `dead_status: Option<u32>`, `border_colour: Option<TmuxColour>`, `active_border_colour: Option<TmuxColour>` |
 | `PaneKindSnapshot` | `Picker` \| `Terminal` \| `Browser(BrowserDescriptor)` \| `Agent(AgentDescriptor)` \| `Editor(EditorDescriptor)` |
 | `BrowserDescriptor` | `tabs: Vec<String>`, `active_tab: usize`, `profile: String` |
@@ -71,6 +73,12 @@ with later OSC 0/2 output. Browser document-title changes arrive through tmux-co
 `select-pane -T`. Either title change advances `generation` and publishes a fresh snapshot without
 renaming the containing window.
 
+`layout_dump` and `visible_layout_dump` carry tmux's checksummed cell-tree strings. Protocol v69
+appended the daemon-expanded `status_label` for the TUI's window-status loop. GUI clients ignore
+that label. Protocol v86 appends `activity` as the final field; the daemon copies its latched
+window-activity flag there, and selection clears it. Native window strips can render the flag from
+structured state without parsing status text.
+
 `Picker` is a durable, runtime-free pane state used by the native split-picker flow. It occupies a real
 layout leaf and survives GUI detach/reattach, but the daemon owns no PTY and the GUI owns no CEF
 session for it. `select-pane-kind` with `terminal`, `browser`, `agent`, or `editor` materializes the
@@ -84,12 +92,10 @@ become mux state.
 
 `Agent(AgentDescriptor)` stores a bounded built-in `AgentProvider` (`Codex` or `ClaudeCode`) without
 transporting provider-specific ACP payloads. The daemon captures the donor terminal's live working
-directory when a picker becomes an Agent pane. After the app creates or loads the ACP session, it
-updates the descriptor with the actual absolute cwd and the agent's opaque session ID. These three
-fields are the v24-and-later restore contract: the app owns the process and live reducer state, and the
-selected provider owns conversation history behind `session/load`. Switching providers updates the
-descriptor and clears its old session ID. Prompts, messages, tool calls, permissions, credentials,
-and provider-specific payloads never enter the mux snapshot.
+directory when a picker becomes an Agent pane, then updates the descriptor with the ACP session's
+absolute cwd and opaque session ID. The daemon owns the adapter process, retained runtime state,
+and journal. Prompts, messages, tool calls, permissions, credentials, and provider-specific payloads
+travel through the separate Agent protocol lanes rather than the mux snapshot.
 
 ## Per-client stamping and presence
 
@@ -156,6 +162,10 @@ let snapshot = MuxSnapshot {
             active_pane: PaneId(3), zoomed_pane: None,
             layout,
             panes: /* BTreeMap<PaneId, PaneSnapshot> */ Default::default(),
+            layout_dump: "layout".into(),
+            visible_layout_dump: "layout".into(),
+            status_label: "0:edit".into(),
+            activity: false,
         }],
         // stamped per recipient: this copy went to "laptop"
         viewers: vec![

@@ -209,6 +209,7 @@ fn native_status_rail(cx: &App) -> AnyElement {
                     WorkspaceStatusWindowState {
                         connected: true,
                         active: true,
+                        agent: true,
                         ..WorkspaceStatusWindowState::default()
                     },
                     cx,
@@ -232,7 +233,7 @@ fn native_status_rail(cx: &App) -> AnyElement {
                     "2:docs".into(),
                     WorkspaceStatusWindowState {
                         connected: true,
-                        zoomed: true,
+                        activity: true,
                         ..WorkspaceStatusWindowState::default()
                     },
                     cx,

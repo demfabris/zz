@@ -386,6 +386,7 @@ pub struct WindowSnapshot {
     pub visible_layout_dump: String,
     #[serde(deserialize_with = "deserialize_window_status_label")]
     pub status_label: String,
+    pub activity: bool,
 }
 
 fn deserialize_window_status_label<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -466,6 +467,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         };
         let first = WindowId(1);
         let second = WindowId(2);
@@ -511,6 +513,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label,
+            activity: false,
         };
         let boundary = window("x".repeat(MAX_WINDOW_STATUS_LABEL_BYTES));
         let encoded = postcard::to_stdvec(&boundary).expect("encode boundary label");

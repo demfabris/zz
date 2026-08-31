@@ -17,6 +17,13 @@ The crate also resolves recursive `LayoutNode` ratios into normalized pane recta
 toolkit shells consume those rectangles through the C ABI, keeping split semantics out of Swift,
 while each surface multiplies them by its current local bounds.
 
+`StatusBarModel::from_snapshot` projects one attached session into renderer-free native status
+data. It carries the optional session and remote-host names, the complete window list, per-client
+focus, bell/activity/Agent markers, the count of non-dead Agent panes, update visibility,
+alignment, and the clock mode. `StatusBarSettings` supplies typed defaults. Views own truncation,
+overflow, actions, colors, and time formatting. This path does not read the daemon-expanded
+`StatusLine`.
+
 `ClientCore` accepts decoded `ProtocolMessage`s and retains the current handshake data, mux
 snapshot, attachment, terminal viewports, daemon key-table snapshots, status, prefix state, and
 daemon-owned overlays. A shell drains two queues after each message:
@@ -91,6 +98,7 @@ are not errors because the daemon may supersede an unread terminal frame under b
 | `crates/zz-client/src/core.rs` | `ClientCore`, retained state, protocol reduction, `CoreEvent`, and `Outbound`. |
 | `crates/zz-client/src/chrome.rs` | `ChromeKeymap`, profiles, action names, chord grammar, defaults, and override API. |
 | `crates/zz-client/src/layout.rs` | Recursive split ratios projected into normalized pane rectangles. |
+| `crates/zz-client/src/status_bar.rs` | Pure native status projection from `MuxSnapshot`, an attachment, an optional host, and typed settings. |
 | `crates/zz-client/tests/simulator.rs` | Real-daemon deterministic convergence harness. |
 
 # Related
@@ -101,3 +109,4 @@ are not errors because the daemon may supersede an unread terminal frame under b
 - [C ABI](/crates/zz-client-ffi.md) wraps the core for non-Rust consumers.
 - [Client core decision record](/designs/client-core-and-contract.md) records the extraction and its
   remaining ABI scope.
+- [Native status bar](/designs/native-status-bar.md) records the desktop presentation boundary.

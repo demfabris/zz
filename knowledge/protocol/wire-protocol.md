@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v85)
+title: zz wire protocol (v86)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over a local socket or an ssh-forwarded one.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -14,7 +14,7 @@ over a Unix-domain socket (Linux/macOS) or a named pipe (Windows). A remote daem
 the same Unix socket, forwarded by `ssh -L`, so there is exactly one transport shape.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 85`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 86`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -63,7 +63,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (85) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (86) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -85,7 +85,7 @@ fields in declaration order.
 | `Input(InputMessage)` | see below | Keyboard / resize / view / split input |
 | `Event(Event)` | `sequence: u64`, `payload: EventPayload` | Ordered daemon → client push |
 | `GuiResponse(GuiResponse)` | `Success { request_id, output }` / `Error { request_id, message }` | Interactive client → daemon answer to an `AgentCommand` or `BrowserCommand::Screenshot` request; both strings bounded to `MAX_GUI_TEXT_BYTES` (64 KiB) |
-| `Resync` | . | Client requests a fresh snapshot after a sequence gap |
+| `Resync` | . | Client requests a fresh snapshot after a shell-detected reconciliation error; event sequence gaps alone are valid because the daemon may supersede stale terminal frames |
 | `RequestFull { pane: PaneId }` | `pane` | Client asks for one full replacement viewport for a single pane after a dropped or unusable terminal frame |
 | `HistoryRequest { pane: PaneId, start: u32, count: u32 }` | scrollback window | Client asks for a chunk of a pane's scrollback; the daemon answers with `EventPayload::HistoryChunk` |
 | `PasteUploadBegin { upload_id, pane, purpose, extension, total_bytes }` | one image announced | Interactive client → daemon: start streaming a pasted image. `purpose` is `PastePath` (write the file on the daemon host and paste that path) or `RecordPastedImage` (keep encoded bytes until the terminal prints a numbered placeholder). `extension` is 1..=8 lowercase ASCII alphanumerics, `total_bytes` is 1..=`MAX_PASTE_UPLOAD_BYTES` (6 MiB) |
@@ -592,8 +592,8 @@ default `Bottom` on wire tag 1), `message_line: u8`, and `customized: bool`. Sin
 is the authoritative personalized status block, and since the 2026-08-21 title slice `title` carries
 the per-client `set-titles-string` expansion whenever `set-titles` is on for the recipient's session
 — published even while `status off` empties the rows; it stays empty at defaults because
-`set-titles` defaults off. zz-tui writes OSC 2 when a non-empty title changes and the GUI adopts the
-window title only for a non-empty (hence explicitly enabled) value. Every string field and each row is bounded to
+`set-titles` defaults off. zz-tui writes OSC 2 when a non-empty title changes. GUI clients ignore
+every `StatusLine` field, including `title`. Every string field and each row is bounded to
 `MAX_STATUS_TEXT_BYTES` (4 KiB) on encode and during deserialization, rows are capped at
 `MAX_STATUS_ROWS` (5) with a sixth rejected before allocation, `base_style` must parse as a style,
 and `message_line` must be `0` with no rows or under `rows.len()` otherwise; `StatusChanged` payloads
@@ -601,9 +601,14 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 85`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 86`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v86 appends `activity: bool` after `status_label` at the end of `WindowSnapshot`. The daemon copies
+  the window's latched activity flag into every snapshot, and native clients can render it without
+  parsing a status format. The frozen postcard fixture for a true flag is
+  `[1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S', 1]`; the final byte is the appended
+  boolean.
 - v85 appends `ServerError::PostAdmissionCallback` and the `read_only` / `client_flags` fields on
   `ProtocolMessage::Attached`. Control can distinguish selected synchronous callback failures from
   direct wrapper errors without inspecting names or prose, and TUI reconnect uses the attachment
@@ -825,21 +830,21 @@ now validate on both encode and decode.
 
 ## Control-frame layout (a `ClientHello`)
 
-`ClientHello { protocol_version: 85, client_instance_id: ClientInstanceId(0), kind: Interactive,
+`ClientHello { protocol_version: 86, client_instance_id: ClientInstanceId(0), kind: Interactive,
 device_name: None, capabilities: [], color_scheme: Some(Dark), origin: None,
 working_directory: None, environment: [], process_id: 0 }` is 20 bytes on the wire: an 8-byte
 envelope over a 12-byte postcard payload.
 
 ```text
 byte  0  1  2  3 | 4    | 5     | 6  7        | 8  9 10 11 12 13 14 15 16 17 18 19
-      10 00 00 00  00     00      55 00         00 55 00 00 00 00 01 01 00 00 00 00
+      10 00 00 00  00     00      56 00         00 56 00 00 00 00 01 01 00 00 00 00
       └ u32 LE ─┘  lane   flags   version LE    postcard payload
-      length = 16  Control        (= 85)
+      length = 16  Control        (= 86)
 ```
 
 - **length `16`** = `ENVELOPE_BYTES` (4) + payload (12); it counts the four envelope bytes, not itself.
-- **payload** `00 55 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
-  `protocol_version` as the varint `0x55` (= 85), `client_instance_id` as varint `00`, `kind`
+- **payload** `00 56 00 00 00 00 01 01 00 00 00 00`: variant `0` (`ProtocolMessage::ClientHello`),
+  `protocol_version` as the varint `0x56` (= 86), `client_instance_id` as varint `00`, `kind`
   variant `0` (`Interactive`), `device_name` as the `Option::None` tag `00`, `capabilities` as the
   sequence length `00`, `Option::Some` tag `01`, `TerminalColorScheme` variant `1` (`Dark`), then
   `origin` and `working_directory` as two `Option::None` tags (`00 00`), followed by the empty
@@ -873,11 +878,11 @@ only `MAX_FRAME_BYTES`, `MAX_ENCODED_FRAME_BYTES`, and `ProtocolError`.
 ## Handshake sketch
 
 ```text
-client → ClientHello { protocol_version: 85, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
+client → ClientHello { protocol_version: 86, client_instance_id: i1, kind: Interactive, device_name: Some("laptop"),
                        capabilities: [], color_scheme: Some(Dark), origin: None,
                        working_directory: Some("/home/demo"), environment: ["TERM=xterm-256color"],
                        process_id: 1234 }
-server → ServerHello { protocol_version: 85, server_id, client_id: c11, client_instance_id: i1,
+server → ServerHello { protocol_version: 86, server_id, client_id: c11, client_instance_id: i1,
                        capabilities: ["mux-v1", "terminal-viewport-v3", "terminal-row-patches",
                                       "terminal-appearance-v2", "config-overrides-v1", ...,
                                       "new-session-attach-v1"],
@@ -894,7 +899,7 @@ client → HistoryRequest { pane: %3, start: 1_488, count: 512 }
 server → Event { sequence: 3, payload: HistoryChunk { pane: %3, start, total, offset, ... } }
 ...
 (unusable patch)      client → RequestFull { pane: %3 }
-(sequence gap)        client → Resync
+(reconciliation error) client → Resync
 (another device runs `attach-session -d`)
 server → Event { sequence: n, payload: Detached { session: $0, by: Some("desktop"), reason: Evicted } }
 ```

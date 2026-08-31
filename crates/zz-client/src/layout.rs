@@ -54,11 +54,7 @@ fn collect_pane_rects(
         } => {
             let ratio = resolved_ratio(*ratio);
             collect_pane_rects(first, rect.placed_within(*axis, 0.0, ratio), rects);
-            collect_pane_rects(
-                second,
-                rect.placed_within(*axis, ratio, 1.0 - ratio),
-                rects,
-            );
+            collect_pane_rects(second, rect.placed_within(*axis, ratio, 1.0 - ratio), rects);
         }
     }
 }
@@ -80,13 +76,7 @@ mod tests {
         LayoutNode::Pane(PaneId(id))
     }
 
-    fn split(
-        id: u64,
-        axis: Axis,
-        ratio: f32,
-        first: LayoutNode,
-        second: LayoutNode,
-    ) -> LayoutNode {
+    fn split(id: u64, axis: Axis, ratio: f32, first: LayoutNode, second: LayoutNode) -> LayoutNode {
         LayoutNode::Split {
             id: SplitId(id),
             axis,
@@ -154,27 +144,9 @@ mod tests {
 
     #[test]
     fn invalid_ratios_are_resolved_deterministically() {
-        let non_finite = pane_rects(&split(
-            1,
-            Axis::Horizontal,
-            f32::NAN,
-            pane(1),
-            pane(2),
-        ));
-        let below_zero = pane_rects(&split(
-            2,
-            Axis::Vertical,
-            -1.0,
-            pane(3),
-            pane(4),
-        ));
-        let above_one = pane_rects(&split(
-            3,
-            Axis::Vertical,
-            2.0,
-            pane(5),
-            pane(6),
-        ));
+        let non_finite = pane_rects(&split(1, Axis::Horizontal, f32::NAN, pane(1), pane(2)));
+        let below_zero = pane_rects(&split(2, Axis::Vertical, -1.0, pane(3), pane(4)));
+        let above_one = pane_rects(&split(3, Axis::Vertical, 2.0, pane(5), pane(6)));
 
         assert_rect(non_finite[0], PaneId(1), 0.0, 0.0, 0.5, 1.0);
         assert_rect(non_finite[1], PaneId(2), 0.5, 0.0, 0.5, 1.0);

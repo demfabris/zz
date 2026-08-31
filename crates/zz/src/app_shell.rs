@@ -1,6 +1,8 @@
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use gpui::{
     AnyElement, App, Context, DragMoveEvent, Entity, IntoElement, KeyUpEvent, MouseButton, Render,
-    Window, div, prelude::*,
+    Task, Window, div, prelude::*,
 };
 use zz_ui::shell::{app_shell_surface, app_titlebar_strip};
 use zz_ui::{
@@ -32,6 +34,8 @@ use crate::{
 
 pub use crate::diagnostics::fps::AppFpsMeter;
 
+const CLOCK_INTERVAL: Duration = Duration::from_mins(1);
+
 pub struct AppShell {
     workspace: Entity<AppView>,
     controller: Entity<BrowserController>,
@@ -39,6 +43,14 @@ pub struct AppShell {
     sidebar: Entity<WorkspaceSidebar>,
     mux: Entity<MuxClient>,
     app_fps_meter: Entity<AppFpsMeter>,
+    _clock_task: Task<()>,
+}
+
+fn duration_until_next_minute(now: SystemTime) -> Duration {
+    let elapsed = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let elapsed_in_minute = Duration::from_secs(elapsed.as_secs() % CLOCK_INTERVAL.as_secs())
+        + Duration::from_nanos(u64::from(elapsed.subsec_nanos()));
+    CLOCK_INTERVAL.saturating_sub(elapsed_in_minute)
 }
 
 impl AppShell {
@@ -55,29 +67,52 @@ impl AppShell {
             .detach();
         cx.subscribe(&sidebar, |_, _, _: &SidebarRouteChanged, cx| cx.notify())
             .detach();
-        let mut status_revision = mux.read(cx).status_revision();
         let mut snapshot_generation = mux.read(cx).snapshot().generation;
         let mut attachment = (
             mux.read(cx).attached_host(),
             mux.read(cx).attached_session(),
+            mux.read(cx).is_connected(),
         );
         cx.observe(&mux, move |_, mux, cx| {
             let mux = mux.read(cx);
-            let next_status_revision = mux.status_revision();
             let next_snapshot_generation = mux.snapshot().generation;
-            let next_attachment = (mux.attached_host(), mux.attached_session());
-            if next_status_revision != status_revision
-                || next_snapshot_generation != snapshot_generation
-                || next_attachment != attachment
-            {
-                status_revision = next_status_revision;
+            let next_attachment = (
+                mux.attached_host(),
+                mux.attached_session(),
+                mux.is_connected(),
+            );
+            if next_snapshot_generation != snapshot_generation || next_attachment != attachment {
                 snapshot_generation = next_snapshot_generation;
                 attachment = next_attachment;
                 cx.notify();
             }
         })
         .detach();
+        cx.observe_global::<crate::config::AppConfig>(|_, cx| cx.notify())
+            .detach();
+        cx.observe_global::<crate::update::UpdateState>(|_, cx| cx.notify())
+            .detach();
         let app_fps_meter = cx.new(|cx| AppFpsMeter::new(window, cx));
+        let clock_task = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(duration_until_next_minute(SystemTime::now()))
+                    .await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.sidebar.read(cx).route() == WorkspaceRoute::App
+                            && crate::config::status_bar_settings(cx).clock
+                                != zz_client::StatusBarClock::Off
+                        {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         Self {
             workspace,
             controller,
@@ -85,6 +120,7 @@ impl AppShell {
             sidebar,
             mux,
             app_fps_meter,
+            _clock_task: clock_task,
         }
     }
 
@@ -133,11 +169,7 @@ impl AppShell {
         placement: GuiStatusPlacement,
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<AnyElement> {
-        let status = self.mux.read(cx).status().clone();
-        if placement == GuiStatusPlacement::Bottom && status.is_empty() {
-            return None;
-        }
+    ) -> AnyElement {
         let titlebar_controls = (placement == GuiStatusPlacement::Titlebar).then(|| {
             let has_layout = !crate::profile::profile(cx).fixed_window;
             let width = workspace_chrome_controls_width(has_layout, window);
@@ -148,8 +180,8 @@ impl AppShell {
             .then(|| self.window_controls().into_any_element());
         let bar = render_gui_status_bar(
             placement,
-            &status,
             &self.mux,
+            &self.sidebar,
             titlebar_controls,
             controls,
             window,
@@ -161,9 +193,9 @@ impl AppShell {
         };
         let bar = corners.round_div(bar, frame_content_corner_radius(cx));
         if placement == GuiStatusPlacement::Bottom || crate::profile::profile(cx).fixed_window {
-            return Some(bar.into_any_element());
+            return bar.into_any_element();
         }
-        Some(window_drag_handle("gui-status-titlebar-drag", bar, window, cx).into_any_element())
+        window_drag_handle("gui-status-titlebar-drag", bar, window, cx).into_any_element()
     }
 
     fn render_slideover(&self, cx: &App) -> AnyElement {
@@ -210,11 +242,11 @@ impl Render for AppShell {
                 ChromeMode::Sidebar => (
                     self.sidebar.clone().into_any_element(),
                     self.render_control_strip(window, cx),
-                    self.render_status_bar(GuiStatusPlacement::Bottom, window, cx),
+                    Some(self.render_status_bar(GuiStatusPlacement::Bottom, window, cx)),
                 ),
                 ChromeMode::Titlebar => (
                     div().into_any_element(),
-                    self.render_status_bar(GuiStatusPlacement::Titlebar, window, cx),
+                    Some(self.render_status_bar(GuiStatusPlacement::Titlebar, window, cx)),
                     None,
                 ),
             },
@@ -308,6 +340,18 @@ mod tests {
 
     use super::*;
     use crate::mux::client::MuxClient;
+
+    #[test]
+    fn clock_task_aligns_to_the_next_minute() {
+        assert_eq!(
+            duration_until_next_minute(UNIX_EPOCH),
+            Duration::from_mins(1)
+        );
+        assert_eq!(
+            duration_until_next_minute(UNIX_EPOCH + Duration::from_millis(61_250)),
+            Duration::from_millis(58_750)
+        );
+    }
 
     #[gpui::test]
     fn mux_notifications_reach_the_mounted_root_layer(cx: &mut TestAppContext) {

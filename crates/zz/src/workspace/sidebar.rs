@@ -1034,7 +1034,6 @@ struct SidebarRevision {
     attached_host: HostId,
     attached_session: Option<SessionId>,
     active_target: Option<TreeNode>,
-    status: u64,
 }
 
 impl SidebarRevision {
@@ -1063,7 +1062,6 @@ impl SidebarRevision {
             attached_host,
             attached_session,
             active_target,
-            status: mux.status_revision(),
         }
     }
 }
@@ -1894,6 +1892,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         }
     }
 
@@ -1918,6 +1917,7 @@ mod tests {
             layout_dump: String::new(),
             visible_layout_dump: String::new(),
             status_label: String::new(),
+            activity: false,
         };
         MuxSnapshot {
             generation: 7,

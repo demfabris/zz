@@ -38,8 +38,9 @@ const WORKSPACE_STATUS_ICON_DROP: Pixels = px(0.5);
 pub struct WorkspaceStatusWindowState {
     pub connected: bool,
     pub active: bool,
-    pub zoomed: bool,
     pub bell: bool,
+    pub activity: bool,
+    pub agent: bool,
 }
 
 #[must_use]
@@ -184,25 +185,36 @@ pub fn workspace_status_window(
                 .text_ellipsis()
                 .child(name),
         )
-        .children(state.zoomed.then(|| {
+        .child(
             div()
                 .flex_none()
                 .relative()
                 .top(WORKSPACE_STATUS_ICON_DROP)
                 .text_color(foreground.muted())
-                .child(Icon::new(IconName::ZoomIn).size(WORKSPACE_STATUS_ICON_SIZE))
-        }))
-        .when(state.bell, |item| {
-            item.child(
-                div()
-                    .absolute()
-                    .top(px(4.0))
-                    .right(px(4.0))
-                    .size(px(5.0))
-                    .rounded_full()
-                    .bg(cx.theme().warning),
-            )
-        })
+                .opacity(if state.agent { 1.0 } else { 0.0 })
+                .child(Icon::new(IconName::Bot).size(WORKSPACE_STATUS_ICON_SIZE)),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(3.0))
+                .child(
+                    div()
+                        .size(px(5.0))
+                        .rounded_full()
+                        .bg(cx.theme().warning)
+                        .opacity(if state.bell { 1.0 } else { 0.0 }),
+                )
+                .child(
+                    div()
+                        .size(px(5.0))
+                        .rounded_full()
+                        .bg(cx.theme().success)
+                        .opacity(if state.activity { 1.0 } else { 0.0 }),
+                ),
+        )
 }
 
 /// Titlebar-height strip at the top of the full-height workspace sidebar,

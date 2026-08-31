@@ -3393,6 +3393,7 @@ impl MuxState {
             layout_dump,
             visible_layout_dump,
             status_label: String::new(),
+            activity: window.activity_flag,
         }
     }
 
@@ -6264,6 +6265,15 @@ mod tests {
         assert!(state.generation() > generation);
         assert!(state.windows[&second].activity_flag);
         assert!(state.windows[&second].silence_flag);
+        let snapshot = state.snapshot();
+        assert!(
+            snapshot.sessions[0]
+                .windows
+                .iter()
+                .find(|window| window.id == second)
+                .expect("second window snapshot")
+                .activity
+        );
 
         let generation = state.generation();
         assert!(!state.set_window_activity_flag(second, true));
@@ -6273,6 +6283,15 @@ mod tests {
         assert!(state.activate_window(session, second));
         assert!(!state.windows[&second].activity_flag);
         assert!(!state.windows[&second].silence_flag);
+        let snapshot = state.snapshot();
+        assert!(
+            !snapshot.sessions[0]
+                .windows
+                .iter()
+                .find(|window| window.id == second)
+                .expect("second window snapshot")
+                .activity
+        );
 
         assert!(!state.set_window_activity_flag(WindowId(9999), true));
         assert!(!state.set_window_silence_flag(WindowId(9999), true));

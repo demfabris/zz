@@ -62,6 +62,7 @@
 | sessions | 3 | yes | 0 | yes | yes | yes |
 | set-buffer-rename | 12 | yes | 0 | yes | yes | yes |
 | show-options-hooks | 34 | yes | 0 | yes | yes | yes |
+| source-hook-cwd-event | 3 | yes | 0 | yes | yes | yes |
 | source-hook-cwd-sourced | 3 | yes | 0 | yes | yes | yes |
 | source-file-format | 40 | yes | 0 | yes | yes | yes |
 | source-file-output | 12 | yes | 0 | yes | yes | yes |

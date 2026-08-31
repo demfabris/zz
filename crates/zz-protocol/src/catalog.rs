@@ -1606,7 +1606,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-window",
         aliases: &["splitw"],
         description: "Split a pane with a terminal",
-        usage: "[-bdEfhPvZ] [-c start-directory] [-e environment] [-F format] [-l size] [-p percentage] [-t target-pane] [shell-command [argument ...]]",
+        usage: "[-bdEfhPvZ] [-c start-directory] [-e environment] [-F format] [-l size] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
@@ -1624,10 +1624,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::unsupported_flag("-I"),
             CommandOptionSpec::unsupported_flag("-k"),
             CommandOptionSpec::unsupported_value("-m"),
-            CommandOptionSpec::unsupported_value("-R"),
-            CommandOptionSpec::unsupported_value("-s"),
-            CommandOptionSpec::unsupported_value("-S"),
-            CommandOptionSpec::unsupported_value("-T"),
+            CommandOptionSpec::value("-R", FreeForm, "inactive pane border style"),
+            CommandOptionSpec::value("-s", FreeForm, "pane style"),
+            CommandOptionSpec::value("-S", FreeForm, "active pane border style"),
+            CommandOptionSpec::value("-T", FreeForm, "pane title"),
             CommandOptionSpec::unsupported_flag("-W"),
             CommandOptionSpec::flag("-Z", "zoom the active pane after splitting"),
         ],
@@ -2825,7 +2825,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (433, 70));
+        assert_eq!((supported, unsupported), (437, 66));
         assert_eq!(usage_overrides.len(), 24);
         assert_eq!(
             usage_overrides,
@@ -3757,6 +3757,25 @@ mod tests {
                 advertised,
                 "usage drift for {}",
                 spec.name
+            );
+        }
+    }
+
+    #[test]
+    fn split_window_spawn_style_and_title_options_are_supported_values() {
+        let spec = command_spec("split-window").expect("split-window catalog entry");
+        for name in ["-R", "-s", "-S", "-T"] {
+            let option = spec.option(name).expect("split-window option");
+            assert_eq!(
+                (
+                    option.value,
+                    option.completable,
+                    option.attached_value,
+                    option.optional_value,
+                    option.unsupported,
+                ),
+                (Some(CommandValueKind::FreeForm), true, false, false, false),
+                "{name}"
             );
         }
     }

@@ -2387,22 +2387,19 @@
       ],
       "owner": "mux",
       "items": [
-        "flag:split-window:-R",
-        "flag:split-window:-S",
-        "flag:split-window:-T",
         "flag:split-window:-k",
-        "flag:split-window:-m",
-        "flag:split-window:-s"
+        "flag:split-window:-m"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
-        "scenario:compat/scenarios/pane-spawn-options.txt"
+        "scenario:compat/scenarios/pane-spawn-options.txt",
+        "file:compat/scenarios/pane-spawn-style-title-v2.txt"
       ],
       "acceptance": [
         "Differential tests cover the supported tiled meaning or each model-bound flag moves to a parked gap."
       ],
       "depends_on": [],
-      "reason": "Most forms extend the existing spawn effect, but some may expose floating or marked state."
+      "reason": "split-window -R/-s/-S/-T carry pinned style and title semantics with differential coverage (scenario pane-spawn-style-title-v2); -k and -m are remain-on-exit lifecycle flags owned by pane.command-completion groundwork and stay loudly unsupported until F-PANE-SPAWN-RETAIN-V3."
     },
     {
       "id": "presentation.native-status",

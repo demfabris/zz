@@ -1,12 +1,12 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **`F-PANE-BORDER-SPANS-V2` AND `F-SOURCE-REPLAY-DIAGNOSTICS-V3` CLOSED; CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **`F-PANE-SPAWN-STYLE-TITLE-V2` DELIVERED (4 OF 6 SPAWN-FLAG ITEMS); CONTINUE THROUGH THE DISPATCH BOARD**
 >
 > Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED)**
 >
 > Ledger settlement: **69.2% (146 of 211 known groups); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **109 SCENARIOS, 1,755 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
+> Exit evidence: **110 SCENARIOS, 1,773 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
@@ -1243,6 +1243,16 @@ format, output, or warning differences. The accepted full corpus covers 109 scen
 steps with attached-client `PASS`, exactly two approved geometry rows, and every other channel
 clean. Its SHA-256 digest is
 `0d22d06eef8dec1b8468fa203a9e657812b739362ed4fbde90fd92f8abcffdf0`.
+
+Adopted from the rescued goblin checkpoint, the pane-spawn style and title slice closes the
+`split-window` `-R`, `-s`, `-S`, and `-T` flags with pinned semantics; `-k` and `-m` stay loudly
+unsupported for `F-PANE-SPAWN-RETAIN-V3` per the remain-on-exit probe. The dedicated
+`pane-spawn-style-title-v2` scenario passes all 18 steps with zero differences. The accepted full
+corpus now covers 110 scenarios and 1,773 steps with attached-client `PASS`, exactly two approved
+geometry rows, and every other channel clean. Its SHA-256 digest is
+`a0d98e17a9bc5bc0aa9edd12c82d1302f5e35acc01b4bec9986c8b226c2e86a5`. This is the final
+full-corpus merge gate: integrations now run the delta corpus, and the full corpus moves to the
+nightly CI run.
 
 The patch stays inside raw zz-tui rendering. It leaves the wire protocol, pane snapshots, and GPUI
 rendering unchanged. Mutable tiled z-order after `join-pane`, `swap-pane`, or serialized

@@ -56693,7 +56693,6 @@ set-option -g @alias-mixed-next yes
         }
         assert_eq!(prefix_cases, 517);
 
-        let mut unsupported_cases = 0;
         for spec in &specs {
             let unknown = ('0'..='9')
                 .chain('A'..='Z')
@@ -56702,7 +56701,6 @@ set-option -g @alias-mixed-next yes
                 .find(|option| spec.option(option).is_none())
                 .expect("every command has an unknown alphanumeric flag");
             for option in spec.options.iter().filter(|option| option.unsupported) {
-                unsupported_cases += 1;
                 let mut arguments = if option.optional_value {
                     vec![format!("{}1", option.name)]
                 } else if option.value.is_some() || option.attached_value {
@@ -56723,8 +56721,6 @@ set-option -g @alias-mixed-next yes
                 );
             }
         }
-        assert_eq!(unsupported_cases, 70);
-
         assert_eq!(
             parse_error(
                 "capturep",

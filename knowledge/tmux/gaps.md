@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **87**. Classified items: **586**.
+Tracked gap groups: **87**. Classified items: **582**.
 
 - Status: open: 45, blocked: 20, accepted: 22.
 - Decision: adopt: 50, native: 16, park: 15, never: 6.
 - Priority: later: 65, none: 22.
 - Closed history entries: 124.
-- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 71, hook: 3, key: 110, binding: 51, native-key: 58, semantic: 108, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 3, key: 110, binding: 51, native-key: 58, semantic: 108, presentation: 8, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 70 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 71 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 3 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 66 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 71 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 3 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -1465,18 +1465,19 @@ Several flags need client input and marked-pane state that the mux does not reta
 
 ### `pane.spawn-flags`: Complete split-window placement flags
 
-Most forms extend the existing spawn effect, but some may expose floating or marked state.
+split-window -R/-s/-S/-T carry pinned style and title semantics with differential coverage (scenario pane-spawn-style-title-v2); -k and -m are remain-on-exit lifecycle flags owned by pane.command-completion groundwork and stay loudly unsupported until F-PANE-SPAWN-RETAIN-V3.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
 - Owner: `mux`
 - User impact: scripts, daily
-- Items: `flag:split-window:-R`, `flag:split-window:-S`, `flag:split-window:-T`, `flag:split-window:-k`, `flag:split-window:-m`, `flag:split-window:-s`
+- Items: `flag:split-window:-k`, `flag:split-window:-m`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `scenario:compat/scenarios/pane-spawn-options.txt`
+  - `file:compat/scenarios/pane-spawn-style-title-v2.txt`
 - Acceptance:
   - `Differential tests cover the supported tiled meaning or each model-bound flag moves to a parked gap.`
 

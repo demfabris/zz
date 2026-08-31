@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux drop-in plan
 description: "The original alias-tmux=zz campaign and its shipped phases, followed by the live compatibility ledger: tmux names retain tmux meaning, zz power uses superset verbs, and linked windows plus real-tmux socket interop stay excluded."
-status: Original nine phases shipped 2026-08-20; F-ALIASES-MULTI-BODY closed 2026-08-30
+status: Original nine phases shipped 2026-08-20; F-PANE-SPAWN-STYLE-TITLE-V2 closed 2026-08-30
 tags:
 - tmux
 - compatibility
@@ -93,12 +93,12 @@ flags and documented semantic divergences.
 
 The persisted accepted compatibility inventory contains 106 differential scenarios and 1,683
 executable steps against pinned tmux `d77c9dc6`, including the config and plugin corpus. The
-persisted full-corpus run from 2026-08-30 leaves every ordinary row clean.
+last accepted full-corpus run from 2026-08-30 leaves every ordinary row clean.
 `known/known-main-preset-two-panes` and
 `known/known-spread-mixed` each retain exactly one approved GEO divergence with every other channel
-clean. The combined summary records the attached-client fixture as `PASS`, and
-`compat/run.sh --check-summary` passes. Its SHA-256 is
-`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`.
+clean. That accepted summary records the attached-client fixture as `PASS` and has SHA-256
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Current summary freshness is
+pending the P1 source-replay repair.
 The 10l source registration and 10m key-structure checkpoints add no differential scenario or step.
 Slice 10n adds seven attached confirmation cases plus a one-byte pane sentinel without adding a
 differential row.
@@ -510,7 +510,7 @@ display, and the active attached status chain across that roster.
 **Commands: 83 of the pin's 92 verbs run; 9 are recognized but unimplemented** (four
 native-chrome superseded, linked windows permanently excluded, and `new-pane`, `switch-mode`, and
 `server-access` parked on separate missing models).
-**Twenty of the 83 implemented commands still reject tmux flags:** exactly 70
+**Twenty of the 83 implemented commands still reject tmux flags:** exactly 66
 catalog-declared pairs, inventoried in the matrix and enforced by
 `the_unsupported_flag_ledger_matches_the_catalog`. Sixty commands have no catalog-declared
 flag gap, but accepted semantic divergences remain outside that count.
@@ -534,8 +534,17 @@ Control exit pane-output discard. The 2026-08-30 shell-job cwd front closes comm
 working-directory selection with focused and attached evidence, and the DEL front closes the three
 distinct DEL spellings with live transport proof. `F-ALIASES-MULTI-BODY` then closes executable
 empty and multi-command user aliases while registering forced-shutdown multi-window hook order as a
-separate residual. The registry has 84 active groups, 586 classified active items, and 123 closed
-records: 42 open, 20 blocked, and 22 accepted; 145 of 207 groups are resolved (70.0%). The current
+separate residual.
+
+**2026-08-30 delivery:** `F-PANE-SPAWN-STYLE-TITLE-V2` closes raw pane-local style storage for
+`split-window -R`, `-s`, and `-S`, plus post-spawn `-T` expansion and shared trusted title cleaning.
+The 18-step strict differential has zero mismatches. Lifecycle flags `-k` and `-m` remain active
+under `pane.spawn-flags`, while `-W` remains active under `pane.command-completion`; configured
+split/select title-hook parity and the exact `after-select-pane` trigger boundary
+remain under `hooks.pane-title-change` and `hooks.after-select-pane-trigger`.
+
+The registry has 89 active groups, 585 classified active items, and 124 closed records: 47 open, 20
+blocked, and 22 accepted; 146 of 213 groups are resolved (68.5%). The current
 198-name partition
 has 95 direct mux values, 32 daemon-delegated values, and 71 live gaps. Slice 10x gives existing
 `new-session -A -c` targets the attach cwd path and preserves fresh explicit-empty session state.
@@ -1629,9 +1638,12 @@ Tranches:
   lets `-b` win over `-a`, and falls back from an unused indexed target to the current window.
   Successful `split-window -Z` zooms the post-spawn active pane; a plain split clears zoom even
   under `-d`.
-- G3b spawn metadata and styles: `split-window -k -m -R -s -S -T`. Keep the C5-dependent
-  subset parked until its terminal seam has approval; implement the independent subset only
-  after C9 defines per-pane metadata.
+- G3b spawn metadata and styles: `split-window -R`, `-s`, `-S`, and `-T` shipped 2026-08-30. The
+  style flags store their final raw pane-local values, omitted values inherit from the destination
+  window, and `-T` expands after spawn in the original target pane's live context before shared
+  trusted cleaning. Lifecycle flags `-k` and `-m` remain under `pane.spawn-flags`; `-W` remains in
+  G3c. Configured title hooks and the exact `after-select-pane` trigger boundary remain under
+  `hooks.pane-title-change` and `hooks.after-select-pane-trigger`.
 - G3c wait lifecycle: implement `split-window -W` with command-queue ownership,
   cancellation, client disconnect, and daemon lifecycle tests.
 - G4 keys: `unbind-key -a -q` and `list-keys -a -N -P` shipped 2026-08-22. The note listing

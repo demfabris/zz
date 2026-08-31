@@ -1264,6 +1264,37 @@
       "reason": "The terminal API lacks a distinct hyperlink-registry reset."
     },
     {
+      "id": "hooks.after-select-pane-trigger",
+      "title": "Match the after-select-pane trigger boundary",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:after-select-pane-trigger-boundary"
+      ],
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "scenario:compat/scenarios/panes.txt",
+        "scenario:compat/scenarios/command-item-format.txt"
+      ],
+      "acceptance": [
+        "after-select-pane emits exactly once only when the ordinary select-pane selection path changes the invoking client's effective active pane. It emits none for select-pane -l; mark or clear-mark (-m or -M); style read (-g); input toggles (-e or -d); title assignment (-T); a direction with no neighboring pane; or a destination that is already effective-active. A valid -P value is applied only after the -l/last-pane and mark branches and before -g, direction, input, title, and ordinary selection handling; it never independently emits the hook, and a command containing it emits only if execution ultimately reaches ordinary selection and changes the effective active pane. The hook context and ordinary no-hooks suppression match pinned tmux; last-pane never substitutes this hook."
+      ],
+      "depends_on": [
+        "clients.active-pane",
+        "pane.selection-state"
+      ],
+      "reason": "Pinned cmd-select-pane.c inserts after-select-pane only at the end of its ordinary selection branch, after every nonselection and already-active return. zz instead derives after-select-pane from every successful select-pane command name and suppresses it only when mux execution returns SuppressAfterHook; current early returns and no-op selection return no suppression. Exact support needs branch-outcome intent from mux-command plus the effective per-client selection owned by clients.active-pane; the remaining input, mark, and style branches are owned by pane.selection-state."
+    },
+    {
       "id": "hooks.pane-events",
       "title": "Produce pane focus and clipboard hooks",
       "decision": "adopt",
@@ -1290,6 +1321,36 @@
       ],
       "depends_on": [],
       "reason": "Focus is per client and clipboard changes cross client ownership."
+    },
+    {
+      "id": "hooks.pane-title-change",
+      "title": "Emit exact pane-title-changed hooks",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:select-pane-same-title-changed",
+        "semantic:split-window-pane-title-changed"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "scenario:compat/scenarios/command-item-format.txt",
+        "scenario:compat/scenarios/pane-spawn-style-title-v2.txt"
+      ],
+      "acceptance": [
+        "When split-window -T reaches its post-spawn title path, it emits exactly one configured pane-title-changed hook for the newly created pane, even when trusted title cleaning rejects the expanded value; omitted -T and failures before that path emit none. When configured, after-split-window runs before pane-title-changed. The title hook carries the new pane's session, window, and pane context, and ordinary no-hooks suppression remains effective.",
+        "When select-pane -T reaches its title path, it emits exactly one configured pane-title-changed hook whenever the expanded title passes trusted cleaning, including when the cleaned value equals the pane's existing title; rejected titles emit none. Format expansion uses the original resolved target, while the title and title-hook context use the destination pane resolved after any direction flag. The -T path returns without changing the active pane and emits no after-select-pane hook, whose broader trigger boundary remains owned by hooks.after-select-pane-trigger; ordinary no-hooks suppression remains effective.",
+        "pane-title-changed remains a configured hook only: neither command emits a corresponding tmux Control-mode notification."
+      ],
+      "depends_on": [],
+      "reason": "Pinned split-window and select-pane invoke notify_pane from command control flow, while zz derives pane-title-changed only by comparing pre- and post-command snapshots. That diff cannot see a newly created pane and suppresses a repeated valid select-pane title because stored state does not change. Pinned split notifies after every post-spawn -T attempt, even when cleaning rejects it; pinned select notifies whenever cleaning accepts the value, including an unchanged value. Exact support needs explicit command-trigger intent across mux-command and daemon-core. Pinned notify.c has no corresponding Control-mode notification path, so this gap is configured-hook-only; this bounded front lacked daemon-core ownership."
     },
     {
       "id": "hooks.shutdown-window-unlinked-order",
@@ -2376,33 +2437,30 @@
     },
     {
       "id": "pane.spawn-flags",
-      "title": "Complete split-window placement flags",
+      "title": "Complete split-window lifecycle flags",
       "decision": "adopt",
       "status": "open",
       "priority": "later",
-      "ease": "medium",
+      "ease": "hard",
       "impact": [
         "scripts",
         "daily"
       ],
-      "owner": "mux",
+      "owner": "daemon",
       "items": [
-        "flag:split-window:-R",
-        "flag:split-window:-S",
-        "flag:split-window:-T",
         "flag:split-window:-k",
-        "flag:split-window:-m",
-        "flag:split-window:-s"
+        "flag:split-window:-m"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
         "scenario:compat/scenarios/pane-spawn-options.txt"
       ],
       "acceptance": [
-        "Differential tests cover the supported tiled meaning or each model-bound flag moves to a parked gap."
+        "Both -k and -m set pane-local remain-on-exit to key, retaining the pane after every child exit until the next non-mouse, non-paste key; -m additionally stores its format as pane-local remain-on-exit-format without claiming rendering."
       ],
       "depends_on": [],
-      "reason": "Most forms extend the existing spawn effect, but some may expose floating or marked state."
+      "reason": "The remaining forms are lifecycle controls rather than creation metadata: -k and -m share key-gated retention after every child exit, -m also stores the pane-local format while rendering remains separately owned, and -W remains the separate command-queue blocking residual until child exit."
     },
     {
       "id": "presentation.native-status",
@@ -4200,6 +4258,20 @@
         "resource:knowledge/tmux/status-line.md"
       ],
       "resolution": "The daemon expands `window-status-separator` after each nonfinal item in the `status-format[]` window loop. It resolves the separator in that window's option and format context, including per-window overrides, nested formats, and style directives; the last item emits no separator. The TUI owns exact tmux row output. The native GUI derives its window controls from snapshot state and does not paint this separator."
+    },
+    {
+      "id": "pane.spawn-style-title",
+      "title": "Apply split-window pane styles and titles",
+      "closed_on": "2026-08-30",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "file:compat/check.sh",
+        "file:compat/scenarios/smoke/fixtures/command-flag-errors.tsv",
+        "scenario:compat/scenarios/pane-spawn-style-title-v2.txt",
+        "resource:knowledge/tmux/commands.md"
+      ],
+      "resolution": "This closed subrecord retires split-window -s, -S, -R, and -T from the broader pane.spawn-flags board contract while leaving -k and -m active there and -W active under pane.command-completion. The three style flags store raw pane-local option values after a successful spawn: -s writes both window-style and window-active-style, -S writes pane-active-border-style, and -R writes pane-border-style. Omitted flags inherit the destination window values, and repeated flags use their final value. -T expands once after spawn in the resolved original target pane's live context rather than the caller's current pane, then writes the result to the new pane. Split-window and select-pane share title cleaning: printable backslashes are doubled, and a title assignment containing an ASCII control byte or DEL is ignored without an error; focused mux tests cover those byte edges. The 18-step strict differential covers inheritance, repeated raw storage including an invalid-looking colour token, distinct caller and target panes, alias invocation with canonical command identity, and both title activity states with zero differences. compat/check.sh requires the focused mux semantic test by exact name; the existing oracle-derived command-flag fixture retains required-value and usage grammar coverage. This closure is limited to style storage, title format expansion, and trusted title cleaning. Configured pane-title-changed hook parity for both split-window and select-pane is explicitly excluded under hooks.pane-title-change; that gap also retains after-split-window before pane-title-changed ordering and the absence of after-select-pane on the select -T path. The broader exact after-select-pane trigger boundary remains under hooks.after-select-pane-trigger. Pinned split still runs pane-title-changed after an ignored assignment; pinned select runs it after every accepted assignment, including an unchanged title. Pinned notify.c emits no corresponding Control-mode notification, so the title residual is configured-hook-only. The retained pane.spawn-flags group owns -m format storage, while options.remain-on-exit-format separately owns rendering it. No protocol or snapshot field changed."
     },
     {
       "id": "sessions.new-session-attach-cwd",

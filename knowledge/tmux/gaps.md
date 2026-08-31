@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **87**. Classified items: **586**.
+Tracked gap groups: **89**. Classified items: **585**.
 
-- Status: open: 45, blocked: 20, accepted: 22.
-- Decision: adopt: 50, native: 16, park: 15, never: 6.
-- Priority: later: 65, none: 22.
-- Closed history entries: 123.
-- Surface: command: 9, flag: 70, native-command: 21, option: 75, format: 71, hook: 3, key: 110, binding: 51, native-key: 58, semantic: 108, presentation: 8, protocol: 2.
+- Status: open: 47, blocked: 20, accepted: 22.
+- Decision: adopt: 52, native: 16, park: 15, never: 6.
+- Priority: later: 67, none: 22.
+- Closed history entries: 124.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 3, key: 110, binding: 51, native-key: 58, semantic: 111, presentation: 8, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 70 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 71 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 3 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 66 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 71 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 3 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -59,12 +59,13 @@ structure as proof.
 | `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | medium | mux | scripts | pane.selection-state |
 | `formats.window-runtime` | Expose remaining window formats | adopt | open | medium | daemon | scripts, remote | none |
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
+| `hooks.after-select-pane-trigger` | Match the after-select-pane trigger boundary | adopt | open | medium | daemon | scripts | clients.active-pane, pane.selection-state |
+| `hooks.pane-title-change` | Emit exact pane-title-changed hooks | adopt | open | medium | daemon | scripts | none |
 | `keys.copy-mode-prompt-defaults` | Add prompt-backed emacs copy-mode defaults | adopt | open | medium | daemon | daily, remote, scripts | prompt.command-fidelity |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
 | `options.pane-chrome` | Consume pane chrome options | adopt | open | medium | client | daily, gui | none |
 | `options.theme-palette` | Map tmux theme palette options | park | blocked | medium | client | gui | none |
 | `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
-| `pane.spawn-flags` | Complete split-window placement flags | adopt | open | medium | mux | scripts, daily | none |
 | `rendering.geometry-residue` | Close bounded geometry reporting gaps | adopt | open | medium | client | scripts, gui | none |
 | `terminal.key-client-selection` | Select the send-keys target client | adopt | open | medium | daemon | scripts, daily | none |
 | `terminal.key-reset` | Reset terminal input and palette state | adopt | open | medium | terminal | scripts, daily | none |
@@ -105,6 +106,7 @@ structure as proof.
 | `options.terminal-behavior` | Consume terminal behavior options | adopt | open | hard | terminal | daily, remote, scripts | none |
 | `pane.command-completion` | Complete two-phase pane command completion | adopt | open | hard | daemon | scripts, daily | none |
 | `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
+| `pane.spawn-flags` | Complete split-window lifecycle flags | adopt | open | hard | daemon | scripts, daily | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | park | blocked | hard | client | daily | clients.interactive-refresh |
 | `source-file.event-hook-client-cwd` | Select the current client cwd for event-hook sources | adopt | open | hard | daemon | scripts | none |
@@ -927,6 +929,27 @@ The terminal API lacks a distinct hyperlink-registry reset.
 - Acceptance:
   - `A terminal-owned action clears normal history and resets the VT hyperlink registry atomically.`
 
+### `hooks.after-select-pane-trigger`: Match the after-select-pane trigger boundary
+
+Pinned cmd-select-pane.c inserts after-select-pane only at the end of its ordinary selection branch, after every nonselection and already-active return. zz instead derives after-select-pane from every successful select-pane command name and suppresses it only when mux execution returns SuppressAfterHook; current early returns and no-op selection return no suppression. Exact support needs branch-outcome intent from mux-command plus the effective per-client selection owned by clients.active-pane; the remaining input, mark, and style branches are owned by pane.selection-state.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `medium`
+- Owner: `daemon`
+- User impact: scripts
+- Items: `semantic:after-select-pane-trigger-boundary`
+- Depends on: `clients.active-pane`, `pane.selection-state`
+- Evidence:
+  - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
+  - `scenario:compat/scenarios/panes.txt`
+  - `scenario:compat/scenarios/command-item-format.txt`
+- Acceptance:
+  - `after-select-pane emits exactly once only when the ordinary select-pane selection path changes the invoking client's effective active pane. It emits none for select-pane -l; mark or clear-mark (-m or -M); style read (-g); input toggles (-e or -d); title assignment (-T); a direction with no neighboring pane; or a destination that is already effective-active. A valid -P value is applied only after the -l/last-pane and mark branches and before -g, direction, input, title, and ordinary selection handling; it never independently emits the hook, and a command containing it emits only if execution ultimately reaches ordinary selection and changes the effective active pane. The hook context and ordinary no-hooks suppression match pinned tmux; last-pane never substitutes this hook.`
+
 ### `hooks.pane-events`: Produce pane focus and clipboard hooks
 
 Focus is per client and clipboard changes cross client ownership.
@@ -944,6 +967,28 @@ Focus is per client and clipboard changes cross client ownership.
   - `resource:crates/zz-daemon/src/daemon.rs`
 - Acceptance:
   - `Each pane transition emits once with a defined client when multiple clients view the pane.`
+
+### `hooks.pane-title-change`: Emit exact pane-title-changed hooks
+
+Pinned split-window and select-pane invoke notify_pane from command control flow, while zz derives pane-title-changed only by comparing pre- and post-command snapshots. That diff cannot see a newly created pane and suppresses a repeated valid select-pane title because stored state does not change. Pinned split notifies after every post-spawn -T attempt, even when cleaning rejects it; pinned select notifies whenever cleaning accepts the value, including an unchanged value. Exact support needs explicit command-trigger intent across mux-command and daemon-core. Pinned notify.c has no corresponding Control-mode notification path, so this gap is configured-hook-only; this bounded front lacked daemon-core ownership.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `medium`
+- Owner: `daemon`
+- User impact: scripts
+- Items: `semantic:select-pane-same-title-changed`, `semantic:split-window-pane-title-changed`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:third_party/tmux-reference/UPSTREAM.md`
+  - `scenario:compat/scenarios/command-item-format.txt`
+  - `scenario:compat/scenarios/pane-spawn-style-title-v2.txt`
+- Acceptance:
+  - `When split-window -T reaches its post-spawn title path, it emits exactly one configured pane-title-changed hook for the newly created pane, even when trusted title cleaning rejects the expanded value; omitted -T and failures before that path emit none. When configured, after-split-window runs before pane-title-changed. The title hook carries the new pane's session, window, and pane context, and ordinary no-hooks suppression remains effective.`
+  - `When select-pane -T reaches its title path, it emits exactly one configured pane-title-changed hook whenever the expanded title passes trusted cleaning, including when the cleaned value equals the pane's existing title; rejected titles emit none. Format expansion uses the original resolved target, while the title and title-hook context use the destination pane resolved after any direction flag. The -T path returns without changing the active pane and emits no after-select-pane hook, whose broader trigger boundary remains owned by hooks.after-select-pane-trigger; ordinary no-hooks suppression remains effective.`
+  - `pane-title-changed remains a configured hook only: neither command emits a corresponding tmux Control-mode notification.`
 
 ### `hooks.shutdown-window-unlinked-order`: Preserve forced-shutdown window-unlinked order
 
@@ -1463,22 +1508,23 @@ Several flags need client input and marked-pane state that the mux does not reta
 - Acceptance:
   - `Pane input, style, title, mark, and clear-mark controls have target-aware state and format tests.`
 
-### `pane.spawn-flags`: Complete split-window placement flags
+### `pane.spawn-flags`: Complete split-window lifecycle flags
 
-Most forms extend the existing spawn effect, but some may expose floating or marked state.
+The remaining forms are lifecycle controls rather than creation metadata: -k and -m share key-gated retention after every child exit, -m also stores the pane-local format while rendering remains separately owned, and -W remains the separate command-queue blocking residual until child exit.
 
 - Decision: `adopt`
 - Status: `open`
-- Priority and ease: `later` / `medium`
-- Owner: `mux`
+- Priority and ease: `later` / `hard`
+- Owner: `daemon`
 - User impact: scripts, daily
-- Items: `flag:split-window:-R`, `flag:split-window:-S`, `flag:split-window:-T`, `flag:split-window:-k`, `flag:split-window:-m`, `flag:split-window:-s`
+- Items: `flag:split-window:-k`, `flag:split-window:-m`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
   - `scenario:compat/scenarios/pane-spawn-options.txt`
 - Acceptance:
-  - `Differential tests cover the supported tiled meaning or each model-bound flag moves to a parked gap.`
+  - `Both -k and -m set pane-local remain-on-exit to key, retaining the pane after every child exit until the next non-mouse, non-paste key; -m additionally stores its format as pane-local remain-on-exit-format without claiming rendering.`
 
 ### `presentation.native-status`: Keep native status and lifecycle presentation
 
@@ -1833,6 +1879,7 @@ The mux cannot inspect cursor, history, or terminal mode state.
 | `options.option-name-format-coverage` | 2026-08-29 | The exact 105-name option-consumer roster now resolves as format variables before format-table, command-item, and environment values. Server, session, window, and pane options follow the pinned target and inheritance chain, including active children, attached-client fallback, explicit missing targets, and S/W/P loop retargeting. Flags render as 0 or 1 while other types keep their raw tmux spelling. command-alias, status-format, and update-environment support whole arrays plus normalized numeric and literal named indices, with numeric-before-named ordering and whole-array local shadowing. Mux-owned expansion reads live state. Every direct daemon format producer uses the same live resolver, while detached status rendering builds one all-scope snapshot per refresh batch and shares it across clients. Missing run-shell -C and if-shell -F targets read global options while their inserted command or branch keeps the caller execution context. Focused exhaustive tests cover the complete roster and scope counts, the strict 60-step option-name-formats differential has zero topology, geometry, format, output, or warning differences, and the attached status probe passes with bounded polling and complete cleanup. No protocol, wire snapshot, or native GUI styling changed. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/formats.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `resource:crates/zz-daemon/src/status.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/option-name-formats.txt`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/status-line.md`, `resource:knowledge/tmux/divergences.md` |
 | `options.show-options-hook-rows` | 2026-08-24 | With `-H`, `show-options` augments only no-positional listings with hook arrays in the pin's final option-table block and hook declaration order. Plain listings exclude hooks, named hook queries work without `-H`, server scope has none, and global-session, global-window, and inherited pane listings expose 57, 11, and 7 hooks. Empty, populated, indexed, named, value-only, pane-fallback, and whole-array-shadowing shapes match the pin, including the inherited empty array's `name*` in a full listing and bare `name` in a named query. `show-window-options` retains its surface without `-H`. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `scenario:compat/scenarios/show-options-hooks.txt`, `resource:knowledge/tmux/commands.md` |
 | `options.window-status-separator` | 2026-08-24 | The daemon expands `window-status-separator` after each nonfinal item in the `status-format[]` window loop. It resolves the separator in that window's option and format context, including per-window overrides, nested formats, and style directives; the last item emits no separator. The TUI owns exact tmux row output. The native GUI derives its window controls from snapshot state and does not paint this separator. | `resource:crates/zz-mux/src/tmux_options.rs`, `file:crates/zz-daemon/src/status.rs`, `scenario:compat/scenarios/status-options.txt`, `resource:knowledge/tmux/status-line.md` |
+| `pane.spawn-style-title` | 2026-08-30 | This closed subrecord retires split-window -s, -S, -R, and -T from the broader pane.spawn-flags board contract while leaving -k and -m active there and -W active under pane.command-completion. The three style flags store raw pane-local option values after a successful spawn: -s writes both window-style and window-active-style, -S writes pane-active-border-style, and -R writes pane-border-style. Omitted flags inherit the destination window values, and repeated flags use their final value. -T expands once after spawn in the resolved original target pane's live context rather than the caller's current pane, then writes the result to the new pane. Split-window and select-pane share title cleaning: printable backslashes are doubled, and a title assignment containing an ASCII control byte or DEL is ignored without an error; focused mux tests cover those byte edges. The 18-step strict differential covers inheritance, repeated raw storage including an invalid-looking colour token, distinct caller and target panes, alias invocation with canonical command identity, and both title activity states with zero differences. compat/check.sh requires the focused mux semantic test by exact name; the existing oracle-derived command-flag fixture retains required-value and usage grammar coverage. This closure is limited to style storage, title format expansion, and trusted title cleaning. Configured pane-title-changed hook parity for both split-window and select-pane is explicitly excluded under hooks.pane-title-change; that gap also retains after-split-window before pane-title-changed ordering and the absence of after-select-pane on the select -T path. The broader exact after-select-pane trigger boundary remains under hooks.after-select-pane-trigger. Pinned split still runs pane-title-changed after an ignored assignment; pinned select runs it after every accepted assignment, including an unchanged title. Pinned notify.c emits no corresponding Control-mode notification, so the title residual is configured-hook-only. The retained pane.spawn-flags group owns -m format storage, while options.remain-on-exit-format separately owns rendering it. No protocol or snapshot field changed. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `file:compat/check.sh`, `file:compat/scenarios/smoke/fixtures/command-flag-errors.tsv`, `scenario:compat/scenarios/pane-spawn-style-title-v2.txt`, `resource:knowledge/tmux/commands.md` |
 | `sessions.new-session-attach-cwd` | 2026-08-29 | When new-session -A finds an existing session, zz now shares the attach-session retargeting path: it resolves the target first, expands -c exactly once with the invoking client and resolved target session, window, and pane, stores the cwd before terminal preflight, and publishes that mutation even when opening the terminal fails. Clientless calls remain inert, permitted Control clients attach and update the target, and nested Control, attached Interactive, and -A -d calls refuse before target selection, expansion, retargeting, or mutation. Fresh creation and an -A miss now preserve an explicitly empty session cwd while leaving the initial pane cwd unset so the existing donor or caller fallback still applies; omitted -c continues to inherit normally. Focused mux and daemon tests cover single expansion, target isolation, failure ordering, every refusal class, and explicit-empty behavior. The strict 10-step new-session-cwd differential matches the pinned tmux build with zero topology, geometry, format, output, or warning differences. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/new-session-cwd.txt`, `resource:knowledge/tmux/divergences.md` |
 | `source-file.default-config-multi-file-order` | 2026-08-25 | Runtime source-file no longer special-cases the active zz/mux.conf. At this close, every declared path expanded and matched in caller order, and each match entered the ordinary config loader immediately in glob order, producing DAD for default, after, and default. The later config.replayed-command-output closure changed that immediate replay timing: one invocation now parses all matches in declared and glob order, then replays them in the same order while preserving DAD and path order. A loud miss returns status 1 without preventing later matches from loading; quiet misses remain silent. Ordinary diagnostics and -v lines retain declared path and match order. That later closure also pins presentation as one complete verbose batch, then replay, then buffered command-name and parser diagnostics for each invocation. Source no-match, glob, and actual OS or path read failures retain their existing error channels. Explicit zz-native reload-config still rediscovers the first existing default candidate, replaces #{config_files}, resets key tables, rebuilds appearance, and reapplies stored mux overrides. Startup still discovers the first existing zz-owned candidate, while ordered explicit -f files remain the intentional startup roots. Parse-only and nested source paths keep their existing behavior. Focused CLI and daemon tests, strict daemon clippy, and fmt pass. The strict 12-step source-file-diagnostics and 40-step source-file-format differentials have zero differences and no skips. At this close the source-file-control row had five clean steps; the later nested-queue proof grew the current row to six clean steps. This closure makes no canonical-suite claim. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `scenario:compat/scenarios/smoke/source-file-diagnostics.txt`, `scenario:compat/scenarios/source-file-format.txt`, `scenario:compat/scenarios/smoke/source-file-control.txt`, `resource:knowledge/tmux/conf-parser.md`, `resource:knowledge/tmux/commands.md`, `resource:knowledge/crates/zz-daemon.md`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `source-file.flags` | 2026-08-25 | source-file now accepts -n, -t, and -v through one mux effect and replay-loader options path. -n parses the whole invocation, retains lexer diagnostics and optional verbose lines, and applies neither parser environment assignments nor commands. At that checkpoint it did not claim whole-file command-name and argument prevalidation. The later config.parser-abort and mux.chain-parse-abort closures added that atomicity. Later shared flag and arity closures match exact diagnostics when each replayed command reaches dispatch. -t resolves a pane target once, preserves the invoking client cwd, supplies that context to -F and replayed commands, and follows CMD_FIND_CANFAIL by loading with an empty target context when lookup fails. -v formats normalized command groups with source and physical line in declared-path and glob order, inherits through nested sources, and stays suppressed for Control clients. The later config.replayed-command-output closure proves that Command and Interactive clients receive one complete verbose batch before that invocation's replay and buffered command-name or parser diagnostics. Source no-match, glob, and actual OS or path read failures retain their existing error channels. It also proves that -n applies no bare assignments across files and produces no replay output. The attached proof first covered transcript presentation and dismissal; the later clients.tui-command-output-navigation closure added interaction inside the TUI output view. The strict source-file-format differential runs 40 steps with no differences, including parse-only state, target and target-based -F context, a missing target, verbose output, and multi-file order. The source-file-control probe proves that Control executes an explicit -v source without leaking verbose lines. Runtime error delivery closed separately under config.replayed-command-errors. At this checkpoint, config alias snapshots, native default-config multi-file ordering, nested Control queueing, sourced-hook cwd, and stdin remained in their explicit groups. The later source-file.default-config-multi-file-order closure removed the default-config residue. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz-mux/tests/hunt_claims.rs`, `file:crates/zz/tests/cli_binary.rs`, `scenario:compat/scenarios/source-file-format.txt`, `scenario:compat/scenarios/smoke/source-file-control.txt`, `resource:knowledge/tmux/conf-parser.md`, `resource:knowledge/tmux/divergences.md` |

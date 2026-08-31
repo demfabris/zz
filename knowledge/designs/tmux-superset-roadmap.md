@@ -2,7 +2,7 @@
 type: Design Plan
 title: tmux-compatible CLI and native superset roadmap
 description: The dependency plan and delivery history for making alias tmux=zz practical while keeping picker, browser, agent, editor, and fleet behavior on explicit zz-only commands.
-status: In Progress; F-ALIASES-MULTI-BODY closed; dispatch board active
+status: In Progress; F-PANE-SPAWN-STYLE-TITLE-V2 closed; dispatch board active
 tags:
 - tmux
 - compatibility
@@ -40,9 +40,10 @@ records the source-anchored baseline used to build this plan.
 
 The three-front trial closed all 3 frozen chunks and registered 3 residual groups. Wave 2 then
 closed slice 10ai, shell-job cwd, and literal DEL identity as 3 of 3 frozen chunks without a new
-residual. Unresolved work moved from 65 to 62: 42 open and 20 blocked. The tracker has 84 active
-groups, 586 classified active items, 123 closed groups, and 22 accepted active groups. Its secondary
-ledger settlement is 145 of 207 known groups (70.0%). The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client
+residual. That wave moved unresolved work from 65 to 62. The live tracker now has 67 unresolved
+groups: 47 open and 20 blocked. It has 89 active groups, 585 classified active items, 124 closed
+groups, and 22 accepted active groups. Its secondary ledger settlement is 146 of 213 known groups
+(68.5%). The persisted accepted artifact covers 106 scenarios and 1,683 steps, with attached-client
 `PASS`, exactly two approved GEO rows, every other channel clean, and SHA-256
 `a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Slice 10af closes
 `jobs.run-shell-positive-delay-environment/semantic:run-shell-positive-delay-environment-timing`.
@@ -58,6 +59,10 @@ The later `F-ALIASES-MULTI-BODY` dispatch-board front closes empty and multi-com
 with an eight-step zero-difference focused scenario. It registers the history-dependent forced
 shutdown `window-unlinked` order as `hooks.shutdown-window-unlinked-order`, so unresolved work stays
 at 62 instead of disappearing into a false parity claim.
+The 2026-08-30 `F-PANE-SPAWN-STYLE-TITLE-V2` front closes raw pane-local style storage for
+`split-window -R`, `-s`, and `-S`, plus post-spawn `-T` expansion and shared trusted title cleaning.
+It keeps `-k` and `-m` under `pane.spawn-flags`, keeps `-W` under `pane.command-completion`, and registers configured title-hook parity and
+the exact `after-select-pane` trigger boundary as two separate residual groups.
 The Config front closes `config.parser-edge-cases` for UTF-8 daemon parser contexts. The parser now
 matches closing-quote expansion, hidden token-state transitions, daemon `HOME`, passwd fallback,
 named users, failed lookup, and the 1,022-byte username limit. Direct Control environment provenance
@@ -84,7 +89,10 @@ READY labels. The coordinator retains the registry, generated report, shared kno
 accepted summary, review, and integration.
 The final workspace run passed every non-daemon package. Two daemon tests failed only under the
 parallel load and each passed when rerun alone, matching the repository's documented load-flake
-class. Strict workspace clippy, formatting, tracker, stored-summary, and OKF validation pass.
+class. Strict workspace clippy, formatting, tracker, and OKF validation pass. Current summary
+freshness is pending the P1 source-replay repair; the 106-scenario, 1,683-step artifact and its
+`a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f` digest remain the last accepted
+checkpoint.
 The Alert cohort closed without a protocol bump. Bell, Activity, and Silence
 messages now share the daemon-owned status-message identity, timer, replacement, dismissal,
 terminal-publication freeze, and full-viewport thaw. Repair requests, resync, and popup viewports
@@ -377,16 +385,16 @@ engine with no differing channel. The attached fixture keeps pane cwd separate f
 proves status cwd, and covers 24 Interactive and Control `run-shell` and `if-shell` cases across
 valid, missing, and omitted targets. No protocol or snapshot field changed.
 
-The registry now has 84 active groups and 586 active items, with 123 closed records: 42 open, 20
-blocked, and 22 accepted. Closed history plus accepted groups resolve 145 of 207 groups (70.0%). The
+The registry now has 89 active groups and 585 active items, with 124 closed records: 47 open, 20
+blocked, and 22 accepted. Closed history plus accepted groups resolve 146 of 213 groups (68.5%). The
 persisted accepted artifact covers 106 scenarios and 1,683 steps with attached-client `PASS`,
 exactly two approved GEO rows, every other channel clean, and SHA-256
 `a59c1ff951d817f00cfed37367c3e7cae8f258840876d502f12622981a1c174f`. Focused mux and
-compatibility gates from the accepted artifact pass. The DEL closure adds 196 strict-key fixture
-checks per engine without changing the scenario or step count. The final workspace run passed every
-non-daemon package; two daemon tests failed only under parallel load and passed alone. Strict
-workspace clippy, formatting, tracker, stored-summary, and OKF validation pass. The coordinator
-has replaced the persisted artifact with the completed aggregate above.
+compatibility gates passed for that accepted checkpoint. The DEL closure adds 196 strict-key fixture
+checks per engine without changing the scenario or step count. That workspace run passed every
+non-daemon package; two daemon tests failed only under parallel load and passed alone. Current
+stored-summary freshness is pending the P1 source-replay repair, so the artifact above remains the
+last accepted checkpoint.
 The historical 10i checkpoint remains 97 scenarios and 1,514 steps at SHA-256
 `3b728eb8f0d30cae1bf1fe9c09100188279aaf8c80c0b33b30cd15b617f75d70`.
 The historical 10h checkpoint remains 96 scenarios and 1,511 steps at SHA-256
@@ -1882,6 +1890,15 @@ permanent product decision has been recorded for them.
   84 active groups and 586 items, with 123 closed records and 145 of 207 groups resolved (70.0%).
   Closure review advanced protocol v85 for typed post-admission callback provenance and
   daemon-authoritative `Attached` reconnect state, not for an alias child-vector field.
+- 2026-08-30: `F-PANE-SPAWN-STYLE-TITLE-V2` closed `pane.spawn-style-title` as a bounded subrecord of
+  `pane.spawn-flags`. `split-window -R`, `-s`, and `-S` store their final raw pane-local styles;
+  omitted values inherit from the destination window. Post-spawn `-T` expands once in the original
+  target pane's live context and shares trusted title cleaning with `select-pane`. The 18-step strict
+  differential has zero mismatches. Lifecycle flags `-k` and `-m` remain active under
+  `pane.spawn-flags`; `-W` remains active under `pane.command-completion`. Review
+  registered `hooks.pane-title-change` for configured split/select title hooks and
+  `hooks.after-select-pane-trigger` for the ordinary-selection trigger boundary. The registry now
+  has 89 active groups and 585 items, with 124 closed records and 146 of 213 groups resolved (68.5%).
 
 # Related
 

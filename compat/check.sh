@@ -12,6 +12,7 @@ cd "$REPO_DIR"
 test_list="$(cargo test -p zz-mux --lib -- --list)"
 for required_test in \
   compat_manifest_tests::command_and_flag_gaps_match_the_pinned_oracle \
+  command::tests::split_window_style_and_title_flags_match_pinned_spawn_semantics \
   compat_manifest_tests::args_parse_gaps_match_the_pinned_oracle \
   compat_manifest_tests::daemon_invalid_flag_runtime_inventory_matches_the_pin \
   compat_manifest_tests::command_flag_fixture_matches_the_pin \

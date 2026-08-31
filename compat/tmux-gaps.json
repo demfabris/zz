@@ -1331,19 +1331,19 @@
       ],
       "owner": "daemon",
       "items": [
-        "semantic:copy-pipe-job-environment",
         "semantic:display-popup-job-environment"
       ],
       "evidence": [
         "resource:knowledge/tmux/divergences.md",
         "resource:crates/zz-daemon/src/daemon.rs",
-        "scenario:compat/scenarios/smoke/jobs-command-environment.txt"
+        "scenario:compat/scenarios/smoke/jobs-command-environment.txt",
+        "scenario:compat/scenarios/jobs-environment.txt"
       ],
       "acceptance": [
         "Copy-pipe and popup jobs construct their environments from the pinned producer-specific scopes."
       ],
       "depends_on": [],
-      "reason": "Command and status shell jobs are proved separately. Positive-delay run-shell sampling now has a bounded owner, while copy-pipe and popup remain distinct producer families."
+      "reason": "Command and status shell jobs are proved separately, and copy-pipe now builds the pinned producer scope: the global overlay plus the copy session's overlay, hidden and child-unset entries dropped, TERM from default-terminal with TERM_PROGRAM, TERM_PROGRAM_VERSION and COLORTERM, TMUX carrying the copy session id, and the server's own working directory because the pin passes a null cwd to job_run. display-popup stays open: its scope adds -e assignments, a -d or target-client cwd, and the session default-shell, and no differential drives a popup job yet."
     },
     {
       "id": "keys.copy-mode-binding-fidelity",

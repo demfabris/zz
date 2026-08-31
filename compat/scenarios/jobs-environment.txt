@@ -1,0 +1,6 @@
+shim:
+stage: fixtures/jobs-environment.sh ~/jobs-environment.sh
+stage: fixtures/pty-attach.py ~/pty-attach.py
+out: set-environment -gu JOBS_ENVIRONMENT
+run-shell 'sh ~/jobs-environment.sh'
+out: show-environment -g JOBS_ENVIRONMENT

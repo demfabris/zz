@@ -91,6 +91,7 @@ unsupported `window-copy` actions below remain open.
 | Cursor | `cursor-left/right/up/down`, `start-of-line`, `back-to-indentation`, `end-of-line` |
 | Word/para | `next-word`, `previous-word`, `next-word-end`, `next-space`, `previous-space`, `next-space-end`, `next-paragraph`, `previous-paragraph` |
 | Page/history | `page-up/down`, `halfpage-up/down`, `scroll-up/down`, `scroll-middle`, `goto-line`, `history-top`, `history-bottom`, `top-line`, `middle-line`, `bottom-line` |
+| Scroll exit | `scroll-exit-on/off/toggle`, `page-down-and-cancel`, `halfpage-down-and-cancel`, `scroll-down-and-cancel`, `cursor-down-and-cancel` |
 | Semantic prompt | `next-prompt`, `previous-prompt` (`-o` = output only, via OSC 133 marks) |
 | Search | `search-again`, `search-reverse`, cursor-word forward/backward actions used by `*`/`#` |
 | Selection | `begin-selection`, `select-word`, `select-line`, `selection-mode`, `clear-selection`, `stop-selection`, `clear-selection-or-cancel`, `other-end` |
@@ -141,6 +142,18 @@ represented as no buffered count, so a following `5` starts at five rather than 
 fifteen. Bare `0` remains `start-of-line`; counted `Escape` runs clear-selection once. Empty
 `send-keys -N <n> -X` still needs tmux's pane-owned prefix persistence and remains tracked under
 `terminal.key-control`.
+
+## Scroll exit
+
+`copy-mode -e` latches a `scroll_exit` bit on the frozen mode, and `scroll-exit-on`, `-off`, and
+`-toggle` rewrite it from inside. While it is set, `page-down`, `halfpage-down`, and `scroll-down`
+leave the mode once the viewport reaches the bottom with no live selection. The four
+`-and-cancel` names force that exit for one action without touching the latch, and they do not
+agree on the selection: `page-down-and-cancel` and `halfpage-down-and-cancel` keep the mode while a
+selection is live, `scroll-down-and-cancel` exits either way, and `cursor-down-and-cancel` exits
+only when the cursor could not move at all and the viewport is at the bottom. That last one is the
+only counted action whose exit test runs once for the whole run instead of once per step, which is
+why it carries its own count policy.
 
 ## Selection lifecycle
 

@@ -13967,6 +13967,9 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::NextMatchingBracket
             | CopyModeAction::GotoLine(_)
             | CopyModeAction::PageDownScrollExit
+            | CopyModeAction::HalfPageDownScrollExit
+            | CopyModeAction::ScrollDownAndCancel
+            | CopyModeAction::CursorDownAndCancel
     )
 }
 
@@ -14026,8 +14029,11 @@ fn copy_mode_action(
         "cursor-down" => Some(CopyModeAction::Down),
         "page-up" => Some(CopyModeAction::PageUp),
         "page-down" => Some(CopyModeAction::PageDown),
+        "page-down-and-cancel" => Some(CopyModeAction::PageDownScrollExit),
         "halfpage-up" => Some(CopyModeAction::HalfPageUp),
         "halfpage-down" => Some(CopyModeAction::HalfPageDown),
+        "halfpage-down-and-cancel" => Some(CopyModeAction::HalfPageDownScrollExit),
+        "cursor-down-and-cancel" => Some(CopyModeAction::CursorDownAndCancel),
         "history-top" => Some(CopyModeAction::Top),
         "history-bottom" => Some(CopyModeAction::Bottom),
         "top-line" => Some(CopyModeAction::TopLine),
@@ -14044,7 +14050,11 @@ fn copy_mode_action(
         "next-space-end" => Some(CopyModeAction::NextSpaceEnd),
         "scroll-up" => Some(CopyModeAction::ScrollUp),
         "scroll-down" => Some(CopyModeAction::ScrollDown),
+        "scroll-down-and-cancel" => Some(CopyModeAction::ScrollDownAndCancel),
         "scroll-middle" => Some(CopyModeAction::ScrollMiddle),
+        "scroll-exit-on" => Some(CopyModeAction::ScrollExitOn),
+        "scroll-exit-off" => Some(CopyModeAction::ScrollExitOff),
+        "scroll-exit-toggle" => Some(CopyModeAction::ScrollExitToggle),
         "goto-line" => copy_goto_line_action(&arguments),
         "next-matching-bracket" => Some(CopyModeAction::NextMatchingBracket),
         "search-forward-cursor-word" => Some(CopyModeAction::SearchCursorWord {

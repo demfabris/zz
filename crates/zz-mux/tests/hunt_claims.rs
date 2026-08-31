@@ -2346,3 +2346,53 @@ fn stop_selection_is_typed_apart_from_clear_selection() {
         );
     }
 }
+
+#[test]
+fn the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+    for (name, action) in [
+        ("scroll-exit-on", CopyModeAction::ScrollExitOn),
+        ("scroll-exit-off", CopyModeAction::ScrollExitOff),
+        ("scroll-exit-toggle", CopyModeAction::ScrollExitToggle),
+        ("page-down-and-cancel", CopyModeAction::PageDownScrollExit),
+        (
+            "halfpage-down-and-cancel",
+            CopyModeAction::HalfPageDownScrollExit,
+        ),
+        ("scroll-down-and-cancel", CopyModeAction::ScrollDownAndCancel),
+        ("cursor-down-and-cancel", CopyModeAction::CursorDownAndCancel),
+    ] {
+        let execution = engine
+            .execute(&mut context, &command("send-keys", &["-X", name]))
+            .unwrap();
+        assert_eq!(
+            execution.effects,
+            [MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(action.clone()),
+            }],
+            "{name}"
+        );
+        let counted = engine
+            .execute(&mut context, &command("send-keys", &["-N", "3", "-X", name]))
+            .unwrap();
+        let expected = if name.starts_with("scroll-exit-") {
+            TerminalViewAction::CopyMode(action)
+        } else {
+            TerminalViewAction::CopyModeCounted { action, count: 3 }
+        };
+        assert_eq!(
+            counted.effects,
+            [MuxEffect::TerminalView {
+                pane,
+                action: expected,
+            }],
+            "counted {name}"
+        );
+    }
+}

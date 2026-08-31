@@ -7360,6 +7360,7 @@ fn apply_copy_mode_action(
         | CopyModeAction::PageDownScrollExit
         | CopyModeAction::HalfPageUp
         | CopyModeAction::HalfPageDown
+        | CopyModeAction::HalfPageDownScrollExit
         | CopyModeAction::Top
         | CopyModeAction::Bottom
         | CopyModeAction::TopLine
@@ -7382,7 +7383,7 @@ fn apply_copy_mode_action(
         | CopyModeAction::PreviousPrompt { .. }
         | CopyModeAction::JumpToMark) => {
             let scroll_exit = match movement {
-                CopyModeAction::PageDownScrollExit => true,
+                CopyModeAction::PageDownScrollExit | CopyModeAction::HalfPageDownScrollExit => true,
                 CopyModeAction::PageDown | CopyModeAction::HalfPageDown => mode.scroll_exit,
                 _ => false,
             };
@@ -7396,6 +7397,39 @@ fn apply_copy_mode_action(
             if scroll_exit && copy_mode_scroll_exit_ready(&mode) {
                 return cancel_copy_mode(terminal, selection, unseen_output);
             }
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::ScrollDownAndCancel => {
+            scroll_copy_cursor(&mut mode, false);
+            if mode.selecting {
+                update_copy_selection(&mut mode, Some(word_separators));
+            }
+            if mode.viewport_offset == mode.revision.maximum_offset() {
+                return cancel_copy_mode(terminal, selection, unseen_output);
+            }
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::CursorDownAndCancel => {
+            *copy_mode = Some(mode);
+            cursor_down_and_cancel(
+                terminal,
+                selection,
+                copy_mode,
+                unseen_output,
+                1,
+                word_separators,
+            )
+        }
+        scroll_exit_action @ (CopyModeAction::ScrollExitOn
+        | CopyModeAction::ScrollExitOff
+        | CopyModeAction::ScrollExitToggle) => {
+            mode.scroll_exit = match scroll_exit_action {
+                CopyModeAction::ScrollExitOn => true,
+                CopyModeAction::ScrollExitOff => false,
+                _ => !mode.scroll_exit,
+            };
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
@@ -7663,6 +7697,14 @@ fn apply_counted_copy_mode_action(
             action,
             word_separators,
         ),
+        CopyModeCountPolicy::CursorDownAndCancel => cursor_down_and_cancel(
+            terminal,
+            selection,
+            copy_mode,
+            unseen_output,
+            count,
+            word_separators,
+        ),
         CopyModeCountPolicy::SelectLine => {
             let Some(mode) = copy_mode.as_mut() else {
                 return Ok(ViewActionResult::None);
@@ -7723,6 +7765,37 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
     mode.selecting = true;
     mode.rectangle = false;
     reveal_copy_cursor(mode);
+}
+
+fn cursor_down_and_cancel(
+    terminal: &mut Terminal<'_, '_>,
+    selection: &mut Option<SelectionState>,
+    copy_mode: &mut CopyModeSlot,
+    unseen_output: &mut u32,
+    count: u32,
+    word_separators: &WordSeparators,
+) -> Result<ViewActionResult, WorkerError> {
+    let Some(start) = copy_mode.as_deref().map(|mode| mode.cursor.y) else {
+        return Ok(ViewActionResult::None);
+    };
+    for _ in 0..count {
+        apply_copy_mode_action(
+            terminal,
+            selection,
+            copy_mode,
+            unseen_output,
+            CopyModeAction::Down,
+            word_separators,
+        )?;
+    }
+    let Some(mode) = copy_mode.as_deref() else {
+        return Ok(ViewActionResult::Snapshot);
+    };
+    if mode.cursor.y == start && mode.viewport_offset == mode.revision.maximum_offset() {
+        *copy_mode = None;
+        return cancel_copy_mode(terminal, selection, unseen_output);
+    }
+    Ok(ViewActionResult::Snapshot)
 }
 
 fn copy_mode_scroll_exit_ready(mode: &CopyModeState) -> bool {
@@ -17452,5 +17525,154 @@ mod tests {
         );
         assert!(!off.rectangle);
         assert!(!off.selection.expect("selection").rectangle);
+    }
+
+    fn copy_mode_after_counted_action(
+        action: CopyModeAction,
+        count: u32,
+        starts_at_bottom: bool,
+    ) -> Option<Box<CopyModeState>> {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 2,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        {
+            let mode = copy_mode.as_mut().expect("mode");
+            let maximum = mode.revision.maximum_offset();
+            assert!(maximum > 1);
+            if !starts_at_bottom {
+                mode.viewport_offset = maximum - 1;
+                let page = u32::from(mode.revision.viewport_rows.max(1));
+                mode.cursor.y = mode
+                    .viewport_offset
+                    .saturating_add(page.saturating_sub(1))
+                    .min(mode.revision.total_rows().saturating_sub(1));
+            }
+        }
+        let mut unseen_output = 0;
+        apply_counted_copy_mode_action(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            action,
+            count,
+            &WordSeparators::default(),
+        )
+        .expect("counted copy action");
+        copy_mode
+    }
+
+    #[test]
+    fn scroll_exit_toggles_rearm_the_latch_taken_at_copy_mode_entry() {
+        for (action, expected) in [
+            (CopyModeAction::ScrollExitOn, true),
+            (CopyModeAction::ScrollExitOff, false),
+            (CopyModeAction::ScrollExitToggle, true),
+        ] {
+            let mode = run_copy_actions(
+                b"alpha beta",
+                20,
+                2,
+                PointCoordinate { x: 0, y: 0 },
+                std::slice::from_ref(&action),
+            );
+            assert_eq!(mode.scroll_exit, expected, "{action:?}");
+        }
+        let toggled_twice = run_copy_actions(
+            b"alpha beta",
+            20,
+            2,
+            PointCoordinate { x: 0, y: 0 },
+            &[
+                CopyModeAction::ScrollExitToggle,
+                CopyModeAction::ScrollExitToggle,
+            ],
+        );
+        assert!(!toggled_twice.scroll_exit);
+    }
+
+    #[test]
+    fn a_rearmed_scroll_exit_latch_drives_the_plain_downward_actions() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 2,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"zero\r\none\r\ntwo\r\nthree");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let mut unseen_output = 0;
+        for action in [CopyModeAction::ScrollExitOn, CopyModeAction::PageDown] {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                action,
+                &WordSeparators::default(),
+            )
+            .expect("copy action");
+        }
+        assert!(copy_mode.is_none());
+    }
+
+    #[test]
+    fn the_and_cancel_actions_exit_without_the_scroll_exit_latch() {
+        for action in [
+            CopyModeAction::PageDownScrollExit,
+            CopyModeAction::HalfPageDownScrollExit,
+            CopyModeAction::ScrollDownAndCancel,
+            CopyModeAction::CursorDownAndCancel,
+        ] {
+            assert!(
+                copy_mode_after_counted_action(action.clone(), 1, true).is_none(),
+                "{action:?} at bottom"
+            );
+        }
+    }
+
+    #[test]
+    fn scroll_down_and_cancel_ignores_a_live_selection_but_page_down_and_cancel_does_not() {
+        assert!(
+            copy_mode_survives_downward_action(
+                CopyModeAction::PageDownScrollExit,
+                false,
+                true,
+                true
+            ),
+            "page-down-and-cancel keeps a selected mode"
+        );
+        assert!(
+            !copy_mode_survives_downward_action(
+                CopyModeAction::ScrollDownAndCancel,
+                false,
+                true,
+                true
+            ),
+            "scroll-down-and-cancel exits with a selection"
+        );
+    }
+
+    #[test]
+    fn counted_cursor_down_and_cancel_only_exits_when_the_whole_run_was_stuck() {
+        assert!(
+            copy_mode_after_counted_action(CopyModeAction::CursorDownAndCancel, 3, false).is_some(),
+            "a run that moves keeps copy mode"
+        );
+        assert!(
+            copy_mode_after_counted_action(CopyModeAction::CursorDownAndCancel, 3, true).is_none(),
+            "a run stuck at the bottom exits"
+        );
     }
 }

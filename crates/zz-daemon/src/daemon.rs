@@ -20582,11 +20582,24 @@ impl Shared {
         command: String,
         data: String,
     ) {
-        let subscriber = {
+        let (subscriber, environment) = {
             let inner = self.inner.lock();
-            (inner.client_kinds.get(&client) == Some(&ClientKind::Interactive))
+            let subscriber = (inner.client_kinds.get(&client) == Some(&ClientKind::Interactive))
                 .then(|| inner.subscribers.get(&client).cloned())
-                .flatten()
+                .flatten();
+            let session = inner
+                .engine
+                .state
+                .window_for_pane(pane)
+                .and_then(|window| inner.engine.state.windows.get(&window))
+                .map(|window| window.session);
+            let environment = CopyPipeEnvironment {
+                variables: inner.engine.job_environment(session),
+                default_terminal: inner.engine.default_terminal_for_spawn().to_owned(),
+                tmux: tmux_environment(&self.socket_path, session),
+                zz_socket: self.socket_path.clone(),
+            };
+            (subscriber, environment)
         };
         let rejection = if command.is_empty() {
             Some("copy-pipe command is empty".to_owned())
@@ -20622,7 +20635,7 @@ impl Shared {
         if let Err(error) = thread::Builder::new()
             .name("zz-copy-pipe".to_owned())
             .spawn(move || {
-                let result = run_copy_pipe(&command, &data);
+                let result = run_copy_pipe(&command, &data, &environment);
                 drop(permit);
                 if let Err(error) = result {
                     shared.publish_copy_pipe_message(
@@ -28138,11 +28151,27 @@ impl Drop for CopyPipePermit {
     }
 }
 
-fn run_copy_pipe(command: &str, data: &str) -> Result<(), String> {
-    run_copy_pipe_with_timeout(command, data, COPY_PIPE_TIMEOUT)
+struct CopyPipeEnvironment {
+    variables: Vec<(String, Option<String>)>,
+    default_terminal: String,
+    tmux: String,
+    zz_socket: PathBuf,
 }
 
-fn run_copy_pipe_with_timeout(command: &str, data: &str, timeout: Duration) -> Result<(), String> {
+fn run_copy_pipe(
+    command: &str,
+    data: &str,
+    environment: &CopyPipeEnvironment,
+) -> Result<(), String> {
+    run_copy_pipe_with_timeout(command, data, environment, COPY_PIPE_TIMEOUT)
+}
+
+fn run_copy_pipe_with_timeout(
+    command: &str,
+    data: &str,
+    environment: &CopyPipeEnvironment,
+    timeout: Duration,
+) -> Result<(), String> {
     let mut input = tempfile::tempfile()
         .map_err(|error| format!("could not stage input in a temporary file: {error}"))?;
     input
@@ -28159,6 +28188,16 @@ fn run_copy_pipe_with_timeout(command: &str, data: &str, timeout: Duration) -> R
 
         process.process_group(0);
     }
+    configure_shell_job_environment(
+        &mut process,
+        &environment.variables,
+        &environment.default_terminal,
+        false,
+        &environment.tmux,
+        environment.zz_socket.as_os_str(),
+        None,
+        None,
+    );
     process
         .stdin(Stdio::from(input))
         .stdout(Stdio::null())
@@ -64417,13 +64456,29 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(shared.inner.lock().paste_buffers.len(), 1);
     }
 
+    fn test_copy_pipe_environment() -> CopyPipeEnvironment {
+        CopyPipeEnvironment {
+            variables: std::env::vars()
+                .map(|(name, value)| (name, Some(value)))
+                .collect(),
+            default_terminal: "screen-256color".to_owned(),
+            tmux: tmux_environment(Path::new("/tmp/zz-copy-pipe.sock"), None),
+            zz_socket: PathBuf::from("/tmp/zz-copy-pipe.sock"),
+        }
+    }
+
     #[cfg(not(windows))]
     #[test]
     fn copy_pipe_receives_the_selection_on_standard_input() {
         let output = tempfile::NamedTempFile::new().expect("output file");
         let command = format!("cat > {}", shell_quote(output.path()));
 
-        run_copy_pipe(&command, "native selection\nwith two lines").expect("copy pipe");
+        run_copy_pipe(
+            &command,
+            "native selection\nwith two lines",
+            &test_copy_pipe_environment(),
+        )
+        .expect("copy pipe");
 
         assert_eq!(
             fs::read_to_string(output.path()).expect("piped output"),
@@ -64441,8 +64496,13 @@ bind - split-window -v -c "#{pane_current_path}"
             shell_quote(&group)
         );
 
-        let error = run_copy_pipe_with_timeout(&command, "", Duration::from_secs(2))
-            .expect_err("copy pipe should time out");
+        let error = run_copy_pipe_with_timeout(
+            &command,
+            "",
+            &test_copy_pipe_environment(),
+            Duration::from_secs(2),
+        )
+        .expect_err("copy pipe should time out");
         assert!(error.contains("timed out"), "{error}");
         let group = fs::read_to_string(group)
             .expect("copy-pipe process group never started")

@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **84**. Classified items: **578**.
+Tracked gap groups: **84**. Classified items: **577**.
 
 - Status: open: 42, blocked: 20, accepted: 22.
 - Decision: adopt: 47, native: 16, park: 15, never: 6.
 - Priority: later: 62, none: 22.
 - Closed history entries: 127.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 105, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 104, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -964,19 +964,20 @@ Pinned tmux session_destroy emits window-unlinked before repeatedly removing RB_
 
 ### `jobs.environment`: Normalize remaining job environments
 
-Command and status shell jobs are proved separately. Positive-delay run-shell sampling now has a bounded owner, while copy-pipe and popup remain distinct producer families.
+Command and status shell jobs are proved separately, and copy-pipe now builds the pinned producer scope: the global overlay plus the copy session's overlay, hidden and child-unset entries dropped, TERM from default-terminal with TERM_PROGRAM, TERM_PROGRAM_VERSION and COLORTERM, TMUX carrying the copy session id, and the server's own working directory because the pin passes a null cwd to job_run. display-popup stays open: its scope adds -e assignments, a -d or target-client cwd, and the session default-shell, and no differential drives a popup job yet.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `daemon`
 - User impact: daily, scripts, remote
-- Items: `semantic:copy-pipe-job-environment`, `semantic:display-popup-job-environment`
+- Items: `semantic:display-popup-job-environment`
 - Depends on: none
 - Evidence:
   - `resource:knowledge/tmux/divergences.md`
   - `resource:crates/zz-daemon/src/daemon.rs`
   - `scenario:compat/scenarios/smoke/jobs-command-environment.txt`
+  - `scenario:compat/scenarios/jobs-environment.txt`
 - Acceptance:
   - `Copy-pipe and popup jobs construct their environments from the pinned producer-specific scopes.`
 

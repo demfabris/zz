@@ -6070,6 +6070,33 @@ fn mode_selection_drag(
     }
 }
 
+/// The end of the word at or after `point`, or the start of the word at or
+/// before it. A cursor parked in whitespace resolves outward, the way the pin's
+/// `window_copy_cursor_next_word_end_pos` and `..._previous_word_pos` do.
+fn mode_word_edge(
+    revision: &ModeRevision,
+    point: PointCoordinate,
+    word_separators: &WordSeparators,
+    forward: bool,
+) -> PointCoordinate {
+    let mut at = point;
+    while revision_cell_is_whitespace(revision, at) {
+        if forward {
+            if at.x.saturating_add(1) >= revision.columns {
+                return point;
+            }
+            at.x += 1;
+        } else {
+            if at.x == 0 {
+                return point;
+            }
+            at.x -= 1;
+        }
+    }
+    let (start, end) = mode_word_bounds(revision, at, word_separators);
+    if forward { end } else { start }
+}
+
 fn mode_word_bounds(
     revision: &ModeRevision,
     point: PointCoordinate,
@@ -7527,8 +7554,10 @@ fn apply_copy_mode_action(
             });
             mode.selection_mode = CopySelectionMode::Word;
             mode.selection_origin = mode.cursor;
+            mode.cursor = focus;
             mode.selecting = true;
             mode.rectangle = false;
+            reveal_copy_cursor(&mut mode);
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
@@ -8695,14 +8724,12 @@ fn update_copy_selection(mode: &mut CopyModeState, word_separators: Option<&Word
             let Some(separators) = word_separators else {
                 return;
             };
-            let (origin_start, origin_end) = mode_word_bounds(&revision, origin, separators);
-            let (cursor_start, cursor_end) = mode_word_bounds(&revision, cursor, separators);
             if (cursor.y, cursor.x) >= (origin.y, origin.x) {
-                selection.anchor = origin_start;
-                selection.focus = cursor_end;
+                selection.anchor = mode_word_edge(&revision, origin, separators, false);
+                selection.focus = mode_word_edge(&revision, cursor, separators, true);
             } else {
-                selection.anchor = origin_end;
-                selection.focus = cursor_start;
+                selection.anchor = mode_word_edge(&revision, origin, separators, true);
+                selection.focus = mode_word_edge(&revision, cursor, separators, false);
             }
             selection.mode = SelectionMode::Word;
         }
@@ -17443,6 +17470,41 @@ mod tests {
     }
 
     #[test]
+    fn word_selection_resolves_a_whitespace_cursor_outward_like_the_pin() {
+        let forward = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 7, y: 0 },
+            &[CopyModeAction::SelectWord, CopyModeAction::Right],
+        );
+        let row = forward.cursor.y;
+        let selection = forward.selection.expect("selection");
+        assert_eq!(forward.cursor.x, 10);
+        assert_eq!(selection.anchor, PointCoordinate { x: 6, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 15, y: row });
+
+        let backward = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 7, y: 0 },
+            &[
+                CopyModeAction::SelectWord,
+                CopyModeAction::Left,
+                CopyModeAction::Left,
+                CopyModeAction::Left,
+                CopyModeAction::Left,
+            ],
+        );
+        let row = backward.cursor.y;
+        let selection = backward.selection.expect("selection");
+        assert_eq!(backward.cursor.x, 5);
+        assert_eq!(selection.anchor, PointCoordinate { x: 9, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 0, y: row });
+    }
+
+    #[test]
     fn selection_mode_line_widens_the_live_selection_to_whole_lines() {
         let mode = run_copy_actions(
             b"one\r\ntwo\r\nthree",
@@ -17512,10 +17574,11 @@ mod tests {
             20,
             2,
             PointCoordinate { x: 7, y: 0 },
-            &[CopyModeAction::SelectWord, CopyModeAction::Right],
+            &[CopyModeAction::SelectWord],
         );
         let row = word.cursor.y;
         let selection = word.selection.expect("selection");
+        assert_eq!(word.cursor, PointCoordinate { x: 9, y: row });
         assert_eq!(selection.anchor, PointCoordinate { x: 6, y: row });
         assert_eq!(selection.focus, PointCoordinate { x: 9, y: row });
 

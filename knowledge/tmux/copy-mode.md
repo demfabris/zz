@@ -184,11 +184,23 @@ takes `char`/`c`, `word`/`w`, and `line`/`l` case-insensitively, defaults to `ch
 argument, and silently does nothing for a name it does not recognise. While the unit is `word` or
 `line`, every cursor move re-derives both selection ends from the origin: forward of the origin the
 anchor sits at the start of the origin's word or logical line and the focus at the end of the
-cursor's, and behind it the two swap. `begin-selection`, `other-end`, and `clear-selection` reset
+cursor's, and behind it the two swap. A cursor parked in whitespace resolves outward to the
+neighboring word, matching the pin, and `select-word` leaves the cursor on the last cell of the
+word it selected rather than where it started. `begin-selection`, `other-end`, and `clear-selection` reset
 the unit to `char`; `select-word` and `select-line` arm `word` and `line`. `stop-selection` is typed
 apart from `clear-selection`: it stops the selection following the cursor and resets the unit but
 leaves the painted range, while `clear-selection` drops the range too. Search-driven cursor sync
 still extends by cell, because the search path does not carry `word-separators`.
+
+Two measured divergences stay: the pin only records the raw reset bounds a word or line selection
+falls back to inside `select-word` and `select-line`, so `begin-selection` followed by
+`selection-mode word` extends against stale bounds there, while zz always derives them from the
+selection origin and produces the wider, consistent range. And a `line` selection's far edge sits at
+the last column of the row instead of the pin's content length, which is zz's existing `select-line`
+shape; the formatter trims each row, so the copied text is the same. The pinned probe recipe is a
+throwaway `-L zzprobe-$$` server plus
+`display-message -p '#{selection_mode}|#{copy_cursor_x}|#{selection_start_x}-#{selection_end_x}'`,
+which reads copy-mode state without an attached client.
 
 # Selection text
 

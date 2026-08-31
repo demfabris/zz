@@ -93,7 +93,7 @@ unsupported `window-copy` actions below remain open.
 | Page/history | `page-up/down`, `halfpage-up/down`, `scroll-up/down`, `scroll-middle`, `goto-line`, `history-top`, `history-bottom`, `top-line`, `middle-line`, `bottom-line` |
 | Semantic prompt | `next-prompt`, `previous-prompt` (`-o` = output only, via OSC 133 marks) |
 | Search | `search-again`, `search-reverse`, cursor-word forward/backward actions used by `*`/`#` |
-| Selection | `begin-selection`, `select-word`, `select-line`, `clear-selection`/`stop-selection`, `clear-selection-or-cancel`, `other-end` |
+| Selection | `begin-selection`, `select-word`, `select-line`, `selection-mode`, `clear-selection`, `stop-selection`, `clear-selection-or-cancel`, `other-end` |
 | Rectangle | `rectangle-toggle`, `rectangle-on`, `rectangle-off` |
 | Marks | `set-mark`, `jump-to-mark` |
 | Character jump | `jump-forward`, `jump-backward`, `jump-to-forward`, `jump-to-backward` (capture one target key), `jump-again`, `jump-reverse`, `next-matching-bracket` |
@@ -101,11 +101,19 @@ unsupported `window-copy` actions below remain open.
 | Pipe | `copy-pipe`, `copy-pipe-no-clear`, `copy-pipe-and-cancel`, `pipe`, `pipe-no-clear`, `pipe-and-cancel` |
 | Exit | `cancel`, `clear-selection-or-cancel` (exits only with no selection) |
 
-The pinned `window-copy` command table contains 95 action names. zz currently maps 66 to typed mux
-and terminal behavior; 29 remain missing. `copy-mode.action-fidelity` keeps those 29 names explicit
-across seven categories: vocabulary, cursor geometry, logical-line and mode-key behavior, goto-line,
-selection lifecycle, jump/page/prompt actions, and copy formatting and destination effects. The
-table above describes the mapped surface. It is not a complete inventory of the pin.
+The pinned `window-copy` command table contains 95 action names, and
+[`crates/zz-mux/src/copy_actions.rs`](/crates/zz-mux.md) is the source-owned inventory of all of
+them: each carries the behavior category that owns it and the pin's `WINDOW_COPY_CMD_FLAG_READONLY`
+bit, while support is derived from the `send-keys -X` parser rather than stored. The categories are
+the `copy-mode.action-fidelity` items: vocabulary, cursor geometry, logical-line and mode-key
+behavior, goto-line, selection lifecycle, jump/page/prompt actions, and copy formatting and
+destination effects. Its tests pin the mapped count, assert every mapped name reproduces the pin's
+read-only classification, and list the missing names per category, so mapping one action shrinks
+that list instead of drifting from the code. The table above describes the mapped surface only.
+
+Because a detached `send-keys -X` fails on the pin with `not in a mode`, an action zz has not mapped
+exits zero where tmux exits one. `compat/scenarios/copy-mode-*.txt` measure exactly that: a name in
+one of those corpora is proof it reaches a typed action, not proof of its semantics.
 
 `top-line`, `middle-line`, and `bottom-line` now set the copy cursor's column to zero and place its
 row at the top, middle, or bottom of the current frozen viewport. They preserve the viewport offset
@@ -133,6 +141,20 @@ represented as no buffered count, so a following `5` starts at five rather than 
 fifteen. Bare `0` remains `start-of-line`; counted `Escape` runs clear-selection once. Empty
 `send-keys -N <n> -X` still needs tmux's pane-owned prefix persistence and remains tracked under
 `terminal.key-control`.
+
+## Selection lifecycle
+
+The pin's `selflag` is the unit a live selection extends by, and zz keeps it on the frozen mode as
+`selection_mode` alongside the raw `selection_origin` the selection started from. `selection-mode`
+takes `char`/`c`, `word`/`w`, and `line`/`l` case-insensitively, defaults to `char` with no
+argument, and silently does nothing for a name it does not recognise. While the unit is `word` or
+`line`, every cursor move re-derives both selection ends from the origin: forward of the origin the
+anchor sits at the start of the origin's word or logical line and the focus at the end of the
+cursor's, and behind it the two swap. `begin-selection`, `other-end`, and `clear-selection` reset
+the unit to `char`; `select-word` and `select-line` arm `word` and `line`. `stop-selection` is typed
+apart from `clear-selection`: it stops the selection following the cursor and resets the unit but
+leaves the painted range, while `clear-selection` drops the range too. Search-driven cursor sync
+still extends by cell, because the search path does not carry `word-separators`.
 
 # Selection text
 

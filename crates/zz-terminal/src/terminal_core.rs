@@ -24,9 +24,9 @@ pub use appearance::{
 pub use input::{KeyAction, KeyCode, KeyInput, Modifiers};
 pub use interaction::{
     ClipboardTarget, CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy,
-    CopyModeCountPolicy, PasteBufferAction, PointerCellEvent, SearchCase, SearchDirection,
-    SearchMode, SearchQuery, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
-    TerminalViewAction, TerminalViewId,
+    CopyModeCountPolicy, CopySelectionMode, PasteBufferAction, PointerCellEvent, SearchCase,
+    SearchDirection, SearchMode, SearchQuery, TerminalMouseButton, TerminalMouseInput,
+    TerminalMousePhase, TerminalViewAction, TerminalViewId,
 };
 pub use model::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,

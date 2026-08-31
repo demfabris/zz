@@ -5,6 +5,7 @@
 mod command;
 #[cfg(test)]
 mod compat_manifest_tests;
+mod copy_actions;
 mod formats;
 mod honest_knobs;
 mod layout;
@@ -31,6 +32,10 @@ pub use command::{
     accepted_native_literal_format_context_scopes, missing_derived_format_context_families,
     missing_literal_format_context_scopes, mux_derived_format_context_families,
     mux_literal_format_context_scopes,
+};
+pub use copy_actions::{
+    CopyActionCategory, PINNED_COPY_MODE_ACTIONS, PinnedCopyAction, copy_mode_action_is_mapped,
+    missing_copy_mode_actions, pinned_copy_action,
 };
 pub use formats::{
     FormatClient, TmuxColour, delegated_format_variable_names, display_width, format_true,

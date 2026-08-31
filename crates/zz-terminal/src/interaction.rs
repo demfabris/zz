@@ -352,6 +352,18 @@ pub enum CopyModeAction {
     CopyEndOfLine(Box<CopyModeCopy>),
     GotoLine(u32),
     PageDownScrollExit,
+    SelectionMode(CopySelectionMode),
+    /// Stop the selection following the cursor without clearing it.
+    StopSelection,
+}
+
+/// The pin's `selflag`: the unit a live selection extends by.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CopySelectionMode {
+    #[default]
+    Char,
+    Word,
+    Line,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -426,6 +438,8 @@ impl CopyModeAction {
             | Self::Cancel
             | Self::ScrollMiddle
             | Self::SearchCursorWord { .. }
+            | Self::SelectionMode(_)
+            | Self::StopSelection
             | Self::GotoLine(_) => CopyModeCountPolicy::Once,
         }
     }

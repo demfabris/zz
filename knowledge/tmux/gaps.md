@@ -473,7 +473,7 @@ Config diagnostics remain generic Warning events that Control classifies by Engl
 
 ### `control-mode.disconnect-cancels-command-queue`: Cancel client-owned Control queues after connection loss
 
-zz now cancels a background if-shell or run-shell callback when its origin is gone before callback entry, but immediate hook and source replay has no connection-owned cancellation token once command execution has started. Pinned tmux frees the remaining client-owned queue on hard connection loss while letting the in-flight worker finish; graceful Return follows a different drain path.
+zz now cancels a background if-shell or run-shell callback when its origin is gone before callback entry, but immediate hook and source replay has no connection-owned cancellation token once command execution has started. Pinned tmux frees the remaining client-owned queue on hard connection loss while letting the in-flight worker finish. Graceful EOF follows a different drain path, measured against the pin on 2026-08-31: stdin lines that arrive together run until the queue blocks, so the pin executes every queued command up to and including the first queue-yielding one and discards the rest, and executes all of them when none yields. zz's control client truncates the pending stdin queue to a single command (retain_first_initial_stdin_before_eof in crates/zz/src/control_mode.rs), which only matches the shape where the first queued command blocks.
 
 - Decision: `adopt`
 - Status: `open`

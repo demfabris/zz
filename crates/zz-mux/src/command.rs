@@ -13971,6 +13971,7 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::TogglePosition
             | CopyModeAction::RecentreTopBottom
             | CopyModeAction::NextMatchingBracket
+            | CopyModeAction::PreviousMatchingBracket
             | CopyModeAction::GotoLine(_)
             | CopyModeAction::PageDownScrollExit
             | CopyModeAction::HalfPageDownScrollExit
@@ -14069,6 +14070,7 @@ fn copy_mode_action(
         "scroll-exit-toggle" => Some(CopyModeAction::ScrollExitToggle),
         "goto-line" => copy_goto_line_action(&arguments),
         "next-matching-bracket" => Some(CopyModeAction::NextMatchingBracket),
+        "previous-matching-bracket" => Some(CopyModeAction::PreviousMatchingBracket),
         "search-forward-cursor-word" => Some(CopyModeAction::SearchCursorWord {
             direction: SearchDirection::Forward,
         }),

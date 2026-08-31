@@ -372,6 +372,7 @@ pub enum CopyModeAction {
     /// Flip the mode's position readout, the pin's `hide_position`.
     TogglePosition,
     RecentreTopBottom,
+    PreviousMatchingBracket,
 }
 
 /// The pin's `selflag`: the unit a live selection extends by.
@@ -427,6 +428,7 @@ impl CopyModeAction {
             | Self::NextParagraph
             | Self::PreviousParagraph
             | Self::NextMatchingBracket
+            | Self::PreviousMatchingBracket
             | Self::HalfPageDownScrollExit
             | Self::ScrollDownAndCancel
             | Self::Jump(_)

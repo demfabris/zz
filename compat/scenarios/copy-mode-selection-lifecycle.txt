@@ -1,0 +1,28 @@
+# Every selection-lifecycle name in the pin's window-copy table reaches a typed
+# copy action, so a detached `send-keys -X` fails on both sides instead of
+# succeeding silently on zz. Unmapped names still exit zero here, which is what
+# this corpus measures.
+send-keys -t =w:0.0 -X begin-selection
+send-keys -t =w:0.0 -X select-word
+send-keys -t =w:0.0 -X select-line
+send-keys -t =w:0.0 -X other-end
+send-keys -t =w:0.0 -X rectangle-on
+send-keys -t =w:0.0 -X rectangle-off
+send-keys -t =w:0.0 -X rectangle-toggle
+send-keys -t =w:0.0 -X stop-selection
+send-keys -t =w:0.0 -X clear-selection
+
+# selection-mode takes the pin's full names and one-letter abbreviations, with
+# no argument meaning char.
+send-keys -t =w:0.0 -X selection-mode
+send-keys -t =w:0.0 -X selection-mode char
+send-keys -t =w:0.0 -X selection-mode c
+send-keys -t =w:0.0 -X selection-mode word
+send-keys -t =w:0.0 -X selection-mode w
+send-keys -t =w:0.0 -X selection-mode line
+send-keys -t =w:0.0 -X selection-mode l
+
+# Counted selection actions run once and keep the same exit class.
+send-keys -t =w:0.0 -N 3 -X select-line
+send-keys -t =w:0.0 -N 2 -X other-end
+send-keys -t =w:0.0 -N 4 -X selection-mode word

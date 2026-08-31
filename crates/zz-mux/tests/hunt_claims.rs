@@ -7,7 +7,7 @@ use zz_mux::{
 use zz_protocol::{
     Axis, ChooseTreeKind, CommandInvocation, KeyToken, LayoutNode, PaneId, ServerError,
 };
-use zz_terminal::{CopyModeAction, TerminalViewAction};
+use zz_terminal::{CopyModeAction, CopySelectionMode, TerminalViewAction};
 
 fn command(name: &str, args: &[&str]) -> CommandInvocation {
     CommandInvocation::new(name, args.iter().copied())
@@ -2273,4 +2273,76 @@ fn set_option_accepts_tmux_boolean_case_and_empty_toggle() {
             &command("set-option", &["synchronize-panes", ""]),
         )
         .unwrap();
+}
+
+#[test]
+fn selection_mode_takes_the_pins_names_abbreviations_and_silent_no_op() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+    for (argument, unit) in [
+        (None, CopySelectionMode::Char),
+        (Some("char"), CopySelectionMode::Char),
+        (Some("C"), CopySelectionMode::Char),
+        (Some("word"), CopySelectionMode::Word),
+        (Some("W"), CopySelectionMode::Word),
+        (Some("LINE"), CopySelectionMode::Line),
+        (Some("l"), CopySelectionMode::Line),
+    ] {
+        let mut arguments = vec!["-X", "selection-mode"];
+        arguments.extend(argument);
+        let execution = engine
+            .execute(&mut context, &command("send-keys", &arguments))
+            .unwrap();
+        assert_eq!(
+            execution.effects,
+            [MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(CopyModeAction::SelectionMode(unit)),
+            }],
+            "{argument:?}"
+        );
+    }
+    for arguments in [
+        &["-X", "selection-mode", "sentence"][..],
+        &["-X", "selection-mode", "word", "line"][..],
+    ] {
+        let execution = engine
+            .execute(&mut context, &command("send-keys", arguments))
+            .unwrap();
+        assert_eq!(
+            execution.effects,
+            [MuxEffect::CopyModeRepeat { pane, count: 1 }],
+            "{arguments:?}"
+        );
+    }
+}
+
+#[test]
+fn stop_selection_is_typed_apart_from_clear_selection() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+    for (name, action) in [
+        ("clear-selection", CopyModeAction::ClearSelection),
+        ("stop-selection", CopyModeAction::StopSelection),
+    ] {
+        let execution = engine
+            .execute(&mut context, &command("send-keys", &["-X", name]))
+            .unwrap();
+        assert_eq!(
+            execution.effects,
+            [MuxEffect::TerminalView {
+                pane,
+                action: TerminalViewAction::CopyMode(action),
+            }],
+            "{name}"
+        );
+    }
 }

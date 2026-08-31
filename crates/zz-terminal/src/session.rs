@@ -44,14 +44,15 @@ use thiserror::Error;
 use crate::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, ClipboardTarget, Color, CopyJump,
-    CopyJumpDirection, CopyModeAction, CopyModeCountPolicy, Cursor, CursorBlinkPolicy, CursorStyle,
-    GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME, KeyAction, KeyCode, KeyInput, KittyLayer,
-    KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES, OVERLAY_RECTANGLE, OverlayKind,
-    OverlaySpan, PackedCell, PackedStyle, PasteBufferAction, PointerCellEvent, ScrollbarState,
-    SearchCase, SearchDirection, SearchMode, SearchQuery, SearchStatus, SessionStatus,
-    TerminalAppearance, TerminalColorScheme, TerminalDictionary, TerminalMode, TerminalMouseButton,
-    TerminalMouseInput, TerminalMousePhase, TerminalPresentation, TerminalViewAction,
-    TerminalViewId, TerminalViewport, UnderlineStyle, WordSeparators,
+    CopyJumpDirection, CopyModeAction, CopyModeCountPolicy, CopySelectionMode, Cursor,
+    CursorBlinkPolicy, CursorStyle, GRAPHEME_TABLE_BIT, IMAGE_PLACEHOLDER_SCHEME, KeyAction,
+    KeyCode, KeyInput, KittyLayer, KittyPlacement, MAX_HISTORY_LIMIT, MAX_KITTY_IMAGE_BYTES,
+    OVERLAY_RECTANGLE, OverlayKind, OverlaySpan, PackedCell, PackedStyle, PasteBufferAction,
+    PointerCellEvent, ScrollbarState, SearchCase, SearchDirection, SearchMode, SearchQuery,
+    SearchStatus, SessionStatus, TerminalAppearance, TerminalColorScheme, TerminalDictionary,
+    TerminalMode, TerminalMouseButton, TerminalMouseInput, TerminalMousePhase,
+    TerminalPresentation, TerminalViewAction, TerminalViewId, TerminalViewport, UnderlineStyle,
+    WordSeparators,
 };
 
 mod mode_revision;
@@ -1909,6 +1910,8 @@ struct CopyModeState {
     scroll_exit: bool,
     hide_position: bool,
     selection: Option<ModeSelection>,
+    selection_mode: CopySelectionMode,
+    selection_origin: PointCoordinate,
     mark: Option<PointCoordinate>,
     last_jump: Option<CopyJump>,
     selecting: bool,
@@ -6145,6 +6148,8 @@ fn enter_copy_mode(
         scroll_exit,
         hide_position,
         selection: None,
+        selection_mode: CopySelectionMode::Char,
+        selection_origin: PointCoordinate { x: 0, y: 0 },
         mark: None,
         last_jump: None,
         selecting: false,
@@ -7386,7 +7391,7 @@ fn apply_copy_mode_action(
             }
             move_copy_cursor(&mut mode, movement, word_separators);
             if mode.selecting {
-                update_copy_selection(&mut mode);
+                update_copy_selection(&mut mode, Some(word_separators));
             }
             if scroll_exit && copy_mode_scroll_exit_ready(&mode) {
                 return cancel_copy_mode(terminal, selection, unseen_output);
@@ -7401,7 +7406,7 @@ fn apply_copy_mode_action(
             }
             scroll_copy_cursor(&mut mode, !scrolls_toward_bottom);
             if mode.selecting {
-                update_copy_selection(&mut mode);
+                update_copy_selection(&mut mode, Some(word_separators));
             }
             if scrolls_toward_bottom && mode.scroll_exit && copy_mode_scroll_exit_ready(&mode) {
                 return cancel_copy_mode(terminal, selection, unseen_output);
@@ -7426,6 +7431,8 @@ fn apply_copy_mode_action(
                 mode: SelectionMode::Cell,
                 rectangle: mode.rectangle,
             });
+            mode.selection_mode = CopySelectionMode::Char;
+            mode.selection_origin = mode.cursor;
             mode.selecting = true;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -7438,6 +7445,8 @@ fn apply_copy_mode_action(
                 mode: SelectionMode::Word,
                 rectangle: false,
             });
+            mode.selection_mode = CopySelectionMode::Word;
+            mode.selection_origin = mode.cursor;
             mode.selecting = true;
             mode.rectangle = false;
             *copy_mode = Some(mode);
@@ -7452,6 +7461,7 @@ fn apply_copy_mode_action(
             *selection = None;
             terminal.set_selection(None)?;
             mode.selection = None;
+            mode.selection_mode = CopySelectionMode::Char;
             mode.selecting = false;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -7460,6 +7470,7 @@ fn apply_copy_mode_action(
             *selection = None;
             terminal.set_selection(None)?;
             mode.selection = None;
+            mode.selection_mode = CopySelectionMode::Char;
             mode.selecting = false;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -7471,7 +7482,7 @@ fn apply_copy_mode_action(
                 mode.selecting = true;
             }
             if mode.selecting {
-                update_copy_selection(&mut mode);
+                update_copy_selection(&mut mode, Some(word_separators));
             }
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -7483,15 +7494,17 @@ fn apply_copy_mode_action(
                 mode.selecting = true;
             }
             if mode.selecting {
-                update_copy_selection(&mut mode);
+                update_copy_selection(&mut mode, Some(word_separators));
             }
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
         CopyModeAction::OtherEnd => {
+            mode.selection_mode = CopySelectionMode::Char;
             if let Some(selection) = mode.selection.as_mut() {
                 std::mem::swap(&mut selection.anchor, &mut selection.focus);
                 mode.cursor = selection.focus;
+                mode.selection_origin = mode.cursor;
                 mode.selecting = true;
                 reveal_copy_cursor(&mut mode);
             }
@@ -7507,7 +7520,7 @@ fn apply_copy_mode_action(
             apply_copy_jump(&mut mode, &jump, false);
             mode.last_jump = Some(jump);
             if mode.selecting {
-                update_copy_selection(&mut mode);
+                update_copy_selection(&mut mode, Some(word_separators));
             }
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -7522,7 +7535,7 @@ fn apply_copy_mode_action(
                 }
                 apply_copy_jump(&mut mode, &jump, true);
                 if mode.selecting {
-                    update_copy_selection(&mut mode);
+                    update_copy_selection(&mut mode, Some(word_separators));
                 }
             }
             *copy_mode = Some(mode);
@@ -7566,6 +7579,17 @@ fn apply_copy_mode_action(
                 CopyModeAction::CopySelection(copy),
                 word_separators,
             )
+        }
+        CopyModeAction::SelectionMode(unit) => {
+            mode.selection_mode = unit;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::StopSelection => {
+            mode.selection_mode = CopySelectionMode::Char;
+            mode.selecting = false;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
         }
         CopyModeAction::SearchAgain { .. } | CopyModeAction::SearchCursorWord { .. } => {
             *copy_mode = Some(mode);
@@ -7671,6 +7695,7 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
     if count == 0 {
         return;
     }
+    let origin = mode.cursor;
     let (anchor, mut focus) = mode_logical_line_bounds(&mode.revision, mode.cursor.y);
     for _ in 1..count {
         let next = focus.y.saturating_add(1);
@@ -7693,6 +7718,8 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
         mode: SelectionMode::Line,
         rectangle: false,
     });
+    mode.selection_mode = CopySelectionMode::Line;
+    mode.selection_origin = origin;
     mode.selecting = true;
     mode.rectangle = false;
     reveal_copy_cursor(mode);
@@ -8493,9 +8520,44 @@ fn copy_word_class(
     })
 }
 
-fn update_copy_selection(mode: &mut CopyModeState) {
-    if let Some(selection) = mode.selection.as_mut() {
-        selection.focus = mode.cursor;
+fn update_copy_selection(mode: &mut CopyModeState, word_separators: Option<&WordSeparators>) {
+    let unit = mode.selection_mode;
+    let origin = mode.selection_origin;
+    let cursor = mode.cursor;
+    let revision = Arc::clone(&mode.revision);
+    let Some(selection) = mode.selection.as_mut() else {
+        return;
+    };
+    selection.focus = cursor;
+    match unit {
+        CopySelectionMode::Char => {}
+        CopySelectionMode::Word => {
+            let Some(separators) = word_separators else {
+                return;
+            };
+            let (origin_start, origin_end) = mode_word_bounds(&revision, origin, separators);
+            let (cursor_start, cursor_end) = mode_word_bounds(&revision, cursor, separators);
+            if (cursor.y, cursor.x) >= (origin.y, origin.x) {
+                selection.anchor = origin_start;
+                selection.focus = cursor_end;
+            } else {
+                selection.anchor = origin_end;
+                selection.focus = cursor_start;
+            }
+            selection.mode = SelectionMode::Word;
+        }
+        CopySelectionMode::Line => {
+            let (origin_start, origin_end) = mode_logical_line_bounds(&revision, origin.y);
+            let (cursor_start, cursor_end) = mode_logical_line_bounds(&revision, cursor.y);
+            if cursor.y >= origin.y {
+                selection.anchor = origin_start;
+                selection.focus = cursor_end;
+            } else {
+                selection.anchor = origin_end;
+                selection.focus = cursor_start;
+            }
+            selection.mode = SelectionMode::Line;
+        }
     }
 }
 
@@ -9295,7 +9357,7 @@ fn sync_copy_cursor_to_search(copy_mode: &mut CopyModeSlot, search: Option<&Sear
     });
     reveal_copy_cursor(mode);
     if mode.selecting {
-        update_copy_selection(mode);
+        update_copy_selection(mode, None);
     }
 }
 
@@ -17115,5 +17177,280 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    fn selection_lifecycle_fixture(
+        text: &[u8],
+        cols: u16,
+        rows: u16,
+    ) -> (Option<SelectionState>, CopyModeSlot) {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols,
+            rows,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(text);
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        (selection, copy_mode)
+    }
+
+    fn run_copy_actions(
+        text: &[u8],
+        cols: u16,
+        rows: u16,
+        start: PointCoordinate,
+        actions: &[CopyModeAction],
+    ) -> CopyModeState {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols,
+            rows,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(text);
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let row = copy_mode.as_ref().expect("mode").viewport_offset;
+        copy_mode.as_mut().expect("mode").cursor = PointCoordinate {
+            x: start.x,
+            y: row.saturating_add(start.y),
+        };
+        let mut unseen_output = 0;
+        for action in actions {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                action.clone(),
+                &WordSeparators::default(),
+            )
+            .expect("copy action");
+        }
+        *copy_mode.expect("mode survives the sequence")
+    }
+
+    #[test]
+    fn selection_mode_word_widens_the_live_selection_to_whole_words() {
+        let forward = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 2, y: 0 },
+            &[
+                CopyModeAction::StartSelection,
+                CopyModeAction::SelectionMode(CopySelectionMode::Word),
+                CopyModeAction::Right,
+                CopyModeAction::Right,
+                CopyModeAction::Right,
+                CopyModeAction::Right,
+                CopyModeAction::Right,
+            ],
+        );
+        let row = forward.cursor.y;
+        let selection = forward.selection.expect("selection");
+        assert_eq!(forward.cursor.x, 7);
+        assert_eq!(selection.anchor, PointCoordinate { x: 0, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 9, y: row });
+        assert_eq!(selection.mode, SelectionMode::Word);
+
+        let backward = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 7, y: 0 },
+            &[
+                CopyModeAction::StartSelection,
+                CopyModeAction::SelectionMode(CopySelectionMode::Word),
+                CopyModeAction::Left,
+                CopyModeAction::Left,
+                CopyModeAction::Left,
+                CopyModeAction::Left,
+                CopyModeAction::Left,
+            ],
+        );
+        let row = backward.cursor.y;
+        let selection = backward.selection.expect("selection");
+        assert_eq!(backward.cursor.x, 2);
+        assert_eq!(selection.anchor, PointCoordinate { x: 9, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 0, y: row });
+    }
+
+    #[test]
+    fn selection_mode_line_widens_the_live_selection_to_whole_lines() {
+        let mode = run_copy_actions(
+            b"one\r\ntwo\r\nthree",
+            10,
+            3,
+            PointCoordinate { x: 1, y: 0 },
+            &[
+                CopyModeAction::StartSelection,
+                CopyModeAction::SelectionMode(CopySelectionMode::Line),
+                CopyModeAction::Down,
+            ],
+        );
+        let selection = mode.selection.expect("selection");
+        let origin = mode.cursor.y.saturating_sub(1);
+        assert_eq!(selection.anchor, PointCoordinate { x: 0, y: origin });
+        assert_eq!(
+            selection.focus,
+            PointCoordinate {
+                x: mode.revision.columns - 1,
+                y: mode.cursor.y,
+            }
+        );
+        assert_eq!(selection.mode, SelectionMode::Line);
+    }
+
+    #[test]
+    fn begin_selection_and_other_end_reset_the_selection_unit_to_characters() {
+        let mode = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 2, y: 0 },
+            &[
+                CopyModeAction::SelectionMode(CopySelectionMode::Word),
+                CopyModeAction::StartSelection,
+                CopyModeAction::Right,
+                CopyModeAction::Right,
+            ],
+        );
+        let row = mode.cursor.y;
+        let selection = mode.selection.expect("selection");
+        assert_eq!(selection.anchor, PointCoordinate { x: 2, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 4, y: row });
+        assert_eq!(selection.mode, SelectionMode::Cell);
+
+        let swapped = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 2, y: 0 },
+            &[
+                CopyModeAction::SelectWord,
+                CopyModeAction::OtherEnd,
+                CopyModeAction::Right,
+            ],
+        );
+        let row = swapped.cursor.y;
+        let selection = swapped.selection.expect("selection");
+        assert_eq!(selection.anchor, PointCoordinate { x: 4, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 1, y: row });
+    }
+
+    #[test]
+    fn select_word_and_select_line_arm_their_own_selection_units() {
+        let word = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 7, y: 0 },
+            &[CopyModeAction::SelectWord, CopyModeAction::Right],
+        );
+        let row = word.cursor.y;
+        let selection = word.selection.expect("selection");
+        assert_eq!(selection.anchor, PointCoordinate { x: 6, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 9, y: row });
+
+        let line = run_copy_actions(
+            b"one\r\ntwo\r\nthree",
+            10,
+            3,
+            PointCoordinate { x: 1, y: 0 },
+            &[CopyModeAction::SelectLine, CopyModeAction::Down],
+        );
+        let selection = line.selection.expect("selection");
+        assert_eq!(selection.mode, SelectionMode::Line);
+        assert_eq!(
+            selection.focus,
+            PointCoordinate {
+                x: line.revision.columns - 1,
+                y: line.cursor.y,
+            }
+        );
+    }
+
+    #[test]
+    fn stop_selection_freezes_the_range_while_clear_selection_drops_it() {
+        let stopped = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 2, y: 0 },
+            &[
+                CopyModeAction::StartSelection,
+                CopyModeAction::Right,
+                CopyModeAction::StopSelection,
+                CopyModeAction::Right,
+                CopyModeAction::Right,
+            ],
+        );
+        let row = stopped.cursor.y;
+        let selection = stopped
+            .selection
+            .expect("selection outlives stop-selection");
+        assert!(!stopped.selecting);
+        assert_eq!(stopped.cursor.x, 5);
+        assert_eq!(selection.anchor, PointCoordinate { x: 2, y: row });
+        assert_eq!(selection.focus, PointCoordinate { x: 3, y: row });
+
+        let cleared = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 2, y: 0 },
+            &[
+                CopyModeAction::StartSelection,
+                CopyModeAction::Right,
+                CopyModeAction::ClearSelection,
+            ],
+        );
+        assert!(cleared.selection.is_none());
+        assert!(!cleared.selecting);
+    }
+
+    #[test]
+    fn rectangle_toggles_keep_the_live_selection_and_survive_entry_defaults() {
+        let (_, copy_mode) = selection_lifecycle_fixture(b"alpha beta", 20, 2);
+        let mode = copy_mode.expect("mode");
+        assert!(!mode.rectangle);
+        assert_eq!(mode.selection_mode, CopySelectionMode::Char);
+
+        let toggled = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 2, y: 0 },
+            &[
+                CopyModeAction::StartSelection,
+                CopyModeAction::Right,
+                CopyModeAction::ToggleRectangle,
+            ],
+        );
+        assert!(toggled.rectangle);
+        let selection = toggled.selection.expect("selection");
+        assert!(selection.rectangle);
+        assert!(toggled.selecting);
+
+        let off = run_copy_actions(
+            b"alpha beta gamma",
+            20,
+            2,
+            PointCoordinate { x: 2, y: 0 },
+            &[
+                CopyModeAction::StartSelection,
+                CopyModeAction::RectangleOn,
+                CopyModeAction::RectangleOff,
+            ],
+        );
+        assert!(!off.rectangle);
+        assert!(!off.selection.expect("selection").rectangle);
     }
 }

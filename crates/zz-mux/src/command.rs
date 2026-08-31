@@ -21,8 +21,8 @@ use zz_protocol::{
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy,
-    DEFAULT_HISTORY_LIMIT, DEFAULT_WORD_SEPARATORS, MAX_HISTORY_LIMIT, PasteBufferAction,
-    SearchDirection, TerminalViewAction,
+    CopySelectionMode, DEFAULT_HISTORY_LIMIT, DEFAULT_WORD_SEPARATORS, MAX_HISTORY_LIMIT,
+    PasteBufferAction, SearchDirection, TerminalViewAction,
 };
 
 use crate::{
@@ -30,6 +30,7 @@ use crate::{
     SplitPlacement, SplitSize as LayoutSplitSize, StatusContext, StatusFormats, StatusOption,
     TmuxSort, TmuxSortOrder, VisualBell, WindowSize, WindowStatusFormats, WindowStatusOption,
     canonical_command, command_spec,
+    copy_actions::pinned_copy_action,
     formats::{
         CommandHooks, FormatClient, FormatContext, FormatType, StatusHooks,
         expand_format_time_with_hooks, expand_format_with_hooks, format_true, parse_tmux_colour,
@@ -13979,44 +13980,34 @@ pub fn send_keys_is_read_only_safe(args: &[String]) -> Result<bool, ServerError>
     let Some(command) = positional.first() else {
         return Ok(true);
     };
-    if PINNED_UNSAFE_COPY_MODE_COMMANDS.contains(&command.as_str()) {
-        return Ok(false);
+    let probe = copy_mode_probe_action(command);
+    if probe.is_none()
+        && let Some(pinned) = pinned_copy_action(command)
+    {
+        return Ok(pinned.read_only);
     }
     if let Ok(Some(action)) = copy_mode_action(command, &positional[1..], SetClipboard::Off, "") {
         return Ok(copy_mode_action_is_read_only_safe(&action));
     }
-    let probe_argument = match command.as_str() {
-        "goto-line" => Some("1"),
-        "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward" => Some("x"),
-        _ => None,
-    };
-    let probe_arguments = probe_argument
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    Ok(
-        copy_mode_action(command, &probe_arguments, SetClipboard::Off, "")?
-            .as_ref()
-            .is_none_or(copy_mode_action_is_read_only_safe),
-    )
+    Ok(probe
+        .as_ref()
+        .is_none_or(copy_mode_action_is_read_only_safe))
 }
 
-const PINNED_UNSAFE_COPY_MODE_COMMANDS: &[&str] = &[
-    "copy-line",
-    "copy-line-and-cancel",
-    "copy-pipe-line",
-    "copy-pipe-line-and-cancel",
-    "scroll-exit-on",
-    "scroll-exit-off",
-    "scroll-exit-toggle",
-    "search-backward",
-    "search-backward-text",
-    "search-backward-incremental",
-    "search-forward",
-    "search-forward-text",
-    "search-forward-incremental",
-    "selection-mode",
-];
+/// The action a bare `-X <command>` maps to, with the one mandatory argument
+/// supplied for the names that require one.
+pub(crate) fn copy_mode_probe_action(command: &str) -> Option<CopyModeAction> {
+    let arguments = match command {
+        "goto-line" => vec!["1".to_owned()],
+        "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward" => {
+            vec!["x".to_owned()]
+        }
+        _ => Vec::new(),
+    };
+    copy_mode_action(command, &arguments, SetClipboard::Off, "")
+        .ok()
+        .flatten()
+}
 
 fn copy_mode_action(
     command: &str,
@@ -14071,7 +14062,10 @@ fn copy_mode_action(
         "begin-selection" => Some(CopyModeAction::StartSelection),
         "select-word" => Some(CopyModeAction::SelectWord),
         "select-line" => Some(CopyModeAction::SelectLine),
-        "clear-selection" | "stop-selection" => Some(CopyModeAction::ClearSelection),
+        "selection-mode" => copy_selection_mode(arguments.first().map(String::as_str))
+            .map(CopyModeAction::SelectionMode),
+        "clear-selection" => Some(CopyModeAction::ClearSelection),
+        "stop-selection" => Some(CopyModeAction::StopSelection),
         "clear-selection-or-cancel" => Some(CopyModeAction::ClearSelectionOrCancel),
         "rectangle-toggle" => Some(CopyModeAction::ToggleRectangle),
         "rectangle-on" => Some(CopyModeAction::RectangleOn),
@@ -14197,7 +14191,8 @@ fn copy_mode_action_options(command: &str, arguments: &[String]) -> Option<(Opti
         | "copy-line-and-cancel"
         | "pipe"
         | "pipe-no-clear"
-        | "pipe-and-cancel" => (0, 1),
+        | "pipe-and-cancel"
+        | "selection-mode" => (0, 1),
         "copy-pipe"
         | "copy-pipe-no-clear"
         | "copy-pipe-and-cancel"
@@ -14218,6 +14213,24 @@ fn copy_end_of_line_action(action: CopyModeAction) -> CopyModeAction {
         unreachable!("copy helper always returns a selection action");
     };
     CopyModeAction::CopyEndOfLine(copy)
+}
+
+/// `None` is the pin's silent no-op for a name it does not recognise, which
+/// leaves the live selection unit alone.
+fn copy_selection_mode(argument: Option<&str>) -> Option<CopySelectionMode> {
+    match argument {
+        None => Some(CopySelectionMode::Char),
+        Some(value) if value.eq_ignore_ascii_case("char") || value.eq_ignore_ascii_case("c") => {
+            Some(CopySelectionMode::Char)
+        }
+        Some(value) if value.eq_ignore_ascii_case("word") || value.eq_ignore_ascii_case("w") => {
+            Some(CopySelectionMode::Word)
+        }
+        Some(value) if value.eq_ignore_ascii_case("line") || value.eq_ignore_ascii_case("l") => {
+            Some(CopySelectionMode::Line)
+        }
+        Some(_) => None,
+    }
 }
 
 fn copy_goto_line_action(arguments: &[String]) -> Option<CopyModeAction> {
@@ -22247,10 +22260,12 @@ mod tests {
                 "{arguments:?}"
             );
         }
-        for command in PINNED_UNSAFE_COPY_MODE_COMMANDS {
-            assert!(
-                !send_keys_is_read_only_safe(&args(&["-X", command])).unwrap(),
-                "{command}"
+        for entry in crate::copy_actions::missing_copy_mode_actions() {
+            assert_eq!(
+                send_keys_is_read_only_safe(&args(&["-X", entry.name])),
+                Ok(entry.read_only),
+                "{}",
+                entry.name
             );
         }
     }

@@ -84,13 +84,20 @@ commit with `git ls-remote origin`, which fails elsewhere.
    is normal.
 5. One commit, no attribution trailers, then
    `git push origin HEAD:campaign/<front-id>` and post `candidate` with your
-   proof lines.
+   proof lines. A repaired or rebased repost never moves a published branch:
+   push a fresh immutable branch (`campaign/<front-id>-<short-sha>`) and post
+   a new candidate record. Never force-update any campaign branch.
 6. Integrate it yourself: `claim MAIN --lease 2h`. Holding MAIN, rebase onto
    fresh origin/main, run the full gate from the issue (workspace tests, clippy,
    strict corpus with the attached fixture, registry close + tracker
    check/write-report, rollup counts), `git push origin HEAD:main`, post
    `integrated`, `release MAIN`. Only ever push `campaign/*` branches, plus
    main while holding MAIN, and never force-push anything.
+   Gate stages are long and verdicts land while they run: re-read your front's
+   comments between stages (after the workspace tests, before the corpus, and
+   always immediately before push). A standing DO-NOT-INTEGRATE found at any
+   of those checkpoints means stop the gate, release MAIN, and repair; do not
+   finish a gate you already know cannot be pushed.
    If `compat/board.py` is not on origin/main yet, merge
    `origin/campaign/board` as part of your first integration.
 7. Remove the worktree (`git worktree remove ../zz-<front-id>`) and go to 1.

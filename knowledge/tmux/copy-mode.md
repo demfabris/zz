@@ -182,13 +182,13 @@ nothing, and neither is reachable from the terminal actor, which does not see `m
 The pin's `selflag` is the unit a live selection extends by, and zz keeps it on the frozen mode as
 `selection_mode` alongside the raw `selection_origin` the selection started from. `selection-mode`
 takes `char`/`c`, `word`/`w`, and `line`/`l` case-insensitively, defaults to `char` with no
-argument, and silently does nothing for a name it does not recognise. While the unit is `word` or
+argument, and silently does nothing for a name it does not know. While the unit is `word` or
 `line`, every cursor move re-derives both selection ends from the origin: forward of the origin the
 anchor sits at the start of the origin's word or logical line and the focus at the end of the
 cursor's, and behind it the two swap. A cursor parked in whitespace resolves outward to the
 neighboring word, matching the pin, and `select-word` leaves the cursor on the last cell of the
-word it selected rather than where it started. `begin-selection`, `other-end`, and `clear-selection` reset
-the unit to `char`; `select-word` and `select-line` arm `word` and `line`. `stop-selection` is typed
+word it selected rather than where it started. `begin-selection`, `other-end`, and
+`clear-selection` reset the unit to `char`; `select-word` and `select-line` arm `word` and `line`. `stop-selection` is typed
 apart from `clear-selection`: it stops the selection following the cursor and resets the unit but
 leaves the painted range, while `clear-selection` drops the range too. Search-driven cursor sync
 still extends by cell, because the search path does not carry `word-separators`.

@@ -1409,7 +1409,8 @@ fn daemon_transport_failure(error: &DaemonError) -> bool {
         | DaemonError::AlreadyRunning(_)
         | DaemonError::Thread(_)
         | DaemonError::InsertedCommandParse(_)
-        | DaemonError::CommandExit { .. } => false,
+        | DaemonError::CommandExit { .. }
+        | DaemonError::ReportedCommandExit { .. } => false,
     }
 }
 

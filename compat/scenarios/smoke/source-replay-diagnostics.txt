@@ -1,0 +1,30 @@
+corpus: none
+set-buffer -b zz-source-replay-if 'if-shell -F 1 "{ display-message -p quoted }"'
+save-buffer -b zz-source-replay-if /tmp/zz-source-replay-if.conf
+source-file /tmp/zz-source-replay-if.conf
+set-buffer -b zz-source-replay-run 'run-shell -C "{ display-message -p quoted }"'
+save-buffer -b zz-source-replay-run /tmp/zz-source-replay-run.conf
+source-file /tmp/zz-source-replay-run.conf
+delete-buffer -b zz-source-replay-if
+delete-buffer -b zz-source-replay-run
+run-shell 'rm -f /tmp/zz-source-replay-if.conf /tmp/zz-source-replay-run.conf'
+stage: fixtures/source-replay-diagnostics.sh ~/source-replay-diagnostics.sh
+run-shell 'sh ~/source-replay-diagnostics.sh'
+out: show-environment -g SOURCE_REPLAY_CONTROL_DIAGNOSTICS
+out: show-environment -g SOURCE_REPLAY_ALIAS_LEAF_POLICY
+out: show-environment -g SOURCE_REPLAY_HOOK_CALLBACKS
+out: show-environment -g SOURCE_REPLAY_HOOK_NESTED_SOURCE
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_RUN
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_IF
+out: show-environment -g SOURCE_REPLAY_CONTROL_CALLBACK_ALIAS
+out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_RUN
+out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_IF
+out: show-environment -g SOURCE_REPLAY_CONTROL_RUNTIME_ALIAS_RUN_SHELL
+out: show-environment -g SOURCE_REPLAY_CONTROL_READ_RUN
+out: show-environment -g SOURCE_REPLAY_CONTROL_READ_IF
+out: show-environment -g SOURCE_REPLAY_CONTROL_READ_ALIAS_RUN_SHELL
+out: show-environment -g SOURCE_REPLAY_CONTROL_MIXED_SOURCE_FIRST
+out: show-environment -g SOURCE_REPLAY_CONTROL_MIXED_DIRECT_FIRST
+out: show-environment -g SOURCE_REPLAY_CONTROL_PARSER
+out: show-environment -g SOURCE_REPLAY_CONTROL_PARSER_NO_EXECUTE
+out: show-environment -g SOURCE_REPLAY_CONTROL_CONFIRM_ACCEPTED

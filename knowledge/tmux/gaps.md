@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **80**. Classified items: **543**.
+Tracked gap groups: **79**. Classified items: **532**.
 
-- Status: open: 32, blocked: 9, accepted: 39.
-- Decision: adopt: 37, native: 31, park: 4, never: 8.
-- Priority: later: 41, none: 39.
-- Closed history entries: 138.
-- Surface: command: 9, flag: 59, native-command: 21, option: 75, format: 69, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 84, presentation: 8, protocol: 2.
+- Status: open: 31, blocked: 9, accepted: 39.
+- Decision: adopt: 36, native: 31, park: 4, never: 8.
+- Priority: later: 40, none: 39.
+- Closed history entries: 139.
+- Surface: command: 9, flag: 53, native-command: 21, option: 75, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 83, presentation: 8, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 59 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 69 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 95 omitted default keys, 61 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 53 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 65 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 95 omitted default keys, 61 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -54,7 +54,7 @@ structure as proof.
 | `choosers.command-flags` | Complete chooser command controls | adopt | open | medium | daemon | daily, scripts | none |
 | `clients.path-encoding` | Preserve non-UTF-8 client facts | adopt | open | medium | protocol | scripts | none |
 | `display-message.format-listing` | List display-message format variables | adopt | open | medium | daemon | scripts, admin | formats.mouse-context, formats.pane-process, formats.pane-runtime, formats.terminal-cells, formats.terminal-runtime, formats.window-runtime |
-| `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | medium | mux | scripts | pane.selection-state |
+| `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | medium | mux | scripts | none |
 | `formats.window-runtime` | Expose remaining window formats | adopt | open | medium | daemon | scripts, remote | none |
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
@@ -89,7 +89,6 @@ structure as proof.
 | `options.pane-engine-knobs` | Consume the pane VT engine knobs | park | blocked | hard | terminal | daily, remote, scripts | none |
 | `options.remain-on-exit-format` | Render remain-on-exit-format in retained panes | adopt | blocked | hard | terminal | daily, scripts | none |
 | `pane.command-completion` | Complete two-phase pane command completion | adopt | open | hard | daemon | scripts, daily | none |
-| `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
 
@@ -520,7 +519,7 @@ The mux has no command-queue mouse record, so bare = currently reaches the ordin
 
 ### `display-message.pane-target-grammar`: Complete display-message pane target grammar
 
-The closed target-client slice proves exact session, window, and pane names plus numeric pane misses. zz's shared pane resolver still models only part of tmux's relative and special target vocabulary, and the bundled marked aliases cannot resolve until pane.selection-state supplies marked-pane identity.
+The closed target-client slice proves exact session, window, and pane names plus numeric pane misses. zz's shared pane resolver still models only part of tmux's relative and special target vocabulary. The marked aliases now have their prerequisite: pane.selection-state is closed and supplies marked-pane identity.
 
 - Decision: `adopt`
 - Status: `open`
@@ -528,7 +527,7 @@ The closed target-client slice proves exact session, window, and pane names plus
 - Owner: `mux`
 - User impact: scripts
 - Items: `semantic:display-message-relative-special-targets`
-- Depends on: `pane.selection-state`
+- Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/model.rs`
   - `resource:crates/zz-mux/src/command.rs`
@@ -1430,23 +1429,6 @@ In the pin a floating pane is a mux object: `new-pane` creates one by default, `
   - ``pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior.`
   - ``editor` keeps the pin's startup seeding from VISUAL or EDITOR and its vi or emacs key-table derivation, and stays store-only beyond that because its only read in the pin spawns a floating pane.`
 
-### `pane.selection-state`: Model pane selection controls
-
-Several flags need client input and marked-pane state that the mux does not retain.
-
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `later` / `hard`
-- Owner: `daemon`
-- User impact: daily, scripts
-- Items: `flag:select-pane:-M`, `flag:select-pane:-P`, `flag:select-pane:-d`, `flag:select-pane:-e`, `flag:select-pane:-g`, `flag:select-pane:-m`, `format:pane_marked`, `format:pane_marked_set`, `format:session_marked`, `format:window_marked_flag`, `semantic:window-marked-pane-format`
-- Depends on: none
-- Evidence:
-  - `resource:crates/zz-protocol/src/catalog.rs`
-  - `resource:knowledge/tmux/divergences.md`
-- Acceptance:
-  - `Pane input, style, title, mark, and clear-mark controls have target-aware state and format tests.`
-
 ### `pane.spawn-flags`: Complete split-window placement flags
 
 split-window -R/-s/-S/-T carry pinned style and title semantics with differential coverage (scenario pane-spawn-style-title-v2); -k and -m are remain-on-exit lifecycle flags owned by pane.command-completion groundwork and stay loudly unsupported until F-PANE-SPAWN-RETAIN-V3.
@@ -1805,6 +1787,7 @@ The mux cannot inspect cursor, history, or terminal mode state.
 | `options.show-options-hook-rows` | 2026-08-24 | With `-H`, `show-options` augments only no-positional listings with hook arrays in the pin's final option-table block and hook declaration order. Plain listings exclude hooks, named hook queries work without `-H`, server scope has none, and global-session, global-window, and inherited pane listings expose 57, 11, and 7 hooks. Empty, populated, indexed, named, value-only, pane-fallback, and whole-array-shadowing shapes match the pin, including the inherited empty array's `name*` in a full listing and bare `name` in a named query. `show-window-options` retains its surface without `-H`. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `scenario:compat/scenarios/show-options-hooks.txt`, `resource:knowledge/tmux/commands.md` |
 | `options.terminal-behavior` | 2026-09-01 | All eighteen options now carry an explicit decision instead of sitting in one undifferentiated basket. Seven went to `options.client-terminal-negotiation` as native: terminal-features, terminal-overrides, user-keys, extended-keys, and extended-keys-format all exist to rewrite or query a terminfo entry for a client terminal that zz's daemon never opens, xterm-keys is marked `no longer used` in the pin's own options table, and assume-paste-time is a heuristic the pin itself disables on any terminal reporting bracketed paste, which is every zz client. Eight went to `options.pane-engine-knobs` parked: allow-rename, alternate-screen, scroll-on-clear, backspace, get-clipboard, codepoint-widths, variation-selector-always-wide, and input-buffer-size each need a per-pane knob channel, and half of them additionally need a libghostty primitive that does not exist, with the pinned behavior for each measured into that group's reason on 2026-09-01. Two went to `options.client-attach-and-focus` parked: default-client-command and focus-follows-mouse are ordinary client work blocked only on option values reaching the client. `editor` went to `pane.floating-model`, which already owns the floating-pane stance its only pin-side read depends on, and whose startup seeding zz already reproduces exactly. Three tests derived from those pin measurements now hold the classification honest: zz-terminal proves `send-keys BSpace` writes the pin's default 0x7f and that clearing the whole screen leaves history alone, which is the pin's scroll-on-clear off case and the parked divergence, and zz-tui proves a bracketed-paste run carrying 0x02 arrives as one Paste rather than as a C-b key, which is the case the pin's own assume-paste-time guard skips. Nothing wire-reachable changed. | `resource:crates/zz-mux/src/honest_knobs.rs`, `resource:crates/zz-terminal/src/session.rs`, `resource:crates/zz-tui/src/terminal_event.rs`, `resource:crates/zz-tui/src/tty.rs`, `resource:knowledge/tmux/divergences.md` |
 | `options.window-status-separator` | 2026-08-24 | The daemon expands `window-status-separator` after each nonfinal item in the `status-format[]` window loop. It resolves the separator in that window's option and format context, including per-window overrides, nested formats, and style directives; the last item emits no separator. The TUI owns exact tmux row output. The native GUI derives its window controls from snapshot state and does not paint this separator. | `resource:crates/zz-mux/src/tmux_options.rs`, `file:crates/zz-daemon/src/status.rs`, `scenario:compat/scenarios/status-options.txt`, `resource:knowledge/tmux/status-line.md` |
+| `pane.selection-state` | 2026-09-01 | select-pane -m, -M, -d, -e, -g, and -P are promoted out of the unsupported catalog and the four marked formats now read live state. Measured on the pin with a throwaway server: the mark is one server-global tuple (server.c server_set_marked and cmd_find_valid_state), so `-m` on a second pane moves it, `-m` on the pane that already holds it clears it through server_is_marked, `-M` clears whatever holds it, and killing the marked pane drops it in window_lost_pane. `pane_marked` is 1 only on the holder, `pane_marked_set` is 1 server-wide while any mark exists, `session_marked` and `window_marked_flag` are 1 only for the owning session and window, and window_printable_flags emits M between the `-` last-window flag and `Z`, so a marked zoomed current window reads `*MZ`. `-m` refuses a pane hidden by zoom (window_pane_is_visible) while `-M` still clears through the same target. zz models one window per session, so the pin's winlink tuple collapses to a pane id whose window and session derive from the model, and validity is checked on read the way server_check_marked defers to cmd_find_valid_state. cmd_select_pane_exec order is reproduced: `-l` first (routing -e and -d at the last pane), then -m/-M, then -P, then -g, then the directional search, then -e before -d, then -T, then the selection. `-P` writes the pane-local window-style and window-active-style with options_set_string, which never validates, so `select-pane -P bogus=zzz` stores the raw string and exits 0 where `set-option -p window-style bogus=zzz` answers `invalid style: bogus=zzz` and exits 1; the deprecated `-g` prints the pane's effective window-style and returns before selection, while a bare `-P` falls through and selects. Input-off enforcement already lived in the daemon input path (resolve_input_sinks), so -d and -e only needed the mux state they toggle. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/model.rs`, `resource:crates/zz-mux/src/formats.rs`, `file:compat/scenarios/pane-selection-marked.txt`, `file:compat/scenarios/pane-selection-input-style.txt`, `resource:knowledge/tmux/divergences.md` |
 | `presentation.border-span-owner` | 2026-08-31 | Raw zz-tui styles each shared divider per adjacent pane span instead of per full segment. In an A\|(B/C) split with C active, the A/B span renders inactive, while the junction cell and the A/C span render with the active style; directional fallback resolves top, bottom, left, then right. Aligned same-side ties from splits resolve by PaneId creation order. The 10-step LC_ALL=C strict differential proves the red upper span with green junction, horizontal, and lower spans against pinned tmux with zero divergence, and the exact base fails its renderer marker row, so the coverage discriminates. This closure is bounded: same-side ties after join-pane, swap-pane, or serialized select-layout stay open under presentation:border-style-owner-z-order, and tiled z-order transport belongs to the pane-border z-order contract. | `resource:crates/zz-tui/src/layout.rs`, `scenario:compat/scenarios/pane-border-span-owner.txt`, `resource:knowledge/tmux/divergences.md` |
 | `sessions.new-session-attach-cwd` | 2026-08-29 | When new-session -A finds an existing session, zz now shares the attach-session retargeting path: it resolves the target first, expands -c exactly once with the invoking client and resolved target session, window, and pane, stores the cwd before terminal preflight, and publishes that mutation even when opening the terminal fails. Clientless calls remain inert, permitted Control clients attach and update the target, and nested Control, attached Interactive, and -A -d calls refuse before target selection, expansion, retargeting, or mutation. Fresh creation and an -A miss now preserve an explicitly empty session cwd while leaving the initial pane cwd unset so the existing donor or caller fallback still applies; omitted -c continues to inherit normally. Focused mux and daemon tests cover single expansion, target isolation, failure ordering, every refusal class, and explicit-empty behavior. The strict 10-step new-session-cwd differential matches the pinned tmux build with zero topology, geometry, format, output, or warning differences. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/new-session-cwd.txt`, `resource:knowledge/tmux/divergences.md` |
 | `source-file.default-config-multi-file-order` | 2026-08-25 | Runtime source-file no longer special-cases the active zz/mux.conf. At this close, every declared path expanded and matched in caller order, and each match entered the ordinary config loader immediately in glob order, producing DAD for default, after, and default. The later config.replayed-command-output closure changed that immediate replay timing: one invocation now parses all matches in declared and glob order, then replays them in the same order while preserving DAD and path order. A loud miss returns status 1 without preventing later matches from loading; quiet misses remain silent. Ordinary diagnostics and -v lines retain declared path and match order. That later closure also pins presentation as one complete verbose batch, then replay, then buffered command-name and parser diagnostics for each invocation. Source no-match, glob, and actual OS or path read failures retain their existing error channels. Explicit zz-native reload-config still rediscovers the first existing default candidate, replaces #{config_files}, resets key tables, rebuilds appearance, and reapplies stored mux overrides. Startup still discovers the first existing zz-owned candidate, while ordered explicit -f files remain the intentional startup roots. Parse-only and nested source paths keep their existing behavior. Focused CLI and daemon tests, strict daemon clippy, and fmt pass. The strict 12-step source-file-diagnostics and 40-step source-file-format differentials have zero differences and no skips. At this close the source-file-control row had five clean steps; the later nested-queue proof grew the current row to six clean steps. This closure makes no canonical-suite claim. | `resource:crates/zz-daemon/src/daemon.rs`, `file:crates/zz/tests/cli_binary.rs`, `scenario:compat/scenarios/smoke/source-file-diagnostics.txt`, `scenario:compat/scenarios/source-file-format.txt`, `scenario:compat/scenarios/smoke/source-file-control.txt`, `resource:knowledge/tmux/conf-parser.md`, `resource:knowledge/tmux/commands.md`, `resource:knowledge/crates/zz-daemon.md`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |

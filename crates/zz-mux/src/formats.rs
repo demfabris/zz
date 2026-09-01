@@ -166,6 +166,8 @@ pub struct StatusContext {
     pub pane_dead_status: Option<u32>,
     pub pane_dead_time: Option<i64>,
     pub pane_input_off: Option<bool>,
+    pub pane_marked: Option<bool>,
+    pub pane_marked_set: Option<bool>,
     pub pane_path: String,
     pub pane_flags: String,
     pub pane_height: Option<u16>,
@@ -199,6 +201,7 @@ pub struct StatusContext {
     pub session_created: Option<i64>,
     pub session_id: String,
     pub session_many_attached: bool,
+    pub session_marked: Option<bool>,
     pub session_name: String,
     pub session_path: String,
     pub session_stack: String,
@@ -226,6 +229,7 @@ pub struct StatusContext {
     pub window_linked_sessions_list: String,
     pub window_manual_height: Option<u16>,
     pub window_manual_width: Option<u16>,
+    pub window_marked_flag: Option<bool>,
     pub window_name: String,
     pub window_panes: usize,
     pub window_silence_alert: bool,
@@ -375,6 +379,8 @@ enum FormatBacking {
     PaneDeadStatus,
     PaneDeadTime,
     PaneInputOff,
+    PaneMarked,
+    PaneMarkedSet,
     PanePath,
     PaneFlags,
     PaneFormat,
@@ -410,6 +416,7 @@ enum FormatBacking {
     SessionFormat,
     SessionId,
     SessionManyAttached,
+    SessionMarked,
     SessionName,
     SessionPath,
     SessionStack,
@@ -440,6 +447,7 @@ enum FormatBacking {
     WindowLinkedSessionsList,
     WindowManualHeight,
     WindowManualWidth,
+    WindowMarkedFlag,
     WindowName,
     WindowPanes,
     WindowRawFlags,
@@ -577,8 +585,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_key_mode", Pane, Empty),
     variable!("pane_last", Pane, PaneLast),
     variable!("pane_left", Pane, PaneLeft),
-    variable!("pane_marked", Pane, Zero),
-    variable!("pane_marked_set", Pane, Zero),
+    variable!("pane_marked", Pane, PaneMarked),
+    variable!("pane_marked_set", Pane, PaneMarkedSet),
     variable!("pane_mode", Pane, Empty),
     variable!("pane_path", Pane, PanePath),
     variable!("pane_pb_progress", Pane, Zero),
@@ -626,7 +634,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("session_id", Session, SessionId),
     variable!("session_last_attached", Session, Time, StatusHook),
     variable!("session_many_attached", Session, SessionManyAttached),
-    variable!("session_marked", Session, Zero),
+    variable!("session_marked", Session, SessionMarked),
     variable!("session_name", Session, SessionName),
     variable!("session_path", Session, SessionPath),
     variable!("session_silence_flag", Session, WindowSilenceFlag),
@@ -676,7 +684,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     ),
     variable!("window_manual_height", Window, WindowManualHeight),
     variable!("window_manual_width", Window, WindowManualWidth),
-    variable!("window_marked_flag", Window, Zero),
+    variable!("window_marked_flag", Window, WindowMarkedFlag),
     variable!("window_name", Window, WindowName),
     variable!("window_offset_x", Window, Empty),
     variable!("window_offset_y", Window, Empty),
@@ -761,6 +769,8 @@ impl StatusContext {
             FormatBacking::PaneDeadStatus => optional_display(self.pane_dead_status),
             FormatBacking::PaneDeadTime => optional_display(self.pane_dead_time),
             FormatBacking::PaneInputOff => optional_bool(self.pane_input_off),
+            FormatBacking::PaneMarked => optional_bool(self.pane_marked),
+            FormatBacking::PaneMarkedSet => optional_bool(self.pane_marked_set),
             FormatBacking::PanePath => Cow::Borrowed(self.pane_path.as_str()),
             FormatBacking::PaneFlags => Cow::Borrowed(self.pane_flags.as_str()),
             FormatBacking::PaneFormat => {
@@ -803,6 +813,7 @@ impl StatusContext {
                 Cow::Borrowed(bool_string(format_type == FormatType::Session))
             }
             FormatBacking::SessionId => Cow::Borrowed(self.session_id.as_str()),
+            FormatBacking::SessionMarked => optional_bool(self.session_marked),
             FormatBacking::SessionManyAttached => {
                 Cow::Borrowed(bool_string(self.session_many_attached))
             }
@@ -855,6 +866,7 @@ impl StatusContext {
             }
             FormatBacking::WindowManualHeight => optional_display(self.window_manual_height),
             FormatBacking::WindowManualWidth => optional_display(self.window_manual_width),
+            FormatBacking::WindowMarkedFlag => optional_bool(self.window_marked_flag),
             FormatBacking::WindowName => Cow::Borrowed(self.window_name.as_str()),
             FormatBacking::WindowPanes => Cow::Owned(self.window_panes.to_string()),
             FormatBacking::WindowRawFlags => Cow::Owned(self.window_flags(false)),
@@ -884,6 +896,9 @@ impl StatusContext {
         }
         if self.window_last.unwrap_or(false) {
             flags.push('-');
+        }
+        if self.window_marked_flag.unwrap_or(false) {
+            flags.push('M');
         }
         if self.window_zoomed {
             flags.push('Z');
@@ -1074,9 +1089,13 @@ impl MuxEngine {
                 .filter(|time| *time != 0),
             ..StatusContext::default()
         };
+        let marked_pane = self.state.marked_pane();
+        let marked_window = marked_pane.and_then(|pane| self.state.window_for_pane(pane));
+        let marked_session = marked_window.map(|window| self.state.windows[&window].session);
         let Some(session) = session_id.and_then(|id| self.state.sessions.get(&id)) else {
             return context;
         };
+        context.session_marked = Some(marked_session == Some(session.id));
         context.session_id = session.id.to_string();
         context.session_name.clone_from(&session.name);
         self.state
@@ -1162,6 +1181,7 @@ impl MuxEngine {
         let Some(window) = window_id.and_then(|id| self.state.windows.get(&id)) else {
             return context;
         };
+        context.window_marked_flag = Some(marked_window == Some(window.id));
         context.window_id = window.id.to_string();
         context.window_index = window.index;
         context.window_name.clone_from(&window.name);
@@ -1209,6 +1229,8 @@ impl MuxEngine {
             .dead_time
             .and_then(|dead_time| i64::try_from(dead_time).ok());
         context.pane_input_off = Some(pane.input_off);
+        context.pane_marked = Some(marked_pane == Some(pane.id));
+        context.pane_marked_set = Some(marked_pane.is_some());
         context.pane_id = pane.id.to_string();
         context.pane_index = self.pane_index(window.id, pane.id).unwrap_or_default();
         context.pane_last = Some(window.last_pane() == Some(pane.id));

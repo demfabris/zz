@@ -7048,7 +7048,7 @@ fn capture_terminal(
     String::from_utf8(output).map_err(|error| TerminalCaptureError::Failed(error.to_string()))
 }
 
-const PANE_RESET_PRELUDE: &[u8] = b"\x1b\\\x1b[!p\x1b[m\x1b(B\x1b)B\x1b[r\x1b[?7h\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?1004l\x1b[?2004l\x1b[3g";
+const PANE_RESET_PRELUDE: &[u8] = b"\x1b\\\x1b[m\x1b(B\x1b)B\x1b[r\x1b[?7h\x1b[?25h\x1b[?1l\x1b[4l\x1b[?6l\x1b[20l\x1b>\x1b[?12l\x1b[?2026l\x1b[?2031l\x1b[=0u\x1b[>4;0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?1004l\x1b[?2004l\x1b[3g";
 
 const PANE_RESET_PALETTE: &[u8] = b"\x1b]104\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\";
 
@@ -7071,11 +7071,12 @@ fn used_visible_rows(terminal: &Terminal<'_, '_>) -> u16 {
 /// whose `screen_write_reset` restores default tab stops, drops the scroll
 /// region, sets the screen mode back to cursor plus wrap, clears the screen
 /// through the `scroll-on-clear` path, and homes the cursor. libghostty's own
-/// `reset` is RIS and discards history, so the same result is composed here out
-/// of a scroll-up sized to the used rows plus explicit mode, tab, and palette
-/// resets. The leading ST terminates any string sequence the pane left half
-/// parsed without printing a cell, which is what `input_clear` plus the return
-/// to the ground state does.
+/// `reset` is RIS and discards history, and its parser ignores DECSTR outright,
+/// so the same result is composed here out of a scroll-up sized to the used
+/// rows plus one explicit reset per mode the pin's `MODE_CURSOR|MODE_WRAP`
+/// assignment drops, then tab, saved-cursor, and palette resets. The leading ST
+/// terminates any string sequence the pane left half parsed without printing a
+/// cell, which is what `input_clear` plus the return to the ground state does.
 fn reset_pane_screen(terminal: &mut Terminal<'_, '_>) -> Result<(), WorkerError> {
     let used = used_visible_rows(terminal);
     let columns = terminal.cols()?;
@@ -7088,7 +7089,7 @@ fn reset_pane_screen(terminal: &mut Terminal<'_, '_>) -> Result<(), WorkerError>
     if used > 0 {
         write!(program, "\x1b[{used}S")?;
     }
-    program.extend_from_slice(b"\x1b[2J\x1b[H");
+    program.extend_from_slice(b"\x1b[2J\x1b[H\x1b7");
     program.extend_from_slice(PANE_RESET_PALETTE);
     terminal.vt_write(&program);
     terminal.scroll_viewport(ScrollViewport::Bottom);
@@ -16728,6 +16729,104 @@ mod tests {
         assert_eq!(
             visible, "after",
             "the pin's input_reset abandons the half-parsed sequence and returns to ground"
+        );
+    }
+
+    #[test]
+    fn pane_reset_drops_the_modes_the_pin_clears_with_send_keys_r() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 4,
+            max_scrollback: 1 << 16,
+        })
+        .expect("terminal");
+        let mut key_encoder = key::Encoder::new().expect("key encoder");
+        let mut key_event = key::Event::new().expect("key event");
+        let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
+        let up = |terminal: &Terminal<'_, '_>,
+                  key_encoder: &mut key::Encoder<'_>,
+                  key_event: &mut key::Event<'_>,
+                  writer: &mut Box<dyn Write + Send>,
+                  key: KeyCode| {
+            let mut input_bytes = Vec::new();
+            encode_key(
+                terminal,
+                key_encoder,
+                key_event,
+                KeyInput {
+                    action: KeyAction::Press,
+                    key,
+                    modifiers: crate::Modifiers::default(),
+                    text: None,
+                    unshifted_codepoint: None,
+                },
+                writer.as_mut(),
+                &mut input_bytes,
+            )
+            .expect("encode key");
+            input_bytes
+        };
+
+        terminal.vt_write(b"\x1b[?1h\x1b[4h\x1b[?6h");
+        assert_eq!(
+            up(
+                &terminal,
+                &mut key_encoder,
+                &mut key_event,
+                &mut writer,
+                KeyCode::ArrowUp
+            ),
+            b"\x1bOA"
+        );
+        terminal.vt_write(b"\x1b[=1u");
+        assert_eq!(
+            up(
+                &terminal,
+                &mut key_encoder,
+                &mut key_event,
+                &mut writer,
+                KeyCode::Escape
+            ),
+            b"\x1b[27u"
+        );
+
+        reset_pane_screen(&mut terminal).expect("reset");
+
+        assert_eq!(
+            up(
+                &terminal,
+                &mut key_encoder,
+                &mut key_event,
+                &mut writer,
+                KeyCode::ArrowUp
+            ),
+            b"\x1b[A",
+            "pinned tmux answers keypad_cursor_flag 1 before send-keys -R and 0 after, and Up then echoes ^[[A"
+        );
+        assert_eq!(
+            up(
+                &terminal,
+                &mut key_encoder,
+                &mut key_event,
+                &mut writer,
+                KeyCode::Escape
+            ),
+            b"\x1b",
+            "the pin's mode reset drops MODE_KEYS_EXTENDED with the rest"
+        );
+        terminal.vt_write(b"ab\rX");
+        let visible =
+            capture_terminal(&terminal, None, CaptureOptions::default()).expect("capture visible");
+        assert_eq!(
+            visible, "Xb",
+            "pinned tmux answers insert_flag 1 before send-keys -R and 0 after, so X overwrites a"
+        );
+        terminal.vt_write(b"\x1b[3;5H\x1b8Y");
+        assert_eq!(terminal.cursor_x().expect("cursor x"), 1);
+        assert_eq!(
+            terminal.cursor_y().expect("cursor y"),
+            0,
+            "the pin's input_reset_cell puts the saved cursor back at 0,0"
         );
     }
 

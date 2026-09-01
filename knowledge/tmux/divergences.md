@@ -1180,18 +1180,28 @@ being discarded. Measured on the pin with a 20x6 pane printing twenty lines: `hi
 custom tab stop at column 4 back to the default 8.
 
 libghostty's only reset entry point is `ghostty_terminal_reset`, whose RIS drops scrollback (7 rows
-to 0 in a probe), so zz composes the same result out of VT bytes instead: a bare ST to abandon a
-half-parsed string sequence without printing a cell, DECSTR plus an explicit `ESC[m` and ASCII
-charset designations for the pen, `ESC[r` for the scroll region because DECSTR does not touch it
-here, DECAWM and DECTCEM back on with the mouse, focus, and bracketed-paste modes off, `ESC[3g`
+to 0 in a probe), and the pinned libghostty (20c3eae0) does not implement DECSTR at all: its
+`CSI p` arm in `src/terminal/stream.zig` handles only DECRQM and logs `ignoring unimplemented CSI
+p with intermediates` for `ESC[!p`. So zz composes the same result out of VT bytes, one per mode:
+a bare ST to abandon a half-parsed string sequence without printing a cell, `ESC[m` and ASCII
+charset designations for the pen, `ESC[r` for the scroll region, DECAWM and DECTCEM back on, then
+DECCKM (`?1`), IRM (`4`), DECOM (`?6`), LNM (`20`), DECKPAM (`ESC >`), cursor blink (`?12`),
+synchronized output (`?2026`), theme updates (`?2031`), the kitty keyboard flags (`CSI = 0 u`),
+modifyOtherKeys (`CSI > 4 ; 0 m`), and the mouse, focus, and bracketed-paste modes off, `ESC[3g`
 plus one HTS every eight columns for the tab stops, `ESC[<used>S` for the history push, then
-`ESC[2J ESC[H` and OSC 104, 110, 111, 112. `used` is the pin's `grid_view_clear_history` count:
-rows up to and including the last one holding content.
+`ESC[2J ESC[H`, `ESC 7` so the saved cursor sits at 0,0 like `input_reset_cell`'s
+`old_cx = old_cy = 0`, and OSC 104, 110, 111, 112. `used` is the pin's `grid_view_clear_history`
+count: rows up to and including the last one holding content. Measured on the pin,
+`#{keypad_cursor_flag} #{insert_flag} #{origin_flag}` read `1 1 1` before `send-keys -R` and
+`0 0 0` after, and Up then echoes `^[[A`; zz's three formats are constant zero, so a zz-terminal
+test carries those numbers instead of the differential.
 
-Two things this does not do. The scroll-up only reaches history on the primary screen, which
+Three things this does not do. The scroll-up only reaches history on the primary screen, which
 matches the pin, whose `grid_view_clear_history` falls back to a plain clear without `GRID_HISTORY`.
-And zz pushes into history unconditionally because `scroll-on-clear` itself is parked in
-`options.pane-engine-knobs`; turning that push off belongs to that group, not to `-R`.
+zz pushes into history unconditionally because `scroll-on-clear` itself is parked in
+`options.pane-engine-knobs`; turning that push off belongs to that group, not to `-R`. And the pin
+keeps `MODE_KEYS_EXTENDED` when `extended-keys` is `always`; zz drops it unconditionally because
+that option lives in `options.client-terminal-negotiation`.
 
 An earlier draft used CAN rather than ST for the abort, and the `send-keys-reset` differential
 caught libghostty printing it as a cell that then rode into history.

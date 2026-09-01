@@ -7035,11 +7035,9 @@ impl MuxEngine {
         if reset {
             execution.effects.push(MuxEffect::ResetPane { pane });
         }
-        execution.effects.push(MuxEffect::SendKeys {
-            pane,
-            keys,
-            repeat,
-        });
+        execution
+            .effects
+            .push(MuxEffect::SendKeys { pane, keys, repeat });
         Ok(execution)
     }
 

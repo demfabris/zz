@@ -681,10 +681,7 @@ mod tests {
             events,
             vec![
                 Event::Paste("a\u{2}b".to_owned()),
-                Event::Key(KeyEvent::new(
-                    KeyCode::Char('b'),
-                    KeyModifiers::CONTROL
-                )),
+                Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
             ],
             "pinned tmux only times key arrivals for assume-paste-time when the client terminal lacks bracketed paste; the raw TUI always arms it, so a pasted C-b never reaches the key path"
         );

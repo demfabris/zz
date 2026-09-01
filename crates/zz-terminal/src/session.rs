@@ -16723,8 +16723,8 @@ mod tests {
             before + 2,
             "the pin's screen_write_scrollregion restores the full region before the clear scrolls"
         );
-        let visible = capture_terminal(&terminal, None, CaptureOptions::default())
-            .expect("capture visible");
+        let visible =
+            capture_terminal(&terminal, None, CaptureOptions::default()).expect("capture visible");
         assert_eq!(
             visible, "after",
             "the pin's input_reset abandons the half-parsed sequence and returns to ground"

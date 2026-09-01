@@ -110,16 +110,18 @@ fields in declaration order.
 | `SetTerminalPreview { enabled }` | `enabled: bool` | An attached Interactive client enables or disables passive terminal delivery for every window in its attached session. Foreground visibility, input, history, and PTY geometry remain unchanged |
 
 `CommandInvocation` is `{ name: String, args: Vec<String>, source: Option<SourceSpan>,
-command_blocks: Vec<u32> }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based
+command_blocks: Vec<u32>, expanded_alias_group: bool }`. Protocol v84 appends `command_blocks`: sorted, unique, zero-based
 positions into `args` for standalone unquoted `{ ... }` arguments. The corresponding argument keeps
 its brace-bearing text. Quoted brace text has no entry and remains a string. Config and Control
 parsers populate the positions; argv-created commands start with an empty vector. Aliases and key
 table snapshots preserve the positions across request, preparation, `ServerHello`, and
 `KeyTablesChanged` frames.
 
-Multi-command and empty aliases reuse this encoding. The mux stores the frozen body as the reserved
-name `__zz-command-alias-group` with one `{ ... }` argument and `command_blocks = [0]`; it does not
-add a child-vector field. Alias expansion appends caller arguments to the final parsed child before
+Multi-command and empty aliases reuse this encoding. The mux stores the frozen body under the
+reserved name `__zz-command-alias-group` with one `{ ... }` argument, `command_blocks = [0]`, and
+the v93 `expanded_alias_group` flag; it does not add a child-vector field. The flag, not the name,
+is what every reader tests: it is set only by alias expansion, so a config, command line, or Control
+line spelling that name by hand stays an ordinary unknown command. Alias expansion appends caller arguments to the final parsed child before
 it renders that body. Clients scan every child for attach and attaching `new-session` TUI routing,
 but only the final leaf for stdin routing. A stdin-reading leaf receives the captured payload inside
 that body; the client then sends one opaque invocation with `CommandRequest.prepared = true`. The
@@ -620,6 +622,13 @@ now validate on both encode and decode.
   `EventPayload::BrowserCommand` through `BrowserCommand::SendKeys` and `SendKeysRepeated`, so the
   appended variant is wire-reachable; a v92 peer cannot decode it. Browser panes have no raw byte
   sink and drop the token.
+- v93 appends `expanded_alias_group: bool` to `CommandInvocation`, after `command_blocks`. It is
+  the provenance that marks a multi-command `command-alias` expansion, and it replaces the
+  name-only test that any parser could satisfy. `CommandInvocation::new` clears it, only
+  `into_expanded_alias_group` sets it, and alias expansion is the single caller, so a user-authored
+  `__zz-command-alias-group { ... }` block is rejected as `unknown command:
+  __zz-command-alias-group` at the CLI, in a configuration file, and in Control input the way the
+  pin rejects any unknown name. A v92 peer cannot decode the appended field.
 - v92 appends `ProtocolMessage::HomeDirectoryRequest { request_id, users }` at tail tag 36 and
   `ProtocolMessage::HomeDirectoryResponse { request_id, homes }` at tail tag 37. A Control client
   parsing its own direct input asks the daemon to resolve the `~` names one line needs before it

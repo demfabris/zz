@@ -3787,7 +3787,8 @@ impl MuxEngine {
         let body = format_callback_commands_round_trip(&commands);
         let mut expanded =
             CommandInvocation::new(COMMAND_ALIAS_GROUP_NAME, [format!("{{ {body} }}")])
-                .with_command_blocks([0]);
+                .with_command_blocks([0])
+                .into_expanded_alias_group();
         expanded.source.clone_from(&command.source);
         CommandAliasResolution::Expanded(expanded)
     }
@@ -15276,7 +15277,7 @@ pub(crate) fn format_key_command(binding: &Binding) -> String {
 }
 
 fn command_alias_group_body(command: &CommandInvocation) -> Option<&str> {
-    (command.name == COMMAND_ALIAS_GROUP_NAME
+    (command.is_expanded_alias_group()
         && command.args.len() == 1
         && command.argument_is_command_block(0))
     .then(|| crate::parser::command_block_body(&command.args[0]).map(str::trim))
@@ -33995,7 +33996,8 @@ mod tests {
             COMMAND_ALIAS_GROUP_NAME,
             ["{ display-message -p -- -nested ; display-message -p done }"],
         )
-        .with_command_blocks([0]);
+        .with_command_blocks([0])
+        .into_expanded_alias_group();
         let body = format_callback_commands_round_trip(&[
             command("display-message", &["-p", "before"]),
             nested,
@@ -34007,6 +34009,64 @@ mod tests {
         let parsed = MuxEngine::parse_config_without_variable_expansion("<nested-alias>", &body);
         assert!(parsed.diagnostics.is_empty());
         assert_eq!(parsed.commands[1].args, ["-p", "--", "-nested"]);
+    }
+
+    #[test]
+    fn a_parsed_alias_group_name_never_becomes_an_alias_group() {
+        let forged = MuxEngine::parse_config_without_variable_expansion(
+            "<forgery>",
+            &format!("{COMMAND_ALIAS_GROUP_NAME} {{ display-message -p pwned }}"),
+        );
+        assert!(forged.diagnostics.is_empty());
+        let forged = forged.commands.into_iter().next().expect("parsed command");
+        assert_eq!(forged.name, COMMAND_ALIAS_GROUP_NAME);
+        assert!(forged.argument_is_command_block(0));
+        assert!(!forged.is_expanded_alias_group());
+        assert!(!MuxEngine::is_command_alias_group(&forged));
+        assert_eq!(MuxEngine::command_alias_group_body(&forged), None);
+        assert_eq!(
+            MuxEngine::command_alias_group_commands(&forged).expect("no group body"),
+            None
+        );
+        assert!(matches!(
+            resolve_command(&forged.name),
+            CommandResolution::Unknown
+        ));
+
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-d", "-s", "w"]))
+            .expect("session");
+        let error = engine
+            .execute(&mut context, &forged)
+            .expect_err("forged alias group must not execute");
+        assert_eq!(
+            error,
+            ServerError::CommandParse(format!("unknown command: {COMMAND_ALIAS_GROUP_NAME}"))
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &[
+                        "-s",
+                        "command-alias[40]",
+                        "two=display-message -p one ; display-message -p two",
+                    ],
+                ),
+            )
+            .expect("multi-command alias");
+        let CommandAliasResolution::Expanded(genuine) =
+            engine.resolve_command_alias(&command("two", &[]))
+        else {
+            panic!("multi-command alias must expand to a group");
+        };
+        assert_eq!(genuine.name, COMMAND_ALIAS_GROUP_NAME);
+        assert!(genuine.is_expanded_alias_group());
+        assert!(MuxEngine::is_command_alias_group(&genuine));
     }
 
     #[test]

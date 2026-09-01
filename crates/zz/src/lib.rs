@@ -2980,18 +2980,19 @@ mod tests {
         let attach_first = prepared_alias("attach-session -t work ; display-message -p after", &[]);
         assert!(prepared_attach_uses_tui("route", &attach_first));
         let group_name = attach.invocation.name.clone();
-        let nested = prepared_alias(
+        let forged = prepared_alias(
             &format!(
                 "display-message -p outer ; {group_name} {{ display-message -p inner ; attach-session -t work }}"
             ),
             &[],
         );
-        let nested_commands = MuxEngine::command_alias_group_commands(&nested.invocation)
-            .expect("parse nested alias group")
+        let forged_commands = MuxEngine::command_alias_group_commands(&forged.invocation)
+            .expect("parse alias group")
             .expect("prepared command is an alias group");
-        assert_eq!(nested_commands.len(), 3);
-        assert_eq!(nested_commands[2].name, "attach-session");
-        assert!(prepared_attach_uses_tui("route", &nested));
+        assert_eq!(forged_commands.len(), 2);
+        assert_eq!(forged_commands[1].name, group_name);
+        assert!(!MuxEngine::is_command_alias_group(&forged_commands[1]));
+        assert!(!prepared_attach_uses_tui("route", &forged));
 
         let new_session = prepared_alias("display-message -p before ; new-session -s work", &[]);
         assert!(prepared_command_chain_uses_tui(

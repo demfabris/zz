@@ -3993,6 +3993,9 @@ fn run_terminal(
         "TERM",
         spawn.terminal_type.as_deref().unwrap_or("tmux-256color"),
     );
+    command.env("COLORTERM", "truecolor");
+    command.env("TERM_PROGRAM", "zz");
+    command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
     for (key, value) in &spawn.env {
         if let Some(value) = value {
             command.env(key, value);
@@ -4003,9 +4006,6 @@ fn run_terminal(
     if let Some(shell) = &spawn.shell {
         command.env("SHELL", shell);
     }
-    command.env("COLORTERM", "truecolor");
-    command.env("TERM_PROGRAM", "zz");
-    command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
     if let Some(working_directory) = &spawn.working_directory {
         command.cwd(working_directory);
     }

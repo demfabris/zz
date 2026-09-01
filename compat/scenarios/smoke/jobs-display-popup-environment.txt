@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/jobs-display-popup-environment.sh ~/jobs-display-popup-environment.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu JOBS_DISPLAY_POPUP_ENVIRONMENT
+run-shell 'sh ~/jobs-display-popup-environment.sh'
+out: show-environment -g JOBS_DISPLAY_POPUP_ENVIRONMENT

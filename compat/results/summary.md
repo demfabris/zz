@@ -104,6 +104,7 @@
 | smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
 | smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/jobs-command-environment | 3 | yes | 0 | yes | yes | yes |
+| smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-shell-job-cwd | 3 | yes | 0 | yes | yes | yes |
 | smoke/kill-filters | 17 | yes | 0 | yes | yes | yes |
 | smoke/oh-my-tmux | 15 | yes | 0 | yes | yes | yes |

@@ -2159,33 +2159,6 @@
       "reason": "In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays."
     },
     {
-      "id": "pane.spawn-flags",
-      "title": "Complete split-window placement flags",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts",
-        "daily"
-      ],
-      "owner": "mux",
-      "items": [
-        "flag:split-window:-k",
-        "flag:split-window:-m"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "scenario:compat/scenarios/pane-spawn-options.txt",
-        "file:compat/scenarios/pane-spawn-style-title-v2.txt"
-      ],
-      "acceptance": [
-        "Differential tests cover the supported tiled meaning or each model-bound flag moves to a parked gap."
-      ],
-      "depends_on": [],
-      "reason": "split-window -R/-s/-S/-T carry pinned style and title semantics with differential coverage (scenario pane-spawn-style-title-v2); -k and -m are remain-on-exit lifecycle flags owned by pane.command-completion groundwork and stay loudly unsupported until F-PANE-SPAWN-RETAIN-V3."
-    },
-    {
       "id": "presentation.native-status",
       "title": "Keep native status and lifecycle presentation",
       "decision": "native",
@@ -4080,6 +4053,18 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "select-pane -m, -M, -d, -e, -g, and -P are promoted out of the unsupported catalog and the four marked formats now read live state. Measured on the pin with a throwaway server: the mark is one server-global tuple (server.c server_set_marked and cmd_find_valid_state), so `-m` on a second pane moves it, `-m` on the pane that already holds it clears it through server_is_marked, `-M` clears whatever holds it, and killing the marked pane drops it in window_lost_pane. `pane_marked` is 1 only on the holder, `pane_marked_set` is 1 server-wide while any mark exists, `session_marked` and `window_marked_flag` are 1 only for the owning session and window, and window_printable_flags emits M between the `-` last-window flag and `Z`, so a marked zoomed current window reads `*MZ`. `-m` refuses a pane hidden by zoom (window_pane_is_visible) while `-M` still clears through the same target. zz models one window per session, so the pin's winlink tuple collapses to a pane id whose window and session derive from the model, and validity is checked on read the way server_check_marked defers to cmd_find_valid_state. cmd_select_pane_exec order is reproduced: `-l` first (routing -e and -d at the last pane), then -m/-M, then -P, then -g, then the directional search, then -e before -d, then -T, then the selection. `-P` writes the pane-local window-style and window-active-style with options_set_string, which never validates, so `select-pane -P bogus=zzz` stores the raw string and exits 0 where `set-option -p window-style bogus=zzz` answers `invalid style: bogus=zzz` and exits 1; the deprecated `-g` prints the pane's effective window-style and returns before selection, while a bare `-P` falls through and selects. Input-off enforcement already lived in the daemon input path (resolve_input_sinks), so -d and -e only needed the mux state they toggle."
+    },
+    {
+      "id": "pane.spawn-flags",
+      "title": "Complete split-window placement flags",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "file:compat/scenarios/pane-spawn-retain.txt",
+        "file:compat/scenarios/pane-spawn-style-title-v2.txt"
+      ],
+      "resolution": "-k and -m are promoted out of the unsupported catalog. Measured on the pin, both write remain-on-exit `key` on the new pane's own option table and touch nothing wider: the window and global scopes stay unset, so a plain sibling split still dies while the flagged pane is retained after a clean or failing child exit. -m additionally stores its argument as that pane's remain-on-exit-format, raw and unexpanded, and -k alone leaves that format unset. Both spellings keep the pin's arity, so a bare -m answers `command split-window: -m expects an argument` and exits 1, and `split-window -?` now prints the pin's usage byte for byte. The retention decision and the key dismissal both reuse the existing paths unchanged: RemainOnExit::Key already retains every exit in retain_exited_pane, and the daemon consults dead_pane_dismisses_on_key only from the key handler, so mouse and paste input cannot dismiss a retained pane while the next key kills it. -W stays loudly unsupported under pane.command-completion; it enters the pin's floating two-phase path and blocks the command queue, which is why no scenario exercises it."
     },
     {
       "id": "presentation.border-span-owner",

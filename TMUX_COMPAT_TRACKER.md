@@ -1,16 +1,16 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **CYCLE 4 INTEGRATED (FORMAT BUDGETS + CELL METRICS, COPY-MODE KEY VOCABULARY, CLIENT EXIT ACTIONS + PROTOCOL V91); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **CYCLE 5 INTEGRATED (TERMINAL BEHAVIOR + PANE CHROME BASKETS AND SEND-KEYS -R, PANE SELECTION STATE + EXACT TARGET PREFIX + SPLIT RETENTION, CONTROL TILDE ENVIRONMENT + CLIENT CWD BYTES + PROTOCOL V92); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **41 UNRESOLVED GROUPS (35 OPEN + 6 BLOCKED = 41)**
+> Live work: **36 UNRESOLVED GROUPS (27 OPEN + 9 BLOCKED = 36)**
 >
-> Ledger settlement: **80.8% (172 of 213 known groups: 100 x (135 CLOSED + 37 ACCEPTED) / (135 CLOSED + 78 LIVE)); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **83.4% (181 of 217 known groups: 100 x (142 CLOSED + 39 ACCEPTED) / (142 CLOSED + 75 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **145 SCENARIOS, 2,094 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
+> Exit evidence: **154 SCENARIOS, 2,361 STEPS, ATTACHED-CLIENT PASS, 3 REGISTERED KNOWN ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 >
-> Orchestration: **PAUSED 2026-09-01 FOR A MACHINE MOVE; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
+> Orchestration: **RESUMED 2026-09-01 ON THE UBUNTU BOX; CYCLE 5 INTEGRATED; THE NEXT CYCLE STARTS FROM THE DISPATCH BOARD, RECIPE IN [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -76,23 +76,23 @@ percentage is a ledger health metric, not a compatibility claim.
 | Fact | Current value |
 | --- | --- |
 | Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
-| Published branch | `origin/main` at `8dd47505` (cycle-4 ledger recompute) |
+| Published branch | `origin/main` at `9cab1fa4` (cycle-5 daemon merge) plus this ledger recompute |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | Cycle 4 of the orchestrated Opus/Fable loop: format expansion budgets and window cell metrics (`747acb39`), copy-mode key vocabulary (`ad539f4c`), client clipboard writes, typed Control diagnostics, and client exit actions with protocol v91 (`21ef482c`) |
-| Orchestration | Paused 2026-09-01 for a machine move. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the resume recipe, the ready cycle-5 workflow script, and the machine-move checklist; the cycle-5 lock fronts `F-TERMINAL-CLIENT-OPTIONS`, `F-PANE-MODEL-BASKET`, and `F-DAEMON-INTERACTION-SMALLS` are READY on the board |
+| Delivery | Cycle 5 of the orchestrated Opus/Fable loop: terminal behavior and pane chrome option baskets settled plus `send-keys -R` (`8c1da05e`), pane selection state, the exact-match target prefix scoped by slot, and `split-window -k`/`-m` (`887a372e`), Control tilde parsing against the daemon environment and a byte-preserving client cwd with protocol v92 (`9cab1fa4`) |
+| Orchestration | Resumed 2026-09-01 on the Ubuntu box after the machine move; cycle 5 ran three lanes with a Fable review each and integrated through the board's MAIN lock; the lock fronts `F-TERMINAL-CLIENT-OPTIONS`, `F-PANE-MODEL-BASKET`, and `F-DAEMON-INTERACTION-SMALLS` are INTEGRATED and released. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the recipe |
 | Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Agreed-scope meter | 54.9% (167 of 304 items frozen on 2026-08-31), 25 of 65 groups done; `python3 compat/progress.py` |
-| Completed fixed cohort | Cycle 4: 3 of 3 lanes integrated, agreed-scope meter 46.1% to 54.9%, unresolved groups 47 to 41 |
-| Previous completed cohort | Cycle 3: 3 of 3 lanes integrated, agreed-scope meter 44.4% to 46.1% |
-| Campaign point | Copy mode carries the pin's stock action keys, emacs digit prefixes, and scrollback-offset goto-line; status text is clamped where the wire owns the bound; detach-client, attach-session, and new-session carry the pin's exec and parent-hangup exit actions; the biggest remaining baskets are terminal-behavior options, pane selection state, pane chrome options, prompt fidelity, and choosers |
-| Live registry | 78 active groups, 544 active items, 135 closed records |
-| Active status | 35 open, 6 blocked, 37 accepted |
-| Known differentials | 2 registered geometry cases |
+| Agreed-scope meter | 65.8% (200 of 304 items frozen on 2026-08-31), 30 of 65 groups done; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 5: 3 of 3 lanes integrated, agreed-scope meter 54.9% to 65.8%, unresolved groups 41 to 36 |
+| Previous completed cohort | Cycle 4: 3 of 3 lanes integrated, agreed-scope meter 46.1% to 54.9% |
+| Campaign point | `send-keys -R` composes the pin's reset from VT bytes; select-pane carries the pin's mark, input, and style controls and the four marked formats; the exact-match prefix is scoped by slot; `split-window -k`/`-m` retain exited panes; Control tildes resolve against the daemon environment and the client cwd crosses the wire as bytes; the biggest remaining baskets are the parked terminal engine knobs and pane border chrome, pane focus hooks, prompt fidelity, and choosers |
+| Live registry | 75 active groups, 527 active items, 142 closed records |
+| Active status | 27 open, 9 blocked, 39 accepted |
+| Known differentials | 3 registered cases: two geometry, one geometry plus output |
 
-Cycles 2 through 4 reached `origin/main` through the board's MAIN lock; cycle 4 ends at
-`8dd47505`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 5 reached `origin/main` through the board's MAIN lock; cycle 5 ends at the
+ledger recompute that follows `9cab1fa4`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -106,15 +106,15 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Cycle 4: 3 of 3 lanes integrated |
-| Previous completed cohort | Cycle 3: 3 of 3 lanes integrated |
-| New residual groups | Since the 2026-08-31 freeze: 4 items across 4 groups, tracked outside the agreed-scope meter |
-| Unresolved movement | Cycle 4: 47 at launch, 41 at close |
-| Live unresolved | 35 open + 6 blocked = 41 |
+| Completed fixed cohort | Cycle 5: 3 of 3 lanes integrated |
+| Previous completed cohort | Cycle 4: 3 of 3 lanes integrated |
+| New residual groups | Since the 2026-08-31 freeze: 3 items across 3 groups, tracked outside the agreed-scope meter |
+| Unresolved movement | Cycle 5: 41 at launch, 36 at close |
+| Live unresolved | 27 open + 9 blocked = 36 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
-| Latest differential | 145 scenarios, 2,094 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
-| Differential SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
-| Ledger settlement | 172 of 213 known groups = 80.8% |
+| Latest differential | 154 scenarios, 2,361 steps, attached-client `PASS`, 3 registered known rows (two GEO-only, one GEO plus OUT), and all other channels clean |
+| Differential SHA-256 | `a13fe7ad9f3fc5c1e60ae9b2b905fdaa37db1aaa45db846723025ca538db532a` |
+| Ledger settlement | 181 of 217 known groups = 83.4% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -128,7 +128,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(135 + 37) / (135 + 78) = 172 / 213 = 80.8%
+(142 + 39) / (142 + 75) = 181 / 217 = 83.4%
 ```
 
 Recompute it from the registry after every tracker change:
@@ -174,6 +174,17 @@ campaign decision.
 | Differential | Formats delta: 101 scenarios; copy-mode delta: 69 scenarios; daemon delta: 82 scenarios (81 sharded eight ways plus source-replay-diagnostics solo); every channel clean under `--strict-geometry` |
 | Records gate | Tracker check, board fold tests, and the stored summary check pass: 145 scenarios, 2,094 steps, attached-client `PASS` |
 | Summary SHA-256 | `fc9886820766b0a9179546202f99f7f9ad77cb3d5a0538c2ad8ae98b0746805c` |
+
+### 2026-09-01 cycle-5 integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `8c1da05e` (terminal behavior and pane chrome option baskets settled, `send-keys -R` composed from VT bytes), `887a372e` (select-pane mark, input, and style controls with the marked formats, exact-match prefix scoped by slot, `split-window -k`/`-m`, break-pane placement flags parked with the floating model), `9cab1fa4` (Control tilde parsing against the daemon environment, byte-preserving client cwd, protocol v92) |
+| Review stage | One Fable reviewer per lane; three confirmed defects, all acted on by the gate with the reviewer's probe re-run: DECSTR is unimplemented in the pinned libghostty so `-R` now resets each mode explicitly with a pin-derived test; the mark survived a cross-session move-window or swap-window where the pin drops it, so it now records its session with a test and 14 differential steps; the pane-focus hook close ignored the pin's focus-events gating and queue order, so `24e36d3` was reverted and `hooks.pane-events` reopened with the measurements in its reason |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on all three lanes; the panes lane's two real red rows were daemon tests spelling exact session targets in the pane slot, respelled to the pin's `=name:` after probing the pin; every other red row was a load-only flake that passed exact-solo |
+| Differential | Terminal delta: 65 scenarios; panes delta: 129 scenarios; daemon delta: 105 scenarios (each four shards plus source-replay-diagnostics solo); every channel clean under `--strict-geometry`, the three known rows at their registered tuples |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 154 scenarios, 2,361 steps, attached-client `PASS` |
+| Summary SHA-256 | `a13fe7ad9f3fc5c1e60ae9b2b905fdaa37db1aaa45db846723025ca538db532a` |
 
 ## Source-of-truth order
 

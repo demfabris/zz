@@ -53897,7 +53897,7 @@ set-option -g @alias-mixed-next yes
                 &mut context,
                 &CommandInvocation::new(
                     "set-option",
-                    ["-t", "=target-session", "display-time", "1111"],
+                    ["-t", "=target-session:", "display-time", "1111"],
                 ),
             )
             .expect("set pane-target display time");
@@ -53908,7 +53908,7 @@ set-option -g @alias-mixed-next yes
                 &mut context,
                 &CommandInvocation::new(
                     "set-option",
-                    ["-t", "=cross-session", "display-time", "0"],
+                    ["-t", "=cross-session:", "display-time", "0"],
                 ),
             )
             .expect("set destination display time to zero");
@@ -53947,7 +53947,7 @@ set-option -g @alias-mixed-next yes
                 &mut context,
                 &CommandInvocation::new(
                     "set-option",
-                    ["-t", "=cross-session", "display-time", "4321"],
+                    ["-t", "=cross-session:", "display-time", "4321"],
                 ),
             )
             .expect("set positive destination display time");
@@ -75596,7 +75596,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     [
                         "-p",
                         "-t",
-                        "=format-client",
+                        "=format-client:",
                         "#{client_name}|#{session_last_attached}|#{session_active}",
                     ],
                 ),

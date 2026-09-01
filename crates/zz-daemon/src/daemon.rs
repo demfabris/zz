@@ -13340,7 +13340,21 @@ impl Shared {
                     )
                     .into());
                 }
-                write_paste_buffer_file(&expand_path(&path), &data, parsed.has('a'))?;
+                let path = buffer_file_path(&self.inner.lock(), invoking_client, &path);
+                let append = parsed.has('a');
+                match self.client_file_operation(
+                    invoking_client,
+                    &path,
+                    ClientFileOperation::Write {
+                        append,
+                        data: data.to_vec(),
+                    },
+                ) {
+                    Some(result) => {
+                        result?;
+                    }
+                    None => write_paste_buffer_file(&path, &data, append)?,
+                }
                 Ok(Execution::default())
             }
             "delete-buffer" | "deleteb" => {

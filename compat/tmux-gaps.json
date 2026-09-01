@@ -30,34 +30,6 @@
       "reason": "The local CLI now prepares against an already-running compatible daemon, but --host intentionally retains static routing because the only current SSH forward constructor starts a new lifecycle."
     },
     {
-      "id": "buffers.client-file-context",
-      "title": "Route buffer files through client path context",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "remote"
-      ],
-      "owner": "protocol",
-      "items": [
-        "semantic:save-buffer-client-path-context"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-daemon/src/client.rs",
-        "resource:crates/zz-protocol/src/message.rs",
-        "scenario:compat/scenarios/buffer-client-file-load.txt",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Relative load-buffer and save-buffer paths use the pin's invoking command-client cwd or attached session cwd, and remote clients move bytes without assuming a shared daemon filesystem."
-      ],
-      "depends_on": [],
-      "reason": "load-buffer now follows the pin: the daemon expands the path once, a leading ~/ against its own home and anything else relative against the invoking client's working directory, then hands the absolute path to that client over protocol v89 so an unattached command client reads its own filesystem. save-buffer still writes from the daemon."
-    },
-    {
       "id": "buffers.clipboard-write",
       "title": "Honor buffer clipboard writes",
       "decision": "adopt",
@@ -2821,6 +2793,21 @@
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "resolution": "MuxEngine::resolve_command_alias now returns Miss, Expanded, or MatchedUnsupported with empty, multiple-command, and unparsable reasons. Every mux and daemon construction entry point converts a matched unsupported body to `unknown command: <typed name>` instead of falling through to a shadowed canonical name or catalog alias. Direct execution, daemon routing, terminal-qualified replay, bind-key and set-hook storage, option-command normalization, and read-only preflight share that result. Stored bind-key and set-hook command lists execute the commands constructed for storage without another user-alias lookup; read-only clients authorize the same frozen list as one all-or-nothing chain before effects. Typed `if-shell`, `run-shell`, and `confirm-before` callbacks are likewise frozen after lexical construction. Typed `if-shell` and `run-shell` callbacks preserve physical groups: a failed group stops its remaining commands while later physical lines continue; string callbacks remain one group. Typed `command-prompt` templates retain their structured constructed command list through submission without another user-alias lookup. String templates substitute raw source before a fresh parse and complete construction pass against the then-current alias table. Both prompt paths replace the first `%%` and every `%1`, with trailing-percent quoting; typed substitution preserves leaf-argument boundaries and physical groups, while string templates and free input form one group. `set-hook` and command-valued native set-option intentionally apply their documented second construction stage. A selected typed `display-menu` action drops its structural wrapper before its fresh construction stage, while a quoted brace string remains literal. Alias-resolution failures use the same command-output and key-command-failed path as other per-command failures. Focused regressions prove `kill-server=`, multi-command `list-windows` and `lsw` shadows, and an unparsable `kill-session` shadow cannot shut down, list, kill a session, replace a binding, install a hook, or change an option command. Each construction path admits one user-alias layer, and a malformed shadow refuses before read-only authorization. `aliases.command-bodies` remains open for actual empty and multi-command execution; local CLI preprocessing is closed under aliases.client-preflight, while remote preprocessing remains under aliases.remote-client-preflight."
+    },
+    {
+      "id": "buffers.client-file-context",
+      "title": "Route buffer files through client path context",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-daemon/src/client.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "scenario:compat/scenarios/buffer-client-file-load.txt",
+        "scenario:compat/scenarios/buffer-client-file-save.txt",
+        "resource:knowledge/protocol/wire-protocol.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "load-buffer and save-buffer now route their file through the client that invoked them, the way file_read and file_write do. The daemon expands the path exactly once in its own format context, a leading ~/ against the server's own home and anything else relative against server_client_get_cwd(c, NULL) \u2014 the config client during startup, an unattached client's own working directory, then that client's attached session cwd, then home. An unattached command client then does the bounded read, or the create-truncate or -a append, on its own host over the protocol v89 ClientFileRequest/ClientFileResponse pair, correlated by request id and released when the connection ends; an attached Interactive or Control client keeps daemon-side IO, as the pin keeps server-side IO for an attached client. Failures read `strerror: path` the way cmd-load-buffer.c and cmd-save-buffer.c print them, and a client-side read that fails after the open reports Input/output error, which is what the pin's bufferevent path reports. The client reports its working directory the way find_cwd does, preferring PWD when it resolves to the same place as getcwd. Eleven focused CLI tests drive a daemon whose directory and home are deliberately not the client's; the two three-step differentials run seven and nine checks per engine over relative, nested, tilde, absolute, append, truncate, and failure paths."
     },
     {
       "id": "choosers.cross-client-pane-mode-routing",

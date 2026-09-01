@@ -15,8 +15,8 @@ use chrono::Local;
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
 use zz_mux::{
-    MuxEngine, StatusContext, StatusFormats, StatusHooks, StatusRowVariables, display_width,
-    expand_status,
+    FormatClientRow, MuxEngine, StatusContext, StatusFormats, StatusHooks, StatusRowVariables,
+    display_width, expand_status,
 };
 use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
@@ -71,6 +71,7 @@ pub(crate) struct FormatHookFacts {
     pub(crate) session_last_attached: Arc<BTreeMap<SessionId, u64>>,
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
+    pub(crate) clients: Arc<Vec<FormatClientRow>>,
     pub(crate) message: Option<MessageFormatFacts>,
     pub(crate) mux: Arc<zz_mux::FormatFacts>,
 }
@@ -111,6 +112,45 @@ pub(crate) struct ClientFormatFacts {
     pub(crate) width: String,
     pub(crate) written: String,
     pub(crate) line: usize,
+}
+
+impl ClientFormatFacts {
+    /// The client formats an `L` row answers with, keyed the way the format
+    /// engine looks them up.
+    pub(crate) fn loop_row(&self, activity: u64) -> FormatClientRow {
+        FormatClientRow {
+            name: self.name.clone(),
+            activity,
+            variables: BTreeMap::from([
+                ("client_activity".to_owned(), self.activity.clone()),
+                ("client_cell_height".to_owned(), self.cell_height.clone()),
+                ("client_cell_width".to_owned(), self.cell_width.clone()),
+                ("client_colours".to_owned(), self.colours.clone()),
+                ("client_control_mode".to_owned(), self.control_mode.clone()),
+                ("client_created".to_owned(), self.created.clone()),
+                ("client_discarded".to_owned(), self.discarded.clone()),
+                ("client_flags".to_owned(), self.flags.clone()),
+                ("client_height".to_owned(), self.height.clone()),
+                ("client_key_table".to_owned(), self.key_table.clone()),
+                ("client_last_session".to_owned(), self.last_session.clone()),
+                ("client_name".to_owned(), self.name.clone()),
+                ("client_pid".to_owned(), self.pid.clone()),
+                ("client_prefix".to_owned(), self.prefix.clone()),
+                ("client_readonly".to_owned(), self.readonly.clone()),
+                ("client_session".to_owned(), self.session.clone()),
+                ("client_termfeatures".to_owned(), self.termfeatures.clone()),
+                ("client_termname".to_owned(), self.termname.clone()),
+                ("client_termtype".to_owned(), self.termtype.clone()),
+                ("client_theme".to_owned(), self.theme.clone()),
+                ("client_tty".to_owned(), self.tty.clone()),
+                ("client_uid".to_owned(), self.uid.clone()),
+                ("client_user".to_owned(), self.user.clone()),
+                ("client_utf8".to_owned(), self.utf8.clone()),
+                ("client_width".to_owned(), self.width.clone()),
+                ("client_written".to_owned(), self.written.clone()),
+            ]),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -721,6 +761,10 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         );
         cache.insert(key, output.clone());
         output
+    }
+
+    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        self.facts.clients.as_ref().clone()
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {

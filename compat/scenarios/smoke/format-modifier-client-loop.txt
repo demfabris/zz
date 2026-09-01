@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/format-modifier-client-loop.sh ~/format-modifier-client-loop.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FORMAT_MODIFIER_CLIENT_LOOP
+run-shell 'sh ~/format-modifier-client-loop.sh'
+out: show-environment -g FORMAT_MODIFIER_CLIENT_LOOP

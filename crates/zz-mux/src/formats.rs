@@ -239,6 +239,15 @@ pub(crate) struct FormatOptionScopes {
     pub(crate) panes: BTreeMap<String, Vec<FormatOptionRow>>,
 }
 
+/// One attached client as the `L` modifier sees it: the client formats that
+/// replace the outer client context, plus the facts the loop orders rows by.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FormatClientRow {
+    pub name: String,
+    pub activity: u64,
+    pub variables: BTreeMap<String, String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FormatOptionRow {
     pub(crate) name: String,
@@ -653,6 +662,7 @@ trait FormatVariables {
     fn variable(&self, name: &str) -> Option<Cow<'_, str>>;
     fn variable_kind(&self, name: &str) -> Option<FormatKind>;
     fn values(&self) -> &StatusContext;
+    fn format_type(&self) -> FormatType;
 }
 
 impl StatusContext {
@@ -857,6 +867,10 @@ impl FormatVariables for StatusContext {
     fn values(&self) -> &StatusContext {
         self
     }
+
+    fn format_type(&self) -> FormatType {
+        FormatType::None
+    }
 }
 
 impl FormatVariables for ResolvedFormatContext {
@@ -881,6 +895,10 @@ impl FormatVariables for ResolvedFormatContext {
 
     fn values(&self) -> &StatusContext {
         &self.values
+    }
+
+    fn format_type(&self) -> FormatType {
+        self.format_type
     }
 }
 
@@ -1404,6 +1422,11 @@ pub trait StatusHooks {
     ) -> usize {
         0
     }
+
+    /// Every attached client eligible for an `L` loop row, in any order.
+    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        Vec::new()
+    }
 }
 
 pub fn expand_status(
@@ -1415,6 +1438,7 @@ pub fn expand_status(
         context,
         hooks,
         time: true,
+        client_row: None,
     };
     truncate_output(expander.expand(format, 0))
 }
@@ -1428,6 +1452,7 @@ pub fn expand_format_values(
         context,
         hooks,
         time: false,
+        client_row: None,
     };
     truncate_output(expander.expand(format, 0))
 }
@@ -1515,6 +1540,7 @@ fn expand_format_inner(
         context: &context,
         hooks: &mut hooks,
         time,
+        client_row: None,
     };
     truncate_output(expander.expand(format, 0))
 }
@@ -1565,12 +1591,17 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
     ) -> usize {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
     }
+
+    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows()
+    }
 }
 
 struct Expander<'a, V: FormatVariables + ?Sized, H: StatusHooks> {
     context: &'a V,
     hooks: &'a mut H,
     time: bool,
+    client_row: Option<&'a FormatClientRow>,
 }
 
 impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
@@ -1732,6 +1763,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             self.expand_loop(copy, depth, LoopTarget::Windows, &flags)?
         } else if flags.loop_panes {
             self.expand_loop(copy, depth, LoopTarget::Panes, &flags)?
+        } else if flags.loop_clients {
+            self.expand_client_loop(copy, depth, &flags)
         } else if let Some(loop_flags) = flags.loop_options {
             self.expand_option_loop(copy, depth, loop_flags)
         } else if flags.name_window {
@@ -2154,10 +2187,46 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 context: &variables,
                 hooks: &mut *self.hooks,
                 time: self.time,
+                client_row: self.client_row,
             };
             output.push_str(&expander.expand(selected, depth));
         }
         Ok(output)
+    }
+
+    fn expand_client_loop(
+        &mut self,
+        copy: &str,
+        depth: usize,
+        flags: &ModifierFlags<'_>,
+    ) -> String {
+        let mut rows = self.hooks.client_loop_rows();
+        sort_client_loop_rows(&mut rows, flags.loop_sort, flags.loop_reversed);
+        let context = self.context.values().clone();
+        let format_type = self.context.format_type();
+        let mut output = String::new();
+        let last = rows.len().saturating_sub(1);
+        for (index, row) in rows.iter().enumerate() {
+            let variables = LoopVariables {
+                context: context.clone(),
+                format_type,
+                dynamic: BTreeMap::from([
+                    (LOOP_CONTEXT_FORMATS[0].to_owned(), index.to_string()),
+                    (
+                        LOOP_CONTEXT_FORMATS[1].to_owned(),
+                        bool_string(index == last).to_owned(),
+                    ),
+                ]),
+            };
+            let mut expander = Expander {
+                context: &variables,
+                hooks: &mut *self.hooks,
+                time: self.time,
+                client_row: Some(row),
+            };
+            output.push_str(&expander.expand(copy, depth));
+        }
+        output
     }
 
     fn expand_option_loop(&mut self, copy: &str, depth: usize, loop_flags: &str) -> String {
@@ -2180,6 +2249,7 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
                 context: &variables,
                 hooks: &mut *self.hooks,
                 time: self.time,
+                client_row: self.client_row,
             };
             output.push_str(&expander.expand(copy, depth));
         }
@@ -2259,7 +2329,12 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     }
 
     fn lookup(&mut self, key: &str, flags: &ModifierFlags<'_>) -> Option<String> {
-        let hooked = self.hooks.variable(key, self.context.values());
+        let hooked = match self.client_row {
+            Some(row) if client_loop_scoped(key) => {
+                Some(row.variables.get(key).cloned().unwrap_or_default())
+            }
+            _ => self.hooks.variable(key, self.context.values()),
+        };
         if hooked.is_none() && self.context.variable_kind(key).is_none() {
             return None;
         }
@@ -2325,6 +2400,7 @@ enum ModifierKind {
     Sessions,
     Windows,
     Panes,
+    Clients,
     Options,
     ContentSearch,
     Repeat,
@@ -2347,7 +2423,7 @@ impl FormatModifierSpec {
     }
 }
 
-const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 33] = [
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 34] = [
     FormatModifierSpec::new("||", ModifierKind::Or, false),
     FormatModifierSpec::new("&&", ModifierKind::And, false),
     FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
@@ -2378,6 +2454,7 @@ const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 33] = [
     FormatModifierSpec::new("S", ModifierKind::Sessions, true),
     FormatModifierSpec::new("W", ModifierKind::Windows, true),
     FormatModifierSpec::new("P", ModifierKind::Panes, true),
+    FormatModifierSpec::new("L", ModifierKind::Clients, true),
     FormatModifierSpec::new("O", ModifierKind::Options, true),
     FormatModifierSpec::new("C", ModifierKind::ContentSearch, true),
     FormatModifierSpec::new("R", ModifierKind::Repeat, true),
@@ -2436,6 +2513,10 @@ impl FormatVariables for LoopVariables {
     fn values(&self) -> &StatusContext {
         &self.context
     }
+
+    fn format_type(&self) -> FormatType {
+        self.format_type
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2492,6 +2573,7 @@ struct ModifierFlags<'a> {
     loop_sessions: bool,
     loop_windows: bool,
     loop_panes: bool,
+    loop_clients: bool,
     loop_options: Option<&'a str>,
     loop_sort: Option<LoopSort>,
     loop_reversed: bool,
@@ -2647,6 +2729,20 @@ impl<'a> ModifierFlags<'a> {
                     });
                     flags.loop_reversed = value.contains('r');
                 }
+                ModifierKind::Clients => {
+                    flags.loop_clients = true;
+                    let value = modifier.args.first().map_or("", String::as_str);
+                    flags.loop_sort = Some(if value.contains('i') {
+                        LoopSort::Order
+                    } else if value.contains('n') {
+                        LoopSort::Name
+                    } else if value.contains('t') {
+                        LoopSort::Activity
+                    } else {
+                        LoopSort::Order
+                    });
+                    flags.loop_reversed = value.contains('r');
+                }
                 ModifierKind::Options => {
                     flags.loop_options = Some(modifier.args.first().map_or("", String::as_str));
                 }
@@ -2658,6 +2754,32 @@ impl<'a> ModifierFlags<'a> {
         }
         flags
     }
+}
+
+/// The client formats an `L` row owns outright: inside a row they answer for
+/// the row's client, never the client the outer format was expanded for.
+fn client_loop_scoped(name: &str) -> bool {
+    format_variable(name).is_some_and(|spec| {
+        spec.scope == FormatScope::Client && spec.backing == FormatBacking::StatusHook
+    })
+}
+
+/// `sort_client_cmp`: only activity orders rows, most recent first, and the
+/// name comparison both breaks ties and stands in for every other order. `r`
+/// negates the finished comparison, tie-break included.
+fn sort_client_loop_rows(rows: &mut [FormatClientRow], sort: Option<LoopSort>, reversed: bool) {
+    rows.sort_by(|left, right| {
+        let ordering = match sort {
+            Some(LoopSort::Activity) => right.activity.cmp(&left.activity),
+            _ => Ordering::Equal,
+        }
+        .then_with(|| left.name.cmp(&right.name));
+        if reversed {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
 }
 
 fn sort_loop_items(items: &mut [FormatLoopItem], target: LoopTarget, sort: Option<LoopSort>) {

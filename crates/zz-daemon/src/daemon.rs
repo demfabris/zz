@@ -29761,6 +29761,25 @@ fn format_hook_facts(inner: &ServerState) -> FormatHookFacts {
                 .collect(),
         ),
         session_last_attached: Arc::new(inner.session_last_attached.clone()),
+        clients: Arc::new(
+            inner
+                .attached
+                .iter()
+                .filter(|(session, _)| inner.engine.state.sessions.contains_key(session))
+                .flat_map(|(session, clients)| {
+                    clients.iter().map(move |client| (*client, *session))
+                })
+                .map(|(client, session)| {
+                    client_format_facts(inner, client, session).loop_row(
+                        inner
+                            .client_activity
+                            .get(&client)
+                            .copied()
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        ),
         buffer: inner
             .paste_buffers
             .iter()

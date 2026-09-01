@@ -925,7 +925,6 @@
       "owner": "mux",
       "items": [
         "semantic:format-modifier-client-interrogation",
-        "semantic:format-modifier-client-loop",
         "semantic:format-modifier-environment-loop"
       ],
       "evidence": [
@@ -935,14 +934,16 @@
         "resource:knowledge/tmux/divergences.md",
         "scenario:compat/scenarios/format-modifier-width.txt",
         "file:crates/zz-mux/tests/format_modifier_option_loop.rs",
-        "scenario:compat/scenarios/format-modifier-option-loop.txt"
+        "scenario:compat/scenarios/format-modifier-option-loop.txt",
+        "file:crates/zz-daemon/tests/format_modifier_client_loop.rs",
+        "scenario:compat/scenarios/smoke/format-modifier-client-loop.txt"
       ],
       "acceptance": [
         "Implement the pinned w, I, L, O, and V tokens with focused source or live proofs for display-cell width, client interrogation, client loops, option loops, and environment loops.",
         "Every token moves from the active-gap partition into the parser-owned support roster only when its runtime behavior is implemented; malformed and nested modifier fallback remains pinned."
       ],
       "depends_on": [],
-      "reason": "The post-10v rerank split the six-token umbrella and selected R separately. w reports display-cell width after the substitution, length-limit, padding, and n transforms. O loops the options stored at the selected scope with the pin's flag precedence (v wins, then w, s, p, with g choosing the global object and gp selecting nothing), name order, one row per array item, and the array, hook, and user row fields. The remaining I, L, and V tokens require client or environment-specific behavior and can still return plausible wrong output instead of an error."
+      "reason": "The post-10v rerank split the six-token umbrella and selected R separately. w reports display-cell width after the substitution, length-limit, padding, and n transforms. O loops the options stored at the selected scope with the pin's flag precedence (v wins, then w, s, p, with g choosing the global object and gp selecting nothing), name order, one row per array item, and the array, hook, and user row fields. L now loops the attached clients the pin's sort_get_clients keeps, each row answering every client format for its own client while the outer session, window, and pane context stays put; default, i, and n order by client name, t by activity newest first, and r negates the finished comparison including the name tie-break. The remaining I and V tokens require client-interrogation and environment-specific behavior and can still return plausible wrong output instead of an error."
     },
     {
       "id": "formats.mouse-context",

@@ -32,8 +32,9 @@ use crate::{
     canonical_command, command_spec,
     copy_actions::pinned_copy_action,
     formats::{
-        CommandHooks, FormatClient, FormatContext, FormatOptionRow, FormatType, StatusHooks,
-        expand_format_time_with_hooks, expand_format_with_hooks, format_true, parse_tmux_colour,
+        CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatOptionRow, FormatType,
+        StatusHooks, expand_format_time_with_hooks, expand_format_with_hooks, format_true,
+        parse_tmux_colour,
     },
     honest_knobs::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
@@ -541,6 +542,10 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         ignore_case: bool,
     ) -> usize {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
+    }
+
+    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows()
     }
 }
 
@@ -1137,6 +1142,10 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
     ) -> usize {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
     }
+
+    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows()
+    }
 }
 
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
@@ -1175,6 +1184,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         ignore_case: bool,
     ) -> usize {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
+    }
+
+    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows()
     }
 }
 
@@ -1216,6 +1229,10 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         ignore_case: bool,
     ) -> usize {
         self.inner.pane_search(pane, pattern, regex, ignore_case)
+    }
+
+    fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows()
     }
 }
 

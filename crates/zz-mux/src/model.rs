@@ -243,6 +243,10 @@ pub struct Window {
     last_layout: Option<LayoutPreset>,
     previous_layout: Option<Box<CellLayout>>,
     pub(crate) last_extent_probe: Option<(PaneId, u16, u16)>,
+    /// The pin's `w->manual_sx`/`w->manual_sy`: the extent `resize-window`
+    /// stored, kept while `window-size` is automatic so a return to manual
+    /// restores it (resize.c `clients_calculate_size`).
+    pub(crate) manual_extent: (u16, u16),
     input_options: InputOptions,
 }
 
@@ -458,6 +462,7 @@ impl MuxState {
             last_layout: None,
             previous_layout: None,
             last_extent_probe: None,
+            manual_extent: extent,
             input_options: InputOptions::default(),
         };
         self.windows.insert(window_id, window);
@@ -581,6 +586,7 @@ impl MuxState {
             last_layout: None,
             previous_layout: None,
             last_extent_probe: None,
+            manual_extent: extent,
             input_options: InputOptions::default(),
         };
         self.windows.insert(window_id, window);
@@ -3098,6 +3104,7 @@ impl MuxState {
                 last_layout: None,
                 previous_layout: None,
                 last_extent_probe: None,
+                manual_extent: inherited_extent,
                 input_options: InputOptions::default(),
             },
         );

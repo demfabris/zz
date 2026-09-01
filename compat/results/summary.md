@@ -39,6 +39,7 @@
 | layout-strings | 6 | yes | 0 | yes | yes | yes |
 | list-keys-padding | 46 | yes | 0 | yes | yes | yes |
 | list-sort-filter | 12 | yes | 0 | yes | yes | yes |
+| manual-window-size-transition | 24 | yes | 0 | yes | yes | yes |
 | micro-flags | 17 | yes | 0 | yes | yes | yes |
 | move-swap | 12 | yes | 0 | yes | yes | yes |
 | mru-activity | 11 | yes | 0 | yes | yes | yes |

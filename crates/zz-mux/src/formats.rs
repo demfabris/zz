@@ -1111,8 +1111,8 @@ impl MuxEngine {
         context.window_width = Some(width);
         context.window_height = Some(height);
         if self.window_size(window.id) == WindowSize::Manual {
-            context.window_manual_width = Some(width);
-            context.window_manual_height = Some(height);
+            context.window_manual_width = Some(window.manual_extent.0);
+            context.window_manual_height = Some(window.manual_extent.1);
         }
         context.window_layout = window.layout.dump();
         context.window_active = Some(session.active_window == window.id);

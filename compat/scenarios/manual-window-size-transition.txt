@@ -1,0 +1,24 @@
+new-session -d -s msize -x 80 -y 24
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+resize-window -t msize:0 -x 40 -y 12
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+out: show-window-options -v -t msize:0 window-size
+set-window-option -t msize:0 window-size latest
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+set-window-option -t msize:0 window-size manual
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+set-option -t msize default-size 100x30
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+resize-window -t msize:0 -A
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+out: show-window-options -v -t msize:0 window-size
+set-window-option -t msize:0 window-size largest
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+set-window-option -t msize:0 window-size manual
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+resize-window -t msize:0 -R 5
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+resize-window -t msize:0 -a
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]
+set-window-option -u -t msize:0 window-size
+out: display-message -p -t msize:0 [#{window_width}x#{window_height}|#{window_manual_width}:#{window_manual_height}]

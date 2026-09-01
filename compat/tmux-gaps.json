@@ -2575,18 +2575,18 @@
       "owner": "client",
       "items": [
         "semantic:attached-gui-pane-width",
-        "semantic:manual-window-size-transition",
         "semantic:split-window-zoom-hidden-width"
       ],
       "evidence": [
         "resource:knowledge/tmux/divergences.md",
-        "scenario:compat/scenarios/split-window-zoom.txt"
+        "scenario:compat/scenarios/split-window-zoom.txt",
+        "scenario:compat/scenarios/manual-window-size-transition.txt"
       ],
       "acceptance": [
         "Client convergence and differential tests pin cell geometry during measurement, zoom, and manual policy transitions."
       ],
       "depends_on": [],
-      "reason": "These mismatches occur where client measurements meet durable mux geometry."
+      "reason": "These mismatches occur where client measurements meet durable mux geometry. The manual policy transition is closed: a window keeps the extent resize-window stored, an automatic policy is free to reach a different measured size, and returning to manual restores the stored extent and reports it through window_manual_width and window_manual_height. Attached-pane width and the hidden zoom split stay open."
     },
     {
       "id": "sessions.linked-groups",

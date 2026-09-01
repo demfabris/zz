@@ -6451,10 +6451,37 @@ impl MuxEngine {
         );
         let generation = self.state.generation();
         self.state.resize_window(window, columns, rows)?;
+        if let Some(window) = self.state.windows.get_mut(&window) {
+            window.manual_extent = window.layout.extent();
+        }
         if changed_mode && self.state.generation() == generation {
             self.state.bump_generation();
         }
         Ok(())
+    }
+
+    fn restore_manual_window_extents(&mut self, window: Option<WindowId>) {
+        let candidates = window.map_or_else(
+            || self.state.windows.keys().copied().collect::<Vec<_>>(),
+            |window| vec![window],
+        );
+        for candidate in candidates {
+            if self.window_size(candidate) != WindowSize::Manual {
+                continue;
+            }
+            let Some(state) = self.state.windows.get(&candidate) else {
+                continue;
+            };
+            let (columns, rows) = state.manual_extent;
+            if state.layout.extent() == (columns, rows) {
+                continue;
+            }
+            if self.state.resize_window(candidate, columns, rows).is_ok()
+                && let Some(state) = self.state.windows.get_mut(&candidate)
+            {
+                state.manual_extent = state.layout.extent();
+            }
+        }
     }
 
     pub fn set_pane_geometry(&mut self, pane: PaneId, columns: u16, rows: u16) -> bool {
@@ -10946,6 +10973,7 @@ impl MuxEngine {
         }
         match option {
             WindowOption::WindowSize => {
+                self.restore_manual_window_extents(window);
                 Ok(Execution::effect(MuxEffect::WindowSizeChanged { window }))
             }
             WindowOption::WrapSearch => Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
@@ -36992,13 +37020,27 @@ mod tests {
             ":"
         );
         assert!(engine.set_pane_geometry(pane, 120, 40));
+        assert_eq!(engine.state.windows[&window].layout.extent(), (120, 40));
         engine
             .execute(
                 &mut context,
                 &command("set-window-option", &["window-size", "manual"]),
             )
             .unwrap();
-        assert_eq!(engine.state.windows[&window].layout.extent(), (120, 40));
+        assert_eq!(engine.state.windows[&window].layout.extent(), (92, 21));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "#{window_manual_width}:#{window_manual_height}"],
+                    ),
+                )
+                .unwrap()
+                .output,
+            "92:21"
+        );
         assert!(!engine.set_pane_geometry(pane, 80, 24));
     }
 

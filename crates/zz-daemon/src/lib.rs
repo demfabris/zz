@@ -173,6 +173,15 @@ fn configure_shell_job_environment(
     configure_tmux_shim(process, tmux_shim, zz_executable, path.map(OsStr::new));
 }
 
+/// The text `strerror` would give for an IO failure. Rust appends its own
+/// `(os error N)` tail, which no tmux message carries.
+pub(crate) fn strerror_text(error: &io::Error) -> String {
+    let text = error.to_string();
+    text.split_once(" (os error ")
+        .map_or(text.as_str(), |(message, _)| message)
+        .to_owned()
+}
+
 /// Classify a failed local handshake as a stale daemon when the wire error or guarded identity
 /// provides enough evidence. Unrelated protocol failures are returned unchanged.
 #[must_use]

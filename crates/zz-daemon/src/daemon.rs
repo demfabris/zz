@@ -32,12 +32,13 @@ use zz_mux::{
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
-    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientHello,
-    ClientId, ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation,
-    CommandPromptAction, CommandPromptKind, CommandPromptMode, CommandPromptState,
-    CommandPromptType, CommandRequest, CommandResolution, CommandResponse, ConfigOverrideEntry,
-    ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState,
-    Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
+    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
+    ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello, ClientId,
+    ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
+    CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
+    CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
+    ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
+    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
     MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
     MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
@@ -4956,6 +4957,9 @@ impl Shared {
         let (terminals, command_output, popup_waiters, menu_waiters, confirm_waiters, shutdown) = {
             let mut inner = self.inner.lock();
             inner.subscribers.remove(&client);
+            inner
+                .client_file_waiters
+                .retain(|_, waiter| waiter.client != client);
             inner.client_color_schemes.remove(&client);
             inner.client_names.remove(&client);
             inner.client_instances.remove(&client);
@@ -12565,6 +12569,68 @@ impl Shared {
         }
     }
 
+    /// Hand one bounded file operation to the command client that invoked the
+    /// command, the way `file_read` and `file_write` send `MSG_READ_OPEN` and
+    /// `MSG_WRITE_OPEN` to a client that is not attached instead of touching
+    /// the server's own filesystem. `None` means the daemon owns the IO.
+    fn client_file_operation(
+        self: &Arc<Self>,
+        client: Option<ClientId>,
+        path: &Path,
+        operation: ClientFileOperation,
+    ) -> Option<Result<Vec<u8>, ServerError>> {
+        let client = client?;
+        if self.inner.lock().client_kinds.get(&client) != Some(&ClientKind::Command) {
+            return None;
+        }
+        let writer = self.client_writers.lock().get(&client).cloned()?;
+        let (request_id, wait) = {
+            let mut inner = self.inner.lock();
+            inner.next_client_file_request = inner.next_client_file_request.wrapping_add(1).max(1);
+            let request_id = inner.next_client_file_request;
+            let (wake, wait) = crossbeam_channel::bounded(1);
+            inner
+                .client_file_waiters
+                .insert(request_id, ClientFileWaiter { client, wake });
+            (request_id, wait)
+        };
+        let sent =
+            writer.enqueue_reliable(&ProtocolMessage::ClientFileRequest(ClientFileRequest {
+                request_id,
+                path: path.to_string_lossy().into_owned(),
+                operation,
+            }));
+        if !sent {
+            self.inner.lock().client_file_waiters.remove(&request_id);
+            return None;
+        }
+        let reply = wait.recv().ok();
+        self.inner.lock().client_file_waiters.remove(&request_id);
+        Some(match reply {
+            Some(reply) => match reply.error {
+                Some(error) => Err(client_file_failure(&error, path)),
+                None => Ok(reply.data),
+            },
+            None => Err(client_file_failure(
+                "the invoking client stopped answering",
+                path,
+            )),
+        })
+    }
+
+    /// Wake the command parked on one [`ClientFileRequest`].
+    fn complete_client_file(&self, client: ClientId, response: ClientFileResponse) {
+        let waiter = self
+            .inner
+            .lock()
+            .client_file_waiters
+            .remove(&response.request_id)
+            .filter(|waiter| waiter.client == client);
+        if let Some(waiter) = waiter {
+            let _ = waiter.wake.send(response);
+        }
+    }
+
     /// Re-fit the overlays a client owns after its own terminal geometry
     /// changed. The pin runs `menu_resize_cb` and `popup_resize_cb` from
     /// `MSG_RESIZE` and closes neither: a menu keeps its rows, its width, its
@@ -13229,8 +13295,19 @@ impl Shared {
                     )
                     .into());
                 }
-                let path = expand_path(&path);
-                let data = read_paste_buffer_file(&path)?;
+                let path = buffer_file_path(&self.inner.lock(), invoking_client, &path);
+                let data = match self.client_file_operation(
+                    invoking_client,
+                    &path,
+                    ClientFileOperation::Read,
+                ) {
+                    Some(result) => {
+                        let data = result?;
+                        validate_paste_buffer_size(data.len())?;
+                        data
+                    }
+                    None => read_paste_buffer_file(&path)?,
+                };
                 if data.is_empty() {
                     return Ok(Execution::default());
                 }
@@ -23817,6 +23894,8 @@ struct ServerState {
     control_command_event_captures:
         HashMap<(ClientId, thread::ThreadId), Vec<CapturedControlCommandEvents>>,
     subscribers: BTreeMap<ClientId, Arc<OutboundMailbox>>,
+    client_file_waiters: BTreeMap<u64, ClientFileWaiter>,
+    next_client_file_request: u64,
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     visible_terminals: BTreeMap<ClientId, BTreeSet<PaneId>>,
     streamed_terminals: BTreeMap<ClientId, BTreeMap<PaneId, TerminalStreamKind>>,
@@ -25257,6 +25336,13 @@ struct CommandOutputSession {
 struct PopupWaiter {
     client: ClientId,
     wake: crossbeam_channel::Sender<u8>,
+}
+
+/// One `load-buffer` or `save-buffer` parked on the client that has to do the
+/// IO, keyed in `client_file_waiters` by the request id the reply carries.
+struct ClientFileWaiter {
+    client: ClientId,
+    wake: crossbeam_channel::Sender<ClientFileResponse>,
 }
 
 struct PopupSession {
@@ -31052,12 +31138,41 @@ fn rename_paste_buffer(
     Ok(events)
 }
 
+/// Where a buffer path that is not absolute hangs from. The pin asks
+/// `server_client_get_cwd(c, NULL)` inside `file_get_path`: the config client
+/// during startup, an unattached client's own cwd, then that client's attached
+/// session cwd, then home.
+fn client_file_working_directory(inner: &ServerState, client: Option<ClientId>) -> PathBuf {
+    if let Some(startup) = inner.startup_source_client_working_directory.clone() {
+        return startup;
+    }
+    let attached = client.and_then(|client| client_attached_session(inner, client));
+    if attached.is_none()
+        && let Some(cwd) = client.and_then(|client| inner.client_working_directories.get(&client))
+    {
+        return cwd.clone();
+    }
+    attached
+        .and_then(|session| inner.engine.state.session_working_directory(session))
+        .map_or_else(default_job_working_directory, Path::to_owned)
+}
+
+/// The absolute path a buffer command names, expanded once in the daemon the
+/// way `file_get_path` does: a leading `~/` against the server's own home, and
+/// anything else relative against the invoking client's working directory.
+fn buffer_file_path(inner: &ServerState, client: Option<ClientId>, path: &str) -> PathBuf {
+    let expanded = expand_path(path);
+    if expanded.is_absolute() {
+        return expanded;
+    }
+    client_file_working_directory(inner, client).join(expanded)
+}
+
 fn read_paste_buffer_file(path: &Path) -> Result<Vec<u8>, ServerError> {
-    let file =
-        fs::File::open(path).map_err(|error| buffer_file_error("load-buffer", path, &error))?;
+    let file = fs::File::open(path).map_err(|error| buffer_file_error(path, &error))?;
     if file
         .metadata()
-        .map_err(|error| buffer_file_error("load-buffer", path, &error))?
+        .map_err(|error| buffer_file_error(path, &error))?
         .len()
         > u64::try_from(MAX_PASTE_BUFFER_BYTES).expect("paste buffer limit fits in u64")
     {
@@ -31073,7 +31188,7 @@ fn read_paste_buffer_file(path: &Path) -> Result<Vec<u8>, ServerError> {
             .saturating_add(1),
     )
     .read_to_end(&mut data)
-    .map_err(|error| buffer_file_error("load-buffer", path, &error))?;
+    .map_err(|error| buffer_file_error(path, &error))?;
     validate_paste_buffer_size(data.len())?;
     Ok(data)
 }
@@ -31088,14 +31203,21 @@ fn write_paste_buffer_file(path: &Path, data: &[u8], append: bool) -> Result<(),
     }
     let mut file = options
         .open(path)
-        .map_err(|error| buffer_file_error("save-buffer", path, &error))?;
+        .map_err(|error| buffer_file_error(path, &error))?;
     file.write_all(data)
         .and_then(|()| file.flush())
-        .map_err(|error| buffer_file_error("save-buffer", path, &error))
+        .map_err(|error| buffer_file_error(path, &error))
 }
 
-fn buffer_file_error(command: &str, path: &Path, error: &std::io::Error) -> ServerError {
-    ServerError::InvalidCommand(format!("{command}: {}: {error}", path.display()))
+/// The pin reports a buffer file failure as `cmdq_error(item, "%s: %s",
+/// strerror(cf->error), cf->path)` in both cmd-load-buffer.c and
+/// cmd-save-buffer.c: the reason, then the path it expanded.
+fn buffer_file_error(path: &Path, error: &std::io::Error) -> ServerError {
+    client_file_failure(&crate::strerror_text(error), path)
+}
+
+fn client_file_failure(reason: &str, path: &Path) -> ServerError {
+    ServerError::InvalidCommand(format!("{reason}: {}", path.display()))
 }
 
 #[derive(Debug)]
@@ -32330,6 +32452,9 @@ fn handle_connection<S: TransportStream>(
                         prepared,
                     );
                 }
+            }
+            ProtocolMessage::ClientFileResponse(response) => {
+                shared.complete_client_file(client, response);
             }
             ProtocolMessage::PrepareCommandList {
                 request_id,
@@ -61982,7 +62107,7 @@ set-option -g @alias-mixed-next yes
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.starts_with("load-buffer: ")
+                if message.ends_with(": ") || message.contains(": /")
         ));
         command_context
             .format_variables
@@ -62024,7 +62149,7 @@ set-option -g @alias-mixed-next yes
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.starts_with("save-buffer: ")
+                if message.ends_with(": ") || message.contains(": /")
         ));
         command_context.format_variables.remove("path");
         let origin_output = directory.path().join("source-session-save-buffer-origin");

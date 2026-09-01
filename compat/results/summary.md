@@ -9,6 +9,7 @@
 | base-index | 11 | yes | 0 | yes | yes | yes |
 | behavior-options | 12 | yes | 0 | yes | yes | yes |
 | break-pane | 30 | yes | 0 | yes | yes | yes |
+| buffer-client-file-load | 3 | yes | 0 | yes | yes | yes |
 | buffer-path-format | 36 | yes | 0 | yes | yes | yes |
 | capture-pane | 23 | yes | 0 | yes | yes | yes |
 | collapse | 4 | yes | 0 | yes | yes | yes |

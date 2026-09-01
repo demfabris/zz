@@ -1,0 +1,4 @@
+corpus: none
+stage: fixtures/status-keys-editor-default.sh ~/status-keys-editor-default.sh
+run-shell 'sh ~/status-keys-editor-default.sh'
+out: show-environment -g STATUS_KEYS_MATRIX

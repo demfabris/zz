@@ -2976,6 +2976,14 @@ impl MuxEngine {
         Ok(())
     }
 
+    pub fn set_default_status_keys(&mut self, value: &str) -> Result<(), ServerError> {
+        let keys = parse_mode_keys(Some(value), self.global_mode_keys)?;
+        self.stored_scalars
+            .global_session
+            .insert("status-keys", keys.as_str().to_owned());
+        Ok(())
+    }
+
     pub fn initialize_default_shell(&mut self, value: impl Into<String>) {
         self.global_default_shell = value.into();
     }

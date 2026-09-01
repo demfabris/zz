@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **75**. Classified items: **527**.
+Tracked gap groups: **75**. Classified items: **526**.
 
 - Status: open: 27, blocked: 9, accepted: 39.
 - Decision: adopt: 32, native: 31, park: 4, never: 8.
 - Priority: later: 36, none: 39.
 - Closed history entries: 142.
-- Surface: command: 9, flag: 51, native-command: 21, option: 75, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 80, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 51, native-command: 21, option: 75, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 79, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -1414,20 +1414,21 @@ Native chrome and a persistent daemon need explicit behavior where tmux assumes 
 
 ### `prompt.command-fidelity`: Complete command-prompt semantics
 
-`command-prompt` now applies its pinned command-or-string argument rule. Typed templates retain their structured constructed command list through submission without another user-alias lookup. Structured substitution edits leaf arguments in place and preserves argument boundaries against quote or semicolon injection. String templates substitute the raw source before a fresh parse and whole-result construction pass, retaining the originating source path and line for failures. Both paths replace the first `%%` and every `%1`; a trailing `%` quotes double quotes, backslashes, dollar signs, semicolons, and tildes. A failed typed physical group stops its remaining commands while later physical lines continue. String templates and free input form one group. Prompt chaining and multi-answer `%2` substitution, labels, key spelling, pass order, vi editing, format and target flags, and freeze behavior remain open. Startup defaults are also half-wired: tmux.c sets both status-keys and mode-keys from the basename of VISUAL or EDITOR, and measured against the pin, EDITOR=vi, EDITOR=/usr/local/bin/nvim, and VISUAL=vim with EDITOR=emacs each answer vi for both options, while a scrubbed environment answers emacs for both. zz's daemon derives the same value in mode_keys_from_environment but hands it only to set_default_mode_keys, so mode-keys tracks the environment and status-keys stays at the table default of emacs in every case. That is the reason zz's prompt has no vi editing to reach.
+`command-prompt` now applies its pinned command-or-string argument rule. Typed templates retain their structured constructed command list through submission without another user-alias lookup. Structured substitution edits leaf arguments in place and preserves argument boundaries against quote or semicolon injection. String templates substitute the raw source before a fresh parse and whole-result construction pass, retaining the originating source path and line for failures. Both paths replace the first `%%` and every `%1`; a trailing `%` quotes double quotes, backslashes, dollar signs, semicolons, and tildes. A failed typed physical group stops its remaining commands while later physical lines continue. String templates and free input form one group. Prompt chaining and multi-answer `%2` substitution, labels, key spelling, pass order, vi editing, format and target flags, and freeze behavior remain open. Startup defaults are also half-wired: tmux.c sets both status-keys and mode-keys from the basename of VISUAL or EDITOR, and measured against the pin, EDITOR=vi, EDITOR=/usr/local/bin/nvim, and VISUAL=vim with EDITOR=emacs each answer vi for both options, while a scrubbed environment answers emacs for both. zz's daemon derived the same value in mode_keys_from_environment but handed it only to set_default_mode_keys, so mode-keys tracked the environment and status-keys stayed at the table default of emacs in every case. Closed 2026-09-01: editor_derived_keys now answers None when neither variable is set and one value otherwise, and boot writes it to mode-keys and status-keys together, the way tmux.c writes global_w_options and global_s_options from one `keys`. Re-measured against the pin on 2026-09-01 with `-f /dev/null` servers on both binaries (the box's own ~/.tmux.conf sets mode-keys vi and status-keys emacs and hides the derivation, which is why the earlier bare probe read mode-keys=vi with a scrubbed environment): scrubbed answers emacs/emacs, EDITOR=vi and EDITOR=/usr/local/bin/nvim and VISUAL=vim with EDITOR=emacs and EDITOR=nano-vi-x each answer vi/vi, and EDITOR=emacs, VISUAL= with EDITOR=vim, and EDITOR=/opt/vi/bin/ed each answer emacs/emacs. The last two are the pin's exact rule and not a paraphrase of it: an empty VISUAL still wins over a set EDITOR because getenv returns non-NULL, and only the basename is searched for `vi`, so a `vi` directory component does not count. Differential coverage over that whole matrix, including the `editor` server option, is smoke/status-keys-editor-default. The remaining ten items are the prompt itself, and vi line editing now has a status-keys value to read.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `daemon`
 - User impact: scripts, daily
-- Items: `flag:command-prompt:-F`, `flag:command-prompt:-l`, `flag:command-prompt:-t`, `option:status-keys`, `semantic:command-prompt-chain`, `semantic:command-prompt-key-spelling`, `semantic:command-prompt-labels`, `semantic:command-prompt-pass-order`, `semantic:command-prompt-vi-editing`, `semantic:prompt-message-freeze`, `semantic:status-keys-editor-derived-default`
+- Items: `flag:command-prompt:-F`, `flag:command-prompt:-l`, `flag:command-prompt:-t`, `option:status-keys`, `semantic:command-prompt-chain`, `semantic:command-prompt-key-spelling`, `semantic:command-prompt-labels`, `semantic:command-prompt-pass-order`, `semantic:command-prompt-vi-editing`, `semantic:prompt-message-freeze`
 - Depends on: `clients.interactive-refresh`
 - Evidence:
   - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `file:compat/attached-client.sh`
+  - `scenario:compat/scenarios/smoke/status-keys-editor-default.txt`
 - Acceptance:
   - `Attached-client tests cover format expansion, prompt chains, labels, key answers, vi editing, fanout, and queue order.`
   - `The daemon's startup derivation writes status-keys as well as mode-keys, so a VISUAL or EDITOR basename containing vi selects vi for both.`

@@ -176,17 +176,15 @@ fn daemon_color_scheme() -> TerminalColorScheme {
     }
 }
 
-fn mode_keys_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) -> &'static str {
-    let Some(editor) = visual.or(editor) else {
-        return "emacs";
-    };
+fn editor_derived_keys(visual: Option<&OsStr>, editor: Option<&OsStr>) -> Option<&'static str> {
+    let editor = visual.or(editor)?;
     let editor = editor.to_string_lossy();
     let basename = editor.rsplit('/').next().unwrap_or(&editor);
-    if basename.contains("vi") {
+    Some(if basename.contains("vi") {
         "vi"
     } else {
         "emacs"
-    }
+    })
 }
 
 fn editor_from_environment(visual: Option<&OsStr>, editor: Option<&OsStr>) -> String {
@@ -3661,7 +3659,7 @@ impl Shared {
             false,
             std::env::temp_dir().join("zz-test-paste"),
             std::env::temp_dir().join("zz-test.sock"),
-            "emacs",
+            None,
             "/usr/bin/vi",
             std::iter::empty::<(String, String)>(),
         )
@@ -3686,7 +3684,7 @@ impl Shared {
             load_user_config,
             paste_directory,
             socket_path,
-            mode_keys_from_environment(visual.as_deref(), editor.as_deref()),
+            editor_derived_keys(visual.as_deref(), editor.as_deref()),
             &default_editor,
             daemon_environment(),
         );
@@ -3703,7 +3701,7 @@ impl Shared {
         load_user_config: bool,
         paste_directory: PathBuf,
         socket_path: PathBuf,
-        default_mode_keys: &str,
+        editor_keys: Option<&str>,
         default_editor: &str,
         environment: I,
     ) -> Self
@@ -3727,10 +3725,16 @@ impl Shared {
             appearance_provenance,
             ..ServerState::default()
         };
-        state
-            .engine
-            .set_default_mode_keys(default_mode_keys)
-            .expect("daemon mode-keys default is valid");
+        if let Some(keys) = editor_keys {
+            state
+                .engine
+                .set_default_mode_keys(keys)
+                .expect("daemon mode-keys default is valid");
+            state
+                .engine
+                .set_default_status_keys(keys)
+                .expect("daemon status-keys default is valid");
+        }
         state.engine.initialize_default_editor(default_editor);
         state.engine.initialize_default_shell(default_shell);
         state.engine.seed_global_environment(environment);
@@ -33884,24 +33888,67 @@ mod tests {
 
     #[test]
     fn editor_sniff_matches_the_pin_basename_rule() {
-        for editor in ["vi", "vim", "nvim", "gvim", "/usr/bin/evil"] {
+        for editor in ["vi", "vim", "nvim", "gvim", "/usr/bin/evil", "nano-vi-x"] {
             assert_eq!(
-                mode_keys_from_environment(None, Some(OsStr::new(editor))),
-                "vi",
+                editor_derived_keys(None, Some(OsStr::new(editor))),
+                Some("vi"),
                 "{editor}"
             );
         }
-        for editor in ["emacsclient", "VI", "/usr/bin/emacs"] {
+        for editor in ["emacsclient", "VI", "/usr/bin/emacs", "/opt/vi/bin/ed"] {
             assert_eq!(
-                mode_keys_from_environment(None, Some(OsStr::new(editor))),
-                "emacs",
+                editor_derived_keys(None, Some(OsStr::new(editor))),
+                Some("emacs"),
                 "{editor}"
             );
         }
-        assert_eq!(mode_keys_from_environment(None, None), "emacs");
+        assert_eq!(editor_derived_keys(None, None), None);
         assert_eq!(
-            mode_keys_from_environment(Some(OsStr::new("")), Some(OsStr::new("vim"))),
-            "emacs"
+            editor_derived_keys(Some(OsStr::new("")), Some(OsStr::new("vim"))),
+            Some("emacs")
+        );
+        assert_eq!(
+            editor_derived_keys(Some(OsStr::new("vim")), Some(OsStr::new("emacs"))),
+            Some("vi")
+        );
+    }
+
+    #[test]
+    fn editor_derived_keys_reach_status_keys_as_well_as_mode_keys() {
+        let boot = |keys: Option<&str>| {
+            let shared = Shared::configured_with_boot_environment(
+                1,
+                Arc::new(TerminalAppearance::default()),
+                AppearanceProvenance::default(),
+                false,
+                std::env::temp_dir().join("zz-test-paste"),
+                std::env::temp_dir().join("zz-test.sock"),
+                keys,
+                "/usr/bin/vi",
+                std::iter::empty::<(String, String)>(),
+            );
+            let mut inner = shared.inner.lock();
+            let read = |inner: &mut ServerState, args: [&str; 2]| {
+                inner
+                    .engine
+                    .execute(
+                        &mut ExecutionContext::default(),
+                        &CommandInvocation::new("show-options", args),
+                    )
+                    .expect("read keys option")
+                    .output
+            };
+            (
+                read(&mut inner, ["-gv", "status-keys"]),
+                read(&mut inner, ["-gwv", "mode-keys"]),
+            )
+        };
+
+        assert_eq!(boot(None), ("emacs".to_owned(), "emacs".to_owned()));
+        assert_eq!(boot(Some("vi")), ("vi".to_owned(), "vi".to_owned()));
+        assert_eq!(
+            boot(Some("emacs")),
+            ("emacs".to_owned(), "emacs".to_owned())
         );
     }
 
@@ -34121,7 +34168,7 @@ mod tests {
             false,
             std::env::temp_dir().join("zz-test-paste"),
             std::env::temp_dir().join("zz-test.sock"),
-            "vi",
+            Some("vi"),
             "nvim",
             [("PHASE4D_BOOT", "seeded")],
         );

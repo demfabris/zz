@@ -154,6 +154,7 @@
 | smoke/source-file-diagnostics | 12 | yes | 0 | yes | yes | yes |
 | smoke/source-file-tilde | 3 | yes | 0 | yes | yes | yes |
 | smoke/source-replay-diagnostics | 60 | yes | 0 | yes | yes | yes |
+| smoke/status-keys-editor-default | 2 | yes | 0 | yes | yes | yes |
 | smoke/tpm-init | 5 | yes | 0 | yes | yes | yes |
 | smoke/vim-tmux-navigator | 8 | yes | 0 | yes | yes | yes |
 | smoke/yank | 3 | yes | 0 | yes | yes | yes |

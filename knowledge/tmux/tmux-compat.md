@@ -102,9 +102,10 @@ counts. The structural matches divide into 49 copy-mode, 61 copy-mode-vi, and 32
 Slice 10l closes hook-producer discovery with a daemon-owned source invariant. It names 27 explicit
 event producers and derives 37 generic `after-<command>` producers whose suffix names an implemented
 command. A later pin audit classifies `after-queue` as explicit-only: ordinary queues do not
-produce it, while `set-hook -R` runs it. The current partition contains those 64 automatic hooks,
-the explicit-only hook, and three active gaps: `pane-focus-in`, `pane-focus-out`, and
-`pane-set-clipboard`. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
+produce it, while `set-hook -R` runs it. The current partition contains 67 automatic hooks
+and the explicit-only hook, with no active hook gap: `pane-set-clipboard` closed with its two pinned
+producers, and `pane-focus-in` and `pane-focus-out` closed on 2026-09-01 against the pin's
+pane-level focus predicate. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
 closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves commands and
 unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
 unbound after ensuring its table. Structural key equality still does not prove every downstream

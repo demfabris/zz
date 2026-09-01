@@ -92,8 +92,10 @@ promotion after a detach. Changed TUI resizes send retained outer size before
 per-pane geometry, so `client-resized` can expand old pane and window dimensions;
 `clients.event-resize-context` owns moving that hook after geometry without losing
 unchanged-report duplicates. Pinned `after-queue` is explicit-only: ordinary queues do not produce
-it, while `set-hook -R` runs it. Three names still have no automatic producer:
-`pane-focus-in`, `pane-focus-out`, and `pane-set-clipboard`.
+it, while `set-hook -R` runs it. Every other pinned hook now has an automatic producer:
+`pane-focus-in` and `pane-focus-out` fire on 2026-09-01 from the pin's pane-level predicate, where a
+pane is focused while it is its window's active pane and some attached, focused, overlay-free client
+has that window current, and the hook carries no client the way `notify_pane` passes none.
 `window-layout-changed` single-fires where the pin double-fires on
 resize/select-layout.
 

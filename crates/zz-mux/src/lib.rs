@@ -38,8 +38,8 @@ pub use copy_actions::{
     missing_copy_mode_actions, pinned_copy_action,
 };
 pub use formats::{
-    FormatClient, FormatClientRow, TmuxColour, delegated_format_variable_names, display_width,
-    format_true, indexed_colour_rgb, parse_tmux_colour,
+    FormatClient, FormatClientRow, FormatEnvironRow, TmuxColour, delegated_format_variable_names,
+    display_width, format_true, indexed_colour_rgb, parse_tmux_colour,
 };
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use layout::{CellLayout, SplitSize};

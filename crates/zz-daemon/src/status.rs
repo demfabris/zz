@@ -15,8 +15,8 @@ use chrono::Local;
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
 use zz_mux::{
-    FormatClientRow, MuxEngine, StatusContext, StatusFormats, StatusHooks, StatusRowVariables,
-    display_width, expand_status,
+    FormatClientRow, FormatEnvironRow, MuxEngine, StatusContext, StatusFormats, StatusHooks,
+    StatusRowVariables, display_width, expand_status,
 };
 use zz_protocol::{
     ClientId, MAX_STATUS_ROWS, MAX_STATUS_TEXT_BYTES, MuxSnapshot, PaneId, SessionId, StatusLine,
@@ -72,6 +72,10 @@ pub(crate) struct FormatHookFacts {
     pub(crate) buffer: Option<BufferFormatFacts>,
     pub(crate) client: Option<ClientFormatFacts>,
     pub(crate) clients: Arc<Vec<FormatClientRow>>,
+    /// The environment of the client this expansion was created for, which is
+    /// the invoking client for a command and the rendering client for a status
+    /// line. `#{Vc:}` reads it.
+    pub(crate) client_environment: Arc<Vec<FormatEnvironRow>>,
     pub(crate) message: Option<MessageFormatFacts>,
     pub(crate) mux: Arc<zz_mux::FormatFacts>,
 }
@@ -112,6 +116,25 @@ pub(crate) struct ClientFormatFacts {
     pub(crate) width: String,
     pub(crate) written: String,
     pub(crate) line: usize,
+    pub(crate) environment: Vec<FormatEnvironRow>,
+}
+
+/// A client's own process environment as `#{Vc:}` rows. A client store has no
+/// hidden or removed entries: the client sends what it has.
+pub(crate) fn client_environment_rows(
+    environment: Option<&Arc<BTreeMap<String, String>>>,
+) -> Vec<FormatEnvironRow> {
+    environment.map_or_else(Vec::new, |environment| {
+        environment
+            .iter()
+            .map(|(name, value)| FormatEnvironRow {
+                name: name.clone(),
+                value: value.clone(),
+                hidden: false,
+                removed: false,
+            })
+            .collect()
+    })
 }
 
 impl ClientFormatFacts {
@@ -121,6 +144,7 @@ impl ClientFormatFacts {
         FormatClientRow {
             name: self.name.clone(),
             activity,
+            environment: self.environment.clone(),
             variables: BTreeMap::from([
                 ("client_activity".to_owned(), self.activity.clone()),
                 ("client_cell_height".to_owned(), self.cell_height.clone()),
@@ -765,6 +789,10 @@ impl StatusHooks for DaemonFormatHooks<'_> {
 
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
         self.facts.clients.as_ref().clone()
+    }
+
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.facts.client_environment.as_ref().clone()
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {

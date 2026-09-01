@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **82**. Classified items: **562**.
+Tracked gap groups: **82**. Classified items: **561**.
 
 - Status: open: 40, blocked: 6, accepted: 36.
 - Decision: adopt: 45, native: 28, park: 1, never: 8.
 - Priority: later: 46, none: 36.
 - Closed history entries: 129.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 89, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 88, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -733,14 +733,14 @@ Schema 5 classified 41 missing literal producer/name tuples plus current_file an
 
 ### `formats.modifier-fidelity`: Implement remaining format modifiers
 
-The post-10v rerank split the six-token umbrella and selected R separately. w reports display-cell width after the substitution, length-limit, padding, and n transforms. O loops the options stored at the selected scope with the pin's flag precedence (v wins, then w, s, p, with g choosing the global object and gp selecting nothing), name order, one row per array item, and the array, hook, and user row fields. L now loops the attached clients the pin's sort_get_clients keeps, each row answering every client format for its own client while the outer session, window, and pane context stays put; default, i, and n order by client name, t by activity newest first, and r negates the finished comparison including the name tie-break. The remaining I and V tokens require client-interrogation and environment-specific behavior and can still return plausible wrong output instead of an error.
+The post-10v rerank split the six-token umbrella and selected R separately. w reports display-cell width after the substitution, length-limit, padding, and n transforms. O loops the options stored at the selected scope with the pin's flag precedence (v wins, then w, s, p, with g choosing the global object and gp selecting nothing), name order, one row per array item, and the array, hook, and user row fields. L now loops the attached clients the pin's sort_get_clients keeps, each row answering every client format for its own client while the outer session, window, and pane context stays put; default, i, and n order by client name, t by activity newest first, and r negates the finished comparison including the name tie-break. V walks one environment store per flag word, exactly as format_loop_environ spells it: the empty word and s take the session's retained store, g the global store, c the selected client's, and any other word leaves no store and no rows. Rows keep the store's name order and every entry in it, hidden and removed included. The remaining I token requires client interrogation and can still return plausible wrong output instead of an error.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `mux`
 - User impact: scripts
-- Items: `semantic:format-modifier-client-interrogation`, `semantic:format-modifier-environment-loop`
+- Items: `semantic:format-modifier-client-interrogation`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.json`
@@ -752,6 +752,8 @@ The post-10v rerank split the six-token umbrella and selected R separately. w re
   - `scenario:compat/scenarios/format-modifier-option-loop.txt`
   - `file:crates/zz-daemon/tests/format_modifier_client_loop.rs`
   - `scenario:compat/scenarios/smoke/format-modifier-client-loop.txt`
+  - `file:crates/zz-daemon/tests/format_modifier_environment_loop.rs`
+  - `scenario:compat/scenarios/smoke/format-modifier-environment-loop.txt`
 - Acceptance:
   - `Implement the pinned w, I, L, O, and V tokens with focused source or live proofs for display-cell width, client interrogation, client loops, option loops, and environment loops.`
   - `Every token moves from the active-gap partition into the parser-owned support roster only when its runtime behavior is implemented; malformed and nested modifier fallback remains pinned.`

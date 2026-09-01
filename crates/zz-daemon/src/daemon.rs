@@ -82,7 +82,8 @@ use crate::{
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, DaemonFormatHooks, FormatHookFacts,
-        MessageFormatFacts, StatusRenderer, StatusRequest, host_names, status_context,
+        MessageFormatFacts, StatusRenderer, StatusRequest, client_environment_rows, host_names,
+        status_context,
     },
     transport::{LocalTransport, Transport, TransportListener, TransportStream},
 };
@@ -27093,6 +27094,7 @@ fn client_format_facts(
         width: width.to_string(),
         written: written.to_string(),
         line: 0,
+        environment: client_environment_rows(inner.client_environments.get(&client)),
     }
 }
 
@@ -27266,6 +27268,9 @@ fn status_request(
 ) -> StatusRequest {
     let attached = client_attached_session(inner, client);
     let mut facts = facts;
+    facts.client_environment = Arc::new(client_environment_rows(
+        inner.client_environments.get(&client),
+    ));
     if let Some(session) = attached {
         facts.client = Some(client_format_facts(inner, client, session));
     }
@@ -29795,6 +29800,14 @@ fn format_hook_facts_for_client(
     context: &ExecutionContext,
 ) -> FormatHookFacts {
     let mut facts = format_hook_facts(inner);
+    // format.c creates a command's tree with the invoking client, so `#{Vc:}`
+    // reads that client's environment even when the format's own client is the
+    // command's target.
+    if let Some(invoking) = format_provenance_client(context, client) {
+        facts.client_environment = Arc::new(client_environment_rows(
+            inner.client_environments.get(&invoking),
+        ));
+    }
     if !context.has_no_client()
         && let Some(client) = format_provenance_client(context, client)
             .and_then(|client| current_format_client(inner, client))

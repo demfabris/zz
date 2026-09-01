@@ -30,6 +30,7 @@ impl Roster {
                         ("client_session".to_owned(), (*session).to_owned()),
                         ("client_activity".to_owned(), activity.to_string()),
                     ]),
+                    environment: Vec::new(),
                 })
                 .collect(),
         }

@@ -32,9 +32,9 @@ use crate::{
     canonical_command, command_spec,
     copy_actions::pinned_copy_action,
     formats::{
-        CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatOptionRow, FormatType,
-        StatusHooks, expand_format_time_with_hooks, expand_format_with_hooks, format_true,
-        parse_tmux_colour,
+        CommandHooks, FormatClient, FormatClientRow, FormatContext, FormatEnvironRow,
+        FormatOptionRow, FormatType, StatusHooks, expand_format_time_with_hooks,
+        expand_format_with_hooks, format_true, parse_tmux_colour,
     },
     honest_knobs::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
@@ -546,6 +546,10 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
 
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
         self.inner.client_loop_rows()
+    }
+
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_environment_rows()
     }
 }
 
@@ -1146,6 +1150,10 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
         self.inner.client_loop_rows()
     }
+
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_environment_rows()
+    }
 }
 
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
@@ -1188,6 +1196,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
 
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
         self.inner.client_loop_rows()
+    }
+
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_environment_rows()
     }
 }
 
@@ -1233,6 +1245,10 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
 
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
         self.inner.client_loop_rows()
+    }
+
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_environment_rows()
     }
 }
 
@@ -9370,6 +9386,20 @@ impl MuxEngine {
         Some((parent, true))
     }
 
+    pub(crate) fn format_global_environment_rows(&self) -> Vec<FormatEnvironRow> {
+        format_environment_rows(&self.global_environment)
+    }
+
+    pub(crate) fn format_session_environment_rows(
+        &self,
+        session: SessionId,
+    ) -> Vec<FormatEnvironRow> {
+        self.session_environments
+            .get(&session)
+            .map(|retained| format_environment_rows(&retained.inner.lock()))
+            .unwrap_or_default()
+    }
+
     pub(crate) fn format_option_rows(&self, target: TmuxOptionTarget) -> Vec<FormatOptionRow> {
         let mut rows = Vec::new();
         if let Some(values) = self.user_options_at_target(target) {
@@ -12052,6 +12082,20 @@ fn tmux_option_is_implemented(option: TmuxOption) -> bool {
         || SessionOption::from_name(option.name).is_some()
         || WindowOption::from_name(option.name).is_some()
         || PaneOption::from_name(option.name).is_some()
+}
+
+/// environ.c keeps entries in a name-ordered tree and `environ_first` walks it
+/// whole, so a hidden or removed entry still owns a row.
+fn format_environment_rows(environment: &Environment) -> Vec<FormatEnvironRow> {
+    environment
+        .iter()
+        .map(|(name, entry)| FormatEnvironRow {
+            name: name.clone(),
+            value: entry.value.clone().unwrap_or_default(),
+            hidden: entry.hidden,
+            removed: entry.value.is_none(),
+        })
+        .collect()
 }
 
 fn push_option_loop_array(

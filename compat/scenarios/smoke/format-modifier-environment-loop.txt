@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/format-modifier-environment-loop.sh ~/format-modifier-environment-loop.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FORMAT_MODIFIER_ENVIRONMENT_LOOP
+run-shell 'sh ~/format-modifier-environment-loop.sh'
+out: show-environment -g FORMAT_MODIFIER_ENVIRONMENT_LOOP

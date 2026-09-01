@@ -28,6 +28,14 @@ const OPTION_LOOP_CONTEXT_FORMATS: &[&str] = &[
     "option_name",
     "option_value",
 ];
+const ENVIRONMENT_LOOP_CONTEXT_FORMATS: &[&str] = &[
+    "environ_hidden",
+    "environ_name",
+    "environ_removed",
+    "environ_value",
+    "loop_index",
+    "loop_last_flag",
+];
 const WINDOW_LOOP_CONTEXT_FORMATS: &[&str] = &["window_after_active", "window_before_active"];
 const WINDOW_NEIGHBOUR_INDEX_CONTEXT_FORMATS: &[&str] = &["next_window_index", "prev_window_index"];
 const WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS: &[&str] =
@@ -227,6 +235,13 @@ pub struct FormatUniverse {
     windows: BTreeMap<String, Vec<FormatLoopItem>>,
     panes: BTreeMap<String, Vec<FormatLoopItem>>,
     options: FormatOptionScopes,
+    environments: FormatEnvironmentScopes,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FormatEnvironmentScopes {
+    pub(crate) global: Vec<FormatEnvironRow>,
+    pub(crate) sessions: BTreeMap<String, Vec<FormatEnvironRow>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -240,12 +255,24 @@ pub(crate) struct FormatOptionScopes {
 }
 
 /// One attached client as the `L` modifier sees it: the client formats that
-/// replace the outer client context, plus the facts the loop orders rows by.
+/// replace the outer client context, the environment `#{Vc:}` reads inside the
+/// row, plus the facts the loop orders rows by.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FormatClientRow {
     pub name: String,
     pub activity: u64,
     pub variables: BTreeMap<String, String>,
+    pub environment: Vec<FormatEnvironRow>,
+}
+
+/// One environment entry as the `V` modifier sees it. A removed entry is a name
+/// the store keeps with no value, which the pin still walks.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FormatEnvironRow {
+    pub name: String,
+    pub value: String,
+    pub hidden: bool,
+    pub removed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1265,10 +1292,15 @@ impl MuxEngine {
         universe.options.server = self.format_option_rows(TmuxOptionTarget::Server);
         universe.options.global_session = self.format_option_rows(TmuxOptionTarget::GlobalSession);
         universe.options.global_window = self.format_option_rows(TmuxOptionTarget::GlobalWindow);
+        universe.environments.global = self.format_global_environment_rows();
         for session in self.state.sessions.values() {
             universe.options.sessions.insert(
                 session.id.to_string(),
                 self.format_option_rows(TmuxOptionTarget::Session(session.id)),
+            );
+            universe.environments.sessions.insert(
+                session.id.to_string(),
+                self.format_session_environment_rows(session.id),
             );
             let active_window = self.state.windows.get(&session.active_window);
             let session_context = self.build_status_context(
@@ -1425,6 +1457,11 @@ pub trait StatusHooks {
 
     /// Every attached client eligible for an `L` loop row, in any order.
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
+        Vec::new()
+    }
+
+    /// The selected client's environment, which `#{Vc:}` walks in store order.
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
         Vec::new()
     }
 }
@@ -1594,6 +1631,10 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
 
     fn client_loop_rows(&mut self) -> Vec<FormatClientRow> {
         self.inner.client_loop_rows()
+    }
+
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_environment_rows()
     }
 }
 
@@ -1767,6 +1808,8 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             self.expand_client_loop(copy, depth, &flags)
         } else if let Some(loop_flags) = flags.loop_options {
             self.expand_option_loop(copy, depth, loop_flags)
+        } else if let Some(loop_flags) = flags.loop_environment {
+            self.expand_environment_loop(copy, depth, loop_flags)
         } else if flags.name_window {
             self.expand_name_exists(copy, depth, true)?
         } else if flags.name_session {
@@ -2229,6 +2272,46 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         output
     }
 
+    /// format.c `format_loop_environ`: the flag word names one environment
+    /// store outright, and anything it does not spell leaves no store to walk.
+    fn expand_environment_loop(&mut self, copy: &str, depth: usize, loop_flags: &str) -> String {
+        let values = self.context.values();
+        let universe = Arc::clone(&values.format_universe);
+        let rows = match loop_flags {
+            "" | "s" => universe
+                .environments
+                .sessions
+                .get(&values.session_id)
+                .cloned()
+                .unwrap_or_default(),
+            "g" => universe.environments.global.clone(),
+            "c" => self.client_row.map_or_else(
+                || self.hooks.client_environment_rows(),
+                |row| row.environment.clone(),
+            ),
+            _ => return String::new(),
+        };
+        let context = self.context.values().clone();
+        let format_type = self.context.format_type();
+        let mut output = String::new();
+        let last = rows.len().saturating_sub(1);
+        for (index, row) in rows.iter().enumerate() {
+            let variables = LoopVariables {
+                context: context.clone(),
+                format_type,
+                dynamic: environment_loop_variables(row, index, index == last),
+            };
+            let mut expander = Expander {
+                context: &variables,
+                hooks: &mut *self.hooks,
+                time: self.time,
+                client_row: self.client_row,
+            };
+            output.push_str(&expander.expand(copy, depth));
+        }
+        output
+    }
+
     fn expand_option_loop(&mut self, copy: &str, depth: usize, loop_flags: &str) -> String {
         let values = self.context.values();
         let universe = Arc::clone(&values.format_universe);
@@ -2402,6 +2485,7 @@ enum ModifierKind {
     Panes,
     Clients,
     Options,
+    Environments,
     ContentSearch,
     Repeat,
 }
@@ -2423,7 +2507,7 @@ impl FormatModifierSpec {
     }
 }
 
-const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 34] = [
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 35] = [
     FormatModifierSpec::new("||", ModifierKind::Or, false),
     FormatModifierSpec::new("&&", ModifierKind::And, false),
     FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
@@ -2456,6 +2540,7 @@ const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 34] = [
     FormatModifierSpec::new("P", ModifierKind::Panes, true),
     FormatModifierSpec::new("L", ModifierKind::Clients, true),
     FormatModifierSpec::new("O", ModifierKind::Options, true),
+    FormatModifierSpec::new("V", ModifierKind::Environments, true),
     FormatModifierSpec::new("C", ModifierKind::ContentSearch, true),
     FormatModifierSpec::new("R", ModifierKind::Repeat, true),
 ];
@@ -2575,6 +2660,7 @@ struct ModifierFlags<'a> {
     loop_panes: bool,
     loop_clients: bool,
     loop_options: Option<&'a str>,
+    loop_environment: Option<&'a str>,
     loop_sort: Option<LoopSort>,
     loop_reversed: bool,
     content_search: Option<&'a str>,
@@ -2745,6 +2831,9 @@ impl<'a> ModifierFlags<'a> {
                 }
                 ModifierKind::Options => {
                     flags.loop_options = Some(modifier.args.first().map_or("", String::as_str));
+                }
+                ModifierKind::Environments => {
+                    flags.loop_environment = Some(modifier.args.first().map_or("", String::as_str));
                 }
                 ModifierKind::ContentSearch => {
                     flags.content_search = Some(modifier.args.first().map_or("", String::as_str));
@@ -3048,6 +3137,39 @@ fn option_loop_rows<'a>(
         };
     }
     global.then_some(&scopes.global_session)
+}
+
+fn environment_loop_variables(
+    row: &FormatEnvironRow,
+    index: usize,
+    last: bool,
+) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            ENVIRONMENT_LOOP_CONTEXT_FORMATS[0].to_owned(),
+            bool_string(row.hidden).to_owned(),
+        ),
+        (
+            ENVIRONMENT_LOOP_CONTEXT_FORMATS[1].to_owned(),
+            row.name.clone(),
+        ),
+        (
+            ENVIRONMENT_LOOP_CONTEXT_FORMATS[2].to_owned(),
+            bool_string(row.removed).to_owned(),
+        ),
+        (
+            ENVIRONMENT_LOOP_CONTEXT_FORMATS[3].to_owned(),
+            row.value.clone(),
+        ),
+        (
+            ENVIRONMENT_LOOP_CONTEXT_FORMATS[4].to_owned(),
+            index.to_string(),
+        ),
+        (
+            ENVIRONMENT_LOOP_CONTEXT_FORMATS[5].to_owned(),
+            bool_string(last).to_owned(),
+        ),
+    ])
 }
 
 fn option_loop_variables(

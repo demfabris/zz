@@ -110,6 +110,7 @@
 | smoke/display-popup-resize-lifecycle | 3 | yes | 0 | yes | yes | yes |
 | smoke/fixture-conf | 5 | yes | 0 | yes | yes | yes |
 | smoke/format-modifier-client-loop | 3 | yes | 0 | yes | yes | yes |
+| smoke/format-modifier-environment-loop | 3 | yes | 0 | yes | yes | yes |
 | smoke/fpp-init | 2 | yes | 0 | yes | yes | yes |
 | smoke/jobs-command-environment | 3 | yes | 0 | yes | yes | yes |
 | smoke/jobs-display-popup-environment | 3 | yes | 0 | yes | yes | yes |

@@ -913,6 +913,32 @@
       "reason": "Schema 5 classified 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. The option-loop slice is done: format_loop_add_option and format_loop_add_array_item each own all twelve context formats, so 24 tuples moved into the implemented partition and 17 remain. What is left is format_loop_clients, format_loop_environ, notify_monitor_cb, current_file, and the window-neighbour user-option family; the slug stays until each of those producers lands with its own value and context tests."
     },
     {
+      "id": "formats.expansion-budgets",
+      "title": "Settle the format expansion budgets",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:format-expansion-output-clamp",
+        "semantic:format-expansion-time-budget"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/formats.rs",
+        "resource:crates/zz-protocol/src/message.rs"
+      ],
+      "acceptance": [
+        "Format expansion stops clamping command-facing output at MAX_STATUS_TEXT_BYTES, so display-message and format-values print the pin's whole string and the 4096-byte bound stays on the status-line message that owns it.",
+        "The pin's wall-clock expansion budget is settled explicitly, either by adopting an abort with the pin's observable truncation or by recording the divergence as accepted, with the recursion depth guard left matching at 100 on both sides."
+      ],
+      "depends_on": [],
+      "reason": "Two expansion budgets differ, in opposite directions. zz clamps every finished expansion to MAX_STATUS_TEXT_BYTES, 4096, in truncate_output, which runs at all three entry points in crates/zz-mux/src/formats.rs, so command-facing output loses everything past 4096 bytes; the pin has no output cap. Measured on the pin, a global option roster through the O loop modifier, `#{Ogs:#{option}=#{option_value};}` followed by the same body under Ogw and Ov, prints 7036 bytes. The clamp is a status-line wire bound, since StatusLine rejects rows longer than MAX_STATUS_TEXT_BYTES in crates/zz-protocol/src/message.rs, applied to output that never rides that message. Going the other way, the pin aborts an expansion that exceeds FORMAT_TIME_LIMIT, 100 milliseconds of wall clock checked in format_expand1 and again inside format_unescape, so a large nested loop returns a truncated result whose length moves run to run: `#{n:#{Ogs:#{Ogs:#{l:x}}}}` measured 10893, 11721, 11751, 11939, 12036, 12068, 12357, and 12461 across eight runs against the uncapped 127 by 127 product of 16129, adding a third nesting level did not lower it, and the whole command took about 150 milliseconds, which is a time budget rather than a count. zz has no time budget and returns 16129 every time. FORMAT_LOOP_LIMIT is not the divergence: it is 100 on both sides and it is a recursion depth on both sides, incremented and decremented around format_expand1 in the pin and threaded as depth through Expander::expand in zz. Adopting the pin's nondeterministic abort verbatim is arguably the wrong fix and that call belongs to this gap, but the 4096-byte clamp on command output raises no such question."
+    },
+    {
       "id": "formats.modifier-fidelity",
       "title": "Implement remaining format modifiers",
       "decision": "adopt",
@@ -2592,6 +2618,31 @@
       ],
       "depends_on": [],
       "reason": "One window belongs to one session in zz."
+    },
+    {
+      "id": "targets.exact-match-prefix",
+      "title": "Scope the exact-match target prefix by slot",
+      "decision": "adopt",
+      "status": "open",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "mux",
+      "items": [
+        "semantic:target-exact-match-prefix-scope"
+      ],
+      "evidence": [
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-mux/src/command.rs"
+      ],
+      "acceptance": [
+        "A colon-less target keeps the pin's slot classification, so the leading equals sign marks an exact match only where the token lands in the session or window slot named by the command's own target type.",
+        "set-option -t =name answers `no such session: =name` and exits 1 while set-option -t =name: still succeeds, and the parsed exactness survives the window-to-session fallback instead of degrading into a prefix search."
+      ],
+      "depends_on": [],
+      "reason": "The pin strips a leading equals sign only where the token lands in the session or window slot of cmd_find_target, and a colon-less token lands in the slot the command's own target type names, so set-option, whose target is CMD_FIND_PANE, reads `=alpha` as a pane name. Measured against the pin on a throwaway server: `set-option -t =alpha history-limit 1234` answers `no such session: =alpha` and exits 1, `set-option -w -t =win0` answers `no such window: =win0`, `set-option -p -t =alpha` answers `no such pane: =alpha`, and `kill-pane -t =alpha` answers `can't find pane: =alpha`, while `set-option -t =alpha:` succeeds because the colon moves the token into the session slot and `set-window-option -t =win0` and `has-session -t =alpha` succeed because their target types put it in the window and session slots. zz has no slot classification: resolve_pane falls through resolve_window_core to resolve_session, and normalize_window_target and resolve_session each strip the equals sign wherever they see it, so `set-option -t =alpha` resolves the session and writes the option. The same fallback drops the exactness it just parsed, handing the stripped name to a prefix search, so `-t =alp` resolves alpha too."
     },
     {
       "id": "terminal.key-client-selection",

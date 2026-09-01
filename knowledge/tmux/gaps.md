@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **82**. Classified items: **563**.
+Tracked gap groups: **84**. Classified items: **566**.
 
-- Status: open: 40, blocked: 6, accepted: 36.
-- Decision: adopt: 45, native: 28, park: 1, never: 8.
-- Priority: later: 46, none: 36.
+- Status: open: 42, blocked: 6, accepted: 36.
+- Decision: adopt: 47, native: 28, park: 1, never: 8.
+- Priority: later: 48, none: 36.
 - Closed history entries: 129.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 90, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 93, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -57,6 +57,7 @@ structure as proof.
 | `control-mode.diagnostic-typing` | Type Control-mode config diagnostics | adopt | open | medium | protocol | scripts | none |
 | `display-message.format-listing` | List display-message format variables | adopt | open | medium | daemon | scripts, admin | formats.mouse-context, formats.pane-process, formats.pane-runtime, formats.terminal-cells, formats.terminal-runtime, formats.window-runtime |
 | `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | medium | mux | scripts | pane.selection-state |
+| `formats.expansion-budgets` | Settle the format expansion budgets | adopt | open | medium | mux | scripts | none |
 | `formats.window-runtime` | Expose remaining window formats | adopt | open | medium | daemon | scripts, remote | none |
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-prompt-defaults` | Add prompt-backed emacs copy-mode defaults | adopt | open | medium | daemon | daily, remote, scripts | prompt.command-fidelity |
@@ -65,6 +66,7 @@ structure as proof.
 | `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
 | `pane.spawn-flags` | Complete split-window placement flags | adopt | open | medium | mux | scripts, daily | none |
 | `rendering.geometry-residue` | Close bounded geometry reporting gaps | adopt | open | medium | client | scripts, gui | none |
+| `targets.exact-match-prefix` | Scope the exact-match target prefix by slot | adopt | open | medium | mux | scripts | none |
 | `terminal.key-client-selection` | Select the send-keys target client | adopt | open | medium | daemon | scripts, daily | none |
 | `terminal.key-reset` | Reset terminal input and palette state | adopt | open | medium | terminal | scripts, daily | none |
 | `terminal.resize-pane-trim` | Add terminal history trim action | adopt | blocked | medium | terminal | daily, scripts | none |
@@ -730,6 +732,24 @@ Schema 5 classified 41 missing literal producer/name tuples plus current_file an
 - Acceptance:
   - `Split the source-registered missing partition by producer before implementation: option and array loops, environment and client loops, monitor hooks, current_file, and next or previous user-option copying retain independent value and context tests.`
   - `Each implemented producer moves its exact path:function/name tuples or derived family out of the active-gap partition without weakening the exhaustive schema-5 gate or treating a same-spelled global format as context proof.`
+
+### `formats.expansion-budgets`: Settle the format expansion budgets
+
+Two expansion budgets differ, in opposite directions. zz clamps every finished expansion to MAX_STATUS_TEXT_BYTES, 4096, in truncate_output, which runs at all three entry points in crates/zz-mux/src/formats.rs, so command-facing output loses everything past 4096 bytes; the pin has no output cap. Measured on the pin, a global option roster through the O loop modifier, `#{Ogs:#{option}=#{option_value};}` followed by the same body under Ogw and Ov, prints 7036 bytes. The clamp is a status-line wire bound, since StatusLine rejects rows longer than MAX_STATUS_TEXT_BYTES in crates/zz-protocol/src/message.rs, applied to output that never rides that message. Going the other way, the pin aborts an expansion that exceeds FORMAT_TIME_LIMIT, 100 milliseconds of wall clock checked in format_expand1 and again inside format_unescape, so a large nested loop returns a truncated result whose length moves run to run: `#{n:#{Ogs:#{Ogs:#{l:x}}}}` measured 10893, 11721, 11751, 11939, 12036, 12068, 12357, and 12461 across eight runs against the uncapped 127 by 127 product of 16129, adding a third nesting level did not lower it, and the whole command took about 150 milliseconds, which is a time budget rather than a count. zz has no time budget and returns 16129 every time. FORMAT_LOOP_LIMIT is not the divergence: it is 100 on both sides and it is a recursion depth on both sides, incremented and decremented around format_expand1 in the pin and threaded as depth through Expander::expand in zz. Adopting the pin's nondeterministic abort verbatim is arguably the wrong fix and that call belongs to this gap, but the 4096-byte clamp on command output raises no such question.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `medium`
+- Owner: `mux`
+- User impact: scripts
+- Items: `semantic:format-expansion-output-clamp`, `semantic:format-expansion-time-budget`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-protocol/src/message.rs`
+- Acceptance:
+  - `Format expansion stops clamping command-facing output at MAX_STATUS_TEXT_BYTES, so display-message and format-values print the pin's whole string and the 4096-byte bound stays on the status-line message that owns it.`
+  - `The pin's wall-clock expansion budget is settled explicitly, either by adopting an abort with the pin's observable truncation or by recording the divergence as accepted, with the recursion depth guard left matching at 100 on both sides.`
 
 ### `formats.modifier-fidelity`: Implement remaining format modifiers
 
@@ -1609,6 +1629,24 @@ One window belongs to one session in zz.
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
   - `The catalog rejects group-only syntax loudly and the divergence matrix keeps the permanent exclusion visible.`
+
+### `targets.exact-match-prefix`: Scope the exact-match target prefix by slot
+
+The pin strips a leading equals sign only where the token lands in the session or window slot of cmd_find_target, and a colon-less token lands in the slot the command's own target type names, so set-option, whose target is CMD_FIND_PANE, reads `=alpha` as a pane name. Measured against the pin on a throwaway server: `set-option -t =alpha history-limit 1234` answers `no such session: =alpha` and exits 1, `set-option -w -t =win0` answers `no such window: =win0`, `set-option -p -t =alpha` answers `no such pane: =alpha`, and `kill-pane -t =alpha` answers `can't find pane: =alpha`, while `set-option -t =alpha:` succeeds because the colon moves the token into the session slot and `set-window-option -t =win0` and `has-session -t =alpha` succeed because their target types put it in the window and session slots. zz has no slot classification: resolve_pane falls through resolve_window_core to resolve_session, and normalize_window_target and resolve_session each strip the equals sign wherever they see it, so `set-option -t =alpha` resolves the session and writes the option. The same fallback drops the exactness it just parsed, handing the stripped name to a prefix search, so `-t =alp` resolves alpha too.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `medium`
+- Owner: `mux`
+- User impact: scripts
+- Items: `semantic:target-exact-match-prefix-scope`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-mux/src/model.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+- Acceptance:
+  - `A colon-less target keeps the pin's slot classification, so the leading equals sign marks an exact match only where the token lands in the session or window slot named by the command's own target type.`
+  - `set-option -t =name answers `no such session: =name` and exits 1 while set-option -t =name: still succeeds, and the parsed exactness survives the window-to-session fallback instead of degrading into a prefix search.`
 
 ### `terminal.key-client-selection`: Select the send-keys target client
 

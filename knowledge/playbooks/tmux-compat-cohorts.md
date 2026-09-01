@@ -4,8 +4,8 @@ title: Running tmux compatibility cohorts
 description: A bounded, parallel workflow for closing the practical alias tmux=zz gap without letting new oracle findings extend one campaign forever.
 tags: [tmux, compatibility, campaign, workflow, agents]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-30
-last_updated_by: Codex
+last_updated: 2026-09-01
+last_updated_by: Claude
 ---
 
 # Outcome
@@ -773,6 +773,48 @@ runtime scenario, registry entry, or shared knowledge page belonged to that edit
 The frozen Formats brief was read-only because it examined paths owned by the Copy editor. It asked
 for exact producer and modifier partitions, dependencies, write zones, and the smallest disjoint
 successors without changing source or tracker state.
+
+## Orchestrated Opus and Fable cycles, 2026-08-31 onward
+
+Once the append-only dispatch board in issue #7 replaced the coordinator, the campaign moved to
+orchestrated cycles run from one Claude Code session with its Workflow tool. Each cycle has the
+same shape:
+
+- Three Opus implementor lanes run in parallel worktrees cut from `origin/main`. Each lane owns a
+  disjoint set of board zones and an ordered batch of registry groups, closes slugs by removing
+  them from `compat/tmux-gaps.json` with a pin-derived proof, and pushes a `campaign/batch-*`
+  branch. A lane skips a group after about ninety honest minutes and records why in the group
+  reason, which is how contracts get re-scoped.
+- One Fable reviewer runs behind each lane as soon as it pushes: contract audit per closed or
+  relocated slug, proof suites re-run at the branch tip, oracle spot-checks on throwaway pinned
+  servers, test honesty, invariants. Its verdict (approve, approve-with-fixes, reject) and its
+  confirmed defects bind the gate.
+- One Fable integration gate runs alone afterwards, one lane at a time: rebase onto `origin/main`,
+  apply the reviewer's must-fixes with the failing probe re-run as proof, full workspace tests and
+  clippy, the delta corpus sharded eight ways over disjoint scenario sets with
+  `smoke/source-replay-diagnostics` run solo, tracker and summary checks, push main, ledger the
+  lane's lock front on the board, then recompute `TMUX_COMPAT_TRACKER.md` and run TRIAGE.
+
+The orchestrator holds one lock front per lane for the cycle, settles the board when the gate
+finishes, and mints the next cycle's locks and batches from a fresh registry census. The board
+refuses two claims in one zone even for the same holder, so a lane claims one lock front and the
+gate ledgers every front it moots at integration time.
+
+| Cycle | Lanes | Merges | Agreed-scope meter |
+| --- | --- | --- | --- |
+| 1, 2026-08-31 | daemon basket, copy-mode action inventory | `a5b924ec`, `6624f042` | 1.6% to 4.6% |
+| 2, 2026-09-01 | mux formats and geometry, daemon display and buffers (protocol v89), park dispositions | `9b4867ab`, `9a4129c3`, `6904747f` | 4.6% to 44.4% |
+| 3, 2026-09-01 | format loops, daemon byte loaders and menu layout (protocol v90), registry hygiene | `a3562a34`, `1d4ab6b8`, `039c47b7` | 44.4% to 46.1% |
+| 4, 2026-09-01 | format budgets and cell metrics, copy-mode key vocabulary, client exit actions (protocol v91) | `747acb39`, `ad539f4c`, `21ef482c` | 46.1% to 54.9% |
+
+The reviewer stage earned its cost every cycle: it caught a menu width rule that ignored the
+pin's title seed, four test expectations orphaned by a lane's final commit, a Control-client
+divergence disclosed only in a throwaway report, and a misattributed pin-derivation comment.
+Worker prompts now carry the protocol bump recipe, the relocation grammar for explicit native
+decisions, the load-flake list, and the rule that proofs count only when re-run at the tip.
+
+The current pause state, the ready next-cycle script, and the machine-move checklist live in
+`compat/orchestration/HANDOFF.md` at the repository root, beside `CAMPAIGN-LOG.md` and the script.
 
 ## Ownership and handoff
 

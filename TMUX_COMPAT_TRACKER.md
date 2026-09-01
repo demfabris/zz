@@ -9,6 +9,8 @@
 > Exit evidence: **145 SCENARIOS, 2,094 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
+>
+> Orchestration: **PAUSED 2026-09-01 FOR A MACHINE MOVE; RESUME FROM [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md)**
 
 This is the resume point for the entire `alias tmux=zz` campaign. An agent asked to continue the
 campaign should read this file, run the preflight below, and resume from the current checkpoint
@@ -73,22 +75,24 @@ percentage is a ledger health metric, not a compatibility claim.
 
 | Fact | Current value |
 | --- | --- |
-| Repository | `$HOME/dev/zz` |
-| Published branch | `origin/main` |
+| Repository | Any clone; campaign state lives in this repo and issue #7, not on one machine |
+| Published branch | `origin/main` at `8dd47505` (cycle-4 ledger recompute) |
 | Wave 2 base | `9a8c87901e2d1f5a71d20f185a278ab35bbe52f2` |
-| Delivery | `F-PANE-BORDER-SPANS-V2` closes per-span raw-TUI border ownership; `F-SOURCE-REPLAY-DIAGNOSTICS-V3` restores located source replay diagnostics and drains detached Control callback guards before exit |
-| Campaign worktrees | Each editor creates a dedicated worktree after claiming its front; shared campaign artifacts remain coordinator-owned |
+| Delivery | Cycle 4 of the orchestrated Opus/Fable loop: format expansion budgets and window cell metrics (`747acb39`), copy-mode key vocabulary (`ad539f4c`), client clipboard writes, typed Control diagnostics, and client exit actions with protocol v91 (`21ef482c`) |
+| Orchestration | Paused 2026-09-01 for a machine move. [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) carries the resume recipe, the ready cycle-5 workflow script, and the machine-move checklist; the cycle-5 lock fronts `F-TERMINAL-CLIENT-OPTIONS`, `F-PANE-MODEL-BASKET`, and `F-DAEMON-INTERACTION-SMALLS` are READY on the board |
+| Campaign worktrees | Each lane works in its own worktree from `origin/main`; the gate integrates in `zz-gate-*` worktrees and removes them; the shared checkout is never edited |
 | Pinned tmux oracle | `d77c9dc6aa021e4bc61f0da128c591af695e6466` (`next-3.8`) |
 | GitHub tracker | [Issue #7](https://github.com/demfabris/zz/issues/7) owns claims, state transitions, and the published base |
-| Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed, 0 residual groups registered, unresolved moved from 65 to 62 |
-| Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed, 3 residual groups registered, unresolved stayed at 65 |
-| Campaign point | Raw zz-tui styles shared dividers per adjacent pane span, while mutable tiled z-order remains registered; source replay preserves physical command groups, located parser diagnostics, Command and Control framing, and post-shutdown guard order |
-| Live registry | 87 active groups, 586 active items, 124 closed records |
-| Active status | 45 open, 20 blocked, 22 accepted |
+| Agreed-scope meter | 54.9% (167 of 304 items frozen on 2026-08-31), 25 of 65 groups done; `python3 compat/progress.py` |
+| Completed fixed cohort | Cycle 4: 3 of 3 lanes integrated, agreed-scope meter 46.1% to 54.9%, unresolved groups 47 to 41 |
+| Previous completed cohort | Cycle 3: 3 of 3 lanes integrated, agreed-scope meter 44.4% to 46.1% |
+| Campaign point | Copy mode carries the pin's stock action keys, emacs digit prefixes, and scrollback-offset goto-line; status text is clamped where the wire owns the bound; detach-client, attach-session, and new-session carry the pin's exec and parent-hangup exit actions; the biggest remaining baskets are terminal-behavior options, pane selection state, pane chrome options, prompt fidelity, and choosers |
+| Live registry | 78 active groups, 544 active items, 135 closed records |
+| Active status | 35 open, 6 blocked, 37 accepted |
 | Known differentials | 2 registered geometry cases |
 
-The trial branched from commit `562b950c`; its three closures reach local `main` through
-`fde87af3`. Resolve the commit containing the latest tracker update with
+Cycles 2 through 4 reached `origin/main` through the board's MAIN lock; cycle 4 ends at
+`8dd47505`. Resolve the commit containing the latest tracker update with
 `git log -1 --format=%H -- TMUX_COMPAT_TRACKER.md`, and
 resolve live remote `main` with
 `git ls-remote https://github.com/demfabris/zz.git refs/heads/main`. Always inspect the live worktree
@@ -102,10 +106,10 @@ found during that wave.
 
 | Signal | Current value |
 | --- | --- |
-| Completed fixed cohort | Wave 2: 3 of 3 frozen chunks closed |
-| Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
-| New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
-| Unresolved movement | Wave 2: 65 at freeze, 62 at close |
+| Completed fixed cohort | Cycle 4: 3 of 3 lanes integrated |
+| Previous completed cohort | Cycle 3: 3 of 3 lanes integrated |
+| New residual groups | Since the 2026-08-31 freeze: 4 items across 4 groups, tracked outside the agreed-scope meter |
+| Unresolved movement | Cycle 4: 47 at launch, 41 at close |
 | Live unresolved | 35 open + 6 blocked = 41 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
 | Latest differential | 145 scenarios, 2,094 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
@@ -199,7 +203,17 @@ old drop-in plan are not live status.
 
 ## Resume contract
 
-When Fabrico asks to resume the campaign, begin here:
+Two modes continue the campaign; both start from published `origin/main` and speak through issue #7.
+
+1. Orchestrated cycles, the mode since 2026-08-31: one Claude Code session runs the Workflow
+   script in [`compat/orchestration/`](compat/orchestration/) (three Opus implementor lanes, one
+   Fable reviewer per lane, one Fable integration gate). Read
+   [`compat/orchestration/HANDOFF.md`](compat/orchestration/HANDOFF.md) first; it holds the pause
+   state, the ready cycle-5 script, the machine-move checklist, and the board tool quirks.
+2. A single autonomous worker: the `zz-worker` skill in `.agents/skills/zz-worker/` claims a front
+   from the board, proves it in a worktree, and integrates through the MAIN lock.
+
+Either way, begin here:
 
 ```sh
 cd "$HOME/dev/zz"
@@ -209,28 +223,29 @@ git fetch https://github.com/demfabris/zz.git main:refs/remotes/origin/main
 git rev-parse HEAD origin/main
 ```
 
-Preserve unrelated changes in the standard checkout. If it is dirty or shared, create a fresh
-dedicated worktree from the verified `origin/main` instead of changing or committing those edits:
+Preserve unrelated changes in the standard checkout. Never work in it directly; create a fresh
+dedicated worktree from the verified `origin/main`:
 
 ```sh
-git worktree add -b codex/tmux-compat-next "$HOME/dev/zz-tmux-compat" origin/main
-cd "$HOME/dev/zz-tmux-compat"
+git worktree add "$HOME/dev/zz-<lane-or-front>" origin/main
+cd "$HOME/dev/zz-<lane-or-front>"
 ```
 
-If that path or branch already exists, inspect and reuse it safely rather than overwriting it. From
-the selected clean campaign worktree, run:
+If that path already exists, inspect and reuse it safely rather than overwriting it. From the
+selected clean worktree, run:
 
 ```sh
 python3 compat/tmux-tracker.py check
 compat/run.sh --check-summary
+python3 compat/progress.py
 just compat-check
 ```
 
 Compare live output with the checkpoint above. If HEAD or tracker counts moved, update this file
-before implementing. Regenerate and re-rank the whole active registry before freezing a slice
+before implementing. Regenerate and re-rank the whole active registry before freezing a batch
 because a newly exposed daily, script, remote, or silent mismatch may outrank the forecast.
 
-Work one bounded milestone at a time:
+Each lane or front works one bounded milestone at a time:
 
 1. Read `AGENTS.md`, this file, the live gap record, the cohort playbook, the harness playbook, and
    the relevant knowledge and source owners.
@@ -247,12 +262,11 @@ Work one bounded milestone at a time:
 7. Obtain an independent code and evidence review.
 8. Run the slice gates, update this file and issue #7, then create one milestone commit only when the
    current task authorizes commits.
-9. Never push unless Fabrico explicitly asks.
+9. Push only through the board's MAIN lock: the integration gate, or the worker holding MAIN.
 
-The 2026-08-29 request resumed the campaign through slices 10w, 10x, 10y, 10z, 10aa, 10ab, 10ac,
-10ad, 10ae, 10af, and 10ag, and closed the false `after-queue` producer gap. Slice 10af closes
-positive-delay `run-shell` environment timing. Slice 10ag closes cold startup initial-client cwd.
-Commit `562b950c` contains slices 10w through 10ag.
+The 2026-08-29 request resumed the campaign through slices 10w to 10ag (commit `562b950c`). The
+dispatch board took over on 2026-08-30, and the orchestrated cycles 2 through 4 on 2026-09-01
+carried `origin/main` to `8dd47505`, where the campaign is paused for a machine move.
 
 ## Persisted acceptance evidence for 10ag
 
@@ -1359,5 +1373,5 @@ Never hand-edit `knowledge/tmux/gaps.md`. Change the JSON registry and run
 - Stage exact paths or hunks, never the entire tree.
 - Do not add attribution trailers.
 - One reviewed, proven, documented slice maps to one milestone commit.
-- Commit only with current authorization. Push only on an explicit request.
+- Commit only with current authorization. Push only through the board's MAIN lock.
 - Keep issue #7 open until the practical exit gate passes.

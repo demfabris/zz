@@ -15,6 +15,11 @@ The issue body is the protocol's source of truth and may have evolved since this
 skill was written. Read it first (`gh issue view 7 --repo demfabris/zz`) and
 follow it where it disagrees with anything below.
 
+This skill is the single-worker mode. Since 2026-08-31 the campaign has mostly
+run as orchestrated cycles (three Opus lanes, a Fable reviewer each, a Fable
+integration gate) driven from one session; if you are that orchestrator, start
+from `compat/orchestration/HANDOFF.md` instead of claiming a front yourself.
+
 ## Identity, once
 
 Generate a session name and treat it as a constant for the whole session:

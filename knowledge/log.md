@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-09-01
+* **Update**: Recorded the orchestrated Opus/Fable campaign cycles (2026-08-31 to 2026-09-01, agreed-scope meter 1.6% to 54.9%, protocol v88 to v91) in the cohorts playbook, refreshed the tracker checkpoint and resume contract for the dispatch-board era, and landed `compat/orchestration/` with the cycle-5 workflow script, the machine-move handoff, and the per-cycle log so the campaign can resume from any clone.
+
 ## 2026-08-31
 * **Update**: Reworked iPad Panorama around one fixed passive workspace surface and pane-local terminal frame slots. Protocol v87 lets an attached Interactive client request terminal previews for all windows in its session; the daemon preserves foreground geometry and input ownership, drops preview work before foreground traffic, and omits preview resize and Kitty payloads. The C client proves an inactive-window viewport, and the iPad simulator build plus 17 tests pass.
 * **Update**: Replaced the desktop GUI's daemon-expanded tmux status presentation with a native bar built from `StatusBarModel`, mux snapshots, app update state, and seven live `zz/config` settings. Protocol v86 appends the window activity latch to `WindowSnapshot`; the cell-faithful TUI status path is unchanged. FFI, mobile-client, and optional custom-text work remain deferred.

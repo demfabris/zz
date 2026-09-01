@@ -611,11 +611,12 @@ now validate on both encode and decode.
 - **`PROTOCOL_VERSION: u16 = 90`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
-- v90 appends `MenuItem.annotation`, the action key a menu row has room to draw beside its
-  name. `key` stays the key the row answers to, so a row whose bracketed key does not fit
-  keeps working while it draws no annotation, the way `menu_add_item` drops `key` from the
-  drawn name but leaves `new_item->key` set. `MenuItem` rides `MenuState` inside
-  `EventPayload::MenuOpened`, so a v89 peer cannot decode the appended field.
+- v90 inserts `MenuItem.annotation` between `key` and `enabled`, the action key a menu row has
+  room to draw beside its name; the mid-struct insert shifts `enabled`'s postcard position, which
+  the version gate makes safe. `key` stays the key the row answers to, so a row whose bracketed
+  key does not fit keeps working while it draws no annotation, the way `menu_add_item` drops
+  `key` from the drawn name but leaves `new_item->key` set. `MenuItem` rides `MenuState` inside
+  `EventPayload::MenuOpened`, so a v89 peer cannot decode the inserted field.
 - v89 appends `ProtocolMessage::ClientFileRequest(ClientFileRequest)` at tail tag 34 and
   `ProtocolMessage::ClientFileResponse(ClientFileResponse)` at tail tag 35, with the
   `ClientFileOperation` enum they carry. The daemon asks an unattached command client to read or

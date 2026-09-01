@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **81**. Classified items: **560**.
+Tracked gap groups: **81**. Classified items: **558**.
 
 - Status: open: 39, blocked: 6, accepted: 36.
 - Decision: adopt: 44, native: 28, park: 1, never: 8.
 - Priority: later: 45, none: 36.
 - Closed history entries: 130.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 87, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 85, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -522,7 +522,7 @@ Copy mode lives per client in zz and needs explicit target-client semantics.
 
 ### `display-menu.behavior-fidelity`: Match remaining display-menu behavior
 
-Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Rows are now built against the client's own cells the way menu_add_item does: the room is the client columns less four, an action key is annotated when its bracketed form fits a quarter of that room or the whole name still fits beside it, otherwise only the annotation is dropped while the row keeps answering the key, and an overlong name keeps its last cells through format_trim_right's reading and gains the `>` marker, so a name past the room trims instead of shedding the whole descriptor. The drawn key and the pressed key are separate wire facts on protocol v90 (MenuItem.annotation). Descriptor action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin.
+Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Rows are now built against the client's own cells the way menu_add_item does: the room is the client columns less four, an action key is annotated when its bracketed form fits a quarter of that room or the whole name still fits beside it, otherwise only the annotation is dropped while the row keeps answering the key, and an overlong name keeps its last cells through format_trim_right's reading and gains the `>` marker, so a name past the room trims instead of shedding the whole descriptor. The drawn key and the pressed key are separate wire facts on protocol v90 (MenuItem.annotation). Descriptor action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin. One measured residue: the pin reads row enablement from the post-trim name (menu_key_cb skips rows via the stored name's leading '-'), so a disabled row whose overlong name loses its '-' to format_trim_right answers its action key on the pin; zz derives enablement from the pre-trim name and keeps such a row inert. Drawn names match either way; probed live on a 40-column client with a '-' plus 200-cell name.
 
 - Decision: `adopt`
 - Status: `open`

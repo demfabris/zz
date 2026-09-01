@@ -50,7 +50,7 @@ use zz_protocol::{
     SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId,
     StatusLine, WindowId, canonical_key, encode_protocol_message_into,
     encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
-    read_protocol_message_into, resolve_command, terminal_patch_frame_len,
+    menu_row_width, read_protocol_message_into, resolve_command, terminal_patch_frame_len,
     terminal_viewport_frame_len,
 };
 use zz_terminal::{
@@ -12845,6 +12845,7 @@ impl Shared {
                 .map(|item| menu_row_cells(&item.name, item.annotation.as_deref()))
                 .max()
                 .unwrap_or_default()
+                .max(menu_row_width(&title))
                 .saturating_add(usize::from(MENU_ROW_MARGIN));
             let height = items.len().saturating_add(2);
             let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {

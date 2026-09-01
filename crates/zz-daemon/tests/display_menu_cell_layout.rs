@@ -76,19 +76,14 @@ fn menu_rows_fit_the_clients_cells_and_keep_their_action_keys() {
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 4);
 
-    // The name outruns the room, so it keeps its last cells and gains `>`; the
-    // one-cell key still fits a quarter of the room, so it stays annotated.
     assert_eq!(rows[0].name, format!("{}>", "A".repeat(31)));
     assert_eq!(rows[0].key.as_deref(), Some("a"));
     assert_eq!(rows[0].annotation.as_deref(), Some("a"));
 
-    // `M-Enter` is wider than a quarter of the room and the name no longer
-    // fits beside it, so the row drops the annotation and keeps the key.
     assert_eq!(rows[1].name, wide_name);
     assert_eq!(rows[1].key.as_deref(), Some("M-Enter"));
     assert_eq!(rows[1].annotation, None);
 
-    // The same key stays annotated once the whole name fits beside it.
     assert_eq!(rows[2].name, narrow_name);
     assert_eq!(rows[2].key.as_deref(), Some("M-Enter"));
     assert_eq!(rows[2].annotation.as_deref(), Some("M-Enter"));
@@ -97,10 +92,59 @@ fn menu_rows_fit_the_clients_cells_and_keep_their_action_keys() {
     assert_eq!(rows[3].key.as_deref(), Some("a"));
     assert_eq!(rows[3].annotation.as_deref(), Some("a"));
 
-    // The widest row is the trimmed one: 31 name cells, the `>` marker, and
-    // the four cells `(a)` and its separating space take, plus the box margin.
     assert_eq!(state.width, CLIENT_COLUMNS);
     assert!(state.width <= state.client_columns);
+
+    overlays
+        .client
+        .send_input(InputMessage::Menu {
+            action: MenuAction::Cancel,
+        })
+        .expect("close the menu");
+    command
+        .join()
+        .expect("the display-menu thread")
+        .expect("display-menu");
+}
+
+#[test]
+fn the_title_seeds_the_menu_width_and_an_overwide_title_refuses_the_menu() {
+    let mut overlays = Overlays::start("menu-cell-layout-title");
+    settle_columns(&mut overlays, CLIENT_COLUMNS);
+    let wide_title = "T".repeat(50);
+    let refused = overlays
+        .commands
+        .execute(CommandInvocation::new(
+            "display-menu",
+            [
+                "-c",
+                &overlays.client_name,
+                "-T",
+                &wide_title,
+                "SHORT",
+                "a",
+                "",
+            ],
+        ))
+        .expect("a refused menu still completes");
+    assert_eq!(refused, "");
+
+    let fitting_title = "T".repeat(20);
+    let command = overlays.spawn_command(CommandInvocation::new(
+        "display-menu",
+        [
+            "-c",
+            &overlays.client_name,
+            "-T",
+            &fitting_title,
+            "SHORT",
+            "a",
+            "",
+        ],
+    ));
+    let state = overlays.await_menu_matching(|state| state.client_columns == CLIENT_COLUMNS);
+    assert_eq!(state.title, fitting_title);
+    assert_eq!(state.width, 24);
 
     overlays
         .client
@@ -126,8 +170,6 @@ fn a_long_row_still_opens_a_menu_a_narrow_client_can_show() {
 
     let state = overlays.await_menu_matching(|state| state.client_columns == 24);
     let row = state.items[0].as_ref().expect("the only row");
-    // Room is 20 cells, the annotated key takes 4 of them and the marker one,
-    // so 15 name cells survive.
     assert_eq!(row.name, format!("{}>", "N".repeat(15)));
     assert_eq!(row.annotation.as_deref(), Some("a"));
     assert_eq!(state.width, 24);

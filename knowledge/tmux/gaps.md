@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **83**. Classified items: **562**.
+Tracked gap groups: **83**. Classified items: **557**.
 
 - Status: open: 41, blocked: 6, accepted: 36.
 - Decision: adopt: 46, native: 28, park: 1, never: 8.
 - Priority: later: 47, none: 36.
 - Closed history entries: 130.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 89, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 105, binding: 51, native-key: 58, semantic: 89, presentation: 8, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 66 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 71 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 110 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 66 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 71 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 105 omitted default keys, 51 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -1059,14 +1059,14 @@ These ten keys require command-prompt behavior and stored command blocks, not an
 
 ### `keys.copy-mode-unsupported-default-actions`: Implement missing stock copy-mode actions
 
-These seven absent default keys name five actions tracked under `copy-mode.action-fidelity`. Four now have typed terminal behavior (previous-matching-bracket, recentre-top-bottom, cursor-centre-horizontal, and toggle-position), so `copy-mode:C-M-b`, `copy-mode:C-l`, `copy-mode:M-l`, `copy-mode:P`, and `copy-mode-vi:P` are ready to install. The two `r` keys still wait on refresh-toggle, which stays unmapped because a frozen copy revision has no live refresh to switch off.
+Five of the seven keys are installed. `copy-mode-vi P` and `copy-mode P` send toggle-position, `copy-mode C-M-b` sends previous-matching-bracket, `copy-mode C-l` sends recentre-top-bottom, and `copy-mode M-l` sends cursor-centre-horizontal, each rendering the pin's stored `send-keys -X <action>` shape with the pin's nonrepeat metadata, so all five are structurally matching shared bindings now. The two `r` keys stay open because refresh-toggle stays unmapped, and the earlier reading of why was wrong: the pinned action does not need a live pane to switch off, it unfreezes the copy backing. Measured on the pin with a detached throwaway server against a pane printing a line every 200ms, `#{scroll_position}` holds at 0 for a second after entry with refresh off, climbs 3 to 8 across a second after `send-keys -X refresh-on` as window_copy_do_refresh re-clones the backing screen on its 50ms timer, and freezes again at 8 after `send-keys -X refresh-toggle`. window-copy.c also refuses to start the timer for a view of another pane (`copy-mode -s`) or for view-mode, and skips a tick while a selection or a cursor drag is live, following the bottom only when oy is 0 and the cursor is on the last row. That is a re-sync of the frozen revision, which in zz is owned by the daemon's single-writer copy_sessions map and its published revisions, not by the mux key tables or the terminal engine. Installing `r` before that re-sync exists would bind a key to nothing, so both `r` keys wait on a daemon-owned refresh revision.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
 - Owner: `terminal`
 - User impact: daily, remote
-- Items: `key:copy-mode-vi:P`, `key:copy-mode-vi:r`, `key:copy-mode:C-M-b`, `key:copy-mode:C-l`, `key:copy-mode:M-l`, `key:copy-mode:P`, `key:copy-mode:r`
+- Items: `key:copy-mode-vi:r`, `key:copy-mode:r`
 - Depends on: `copy-mode.action-fidelity`
 - Evidence:
   - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
@@ -1074,6 +1074,7 @@ These seven absent default keys name five actions tracked under `copy-mode.actio
   - `resource:crates/zz-mux/src/command.rs`
   - `resource:crates/zz-terminal/src/interaction.rs`
   - `resource:knowledge/tmux/key-tables.md`
+  - `file:compat/scenarios/copy-mode-stock-action-keys.txt`
 - Acceptance:
   - `previous-matching-bracket, recentre-top-bottom, cursor-centre-horizontal, toggle-position, and refresh-toggle have typed terminal behavior before their seven stock keys are installed.`
 

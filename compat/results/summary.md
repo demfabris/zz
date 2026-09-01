@@ -21,6 +21,7 @@
 | copy-mode-recentre | 8 | yes | 0 | yes | yes | yes |
 | copy-mode-scroll-exit | 11 | yes | 0 | yes | yes | yes |
 | copy-mode-selection-lifecycle | 19 | yes | 0 | yes | yes | yes |
+| copy-mode-stock-action-keys | 17 | yes | 0 | yes | yes | yes |
 | daemon-command-item-format | 24 | yes | 0 | yes | yes | yes |
 | display-message | 27 | yes | 0 | yes | yes | yes |
 | display-panes-format | 10 | yes | 0 | yes | yes | yes |

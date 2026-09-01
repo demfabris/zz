@@ -1,0 +1,27 @@
+# The five stock copy-mode keys the pin installs for actions that already have
+# typed terminal behavior. Each renders the pin's stored `send-keys -X <action>`
+# shape and carries the pin's nonrepeat metadata.
+out: list-keys -T copy-mode-vi -1 P
+out: list-keys -T copy-mode -1 P
+out: list-keys -T copy-mode -1 C-M-b
+out: list-keys -T copy-mode -1 C-l
+out: list-keys -T copy-mode -1 M-l
+out: list-keys -1 -T copy-mode-vi -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} P
+out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} P
+out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} C-M-b
+out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} C-l
+out: list-keys -1 -T copy-mode -F #{key_table}|#{key_string}|#{key_repeat}|#{key_has_repeat} M-l
+
+# The neighbouring emacs bracket key keeps its shape, so the new C-M-b sits
+# beside an already matching default rather than replacing it.
+out: list-keys -1 -T copy-mode -F #{key_string}|#{key_repeat} C-M-f
+
+# The four named actions reach a typed copy action on both sides, detached.
+send-keys -t =w:0.0 -X toggle-position
+send-keys -t =w:0.0 -X previous-matching-bracket
+send-keys -t =w:0.0 -X recentre-top-bottom
+send-keys -t =w:0.0 -X cursor-centre-horizontal
+
+# Rebinding a stock key replaces the whole command on both sides.
+bind-key -T copy-mode-vi P send-keys -X cursor-centre-vertical
+out: list-keys -T copy-mode-vi -1 P

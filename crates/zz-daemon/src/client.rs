@@ -12,14 +12,18 @@ use std::{
 
 use parking_lot::Mutex;
 use zz_protocol::{
-    AgentImage, AgentSessionOpKind, ClientHello, ClientInstanceId, ClientKind, CommandInvocation,
-    CommandRequest, CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage,
-    MAX_CLIENT_ENVIRONMENT_BYTES, MAX_CLIENT_ENVIRONMENT_ENTRIES,
-    MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES,
-    MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId, PasteUploadPurpose, PreparedCommand,
-    ProtocolMessage, ServerError, ServerHello, encode_protocol_message_into,
-    read_protocol_message_into,
+    AgentImage, AgentSessionOpKind, ClientFileOperation, ClientFileRequest, ClientFileResponse,
+    ClientHello, ClientInstanceId, ClientKind, CommandInvocation, CommandRequest, CommandResponse,
+    ConfigOverrideEntry, GuiResponse, InputMessage, MAX_CLIENT_ENVIRONMENT_BYTES,
+    MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
+    MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
+    PasteUploadPurpose, PreparedCommand, ProtocolMessage, ServerError, ServerHello,
+    encode_protocol_message_into, read_protocol_message_into,
 };
+
+/// `EIO`, the error the pin's client reports for anything that fails after the
+/// file opened.
+const CLIENT_FILE_READ_ERRNO: i32 = 5;
 
 static CLIENT_INSTANCE_ID: OnceLock<ClientInstanceId> = OnceLock::new();
 
@@ -292,6 +296,12 @@ impl CommandClient {
                             error: Box::new(error),
                         })
                     };
+                }
+                ProtocolMessage::ClientFileRequest(request) => {
+                    self.writer
+                        .send(&ProtocolMessage::ClientFileResponse(answer_client_file(
+                            &request,
+                        )))?;
                 }
                 _ => {}
             }
@@ -1141,6 +1151,21 @@ fn client_working_directory(
         })
 }
 
+/// The directory this client reports as its own. The pin's `find_cwd` prefers
+/// `PWD` over `getcwd` whenever both resolve to the same place, so a client
+/// started under a symlinked path reports the path the user typed.
+fn logical_current_dir() -> Option<PathBuf> {
+    let current = std::env::current_dir().ok()?;
+    let Some(declared) = std::env::var_os("PWD").filter(|value| !value.is_empty()) else {
+        return Some(current);
+    };
+    let declared = PathBuf::from(declared);
+    match (declared.canonicalize(), current.canonicalize()) {
+        (Ok(left), Ok(right)) if left == right => Some(declared),
+        _ => Some(current),
+    }
+}
+
 fn client_environment() -> Vec<String> {
     client_environment_with(std::env::vars_os())
 }
@@ -1287,7 +1312,7 @@ fn connect_stream_with_startup_owner<S: TransportStream>(
             .then(|| std::env::var("ZZ_PANE").ok())
             .flatten()
             .and_then(|pane| pane.parse().ok()),
-        working_directory: client_working_directory(client_facts, || std::env::current_dir().ok()),
+        working_directory: client_working_directory(client_facts, logical_current_dir),
         environment: client_environment(),
         process_id: std::process::id(),
     }))?;
@@ -1317,6 +1342,56 @@ pub fn short_device_name() -> Option<String> {
         .next()
         .filter(|name| !name.is_empty())
         .map(str::to_owned)
+}
+
+/// Do the one bounded file operation the daemon asked for, on this client's own
+/// host. The daemon has already expanded the path against this client's working
+/// directory, so nothing here resolves anything.
+fn answer_client_file(request: &ClientFileRequest) -> ClientFileResponse {
+    let path = PathBuf::from(&request.path);
+    let (data, error) = match &request.operation {
+        ClientFileOperation::Read => match read_client_file(&path) {
+            Ok(data) => (data, None),
+            Err(error) => (Vec::new(), Some(error)),
+        },
+        ClientFileOperation::Write { append, data } => {
+            (Vec::new(), write_client_file(&path, data, *append).err())
+        }
+    };
+    ClientFileResponse {
+        request_id: request.request_id,
+        data,
+        error,
+    }
+}
+
+/// The pin's client opens the file itself and reads it through a bufferevent,
+/// so an open failure reports its own `errno` while anything that goes wrong
+/// afterwards reports `EIO` (`file_read_error_callback`).
+fn read_client_file(path: &Path) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|error| crate::strerror_text(&error))?;
+    let limit = u64::try_from(MAX_CLIENT_FILE_BYTES).unwrap_or(u64::MAX);
+    let mut data = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut data)
+        .map_err(|_| crate::strerror_text(&io::Error::from_raw_os_error(CLIENT_FILE_READ_ERRNO)))?;
+    Ok(data)
+}
+
+fn write_client_file(path: &Path, data: &[u8], append: bool) -> Result<(), String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    if append {
+        options.append(true);
+    } else {
+        options.truncate(true);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| crate::strerror_text(&error))?;
+    file.write_all(data)
+        .and_then(|()| file.flush())
+        .map_err(|error| crate::strerror_text(&error))
 }
 
 #[cfg(test)]

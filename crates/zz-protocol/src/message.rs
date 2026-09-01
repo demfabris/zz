@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 88;
+pub const PROTOCOL_VERSION: u16 = 89;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -43,6 +43,12 @@ pub const MAX_CLIENT_WORKING_DIRECTORY_BYTES: usize = 16 * 1024;
 pub const MAX_CLIENT_ENVIRONMENT_ENTRIES: usize = 4096;
 pub const MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES: usize = 16_367;
 pub const MAX_CLIENT_ENVIRONMENT_BYTES: usize = 4 * 1024 * 1024;
+/// Longest absolute path the daemon may hand a client to open for
+/// `load-buffer` or `save-buffer`.
+pub const MAX_CLIENT_FILE_PATH_BYTES: usize = 16 * 1024;
+/// Most bytes one `load-buffer` or `save-buffer` may move through a client,
+/// matching the daemon's own paste-buffer ceiling.
+pub const MAX_CLIENT_FILE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_STARTUP_CONFIG_CAUSES: usize = 1024;
 pub const MAX_STARTUP_CONFIG_CAUSE_BYTES: usize = 64 * 1024;
 pub const MAX_STARTUP_CONFIG_CAUSES_BYTES: usize = 1024 * 1024;
@@ -764,6 +770,27 @@ where
         ));
     }
     Ok(total_bytes)
+}
+
+fn deserialize_client_file_path<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_text(deserializer, MAX_CLIENT_FILE_PATH_BYTES)
+}
+
+fn deserialize_client_file_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    if bytes.len() > MAX_CLIENT_FILE_BYTES {
+        return Err(D::Error::invalid_length(
+            bytes.len(),
+            &"a client file payload within the wire byte limit",
+        ));
+    }
+    Ok(bytes)
 }
 
 fn deserialize_paste_upload_chunk<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
@@ -2716,6 +2743,63 @@ pub enum ProtocolMessage {
     SetTerminalPreview {
         enabled: bool,
     },
+    /// Ask the invoking command client to do one bounded file operation on its
+    /// own host, the way the pin's `file_read`/`file_write` hand `MSG_READ_OPEN`
+    /// and `MSG_WRITE_OPEN` to an unattached client instead of touching the
+    /// server's filesystem.
+    ClientFileRequest(ClientFileRequest),
+    /// The answer to exactly one [`ProtocolMessage::ClientFileRequest`].
+    ClientFileResponse(ClientFileResponse),
+}
+
+/// What the daemon wants the client to do with the file it named.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClientFileOperation {
+    Read,
+    Write {
+        append: bool,
+        #[serde(deserialize_with = "deserialize_client_file_bytes")]
+        data: Vec<u8>,
+    },
+}
+
+/// One file operation the daemon asks its invoking client to perform. `path` is
+/// already absolute: the daemon expanded it in its own format context and
+/// against the client's own working directory, exactly as `file_get_path` does.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientFileRequest {
+    pub request_id: u64,
+    #[serde(deserialize_with = "deserialize_client_file_path")]
+    pub path: String,
+    pub operation: ClientFileOperation,
+}
+
+/// The result of one [`ClientFileRequest`]: `error` carries the client's own
+/// failure text when the operation did not complete, and `data` carries the
+/// bytes a read produced.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientFileResponse {
+    pub request_id: u64,
+    #[serde(deserialize_with = "deserialize_client_file_bytes")]
+    pub data: Vec<u8>,
+    #[serde(deserialize_with = "deserialize_optional_client_file_error")]
+    pub error: Option<String>,
+}
+
+fn deserialize_optional_client_file_error<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let text = Option::<String>::deserialize(deserializer)?;
+    match text {
+        Some(text) if text.len() > MAX_GUI_TEXT_BYTES => Err(D::Error::invalid_length(
+            text.len(),
+            &"a client file error within the wire byte limit",
+        )),
+        text => Ok(text),
+    }
 }
 
 #[cfg(test)]
@@ -3823,7 +3907,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 88);
+        assert_eq!(super::PROTOCOL_VERSION, 89);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

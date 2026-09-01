@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **83**. Classified items: **569**.
+Tracked gap groups: **83**. Classified items: **568**.
 
 - Status: open: 41, blocked: 20, accepted: 22.
 - Decision: adopt: 46, native: 16, park: 15, never: 6.
 - Priority: later: 61, none: 22.
 - Closed history entries: 128.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 96, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 95, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -162,17 +162,20 @@ The local CLI now prepares against an already-running compatible daemon, but --h
 
 ### `buffers.client-file-context`: Route buffer files through client path context
 
-zz expands and accesses buffer paths in the persistent daemon, while tmux routes file access through the invoking client and selects that client's command cwd or attached session cwd.
+load-buffer now follows the pin: the daemon expands the path once, a leading ~/ against its own home and anything else relative against the invoking client's working directory, then hands the absolute path to that client over protocol v89 so an unattached command client reads its own filesystem. save-buffer still writes from the daemon.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `protocol`
 - User impact: scripts, remote
-- Items: `semantic:load-buffer-client-path-context`, `semantic:save-buffer-client-path-context`
+- Items: `semantic:save-buffer-client-path-context`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-daemon/src/client.rs`
+  - `resource:crates/zz-protocol/src/message.rs`
+  - `scenario:compat/scenarios/buffer-client-file-load.txt`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
   - `Relative load-buffer and save-buffer paths use the pin's invoking command-client cwd or attached session cwd, and remote clients move bytes without assuming a shared daemon filesystem.`

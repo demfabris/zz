@@ -1,0 +1,5 @@
+shim:
+stage: fixtures/buffer-client-file-load.sh ~/buffer-client-file-load.sh
+out: set-environment -gu BUFFER_CLIENT_FILE_LOAD
+run-shell 'sh ~/buffer-client-file-load.sh'
+out: show-environment -g BUFFER_CLIENT_FILE_LOAD

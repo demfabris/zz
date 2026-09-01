@@ -105,6 +105,7 @@
 | smoke/buffer-clipboard-write | 3 | yes | 0 | yes | yes | yes |
 | smoke/cheap-flags | 22 | yes | 0 | yes | yes | yes |
 | smoke/cli-chain-parse-abort | 3 | yes | 0 | yes | yes | yes |
+| smoke/client-exit-actions | 3 | yes | 0 | yes | yes | yes |
 | smoke/command-flag-errors | 3 | yes | 0 | yes | yes | yes |
 | smoke/config-alias-parse-unit | 2 | yes | 0 | yes | yes | yes |
 | smoke/config-chain-parse-abort | 2 | yes | 0 | yes | yes | yes |

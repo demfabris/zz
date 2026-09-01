@@ -14,9 +14,9 @@ use std::{
 use zz_client::{ClientCore, CoreEvent, Outbound};
 use zz_daemon::{Endpoint, HostEntry, InteractiveClient};
 use zz_protocol::{
-    BrowserCommand, BrowserDescriptor, CommandInvocation, CommandResponse, GuiResponse,
-    InputMessage, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot, ProtocolMessage,
-    ServerError, ServerHello, TerminalUiCommand,
+    BrowserCommand, BrowserDescriptor, ClientExitAction, CommandInvocation, CommandResponse,
+    GuiResponse, InputMessage, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot,
+    ProtocolMessage, ServerError, ServerHello, TerminalUiCommand,
 };
 use zz_terminal::{SearchQuery, TerminalColorScheme, TerminalViewAction, TerminalViewport};
 
@@ -402,6 +402,15 @@ enum ProtocolOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TuiExit {
     Detached(String),
+    /// `detach-client -P`, `attach-session -x`, `new-session -X`: the pin
+    /// prints a different notice and then hangs up its parent process.
+    DetachedHangup(String),
+    /// `detach-client -E`: the client process is replaced by `shell -c command`
+    /// instead of printing a notice.
+    Exec {
+        command: String,
+        shell: String,
+    },
     Exited,
     ServerExited,
     ServerExitedUnexpectedly,
@@ -411,6 +420,10 @@ impl TuiExit {
     fn notice(&self) -> String {
         match self {
             Self::Detached(session) => format!("[detached (from session {session})]"),
+            Self::DetachedHangup(session) => {
+                format!("[detached and SIGHUP (from session {session})]")
+            }
+            Self::Exec { .. } => String::new(),
             Self::Exited => "[exited]".to_owned(),
             Self::ServerExited => "[server exited]".to_owned(),
             Self::ServerExitedUnexpectedly => "[server exited unexpectedly]".to_owned(),
@@ -419,7 +432,7 @@ impl TuiExit {
 
     const fn exit_code(&self) -> u8 {
         match self {
-            Self::Detached(_) | Self::Exited => 0,
+            Self::Detached(_) | Self::DetachedHangup(_) | Self::Exec { .. } | Self::Exited => 0,
             Self::ServerExited | Self::ServerExitedUnexpectedly => 1,
         }
     }
@@ -932,9 +945,18 @@ pub(crate) fn run(
     browser.close_all();
     drop(terminal);
     match outcome {
+        Ok(TuiExit::Exec { command, shell }) => {
+            // The pin execs before it would have printed any exit notice, so the
+            // shell command inherits the client's terminal and process slot.
+            Err(exec_client_command(&shell, &command))
+        }
         Ok(exit) => {
             println!("{}", exit.notice());
+            let hangup = matches!(exit, TuiExit::DetachedHangup(_));
             if exit.exit_code() == 0 {
+                if hangup {
+                    hangup_parent();
+                }
                 Ok(())
             } else {
                 std::process::exit(i32::from(exit.exit_code()))
@@ -942,6 +964,46 @@ pub(crate) fn run(
         }
         Err(error) => Err(error),
     }
+}
+
+/// `kill(getppid(), SIGHUP)` guarded the way client.c guards it, so a reparented
+/// client never signals init.
+#[cfg(unix)]
+fn hangup_parent() {
+    use rustix::process::{Signal, getppid, kill_process};
+
+    let Some(parent) = getppid() else {
+        return;
+    };
+    if parent.as_raw_nonzero().get() > 1 {
+        let _ = kill_process(parent, Signal::HUP);
+    }
+}
+
+#[cfg(not(unix))]
+const fn hangup_parent() {}
+
+/// Replace this process with `shell -c command`, matching `client_exec`.
+#[cfg(unix)]
+fn exec_client_command(shell: &str, command: &str) -> String {
+    use std::os::unix::process::CommandExt as _;
+
+    let argv0 = std::path::Path::new(shell).file_name().map_or_else(
+        || shell.to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let error = std::process::Command::new(shell)
+        .arg0(argv0)
+        .arg("-c")
+        .arg(command)
+        .env("SHELL", shell)
+        .exec();
+    format!("{shell}: {error}")
+}
+
+#[cfg(not(unix))]
+fn exec_client_command(shell: &str, _command: &str) -> String {
+    format!("{shell}: detach-client -E needs a Unix client")
 }
 
 fn connect(endpoint: &Endpoint) -> Result<InteractiveClient, String> {
@@ -1443,12 +1505,20 @@ fn handle_core_event(
             model.viewports.remove(&pane);
             Ok(ProtocolOutcome::RepaintAll)
         }
-        CoreEvent::Detached { session, by: _ } if model.attached_session == Some(session) => {
+        CoreEvent::Detached {
+            session,
+            by: _,
+            action,
+        } if model.attached_session == Some(session) => {
             let core = lock_core(core);
-            let exit = if core.last_detach_was_session_destroyed() {
+            let exit = if let ClientExitAction::Exec { command, shell } = action {
+                TuiExit::Exec { command, shell }
+            } else if core.last_detach_was_session_destroyed() {
                 TuiExit::Exited
             } else if core.last_detach_was_server_stopping() {
                 TuiExit::ServerExited
+            } else if action.is_parent_hangup() {
+                TuiExit::DetachedHangup(attached_session_name(model))
             } else {
                 TuiExit::Detached(attached_session_name(model))
             };

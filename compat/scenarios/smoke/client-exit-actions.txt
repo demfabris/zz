@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/client-exit-actions.sh ~/client-exit-actions.sh
+stage: fixtures/client-exit-actions.py ~/client-exit-actions.py
+out: set-environment -gu CLIENT_EXIT_ACTIONS
+run-shell 'sh ~/client-exit-actions.sh'
+out: show-environment -g CLIENT_EXIT_ACTIONS

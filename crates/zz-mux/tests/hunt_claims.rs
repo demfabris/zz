@@ -1541,6 +1541,8 @@ fn detach_client_dash_a_leaves_the_caller_attached() {
         [MuxEffect::Detach(DetachRequest {
             target_client: None,
             scope: DetachScope::Client,
+            exec: None,
+            parent_hangup: false,
         })]
     );
 
@@ -1552,6 +1554,39 @@ fn detach_client_dash_a_leaves_the_caller_attached() {
         [MuxEffect::Detach(DetachRequest {
             target_client: None,
             scope: DetachScope::Others,
+            exec: None,
+            parent_hangup: false,
+        })]
+    );
+
+    // cmd-detach-client.c takes -E as a value and -P as a flag, and -E wins over
+    // the message type -P would have chosen.
+    let exec = engine
+        .execute(
+            &mut context,
+            &command("detach-client", &["-P", "-E", "exit 3"]),
+        )
+        .unwrap();
+    assert_eq!(
+        exec.effects,
+        [MuxEffect::Detach(DetachRequest {
+            target_client: None,
+            scope: DetachScope::Client,
+            exec: Some("exit 3".to_owned()),
+            parent_hangup: true,
+        })]
+    );
+
+    let hangup = engine
+        .execute(&mut context, &command("detach-client", &["-P"]))
+        .unwrap();
+    assert_eq!(
+        hangup.effects,
+        [MuxEffect::Detach(DetachRequest {
+            target_client: None,
+            scope: DetachScope::Client,
+            exec: None,
+            parent_hangup: true,
         })]
     );
 
@@ -1566,6 +1601,8 @@ fn detach_client_dash_a_leaves_the_caller_attached() {
         [MuxEffect::Detach(DetachRequest {
             target_client: Some("target:".to_owned()),
             scope: DetachScope::Session("work".to_owned()),
+            exec: None,
+            parent_hangup: false,
         })]
     );
 }

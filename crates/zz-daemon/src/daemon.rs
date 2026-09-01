@@ -33,7 +33,7 @@ use zz_mux::{
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
-    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
+    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientExitAction,
     ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello, ClientId,
     ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
     CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
@@ -7768,7 +7768,7 @@ impl Shared {
                             )
                             .into());
                         }
-                        detach = match &request.scope {
+                        let scope = match &request.scope {
                             DetachScope::Client => Some(ResolvedDetach::Client(target_client)),
                             DetachScope::Others => Some(ResolvedDetach::Others(target_client)),
                             DetachScope::Session(target) => match inner
@@ -7781,6 +7781,15 @@ impl Shared {
                                 Err(error) => return Err(error.into()),
                             },
                         };
+                        detach = scope.map(|scope| {
+                            (
+                                scope,
+                                DetachExit {
+                                    exec: request.exec.clone(),
+                                    parent_hangup: request.parent_hangup,
+                                },
+                            )
+                        });
                     }
                     MuxEffect::SourceFile {
                         path,
@@ -8019,10 +8028,17 @@ impl Shared {
         }
         match detach {
             None => {}
-            Some(detach) => {
-                let victims = requested_detach_victims(&self.inner.lock(), detach);
+            // An empty -E is the pin's `server_client_exec` early return: the
+            // victim is neither replaced nor detached.
+            Some((_, exit)) if exit.exec.as_deref() == Some("") => {}
+            Some((scope, exit)) => {
+                let victims = requested_detach_victims(&self.inner.lock(), scope);
                 for (session, victim) in victims {
-                    self.publish_to_client(victim, EventPayload::detached_requested(session, None));
+                    let action = self.client_exit_action(session, &exit);
+                    self.publish_to_client(
+                        victim,
+                        EventPayload::detached_requested_with_action(session, None, action),
+                    );
                     self.detach_with_event_hooks(victim, event_hooks_enabled);
                 }
             }
@@ -20373,6 +20389,25 @@ impl Shared {
         }
     }
 
+    /// Pick the victim's exit action the way `cmd_detach_client_exec` picks
+    /// between `server_client_exec`, `MSG_DETACHKILL`, and `MSG_DETACH`: `-E`
+    /// wins over `-P`, and the shell comes from the victim session's
+    /// `default-shell` with the pin's `_PATH_BSHELL` fallback.
+    fn client_exit_action(&self, session: SessionId, exit: &DetachExit) -> ClientExitAction {
+        if let Some(command) = exit.exec.clone() {
+            let shell = {
+                let inner = self.inner.lock();
+                terminal_shell_for_session(&inner.engine, session)
+                    .unwrap_or_else(|_| inner.engine.global_default_shell().to_owned())
+            };
+            return ClientExitAction::Exec { command, shell };
+        }
+        if exit.parent_hangup {
+            return ClientExitAction::ParentHangup;
+        }
+        ClientExitAction::Exit
+    }
+
     fn deliver_buffer_clipboard_write(
         self: &Arc<Self>,
         invoking_client: Option<ClientId>,
@@ -23876,6 +23911,13 @@ enum ResolvedDetach {
     Client(ClientId),
     Others(ClientId),
     Session(SessionId),
+}
+
+/// The `detach-client` modifiers that pick the victim's exit action.
+#[derive(Clone, Default)]
+struct DetachExit {
+    exec: Option<String>,
+    parent_hangup: bool,
 }
 
 fn context_client_terminal(context: &ExecutionContext) -> ClientTerminal {
@@ -70239,6 +70281,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             session: detached,
                             by: None,
                             reason,
+                            ..
                         },
                     ..
                 }) if *detached == session && reason.is_requested()
@@ -70304,6 +70347,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             session: detached,
                             by: None,
                             reason,
+                            ..
                         },
                     ..
                 }) if *detached == session && reason.is_requested()
@@ -70367,6 +70411,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             session: detached,
                             by: None,
                             reason,
+                            ..
                         },
                     ..
                 }) if *detached == session && reason.is_requested()
@@ -70439,7 +70484,7 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session, by: None, reason },
+                    payload: EventPayload::Detached { session, by: None, reason, .. },
                     ..
                 }) if *session == origin_session && reason.is_requested()
             )
@@ -70461,7 +70506,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 matches!(
                     message,
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::Detached { session, by: None, reason },
+                        payload: EventPayload::Detached { session, by: None, reason, .. },
                         ..
                     }) if *session == origin_session && reason.is_requested()
                 )
@@ -70579,7 +70624,7 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Detached { session: detached, by: None, reason },
+                    payload: EventPayload::Detached { session: detached, by: None, reason, .. },
                     ..
                 }) if *detached == session && reason.is_requested()
             )
@@ -70704,6 +70749,7 @@ bind - split-window -v -c "#{pane_current_path}"
                                 session: detached,
                                 by: Some(device),
                                 reason,
+                                ..
                             },
                         ..
                     }) if *detached == session && device == "laptop" && reason.is_evicted()

@@ -31,7 +31,7 @@ pub use message::{
     AgentCommand, AgentConnectionPhase, AgentGitSummary, AgentImage, AgentPaneWire,
     AgentPermissionWire, AgentSessionOpKind, BrowserCommand, ChooseBufferAction, ChooseBufferItem,
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
-    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget,
+    ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientExitAction,
     ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello, ClientKind,
     ClientMessageKind, CommandInvocation, CommandPromptAction, CommandPromptKind,
     CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest, CommandResponse,

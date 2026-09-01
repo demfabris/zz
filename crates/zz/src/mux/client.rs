@@ -3660,17 +3660,23 @@ impl MuxClient {
                     self.sidebar_focus_revision
                 );
             }
-            CoreEvent::Detached { session, by } => {
+            CoreEvent::Detached {
+                session,
+                by,
+                action,
+            } => {
                 if attached_before == Some(session) {
                     self.reset_session_state(cx);
-                    Self::emit_notification(
-                        ClientMessageKind::Warning,
-                        by.map_or_else(
+                    let notice = match action {
+                        zz_protocol::ClientExitAction::Exec { command, .. } => {
+                            format!("detach-client -E needs a terminal client: {command}")
+                        }
+                        _ => by.map_or_else(
                             || "session ended".to_owned(),
                             |device| format!("detached by {device}"),
                         ),
-                        cx,
-                    );
+                    };
+                    Self::emit_notification(ClientMessageKind::Warning, notice, cx);
                 }
             }
             CoreEvent::ServerStopping => {

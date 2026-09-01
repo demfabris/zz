@@ -2204,6 +2204,34 @@ pub enum DetachReason {
     ServerStopping,
 }
 
+/// What the presentation process does once it stops attending a session, the
+/// way the pin picks between `MSG_DETACH`, `MSG_DETACHKILL`, and `MSG_EXEC`.
+// Postcard tags variants by index: append new actions, never reorder.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClientExitAction {
+    /// Print the ordinary detach notice and exit.
+    #[default]
+    Exit,
+    /// Print the SIGHUP detach notice, then send `SIGHUP` to the client
+    /// process's parent, as `detach-client -P` asks in cmd-detach-client.c.
+    ParentHangup,
+    /// Replace the client process with `shell -c command`, as
+    /// `detach-client -E` asks through `server_client_exec`.
+    Exec { command: String, shell: String },
+}
+
+impl ClientExitAction {
+    #[must_use]
+    pub const fn is_exit(&self) -> bool {
+        matches!(self, Self::Exit)
+    }
+
+    #[must_use]
+    pub const fn is_parent_hangup(&self) -> bool {
+        matches!(self, Self::ParentHangup)
+    }
+}
+
 impl DetachReason {
     #[must_use]
     pub const fn is_requested(self) -> bool {
@@ -2425,6 +2453,10 @@ pub enum EventPayload {
         session: SessionId,
         by: Option<String>,
         reason: DetachReason,
+        /// What the receiving client does after it stops attending. Appended in
+        /// v91 so `detach-client -E` and `-P` can reach the presentation
+        /// process the way `MSG_EXEC` and `MSG_DETACHKILL` do.
+        action: ClientExitAction,
     },
     HistoryChunk {
         pane: PaneId,
@@ -2575,10 +2607,20 @@ pub enum EventPayload {
 impl EventPayload {
     #[must_use]
     pub fn detached_requested(session: SessionId, by: Option<String>) -> Self {
+        Self::detached_requested_with_action(session, by, ClientExitAction::Exit)
+    }
+
+    #[must_use]
+    pub fn detached_requested_with_action(
+        session: SessionId,
+        by: Option<String>,
+        action: ClientExitAction,
+    ) -> Self {
         Self::Detached {
             session,
             by,
             reason: DetachReason::Requested,
+            action,
         }
     }
 
@@ -2588,6 +2630,7 @@ impl EventPayload {
             session,
             by,
             reason: DetachReason::Evicted,
+            action: ClientExitAction::Exit,
         }
     }
 
@@ -2597,6 +2640,7 @@ impl EventPayload {
             session,
             by: None,
             reason: DetachReason::SessionDestroyed,
+            action: ClientExitAction::Exit,
         }
     }
 
@@ -2606,6 +2650,7 @@ impl EventPayload {
             session,
             by: None,
             reason: DetachReason::ServerStopping,
+            action: ClientExitAction::Exit,
         }
     }
 }
@@ -3930,11 +3975,47 @@ mod tests {
                     session: crate::SessionId(1),
                     by: None,
                     reason,
+                    action: super::ClientExitAction::Exit,
                 },
             };
             let bytes = postcard::to_stdvec(&event).expect("detached event encodes");
             assert_eq!(bytes[1], 23);
-            assert_eq!(bytes.last(), Some(&tag));
+            assert_eq!(bytes[bytes.len() - 2], tag);
+            assert_eq!(bytes.last(), Some(&0));
+            assert_eq!(
+                postcard::from_bytes::<super::Event>(&bytes).expect("detached event decodes"),
+                event
+            );
+        }
+    }
+
+    #[test]
+    fn client_exit_actions_append_after_the_detach_reason() {
+        for (action, tail) in [
+            (super::ClientExitAction::Exit, vec![0]),
+            (super::ClientExitAction::ParentHangup, vec![1]),
+            (
+                super::ClientExitAction::Exec {
+                    command: "id".to_owned(),
+                    shell: "/bin/sh".to_owned(),
+                },
+                vec![
+                    2, 2, b'i', b'd', 7, b'/', b'b', b'i', b'n', b'/', b's', b'h',
+                ],
+            ),
+        ] {
+            let event = super::Event {
+                sequence: 0,
+                payload: super::EventPayload::Detached {
+                    session: crate::SessionId(1),
+                    by: None,
+                    reason: super::DetachReason::Requested,
+                    action: action.clone(),
+                },
+            };
+            let bytes = postcard::to_stdvec(&event).expect("detached event encodes");
+            assert_eq!(bytes[1], 23);
+            assert_eq!(&bytes[bytes.len() - tail.len()..], tail.as_slice());
             assert_eq!(
                 postcard::from_bytes::<super::Event>(&bytes).expect("detached event decodes"),
                 event

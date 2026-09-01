@@ -949,21 +949,21 @@
         "semantic:format-modifier-client-interrogation",
         "semantic:format-modifier-client-loop",
         "semantic:format-modifier-environment-loop",
-        "semantic:format-modifier-option-loop",
-        "semantic:format-modifier-width"
+        "semantic:format-modifier-option-loop"
       ],
       "evidence": [
         "resource:compat/tmux-oracle.json",
         "resource:crates/zz-mux/src/formats.rs",
         "resource:crates/zz-mux/src/compat_manifest_tests.rs",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/format-modifier-width.txt"
       ],
       "acceptance": [
         "Implement the pinned w, I, L, O, and V tokens with focused source or live proofs for display-cell width, client interrogation, client loops, option loops, and environment loops.",
         "Every token moves from the active-gap partition into the parser-owned support roster only when its runtime behavior is implemented; malformed and nested modifier fallback remains pinned."
       ],
       "depends_on": [],
-      "reason": "The post-10v rerank split the six-token umbrella and selected R separately. The remaining w, I, L, O, and V tokens require display-width, client, option, or environment-specific behavior and can still return plausible wrong output instead of an error."
+      "reason": "The post-10v rerank split the six-token umbrella and selected R separately. w is implemented: it replaces the value with its display-cell width after the substitution, length-limit, padding, and n transforms, counts an escaped hash run as its rendered hashes, skips a #[...] style span, returns 0 for an unterminated span, and gives control characters no width. The remaining I, L, O, and V tokens require client, option, or environment-specific behavior and can still return plausible wrong output instead of an error."
     },
     {
       "id": "formats.mouse-context",

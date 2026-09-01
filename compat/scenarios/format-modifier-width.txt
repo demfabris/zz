@@ -1,0 +1,9 @@
+fmt: #{w:#{l:abc}}|#{w:}|#{w:#{l:a##b}}|#{w:#{l:####}}
+fmt: #{w:#{l:a#[fg=red]b}}|#{w:#{l:a###[fg=red]b}}|#{w:#{l:a##[fg=red]b}}|#{w:#{l:####[fg=red]x}}
+fmt: #{w:#{l:#[fg=red]}}|#{w:#{l:x#[]y}}|#{w:#{l:a#[fg=red}}
+fmt: #{w:#{l:日本語}}|#{w:#{l:😀e##}}
+fmt: #{w;=2:#{l:abcdef}}|#{=2;w:#{l:abcdef}}|#{=3;w:#{l:日本語abc}}
+fmt: #{w;p6:#{l:ab}}|#{p-6;w:#{l:ab}}|#{s/a/bb/;w:#{l:aXa}}
+fmt: #{n;w:#{l:日本語}}|#{w;n:#{l:日本語}}
+set-option -g @width-style "#[fg=red]ab#[default]"
+fmt: #{w:#{E:@width-style}}|#{n:#{E:@width-style}}

@@ -1719,6 +1719,9 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
         if flags.length {
             value = value.len().to_string();
         }
+        if flags.width {
+            value = styled_display_width(&value).to_string();
+        }
         Ok(value)
     }
 
@@ -2200,6 +2203,7 @@ enum ModifierKind {
     Basename,
     Dirname,
     Length,
+    Width,
     Expand,
     ExpandTime,
     Character,
@@ -2246,7 +2250,7 @@ impl FormatModifierSpec {
     }
 }
 
-const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 31] = [
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 32] = [
     FormatModifierSpec::new("||", ModifierKind::Or, false),
     FormatModifierSpec::new("&&", ModifierKind::And, false),
     FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
@@ -2258,6 +2262,7 @@ const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 31] = [
     FormatModifierSpec::new("b", ModifierKind::Basename, false),
     FormatModifierSpec::new("d", ModifierKind::Dirname, false),
     FormatModifierSpec::new("n", ModifierKind::Length, false),
+    FormatModifierSpec::new("w", ModifierKind::Width, false),
     FormatModifierSpec::new("E", ModifierKind::Expand, false),
     FormatModifierSpec::new("T", ModifierKind::ExpandTime, false),
     FormatModifierSpec::new("a", ModifierKind::Character, true),
@@ -2371,6 +2376,7 @@ struct ModifierFlags<'a> {
     basename: bool,
     dirname: bool,
     length: bool,
+    width: bool,
     expand: bool,
     expand_time: bool,
     character: bool,
@@ -2408,6 +2414,7 @@ impl<'a> ModifierFlags<'a> {
                 ModifierKind::Basename => flags.basename = true,
                 ModifierKind::Dirname => flags.dirname = true,
                 ModifierKind::Length => flags.length = true,
+                ModifierKind::Width => flags.width = true,
                 ModifierKind::Expand => flags.expand = true,
                 ModifierKind::ExpandTime => flags.expand_time = true,
                 ModifierKind::Character => flags.character = true,
@@ -2775,6 +2782,74 @@ fn find_format_end(text: &str, start: usize) -> Option<usize> {
             if depth == 0 {
                 return Some(position);
             }
+        }
+        position += 1;
+    }
+    None
+}
+
+fn styled_display_width(value: &str) -> usize {
+    let bytes = value.as_bytes();
+    let mut width = 0usize;
+    let mut position = 0usize;
+    while position < bytes.len() {
+        if bytes[position] == b'#' {
+            let (end, leading) = leading_hashes(bytes, position);
+            width += leading;
+            position = end;
+            if bytes.get(position) == Some(&b'#') {
+                let Some(end) = find_measured_style_end(bytes, position + 2) else {
+                    return 0;
+                };
+                position = end + 1;
+            }
+            continue;
+        }
+        let character = value[position..].chars().next().unwrap_or_default();
+        width += character.width().unwrap_or_default();
+        position += character.len_utf8();
+    }
+    width
+}
+
+fn leading_hashes(bytes: &[u8], start: usize) -> (usize, usize) {
+    let mut count = 0usize;
+    while bytes.get(start + count) == Some(&b'#') {
+        count += 1;
+    }
+    if count == 0 {
+        return (start, 0);
+    }
+    if bytes.get(start + count) != Some(&b'[') {
+        return (start + count, count.div_ceil(2));
+    }
+    if count.is_multiple_of(2) {
+        (start + count, count / 2)
+    } else {
+        (start + count - 1, count / 2)
+    }
+}
+
+fn find_measured_style_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut brackets = 0isize;
+    let mut position = start;
+    while position < bytes.len() {
+        if bytes[position] == b'#' && bytes.get(position + 1) == Some(&b'{') {
+            brackets += 1;
+        }
+        if bytes[position] == b'#'
+            && bytes
+                .get(position + 1)
+                .is_some_and(|next| matches!(*next, b',' | b'#' | b'{' | b'}' | b':'))
+        {
+            position += 2;
+            continue;
+        }
+        if bytes[position] == b'}' {
+            brackets -= 1;
+        }
+        if bytes[position] == b']' && brackets == 0 {
+            return Some(position);
         }
         position += 1;
     }
@@ -4149,6 +4224,51 @@ mod tests {
         assert_eq!(
             expand_status("#{q/a:pane_title}", &context, &mut Stub),
             "\"\\$name\""
+        );
+    }
+
+    #[test]
+    fn width_modifier_counts_display_cells_around_style_spans() {
+        assert_eq!(expand("#{w:#{l:abc}}|#{w:}|#{w:#{l:a##b}}"), "3|0|3");
+        assert_eq!(
+            expand("#{w:#{l:a#[fg=red]b}}|#{w:#{l:a###[fg=red]b}}|#{w:#{l:a##[fg=red]b}}"),
+            "2|11|2"
+        );
+        assert_eq!(
+            expand("#{w:#{l:#[fg=red]}}|#{w:#{l:x#[]y}}|#{w:#{l:a#[fg=red}}"),
+            "0|2|0"
+        );
+        assert_eq!(expand("#{w:#{l:日本語}}|#{w:#{l:😀e##}}"), "6|4");
+    }
+
+    #[test]
+    fn width_modifier_runs_after_the_other_value_transforms() {
+        assert_eq!(
+            expand("#{w;=2:#{l:abcdef}}|#{=2;w:#{l:abcdef}}|#{=3;w:#{l:日本語abc}}"),
+            "2|2|2"
+        );
+        assert_eq!(
+            expand("#{w;p6:#{l:ab}}|#{p-6;w:#{l:ab}}|#{s/a/bb/;w:#{l:aXa}}"),
+            "6|6|5"
+        );
+        assert_eq!(expand("#{n;w:#{l:日本語}}|#{w;n:#{l:日本語}}"), "1|1");
+    }
+
+    #[test]
+    fn width_modifier_gives_control_characters_no_width() {
+        let mut context = context();
+        for control in ["a\tb", "a\u{1b}b", "a\u{7f}b", "a\u{1}b"] {
+            context.pane_title = control.to_owned();
+            assert_eq!(
+                expand_status("#{n:pane_title}|#{w:pane_title}", &context, &mut Stub),
+                "3|2",
+                "{control:?}"
+            );
+        }
+        context.pane_title = "e\u{301}".to_owned();
+        assert_eq!(
+            expand_status("#{n:pane_title}|#{w:pane_title}", &context, &mut Stub),
+            "3|1"
         );
     }
 

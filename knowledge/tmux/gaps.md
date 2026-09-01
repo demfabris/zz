@@ -411,7 +411,7 @@ The GUI superset needs its own names so tmux spellings can keep frozen tmux mean
 
 ### `config.non-utf8-file-bytes`: Match config-file byte parsing
 
-The parser now exposes distinct raw-byte entrypoints for startup-file and runtime-buffer semantics and pins isolated and embedded byte placement without lossy conversion. MuxEngine adapters and startup and runtime loaders still accept string input, so direct Command, Control, and synchronous if-shell behavior remains open; source-path encoding remains a separate problem.
+The parser exposes distinct raw-byte entrypoints and MuxEngine now carries them through parse_config_file_bytes, parse_config_file_bytes_parse_only, and parse_config_buffer_bytes, so byte input keeps the engine's global-environment variables, its assignment overlay, and its #{} condition evaluation without lossy conversion. The startup and runtime loaders and the source-path client routing still take string input, so direct Command, Control, and synchronous if-shell behavior remains open.
 
 - Decision: `adopt`
 - Status: `open`
@@ -424,6 +424,7 @@ The parser now exposes distinct raw-byte entrypoints for startup-file and runtim
   - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-mux/src/parser.rs`
   - `file:crates/zz-mux/tests/config_non_utf8_bytes.rs`
+  - `file:crates/zz-mux/tests/config_non_utf8_engine.rs`
   - `scenario:compat/scenarios/smoke/config-non-utf8-byte-matrix.txt`
   - `resource:third_party/tmux-reference/UPSTREAM.md`
   - `resource:knowledge/references/tmux-upstream.md`

@@ -47,7 +47,10 @@ pub use model::{
     LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
     joined_layout, swapped_layout,
 };
-pub use parser::{ConfigDiagnostic, ParsedConfig, command_block_body, parse_config};
+pub use parser::{
+    ConfigCommandBytes, ConfigDiagnostic, ConfigEnvironmentAssignmentBytes, ParsedConfig,
+    ParsedConfigBytes, command_block_body, parse_config,
+};
 pub use sort::{TmuxSort, TmuxSortOrder};
 pub use status::{
     DEFAULT_STATUS_INTERVAL, DEFAULT_STATUS_LEFT, DEFAULT_STATUS_RIGHT, DEFAULT_STATUS_STYLE,

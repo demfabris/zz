@@ -2797,6 +2797,60 @@ impl MuxEngine {
         crate::parser::parse_config_without_assignment_overlay(source, input, &mut context)
     }
 
+    #[must_use]
+    pub fn parse_config_file_bytes(
+        &self,
+        source: impl Into<String>,
+        input: &[u8],
+    ) -> crate::ParsedConfigBytes {
+        let mut context = (
+            |name: &str| self.global_environment_variable(name),
+            |condition: &str| self.evaluate_config_condition(condition),
+        );
+        crate::parser::parse_config_file_bytes_with_assignment_overlay(
+            source,
+            input,
+            &mut context,
+            true,
+        )
+    }
+
+    #[must_use]
+    pub fn parse_config_file_bytes_parse_only(
+        &self,
+        source: impl Into<String>,
+        input: &[u8],
+    ) -> crate::ParsedConfigBytes {
+        let mut context = (
+            |name: &str| self.global_environment_variable(name),
+            |condition: &str| self.evaluate_config_condition(condition),
+        );
+        crate::parser::parse_config_file_bytes_with_assignment_overlay(
+            source,
+            input,
+            &mut context,
+            false,
+        )
+    }
+
+    #[must_use]
+    pub fn parse_config_buffer_bytes(
+        &self,
+        source: impl Into<String>,
+        input: &[u8],
+    ) -> crate::ParsedConfigBytes {
+        let mut context = (
+            |name: &str| self.global_environment_variable(name),
+            |condition: &str| self.evaluate_config_condition(condition),
+        );
+        crate::parser::parse_config_buffer_bytes_with_assignment_overlay(
+            source,
+            input,
+            &mut context,
+            true,
+        )
+    }
+
     pub fn prepare_callback_commands(
         &self,
         input: &str,

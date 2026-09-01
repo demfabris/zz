@@ -378,31 +378,41 @@ impl Default for KeyTables {
             );
         }
         for digit in '1'..='9' {
+            for (table, key) in [
+                ("copy-mode-vi", digit.to_string()),
+                ("copy-mode", format!("M-{digit}")),
+            ] {
+                tables.bind(
+                    table,
+                    &key,
+                    Binding {
+                        commands: vec![CommandInvocation::new(
+                            "copy-mode-repeat",
+                            [digit.to_string()],
+                        )],
+                        repeat: false,
+                        note: None,
+                    },
+                );
+            }
+        }
+        for (table, key) in [("copy-mode-vi", ":"), ("copy-mode", "g")] {
             tables.bind(
-                "copy-mode-vi",
-                &digit.to_string(),
+                table,
+                key,
                 Binding {
-                    commands: vec![CommandInvocation::new(
-                        "copy-mode-repeat",
-                        [digit.to_string()],
-                    )],
+                    commands: vec![
+                        CommandInvocation::new(
+                            "command-prompt",
+                            ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                        )
+                        .with_command_blocks([2]),
+                    ],
                     repeat: false,
                     note: None,
                 },
             );
         }
-        tables.bind(
-            "copy-mode-vi",
-            ":",
-            Binding {
-                commands: vec![CommandInvocation::new(
-                    "command-prompt",
-                    ["-p", "(goto line)", "send-keys -X goto-line -- '%%'"],
-                )],
-                repeat: false,
-                note: None,
-            },
-        );
         tables.bind_copy_mode_search_defaults();
         // tmux's stock `bind C-b send-prefix`.
         let prefix = tables.prefix.clone();
@@ -774,7 +784,7 @@ impl KeyEngine {
         if let Some(decision) = self.take_pending_jump_target(&key) {
             return decision;
         }
-        if self.table.as_deref() == Some("copy-mode-vi")
+        if matches!(self.table.as_deref(), Some("copy-mode" | "copy-mode-vi"))
             && key.len() == 1
             && let Some(digit) = key.as_bytes().first().copied().filter(u8::is_ascii_digit)
             && let Some(CopyModeRepeatPrefix::Capturing(count)) = self.repeat_count
@@ -2914,8 +2924,9 @@ mod tests {
             " ", ",", ";", "C- ", "C-Down", "C-M-Down", "C-M-Up", "C-M-b", "C-M-f", "C-Up", "C-[",
             "C-a", "C-b", "C-c", "C-e", "C-f", "C-g", "C-k", "C-l", "C-n", "C-p", "C-r", "C-s",
             "C-v", "C-w", "Down", "End", "Enter", "Escape", "F", "Home", "Left", "M-<", "M->",
-            "M-Down", "M-R", "M-Up", "M-b", "M-f", "M-l", "M-m", "M-r", "M-v", "M-w", "M-x", "M-{",
-            "M-}", "N", "NPage", "P", "PPage", "R", "Right", "T", "Up", "X", "f", "n", "q", "t",
+            "M-1", "M-2", "M-3", "M-4", "M-5", "M-6", "M-7", "M-8", "M-9", "M-Down", "M-R", "M-Up",
+            "M-b", "M-f", "M-l", "M-m", "M-r", "M-v", "M-w", "M-x", "M-{", "M-}", "N", "NPage",
+            "P", "PPage", "R", "Right", "T", "Up", "X", "f", "g", "n", "q", "t",
         ]
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -2987,17 +2998,30 @@ mod tests {
                 "copy-mode-vi {key}",
             );
         }
-        assert_eq!(
-            tables.get("copy-mode-vi", ":").expect(": binding").commands,
-            vec![CommandInvocation::new(
-                "command-prompt",
-                ["-p", "(goto line)", "send-keys -X goto-line -- '%%'",],
-            )]
-        );
+        for (table, key) in [("copy-mode-vi", ":"), ("copy-mode", "g")] {
+            assert_eq!(
+                tables
+                    .get(table, key)
+                    .unwrap_or_else(|| panic!("{table} {key} is bound"))
+                    .commands,
+                vec![
+                    CommandInvocation::new(
+                        "command-prompt",
+                        ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                    )
+                    .with_command_blocks([2])
+                ],
+                "{table} {key}",
+            );
+        }
         for digit in '1'..='9' {
             assert!(
                 tables.get("copy-mode-vi", &digit.to_string()).is_some(),
                 "copy-mode-vi {digit}"
+            );
+            assert!(
+                tables.get("copy-mode", &format!("M-{digit}")).is_some(),
+                "copy-mode M-{digit}"
             );
         }
     }
@@ -3138,6 +3162,61 @@ mod tests {
             KeyDecision::Commands(vec![CommandInvocation::new(
                 "send-keys",
                 ["-N", "3", "-X", "clear-selection"],
+            )])
+        );
+    }
+
+    #[test]
+    fn copy_mode_emacs_meta_digits_capture_the_same_numeric_prefix() {
+        let tables = KeyTables::default();
+        let mut engine = KeyEngine::default();
+        engine.switch_table(Some("copy-mode".to_owned()));
+
+        assert_eq!(engine.handle(&tables, "M-3"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "C-n"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "3", "-X", "cursor-down"],
+            )])
+        );
+
+        assert_eq!(engine.handle(&tables, "M-1"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "2"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "C-p"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "12", "-X", "cursor-up"],
+            )])
+        );
+
+        assert_eq!(engine.handle(&tables, "M-4"), KeyDecision::Ignore);
+        assert_eq!(engine.handle(&tables, "f"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "x"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-N", "4", "-X", "jump-forward", "x"],
+            )])
+        );
+
+        assert_eq!(engine.handle(&tables, "M-2"), KeyDecision::Ignore);
+        assert_eq!(
+            engine.handle(&tables, "g"),
+            KeyDecision::Commands(vec![
+                CommandInvocation::new(
+                    "command-prompt",
+                    ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                )
+                .with_command_blocks([2])
+            ])
+        );
+        assert_eq!(
+            engine.handle(&tables, "C-n"),
+            KeyDecision::Commands(vec![CommandInvocation::new(
+                "send-keys",
+                ["-X", "cursor-down"],
             )])
         );
     }
@@ -3406,8 +3485,9 @@ mod tests {
                 ":",
                 CommandInvocation::new(
                     "command-prompt",
-                    ["-p", "(goto line)", "send-keys -X goto-line -- '%%'"],
-                ),
+                    ["-p", "(goto line)", "{ send-keys -X goto-line -- \"%%\" }"],
+                )
+                .with_command_blocks([2]),
             ),
         ] {
             let mut engine = KeyEngine::default();

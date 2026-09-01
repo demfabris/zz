@@ -1347,6 +1347,7 @@
         "binding:copy-mode:F",
         "binding:copy-mode:T",
         "binding:copy-mode:f",
+        "binding:copy-mode:g",
         "binding:copy-mode:t"
       ],
       "evidence": [
@@ -1360,7 +1361,7 @@
       "depends_on": [
         "copy-mode.command-fidelity"
       ],
-      "reason": "Cursor-word search, prompted search, goto-line, and character jumps retain 15 divergent stored command shapes; this gap does not assume their native behavior is exact."
+      "reason": "Cursor-word search, prompted search, goto-line, and character jumps retain divergent stored command shapes; this gap does not assume their native behavior is exact. `binding:copy-mode:g` joined the group when the emacs goto-line key was installed: it renders the same command vi ':' renders, now a structured `command-prompt -p \"(goto line)\" { send-keys -X goto-line -- \"%%\" }` block rather than a string template, so the only remaining difference from the pin on both keys is the -P pane-cell prompt flag. That flag is the shared cause of thirteen of these sixteen items: the pin renders '/', '?', ':', 'g', 'f', 'F', 't', 'T', 'C-r' and 'C-s' through command-prompt -P, and `prompt.pane-rendered` accepted -P as loudly unsupported because painting a prompt into pane cells would mean the daemon writing another client's grid. The remaining two, vi '#' and '*', need `send-keys -F` format expansion plus the pinned `#{copy_cursor_word}` format, which zz does not publish; zz reaches the same behavior through the native `search-backward-cursor-word` and `search-forward-cursor-word` action names instead. Closing any of the thirteen therefore needs the `prompt.pane-rendered` decision reopened or this acceptance re-scoped onto behavior rather than the rendered command string."
     },
     {
       "id": "keys.copy-mode-native-mouse",
@@ -1402,7 +1403,7 @@
     },
     {
       "id": "keys.copy-mode-native-numeric-prefix",
-      "title": "Keep native vi numeric prefix capture",
+      "title": "Keep native copy-mode numeric prefix capture",
       "decision": "native",
       "status": "accepted",
       "priority": "none",
@@ -1422,7 +1423,16 @@
         "binding:copy-mode-vi:6",
         "binding:copy-mode-vi:7",
         "binding:copy-mode-vi:8",
-        "binding:copy-mode-vi:9"
+        "binding:copy-mode-vi:9",
+        "binding:copy-mode:M-1",
+        "binding:copy-mode:M-2",
+        "binding:copy-mode:M-3",
+        "binding:copy-mode:M-4",
+        "binding:copy-mode:M-5",
+        "binding:copy-mode:M-6",
+        "binding:copy-mode:M-7",
+        "binding:copy-mode:M-8",
+        "binding:copy-mode:M-9"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/key.rs",
@@ -1432,49 +1442,11 @@
       ],
       "acceptance": [
         "Digits accumulate per client without opening a pane-cell prompt, and the next copy action carries one -N count without allocating count-proportional action vectors.",
-        "A counted multi-command binding consumes the prefix at its first send or send-keys command whose option prefix contains -X. That command keeps its own -N when present; otherwise zz inserts one separate -N count pair immediately before the option argument containing -X. Later actions do not inherit the prefix, while a list with no qualifying -X command preserves it. Movements, jumps, matching brackets, and repeat-search consume the count; other-end swaps on odd counts, select-line spans count lines, copy-end-of-line spans count rows and copies once, and other toggles, selection, copy, clear-selection, and cancel execute once."
+        "A counted multi-command binding consumes the prefix at its first send or send-keys command whose option prefix contains -X. That command keeps its own -N when present; otherwise zz inserts one separate -N count pair immediately before the option argument containing -X. Later actions do not inherit the prefix, while a list with no qualifying -X command preserves it. Movements, jumps, matching brackets, and repeat-search consume the count; other-end swaps on odd counts, select-line spans count lines, copy-end-of-line spans count rows and copies once, and other toggles, selection, copy, clear-selection, and cancel execute once.",
+        "Both copy tables reach the same capture: bare vi digits and emacs M-1 through M-9 arm it, and a following bare digit extends it in either table."
       ],
       "depends_on": [],
-      "reason": "zz keeps numeric capture inside its per-client key engine instead of rendering tmux's command-prompt -P, while preserving the pin's action-level repeat semantics and exposing the native copy-mode-repeat command shape to list-keys."
-    },
-    {
-      "id": "keys.copy-mode-prompt-defaults",
-      "title": "Add prompt-backed emacs copy-mode defaults",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "daily",
-        "remote",
-        "scripts"
-      ],
-      "owner": "daemon",
-      "items": [
-        "key:copy-mode:M-1",
-        "key:copy-mode:M-2",
-        "key:copy-mode:M-3",
-        "key:copy-mode:M-4",
-        "key:copy-mode:M-5",
-        "key:copy-mode:M-6",
-        "key:copy-mode:M-7",
-        "key:copy-mode:M-8",
-        "key:copy-mode:M-9",
-        "key:copy-mode:g"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
-        "resource:crates/zz-protocol/src/key.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:knowledge/tmux/key-tables.md"
-      ],
-      "acceptance": [
-        "M-1 through M-9 open the pin's numeric repeat prompt and g opens its goto-line prompt with exact stored command shapes, submission behavior, and nonrepeat metadata."
-      ],
-      "depends_on": [
-        "prompt.command-fidelity"
-      ],
-      "reason": "These ten keys require command-prompt behavior and stored command blocks, not another direct send-keys -X navigation binding."
+      "reason": "zz keeps numeric capture inside its per-client key engine instead of rendering tmux's command-prompt -P, while preserving the pin's action-level repeat semantics and exposing the native copy-mode-repeat command shape to list-keys. The emacs table now reaches the same capture: the pin binds M-1 through M-9 to `command-prompt -NP -I <digit> -p (repeat) { send-keys -N \"%%\" }`, a PROMPT_NUMERIC prompt seeded with the digit that collects further digits and hands the first non-digit key on, and whose block writes wme->prefix for the next action. zz arms the same count with `copy-mode-repeat <digit>` and lets a following bare digit extend it, which the engine previously allowed only in copy-mode-vi. The visible shape difference is the pane-cell prompt, accepted under `prompt.pane-rendered`."
     },
     {
       "id": "keys.copy-mode-unsupported-default-actions",
@@ -3957,6 +3929,18 @@
         "resource:knowledge/tmux/copy-mode.md"
       ],
       "resolution": "Added the pin's 13 previously absent emacs navigation keys with exact send-keys -X command shapes and nonrepeat metadata: C-Down, C-M-Down, C-M-Up, C-M-f, C-Up, End, Home, M-<, M->, M-Down, M-R, M-Up, and Space. Their existing typed actions cover line scrolling, semantic-prompt navigation, matching brackets, line endpoints, history endpoints, half pages, top-line positioning, and page-down without a new terminal action or UI flow. KeyEngine and mux effect tests cover every key and action, and shifted Alt input reaches M-R, M-<, and M->. At this historical closure 23 stock keys remained: six supported non-navigation defaults, ten prompt-backed defaults, and seven keys behind unsupported actions. The later keys.copy-mode-defaults closure reduced the current residual to 17."
+    },
+    {
+      "id": "keys.copy-mode-prompt-defaults",
+      "title": "Add prompt-backed emacs copy-mode defaults",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-protocol/src/key.rs",
+        "resource:crates/zz-mux/src/compat_manifest_tests.rs",
+        "resource:knowledge/tmux/key-tables.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "All ten keys are installed, so the emacs copy table no longer swallows M-1 through M-9 and g. M-1 through M-9 arm zz's per-client numeric capture with the same `copy-mode-repeat <digit>` command the vi digits use, and the capture rule that only vi digits could extend now covers both copy tables, so M-1 2 accumulates to 12 exactly as the pin's PROMPT_NUMERIC prompt accumulates digits after its -I seed. The next copy action consumes the count through the same engine path as vi: the count lands as one `-N <count>` pair before the argument containing -X, which is what the pin's `{ send-keys -N \"%%\" }` block does when it writes wme->prefix for the following action. g opens the same goto-line prompt vi ':' opens, and both now carry a structured `{ send-keys -X goto-line -- \"%%\" }` command block instead of the old string template, so submission edits the leaf argument in place and a typed line number cannot inject a second command. The exact stored command shape in this group's acceptance was not reached and did not vanish: the pin renders both families through `command-prompt -P`, whose pane-cell prompt is loudly unsupported by the accepted `prompt.pane-rendered` decision. The nine M-digit shape divergences moved to `keys.copy-mode-native-numeric-prefix`, which already owns that stance for the vi digits, and `binding:copy-mode:g` moved to `keys.copy-mode-binding-fidelity` beside `binding:copy-mode-vi::`. Nothing wire-reachable changed."
     },
     {
       "id": "keys.literal-delete-identity",

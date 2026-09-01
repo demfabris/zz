@@ -2774,6 +2774,7 @@ struct PendingHookEvent {
     exclude_client: Option<ClientId>,
 }
 
+const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
 const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_CLIENT_CONTEXT_FORMAT: &str = "hook_client";
 const HOOK_PANE_CONTEXT_FORMAT: &str = "hook_pane";
@@ -21613,6 +21614,13 @@ impl Shared {
         deferred_control_config_warnings: &mut Vec<DeferredControlConfigWarning>,
         queue_execution: &CommandQueueExecution,
     ) -> Result<(), DaemonError> {
+        // cfg.c adds `current_file` to the state every command parsed out of this
+        // file inherits. A nested source replays through its own cloned context,
+        // so a child overrides its parent for its own commands only.
+        context.format_variables.insert(
+            CURRENT_FILE_CONTEXT_FORMAT.to_owned(),
+            path.display().to_string(),
+        );
         let _suppressed_control_capture = if options.suppress_replay_output {
             options
                 .control_target

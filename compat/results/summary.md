@@ -71,6 +71,7 @@
 | show-options-hooks | 34 | yes | 0 | yes | yes | yes |
 | source-hook-cwd-event | 3 | yes | 0 | yes | yes | yes |
 | source-hook-cwd-sourced | 3 | yes | 0 | yes | yes | yes |
+| source-file-current-file | 24 | yes | 0 | yes | yes | yes |
 | source-file-format | 40 | yes | 0 | yes | yes | yes |
 | source-file-output | 12 | yes | 0 | yes | yes | yes |
 | split-window-zoom | 11 | yes | 0 | yes | yes | yes |

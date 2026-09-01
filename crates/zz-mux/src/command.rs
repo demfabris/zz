@@ -207,6 +207,7 @@ const LIST_KEY_SUMMARY_CONTEXT_FORMATS: &[&str] = &[
     "key_table_width",
     "notes_only",
 ];
+const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
 const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_ARGUMENTS_CONTEXT_FORMAT: &str = "hook_arguments";
 const HOOK_ARGUMENT_CONTEXT_PATTERN: &str = "hook_argument_N";
@@ -255,6 +256,7 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
 ];
 
 const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
+    ("current-file", &[CURRENT_FILE_CONTEXT_FORMAT], &[]),
     ("hook", &[HOOK_CONTEXT_FORMAT], &[]),
     ("hook-arguments", &[HOOK_ARGUMENTS_CONTEXT_FORMAT], &[]),
     ("hook-argument", &[], &[HOOK_ARGUMENT_CONTEXT_PATTERN]),
@@ -371,10 +373,8 @@ const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[(
         "hook_window_name",
     ],
 )];
-const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
-    ("current-file", &["current_file"], &[]),
-    ("window-neighbour-user-option", &[], &["next_@*", "prev_@*"]),
-];
+const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] =
+    &[("window-neighbour-user-option", &[], &["next_@*", "prev_@*"])];
 
 #[doc(hidden)]
 pub fn mux_literal_format_context_scopes()

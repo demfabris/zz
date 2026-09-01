@@ -708,7 +708,7 @@ A popup now keeps the origin and size it asked for and rebuilds the live box fro
 
 ### `formats.context-producer-fidelity`: Implement missing context-format producers
 
-Schema 5 classified 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. Three slices are done. The option loop moved 24 tuples: format_loop_add_option and format_loop_add_array_item each own all twelve option-loop formats. format_loop_clients owns loop_index and loop_last_flag, counting its sorted roster from zero and flagging the final row under every order form. format_loop_environ owns environ_name, environ_value, environ_hidden, environ_removed, loop_index, and loop_last_flag for whichever store its flag word names, with a removed entry keeping its name and losing its value and a hidden one keeping both. Nested loops take those names over only for the length of their own rows and none of them answer outside a loop. Nine tuples remain, all notify_monitor_cb, alongside the current_file and window-neighbour user-option derived families; the slug stays until each of those producers lands with its own value and context tests.
+Schema 5 classified 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. Four slices are done. The option loop moved 24 tuples: format_loop_add_option and format_loop_add_array_item each own all twelve option-loop formats. format_loop_clients owns loop_index and loop_last_flag, counting its sorted roster from zero and flagging the final row under every order form. format_loop_environ owns environ_name, environ_value, environ_hidden, environ_removed, loop_index, and loop_last_flag for whichever store its flag word names. The current-file family is next: every command a config file queues carries that file's resolved load path, whether it comes from the startup root, a runtime source-file, one of several path operands, or a nested source, and it survives an alias, an if-shell child, a run-shell -C callback, and a control replay. A nested source overrides its parent for its own commands only and the parent resumes afterward; a hook body starts a queue item without one; -n executes nothing; and no expansion outside a file has a value at all. Nine literal tuples remain, all notify_monitor_cb, alongside the window-neighbour user-option derived family; the slug stays until both land with their own value and context tests.
 
 - Decision: `adopt`
 - Status: `open`
@@ -731,6 +731,7 @@ Schema 5 classified 41 missing literal producer/name tuples plus current_file an
   - `scenario:compat/scenarios/smoke/format-client-loop-context.txt`
   - `file:crates/zz-daemon/tests/format_environment_loop_context.rs`
   - `scenario:compat/scenarios/smoke/format-environment-loop-context.txt`
+  - `scenario:compat/scenarios/source-file-current-file.txt`
 - Acceptance:
   - `Split the source-registered missing partition by producer before implementation: option and array loops, environment and client loops, monitor hooks, current_file, and next or previous user-option copying retain independent value and context tests.`
   - `Each implemented producer moves its exact path:function/name tuples or derived family out of the active-gap partition without weakening the exhaustive schema-5 gate or treating a same-spelled global format as context proof.`

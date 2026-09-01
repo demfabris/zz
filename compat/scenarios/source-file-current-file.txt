@@ -1,0 +1,27 @@
+# Every command a config file queues carries that file's resolved load path.
+# A nested source overrides it for its own commands only, a hook body starts a
+# queue item of its own without one, and nothing outside a file has one at all.
+new-session -d -s cf
+out: display-message -p [#{current_file}]
+set-option -s command-alias[60] cfalias=set-option
+source-file compat/scenarios/source-file-current-file-root.conf
+out: show-options -gv @cf-root
+out: show-options -gv @cf-child
+out: show-options -gv @cf-after-child
+out: show-options -gv @cf-alias
+out: show-options -gv @cf-hook
+out: show-options -gv @cf-if
+out: show-options -gv @cf-run
+out: display-message -p [#{==:#{@cf-root-full},#{@cf-child-full}}]
+out: display-message -p [#{current_file}]
+set-option -g @cf-child untouched
+set-option -g @cf-root untouched
+source-file -n compat/scenarios/source-file-current-file-child.conf
+out: show-options -gv @cf-child
+out: source-file compat/scenarios/source-file-current-file-child.conf compat/scenarios/source-file-current-file-root.conf
+out: show-options -gv @cf-child
+out: show-options -gv @cf-root
+source-file compat/scenarios/source-file-current-file-missing.conf
+out: display-message -p [#{current_file}]
+out: show-options -gv @cf-root
+set-hook -gu after-set-buffer

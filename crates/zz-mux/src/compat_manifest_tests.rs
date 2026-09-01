@@ -657,7 +657,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             "duplicate mux derived format family: {family}"
         );
     }
-    assert_eq!(mux_families.len(), 7);
+    assert_eq!(mux_families.len(), 8);
 
     let mut missing_families = BTreeSet::new();
     for (family, names, patterns) in missing_derived_format_context_families() {
@@ -683,7 +683,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
     }
     assert_eq!(
         missing_families,
-        BTreeSet::from(["current-file", "window-neighbour-user-option"])
+        BTreeSet::from(["window-neighbour-user-option"])
     );
     assert!(mux_families.is_disjoint(&missing_families));
     let classified_families = mux_families

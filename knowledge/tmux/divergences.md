@@ -1175,7 +1175,11 @@ otherwise fills it from the sizing client's `c->tty.xpixel`, which a pty client 
 zz delegates both names to the daemon, answering the format client's reported cell pixels and falling
 back to the pin's defaults, gated on a window in context exactly as `format_cb_window_cell_width`
 gates on `ft->w`. Both sides answer 16 and 32 from `display-message` with and without an attached
-client and from every `list-windows` row, and null from a `list-sessions` row.
+client, from every `list-windows` row, and from a `list-sessions` row too: `format_defaults` fills
+`wl = s->curw` when no winlink is given, so a session row reads the metrics through its current
+window, and the differential transcript records `[16|]` on both sides for that step. Null appears
+only for a format tree with no window at all, the case the `StatusContext::default()` unit test
+exercises.
 
 `window_bigger` and the two offsets are per-client and stay open on a measured blocker. In the pin
 they read the client's cached tty viewport through `tty_window_offset`, so `format_cb_window_bigger`

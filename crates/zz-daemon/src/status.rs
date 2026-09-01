@@ -528,7 +528,7 @@ fn wrap_status_style(formats: &StatusFormats, text: &str, side_style: &str) -> S
         base.push_str(&formats.background);
     }
     if base.is_empty() && matches!(side_style, "" | "default") {
-        return text.to_owned();
+        return clamp_status_text(text.to_owned());
     }
     let mut output = String::with_capacity(
         (base.len() + side_style.len() + text.len() + 32).min(MAX_STATUS_TEXT_BYTES),
@@ -1866,6 +1866,17 @@ mod tests {
         for row in &status.rows {
             assert_eq!(row.len(), MAX_STATUS_TEXT_BYTES);
         }
+
+        let unstyled = self::request(1, overflow, "");
+        let status = StatusRenderer::default().render_initial(&unstyled);
+        assert_eq!(status.validate(), Ok(()));
+        assert!(status.left.len() <= MAX_STATUS_TEXT_BYTES);
+
+        let mut markers = self::request(1, "#{R:#[bold],700}x", "");
+        markers.formats.left_length = 10;
+        let status = StatusRenderer::default().render_initial(&markers);
+        assert_eq!(status.validate(), Ok(()));
+        assert!(status.left.len() <= MAX_STATUS_TEXT_BYTES);
     }
 
     #[test]

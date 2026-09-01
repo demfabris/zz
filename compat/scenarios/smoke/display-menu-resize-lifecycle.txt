@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/display-menu-resize-lifecycle.sh ~/display-menu-resize-lifecycle.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu DISPLAY_MENU_RESIZE_LIFECYCLE
+run-shell 'sh ~/display-menu-resize-lifecycle.sh'
+out: show-environment -g DISPLAY_MENU_RESIZE_LIFECYCLE

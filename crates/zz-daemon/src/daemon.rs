@@ -12544,6 +12544,41 @@ impl Shared {
         }
     }
 
+    /// Re-fit the overlays a client owns after its own terminal geometry
+    /// changed. The pin runs `menu_resize_cb` from `MSG_RESIZE` and closes
+    /// nothing: the menu keeps its rows, its width, its selection and its
+    /// stay-open policy, and only slides back inside the viewport.
+    fn refit_client_overlays(self: &Arc<Self>, client: ClientId) {
+        let menu = {
+            let mut inner = self.inner.lock();
+            let Ok(Some(geometry)) = popup_client_geometry(&inner, client) else {
+                return;
+            };
+            let Some(menu) = inner.menus.get_mut(&client) else {
+                return;
+            };
+            let refit = MenuState {
+                left: overlay_origin_for_viewport(
+                    menu.state.left,
+                    menu.state.width,
+                    geometry.columns,
+                ),
+                top: overlay_origin_for_viewport(menu.state.top, menu.state.height, geometry.rows),
+                client_columns: geometry.columns,
+                client_rows: geometry.rows,
+                cell_width_px: geometry.cell_width_px,
+                cell_height_px: geometry.cell_height_px,
+                ..menu.state.clone()
+            };
+            if refit == menu.state {
+                return;
+            }
+            menu.state = refit.clone();
+            refit
+        };
+        self.publish_to_client(client, EventPayload::Menu { state: Some(menu) });
+    }
+
     fn display_menu(
         self: &Arc<Self>,
         client: ClientId,
@@ -14210,6 +14245,7 @@ impl Shared {
                             geometry.cell_height_px,
                         );
                     }
+                    self.refit_client_overlays(client);
                 }
                 InputMessage::TerminalView {
                     pane,
@@ -31414,6 +31450,17 @@ fn popup_other_overlay_present(inner: &ServerState, client: ClientId) -> bool {
 
 fn any_overlay_present(inner: &ServerState, client: ClientId) -> bool {
     popup_other_overlay_present(inner, client) || inner.popups.contains_key(&client)
+}
+
+/// The pin's overlay re-fit rule: an origin moves only when the box would fall
+/// off the viewport, and a box no smaller than the viewport parks at zero
+/// (`menu_resize_cb` in menu.c, `popup_resize_cb` in popup.c).
+fn overlay_origin_for_viewport(origin: u16, extent: u16, available: u16) -> u16 {
+    if origin.saturating_add(extent) > available {
+        available.saturating_sub(extent)
+    } else {
+        origin
+    }
 }
 
 /// The one key a menu row can carry that `input_key_name` never spells:

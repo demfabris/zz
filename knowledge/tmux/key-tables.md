@@ -16,7 +16,7 @@ types cooperate: `KeyTables` is the shared, mutable set of named tables (`prefix
 `copy-mode`, `copy-mode-vi`, `choose-tree`, `choose-buffer`, plus any custom `-T` table) mapping a
 canonical key string to a
 `Binding`; `KeyEngine` is the cheap per-client cursor that tracks whether the prefix has been pressed,
-whether a "jump" binding is waiting for its target key, a repeat deadline, and a vi numeric prefix. `KeyEngine::handle` returns a
+whether a "jump" binding is waiting for its target key, a repeat deadline, and a copy-mode numeric prefix. `KeyEngine::handle` returns a
 `KeyDecision` telling the daemon to pass the key through to the surface, enter the prefix, ignore it,
 or run a list of `CommandInvocation`s. Defaults are audited against the pinned tmux tables
 (`key-bindings.c`); custom binds come from `bind-key`/`unbind-key` in
@@ -83,7 +83,8 @@ literal `None` value also reads as unset). Resolution in `KeyEngine::handle`:
 - Jump bindings (`send-keys -X jump-forward|jump-backward|jump-to-forward|jump-to-backward`) set
   `pending` and return `Ignore`; the next key is appended as the jump target (or `Escape` cancels
   with `Ignore`).
-- In `copy-mode-vi`, `1` through `9` begin a numeric prefix. More digits, including `0`, extend it;
+- In `copy-mode-vi`, `1` through `9` begin a numeric prefix, and in `copy-mode`, `M-1` through
+  `M-9` begin the same one. More digits, including `0`, extend it in either table;
   the next copy action carries that count once as `send-keys -N <count> -X ...`. The typed count
   policy repeats prefix-consuming movements, jumps, matching brackets, and repeat-search actions;
   `other-end` swaps only for odd counts, `select-line` spans the requested lines, and the
@@ -155,8 +156,8 @@ bindings name the zz-native `split-picker` verb instead, which opens the pane-ki
 
 # Default bindings (seeded in `KeyTables::default`)
 
-The pinned 303 defaults and zz's 256 defaults contain 198 shared keys. The live manifest owns 105
-missing keys, 58 zz-native keys, and 51 shared command-or-repeat divergences. The remaining 147
+The pinned 303 defaults and zz's 266 defaults contain 208 shared keys. The live manifest owns 95
+missing keys, 58 zz-native keys, and 61 shared command-or-repeat divergences. The remaining 147
 shared entries match structurally: 53 in `copy-mode`, 62 in `copy-mode-vi`, and 32 in `prefix`.
 That structural equality does not claim complete command or action behavior; the existing consumer
 groups retain those runtime contracts.
@@ -247,8 +248,9 @@ Five of those stock action keys are now installed: `copy-mode-vi P` and `copy-mo
 `recentre-top-bottom`, and `copy-mode M-l` sends `cursor-centre-horizontal`, each with the pin's
 stored command and nonrepeat metadata.
 
-Twelve stock keyboard keys remain open. Ten emacs keys need numeric-repeat or goto-line command
-prompts. The two `r` keys name `refresh-toggle`, which unfreezes the copy backing rather than
+Two stock keyboard keys remain open. The emacs table now binds `M-1` through `M-9` to zz's own
+numeric capture and `g` to the goto-line prompt vi `:` opens, so only the two `r` keys are left.
+They name `refresh-toggle`, which unfreezes the copy backing rather than
 switching off a live pane: measured on the pin, `#{scroll_position}` holds at 0 after entry, climbs
 while `refresh-on` re-clones the backing on its 50ms timer, and freezes again after
 `refresh-toggle`. That re-sync belongs to the daemon's copy revisions, so both `r` keys wait on it.
@@ -258,10 +260,13 @@ actions. Pointer pseudo-bindings stay in the direct mouse route.
 
 Copy-mode movement, jump capture, and numeric repetition do not read the binding repeat field;
 `copy-mode-repeat`, `repeat_count`, and the copy action's runtime repeat policy own them. The nine vi
-digit bindings retain zz's per-client `copy-mode-repeat` command shape instead of tmux's pane-cell
-numeric prompt. Prefix-table and user-created `bind-key -r` bindings still carry and use their repeat
-bit. The remaining open shared-binding command-shape group contains 15 cursor-word, search,
-goto-line, and jump bindings. See [copy mode](/tmux/copy-mode.md).
+digit bindings and the nine emacs `M-1` through `M-9` bindings retain zz's per-client
+`copy-mode-repeat` command shape instead of tmux's pane-cell numeric prompt, and a bare digit typed
+after either extends the count in either table. Prefix-table and user-created `bind-key -r` bindings
+still carry and use their repeat bit. The remaining open shared-binding command-shape group contains
+16 cursor-word, search, goto-line, and jump bindings; thirteen of them differ from the pin only by
+the `-P` pane-cell prompt flag that `prompt.pane-rendered` accepted as unsupported.
+See [copy mode](/tmux/copy-mode.md).
 
 # Shifted key spellings
 

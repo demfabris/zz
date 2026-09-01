@@ -708,7 +708,7 @@ A popup now keeps the origin and size it asked for and rebuilds the live box fro
 
 ### `formats.context-producer-fidelity`: Implement missing context-format producers
 
-Schema 5 classified 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. Two slices are done. The option loop moved 24 tuples: format_loop_add_option and format_loop_add_array_item each own all twelve option-loop formats. The client loop now moves two more: format_loop_clients owns loop_index and loop_last_flag, counting its sorted roster from zero and flagging the final row under every order form, with nested loops taking the names over for the length of their own rows and nothing answering outside a loop. Fifteen tuples remain, for format_loop_environ and notify_monitor_cb, alongside the current_file and window-neighbour user-option derived families; the slug stays until each of those producers lands with its own value and context tests.
+Schema 5 classified 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. Three slices are done. The option loop moved 24 tuples: format_loop_add_option and format_loop_add_array_item each own all twelve option-loop formats. format_loop_clients owns loop_index and loop_last_flag, counting its sorted roster from zero and flagging the final row under every order form. format_loop_environ owns environ_name, environ_value, environ_hidden, environ_removed, loop_index, and loop_last_flag for whichever store its flag word names, with a removed entry keeping its name and losing its value and a hidden one keeping both. Nested loops take those names over only for the length of their own rows and none of them answer outside a loop. Nine tuples remain, all notify_monitor_cb, alongside the current_file and window-neighbour user-option derived families; the slug stays until each of those producers lands with its own value and context tests.
 
 - Decision: `adopt`
 - Status: `open`
@@ -729,6 +729,8 @@ Schema 5 classified 41 missing literal producer/name tuples plus current_file an
   - `scenario:compat/scenarios/format-option-loop-context.txt`
   - `file:crates/zz-daemon/tests/format_client_loop_context.rs`
   - `scenario:compat/scenarios/smoke/format-client-loop-context.txt`
+  - `file:crates/zz-daemon/tests/format_environment_loop_context.rs`
+  - `scenario:compat/scenarios/smoke/format-environment-loop-context.txt`
 - Acceptance:
   - `Split the source-registered missing partition by producer before implementation: option and array loops, environment and client loops, monitor hooks, current_file, and next or previous user-option copying retain independent value and context tests.`
   - `Each implemented producer moves its exact path:function/name tuples or derived family out of the active-gap partition without weakening the exhaustive schema-5 gate or treating a same-spelled global format as context proof.`

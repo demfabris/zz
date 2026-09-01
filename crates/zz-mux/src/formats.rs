@@ -53,6 +53,11 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
         OPTION_LOOP_CONTEXT_FORMATS,
     ),
     ("format.c", "format_loop_clients", LOOP_CONTEXT_FORMATS),
+    (
+        "format.c",
+        "format_loop_environ",
+        ENVIRONMENT_LOOP_CONTEXT_FORMATS,
+    ),
     ("format.c", "format_loop_panes", LOOP_CONTEXT_FORMATS),
     ("format.c", "format_loop_sessions", LOOP_CONTEXT_FORMATS),
     ("format.c", "format_loop_windows", LOOP_CONTEXT_FORMATS),

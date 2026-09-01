@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/format-environment-loop-context.sh ~/format-environment-loop-context.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu FORMAT_ENVIRONMENT_LOOP_CONTEXT
+run-shell 'sh ~/format-environment-loop-context.sh'
+out: show-environment -g FORMAT_ENVIRONMENT_LOOP_CONTEXT

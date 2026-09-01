@@ -356,35 +356,21 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         ],
     ),
 ];
-const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
-    (
-        "format.c",
-        "format_loop_environ",
-        &[
-            "environ_hidden",
-            "environ_name",
-            "environ_removed",
-            "environ_value",
-            "loop_index",
-            "loop_last_flag",
-        ],
-    ),
-    (
-        "notify.c",
-        "notify_monitor_cb",
-        &[
-            "hook",
-            "hook_last",
-            "hook_pane",
-            "hook_session",
-            "hook_session_name",
-            "hook_value",
-            "hook_window",
-            "hook_window_index",
-            "hook_window_name",
-        ],
-    ),
-];
+const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[(
+    "notify.c",
+    "notify_monitor_cb",
+    &[
+        "hook",
+        "hook_last",
+        "hook_pane",
+        "hook_session",
+        "hook_session_name",
+        "hook_value",
+        "hook_window",
+        "hook_window_index",
+        "hook_window_name",
+    ],
+)];
 const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
     ("current-file", &["current_file"], &[]),
     ("window-neighbour-user-option", &[], &["next_@*", "prev_@*"]),

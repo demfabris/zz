@@ -361,7 +361,7 @@ pub struct MuxState {
     format_now: u64,
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
-    marked_pane: Option<(WindowId, PaneId)>,
+    marked_pane: Option<(SessionId, WindowId, PaneId)>,
     pub sessions: BTreeMap<SessionId, Session>,
     pub windows: BTreeMap<WindowId, Window>,
 }
@@ -3442,19 +3442,21 @@ impl MuxState {
     }
 
     /// The pin's `marked_pane`: one server-global mark over a whole find
-    /// state, reported valid only while that window still holds that pane
-    /// (`server_check_marked` defers to `cmd_find_valid_state`, whose last
-    /// test is `window_has_pane`). Killing the pane or moving it into another
-    /// window through break-pane or join-pane reads as no mark at all, while a
-    /// swap inside the same window keeps it.
+    /// state, reported valid only while the session it was taken in still
+    /// links that window and the window still holds that pane
+    /// (`server_check_marked` defers to `cmd_find_valid_state`, which walks
+    /// `marked_pane.s->windows` for `marked_pane.wl` and ends at
+    /// `window_has_pane`). Killing the pane or moving it into another window
+    /// through break-pane or join-pane reads as no mark at all, and so does a
+    /// window that changed session through move-window or swap-window,
+    /// because `server_link_window` and `cmd_swap_window_exec` retarget only
+    /// `marked_pane.wl`, never `marked_pane.s`. A swap inside the same window
+    /// and a move inside the same session keep it.
     #[must_use]
     pub fn marked_pane(&self) -> Option<PaneId> {
-        let (window, pane) = self.marked_pane?;
-        self.windows
-            .get(&window)?
-            .panes
-            .contains_key(&pane)
-            .then_some(pane)
+        let (session, window, pane) = self.marked_pane?;
+        let window = self.windows.get(&window)?;
+        (window.session == session && window.panes.contains_key(&pane)).then_some(pane)
     }
 
     fn marked_window(&self) -> Result<WindowId, ServerError> {
@@ -3469,7 +3471,12 @@ impl MuxState {
         let window = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let next = (self.marked_pane() != Some(pane)).then_some((window, pane));
+        let session = self
+            .windows
+            .get(&window)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?
+            .session;
+        let next = (self.marked_pane() != Some(pane)).then_some((session, window, pane));
         if self.marked_pane != next {
             self.marked_pane = next;
             self.bump_generation();

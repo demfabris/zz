@@ -37033,6 +37033,101 @@ mod tests {
     }
 
     #[test]
+    fn marked_pane_stays_with_the_session_it_was_taken_in_like_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "w"]))
+            .expect("w");
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "w", "-n", "one"]),
+            )
+            .expect("one");
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "w", "-n", "two"]),
+            )
+            .expect("two");
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-d", "-s", "other"]),
+            )
+            .expect("other");
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "other", "-n", "spare"]),
+            )
+            .expect("spare");
+        let marks = |engine: &mut MuxEngine, context: &mut ExecutionContext, target: &str| {
+            format_of(
+                engine,
+                context,
+                target,
+                "#{pane_marked}:#{pane_marked_set}:#{session_marked}:#{window_marked_flag}",
+            )
+        };
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", "w:one.0"]),
+            )
+            .expect("mark w:one");
+        engine
+            .execute(
+                &mut context,
+                &command("move-window", &["-d", "-s", "w:one", "-t", "w:7"]),
+            )
+            .expect("move inside w");
+        assert_eq!(
+            marks(&mut engine, &mut context, "w:7.0"),
+            "1:1:1:1",
+            "pinned tmux keeps the mark across a same-session move-window"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("move-window", &["-d", "-s", "w:7", "-t", "other:5"]),
+            )
+            .expect("move to other");
+        assert_eq!(
+            marks(&mut engine, &mut context, "other:5.0"),
+            "0:0:0:0",
+            "pinned tmux answers 0:0:0:0 on the moved window's pane after move-window -d -s w:0 -t other:5"
+        );
+        assert_eq!(engine.state.marked_pane(), None);
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", "w:two.0"]),
+            )
+            .expect("mark w:two");
+        engine
+            .execute(
+                &mut context,
+                &command("swap-window", &["-d", "-s", "w:two", "-t", "other:1"]),
+            )
+            .expect("swap into other");
+        assert_eq!(
+            marks(&mut engine, &mut context, "other:1.0"),
+            "0:0:0:0",
+            "pinned tmux answers 0:0:0:0 on the swapped window's pane after swap-window -d -s w:1 -t other:1"
+        );
+        assert_eq!(engine.state.marked_pane(), None);
+        assert_eq!(
+            format_of(&mut engine, &mut context, "w:1.0", "#{pane_marked_set}"),
+            "0"
+        );
+    }
+
+    #[test]
     fn marked_pane_formats_scope_to_the_marked_session_and_window() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();

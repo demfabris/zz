@@ -72,3 +72,22 @@ swap-pane -d -s w:sidecar.1 -t w:sidecar.0
 out: display-message -p -t w:0.0 #{pane_marked_set}
 out: display-message -p -t {marked} #{window_name}.#{pane_index}
 select-pane -M -t w:0.0
+
+# marked_pane.s is never retargeted: server_link_window and cmd_swap_window_exec
+# only retarget marked_pane.wl, and cmd_find_valid_state walks that session's
+# winlinks, so a move inside the session keeps the mark while a window that
+# changes session takes no mark with it.
+select-pane -m -t w:sidecar.1
+move-window -d -s w:sidecar -t w:7
+out: display-message -p -t w:7.1 #{pane_marked}:#{pane_marked_set}:#{session_marked}:#{window_marked_flag}
+out: display-message -p -t w:7 [#{window_flags}]
+new-window -d -t other:1 -n spare
+move-window -d -s w:7 -t other:5
+out: display-message -p -t other:5.1 #{pane_marked}:#{pane_marked_set}:#{session_marked}:#{window_marked_flag}
+out: display-message -p -t other:5 [#{window_flags}]
+out: display-message -p -t w #{session_marked}
+select-pane -m -t w:second.0
+swap-window -d -s w:second -t other:1
+out: display-message -p -t other:1.0 #{pane_marked}:#{pane_marked_set}:#{session_marked}:#{window_marked_flag}
+out: display-message -p -t other:1 [#{window_flags}]
+out: display-message -p -t w:1.0 #{pane_marked}:#{pane_marked_set}

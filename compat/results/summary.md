@@ -65,7 +65,7 @@
 | pane-dead-time | 6 | yes | 0 | yes | yes | yes |
 | pane-exact-target-prefix | 31 | yes | 0 | yes | yes | yes |
 | pane-selection-input-style | 40 | yes | 0 | yes | yes | yes |
-| pane-selection-marked | 59 | yes | 0 | yes | yes | yes |
+| pane-selection-marked | 73 | yes | 0 | yes | yes | yes |
 | pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
 | pane-spawn-retain | 27 | yes | 0 | yes | yes | yes |
 | pane-spawn-style-title-v2 | 18 | yes | 0 | yes | yes | yes |

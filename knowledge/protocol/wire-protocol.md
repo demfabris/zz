@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v90)
+title: zz wire protocol (v91)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 90`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 91`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (90) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (91) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -608,9 +608,15 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 90`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 91`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v91 appends `EventPayload::ControlConfigError { text }` at tail tag 51. A configuration
+  diagnostic now carries typed identity from where it was raised instead of arriving as a generic
+  `ClientMessage` warning that Control had to recognize by English prose, so `%config-error`
+  routing matches the pin's structural `cfg_add_cause` decision and survives reworded or localized
+  messages. Only the two config-replay producers emit it and only to Control clients, so no other
+  surface changes.
 - v90 inserts `MenuItem.annotation` between `key` and `enabled`, the action key a menu row has
   room to draw beside its name; the mid-struct insert shifts `enabled`'s postcard position, which
   the version gate makes safe. `key` stays the key the row answers to, so a row whose bracketed

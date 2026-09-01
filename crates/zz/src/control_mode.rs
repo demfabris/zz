@@ -851,9 +851,7 @@ fn handle_protocol<W: Write>(
                 state.return_code = 1;
                 output.diagnostic_error(&text)?;
             }
-            EventPayload::ClientMessage { kind, text, .. }
-                if kind == zz_protocol::ClientMessageKind::Warning && is_config_message(&text) =>
-            {
+            EventPayload::ControlConfigError { text } => {
                 output.notify(format!("%config-error {text}").as_bytes())?;
             }
             EventPayload::Detached { .. } => {
@@ -1034,18 +1032,6 @@ fn render_message(text: &str) -> Vec<u8> {
         }
     }
     rendered
-}
-
-fn is_config_message(text: &str) -> bool {
-    text.starts_with("source-file ")
-        || text.contains(" invalid line")
-        || text.starts_with("invalid line")
-        || (text.starts_with("skipped ") && text.contains("unsupported tmux command"))
-        || text.rmatch_indices(": ").any(|(delimiter, _)| {
-            text[..delimiter]
-                .rsplit_once(':')
-                .is_some_and(|(path, line)| !path.is_empty() && line.parse::<u32>().is_ok())
-        })
 }
 
 fn is_source_error_message(text: &str) -> bool {
@@ -2817,11 +2803,42 @@ mod tests {
     }
 
     #[test]
-    fn untyped_warnings_keep_config_routing_without_promoting_unknown_source_text() {
+    fn config_errors_route_on_their_payload_type_and_not_on_their_prose() {
+        // The pin decides %config-error from where the diagnostic was raised
+        // (cfg_add_cause, printed by cfg_print_causes and cfg_show_causes), not
+        // from how the text reads, so every shape below routes the same way.
         for text in [
+            "/tmp/mux.conf:51: unknown command: wibble",
+            "skipped 1 unsupported tmux command: new-pane",
             "Is a directory (os error 21): relative-source.conf",
+            "worker warning",
+            "commande inconnue",
+            "",
+        ] {
+            let mut writer = ControlWriter::new(Vec::new(), false);
+            let mut state = ControlState::default();
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::ControlConfigError {
+                        text: text.to_owned(),
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+            assert_eq!(writer.output, format!("%config-error {text}\n").as_bytes());
+            assert_eq!(state.return_code, 0);
+            assert_eq!(completed_exit_code(0, &state), 0);
+        }
+
+        // A generic warning that merely reads like a config diagnostic no longer
+        // promotes itself.
+        for text in [
+            "/tmp/mux.conf:51: unknown command: wibble",
+            "skipped 1 unsupported tmux command: new-pane",
             "stream did not contain valid UTF-8: binary.conf",
-            "No such file or directory: missing.conf\nstream did not contain valid UTF-8: binary.conf",
             "worker warning",
         ] {
             let mut writer = ControlWriter::new(Vec::new(), false);
@@ -2839,31 +2856,6 @@ mod tests {
             )
             .unwrap();
             assert!(writer.output.is_empty(), "{text}");
-        }
-
-        for text in [
-            "/tmp/mux.conf:51: unknown command: wibble",
-            "/tmp/a: b/mux.conf:51: unknown command: wibble",
-            "skipped 1 unsupported tmux command: new-pane",
-        ] {
-            let mut writer = ControlWriter::new(Vec::new(), false);
-            let mut state = ControlState::default();
-            handle_protocol(
-                ProtocolMessage::Event(zz_protocol::Event {
-                    sequence: 1,
-                    payload: EventPayload::ClientMessage {
-                        pane: None,
-                        kind: zz_protocol::ClientMessageKind::Warning,
-                        text: text.to_owned(),
-                    },
-                }),
-                &mut state,
-                &mut writer,
-            )
-            .unwrap();
-            assert_eq!(writer.output, format!("%config-error {text}\n").as_bytes());
-            assert_eq!(state.return_code, 0);
-            assert_eq!(completed_exit_code(0, &state), 0);
         }
     }
 
@@ -3609,42 +3601,7 @@ mod tests {
     }
 
     #[test]
-    fn config_messages_include_the_source_line_shape() {
-        assert!(is_config_message(
-            "/tmp/mux.conf:1: unknown command: wibble"
-        ));
-        assert!(is_config_message(
-            "skipped 1 unsupported tmux command: focus-events"
-        ));
-        assert!(is_config_message(
-            "skipped 2 unsupported tmux commands: focus-events, status-keys"
-        ));
-        assert!(!is_config_message(
-            "device-7 message: unknown command: wibble"
-        ));
-        assert!(!is_config_message(
-            "skipped 2 deprecated options: focus-events, status-keys"
-        ));
-        assert!(!is_config_message(
-            "prefix skipped 2 unsupported tmux commands: focus-events, status-keys"
-        ));
-    }
-
-    #[test]
-    fn daemon_diagnostics_are_partitioned_between_config_and_source_channels() {
-        for text in [
-            "/tmp/mux.conf:1: unknown command: wibble",
-            "skipped 1 unsupported tmux command: focus-events",
-            "skipped 2 unsupported tmux commands: focus-events, status-keys",
-            "skipped 1 unsupported tmux command: focus-events; \
-             1 invalid line: /tmp/mux.conf:3: unknown command: wibble",
-            "2 invalid lines: /tmp/mux.conf:1: unknown command: wibble, \
-             /tmp/mux.conf:2: unknown command: blorp",
-            "source-file from standard input is not supported",
-        ] {
-            assert!(is_config_message(text), "{text}");
-            assert!(!is_source_error_message(text), "{text}");
-        }
+    fn daemon_source_read_failures_keep_their_own_channel() {
         for text in [
             "No such file or directory: /tmp/mux.conf",
             "Invalid argument: /tmp/mux.conf",
@@ -3655,12 +3612,10 @@ mod tests {
             "stream did not contain valid UTF-8: /tmp/binary.conf",
         ] {
             assert!(is_source_error_message(text), "{text}");
-            assert!(!is_config_message(text), "{text}");
         }
         assert!(!is_source_error_message(
             "/tmp/mux.conf:51: too many nested files"
         ));
-        assert!(is_config_message("/tmp/mux.conf:51: too many nested files"));
         for text in [
             "stream did not contain valid UTF-8: binary.conf",
             "worker warning (os error 21)",
@@ -3668,9 +3623,6 @@ mod tests {
         ] {
             assert!(!is_source_error_message(text), "{text}");
         }
-        assert!(!is_config_message(
-            "Reloaded zz configuration; skipped 1 unsupported tmux command: focus-events"
-        ));
     }
 
     #[test]

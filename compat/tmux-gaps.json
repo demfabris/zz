@@ -883,7 +883,6 @@
         "semantic:display-popup-border-drag",
         "semantic:display-popup-context-menu",
         "semantic:display-popup-kitty-images",
-        "semantic:display-popup-resize-lifecycle",
         "semantic:display-popup-style-refresh",
         "semantic:display-popup-to-pane"
       ],
@@ -893,6 +892,7 @@
         "resource:crates/zz-tui/src/input.rs",
         "resource:crates/zz-tui/src/render.rs",
         "file:compat/attached-client.sh",
+        "scenario:compat/scenarios/smoke/display-popup-resize-lifecycle.txt",
         "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
@@ -901,7 +901,7 @@
         "Attached clients cover popup-to-pane conversion and popup Kitty image rendering, replacement, and close cleanup."
       ],
       "depends_on": [],
-      "reason": "Slice 10p consumes the daemon-published popup terminal in raw zz-tui and proves bounded keyboard, paste, tracked pointer, focus, exit, and cache ownership. Exact live resize and style refresh, native popup pointer affordances, popup-to-pane conversion, and popup Kitty image presentation remain separate cross-daemon and client fidelity work. Real mouse and status format facts remain under formats.mouse-context; Control presentation and read-only popup policy keep their existing native-client owners."
+      "reason": "A popup now keeps the origin and size it asked for and rebuilds the live box from them on every owning-client resize the way popup_resize_cb does \u2014 the smaller of the request and the viewport, the preferred origin whenever it fits, the clamped one when it does not, and the job resized to the content box \u2014 proved against the pin in scenario display-popup-resize-lifecycle. Style refresh, native popup pointer affordances, popup-to-pane conversion, and popup Kitty image presentation remain separate cross-daemon and client fidelity work. Real mouse and status format facts remain under formats.mouse-context; Control presentation and read-only popup policy keep their existing native-client owners."
     },
     {
       "id": "formats.context-producer-fidelity",

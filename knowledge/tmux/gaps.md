@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **84**. Classified items: **567**.
+Tracked gap groups: **84**. Classified items: **566**.
 
 - Status: open: 42, blocked: 20, accepted: 22.
 - Decision: adopt: 47, native: 16, park: 15, never: 6.
 - Priority: later: 62, none: 22.
 - Closed history entries: 127.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 94, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 93, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -699,14 +699,14 @@ zz has no parked command-queue item tied to a client overlay lifetime.
 
 ### `display-popup.behavior-fidelity`: Match remaining display-popup behavior
 
-Slice 10p consumes the daemon-published popup terminal in raw zz-tui and proves bounded keyboard, paste, tracked pointer, focus, exit, and cache ownership. Exact live resize and style refresh, native popup pointer affordances, popup-to-pane conversion, and popup Kitty image presentation remain separate cross-daemon and client fidelity work. Real mouse and status format facts remain under formats.mouse-context; Control presentation and read-only popup policy keep their existing native-client owners.
+A popup now keeps the origin and size it asked for and rebuilds the live box from them on every owning-client resize the way popup_resize_cb does — the smaller of the request and the viewport, the preferred origin whenever it fits, the clamped one when it does not, and the job resized to the content box — proved against the pin in scenario display-popup-resize-lifecycle. Style refresh, native popup pointer affordances, popup-to-pane conversion, and popup Kitty image presentation remain separate cross-daemon and client fidelity work. Real mouse and status format facts remain under formats.mouse-context; Control presentation and read-only popup policy keep their existing native-client owners.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `daemon`
 - User impact: daily, remote, scripts
-- Items: `semantic:display-popup-border-drag`, `semantic:display-popup-context-menu`, `semantic:display-popup-kitty-images`, `semantic:display-popup-resize-lifecycle`, `semantic:display-popup-style-refresh`, `semantic:display-popup-to-pane`
+- Items: `semantic:display-popup-border-drag`, `semantic:display-popup-context-menu`, `semantic:display-popup-kitty-images`, `semantic:display-popup-style-refresh`, `semantic:display-popup-to-pane`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-daemon/src/daemon.rs`
@@ -714,6 +714,7 @@ Slice 10p consumes the daemon-published popup terminal in raw zz-tui and proves 
   - `resource:crates/zz-tui/src/input.rs`
   - `resource:crates/zz-tui/src/render.rs`
   - `file:compat/attached-client.sh`
+  - `scenario:compat/scenarios/smoke/display-popup-resize-lifecycle.txt`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
   - `Pinned attached probes cover live content resize, style refresh, and border transitions without stale descriptors, frames, or terminal geometry.`

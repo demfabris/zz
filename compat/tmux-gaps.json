@@ -417,38 +417,6 @@
       "reason": "The GUI superset needs its own names so tmux spellings can keep frozen tmux meaning."
     },
     {
-      "id": "config.non-utf8-file-bytes",
-      "title": "Match config-file byte parsing",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:config-file-byte-input"
-      ],
-      "evidence": [
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-mux/src/parser.rs",
-        "file:crates/zz-mux/tests/config_non_utf8_bytes.rs",
-        "file:crates/zz-mux/tests/config_non_utf8_engine.rs",
-        "scenario:compat/scenarios/smoke/config-non-utf8-byte-matrix.txt",
-        "resource:third_party/tmux-reference/UPSTREAM.md",
-        "resource:knowledge/references/tmux-upstream.md",
-        "resource:knowledge/tmux/conf-parser.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "For a config file containing only byte 0xff, direct Command sourcing exits 0 with empty streams; direct Control sourcing emits one flags-1 success guard, consumes one hidden empty-command item plus the ordinary source completion, and exits 0; and synchronous if-shell sourcing emits flags-1 parent and source success guards, no visible diagnostic, and continues the root file. zz no longer reports this measured case as `stream did not contain valid UTF-8` through a typed Error with status 1.",
-        "A pinned byte matrix covers isolated and embedded non-UTF-8 bytes, their placement, resulting commands, diagnostics, and status before zz claims general byte compatibility. The implementation neither substitutes lossy text nor treats config-content bytes as the separate source-path encoding problem."
-      ],
-      "depends_on": [],
-      "reason": "The parser exposes distinct raw-byte entrypoints and MuxEngine now carries them through parse_config_file_bytes, parse_config_file_bytes_parse_only, and parse_config_buffer_bytes, so byte input keeps the engine's global-environment variables, its assignment overlay, and its #{} condition evaluation without lossy conversion. The startup and runtime loaders and the source-path client routing still take string input, so direct Command, Control, and synchronous if-shell behavior remains open."
-    },
-    {
       "id": "config.tilde-home-path-encoding",
       "title": "Preserve non-UTF-8 passwd home paths",
       "decision": "adopt",
@@ -472,10 +440,8 @@
       "acceptance": [
         "On Unix, bare-tilde fallback and named-user expansion preserve passwd home-directory bytes that are not valid UTF-8 through config parsing and source-path execution, without replacement text or a false syntax error. Representable paths retain their current behavior."
       ],
-      "depends_on": [
-        "config.non-utf8-file-bytes"
-      ],
-      "reason": "The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, while the pin carries the returned bytes. This needs the future byte-input parser contract rather than substitution."
+      "depends_on": [],
+      "reason": "The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, while the pin carries the returned bytes. The config-file byte contract is now closed under config.non-utf8-file-bytes, so this only needs the passwd path itself carried as bytes through the byte parser and the SourceFile path."
     },
     {
       "id": "control-mode.diagnostic-typing",
@@ -3169,6 +3135,25 @@
         "scenario:compat/scenarios/micro-flags.txt"
       ],
       "resolution": "The pin's outer send-keys grammar is c:FHKlMN:Rt:X. zz removed C, P, and o from the outer catalog and returns the exact unknown-flag error when they appear there; the tracked c, K, and R gaps remain under terminal.key-control, and M remains under mouse.bound-context. The copy-mode parser recognizes -C and -P on the pin's 14 copy-family grammar entries and -o on next-prompt and previous-prompt; -- terminates its flag scan. Invalid local flags, actions, and arity produce no command error or copy action and reset the copy-mode repeat prefix to 1. Existing CopyModeCopy clipboard, paste-buffer, and pipe fields retain their behavior. Execution for copy-line, copy-line-and-cancel, copy-pipe-line, and copy-pipe-line-and-cancel remains under terminal.key-control through semantic:send-keys-copy-command-shape. The pin also redraws the first copy-mode line after a local parser failure; zz has no no-op redraw effect, so that presentation residue stays with the same item."
+    },
+    {
+      "id": "config.non-utf8-file-bytes",
+      "title": "Match config-file byte parsing",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/parser.rs",
+        "file:crates/zz-mux/tests/config_non_utf8_bytes.rs",
+        "file:crates/zz-mux/tests/config_non_utf8_engine.rs",
+        "file:crates/zz/tests/cli_binary.rs",
+        "scenario:compat/scenarios/smoke/config-non-utf8-byte-matrix.txt",
+        "scenario:compat/scenarios/smoke/config-non-utf8-file-bytes.txt",
+        "resource:third_party/tmux-reference/UPSTREAM.md",
+        "resource:knowledge/references/tmux-upstream.md",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "The startup and runtime loaders read config files as bytes and keep the pin's two input shapes apart. A runtime source-file matches cmd-source-file.c, which reads the file into a buffer and calls load_cfg_from_buffer, so parse_config_buffer_bytes applies the signed-char getc reading where 0xff is one EOF: it ends the current line, the file keeps parsing, and a second 0xff stops it. The startup -f file matches cfg.c load_cfg, which parses the open stdio file, so parse_config_file_bytes keeps 0xff inside the token and the command name stays unknown. A non-empty file that parses to no command now consumes the pin's cmdq_empty_command item, which cmd_source_file_done skips for a zero-length file, so control clients see the pin's hidden numbering for byte, comment-only, and blank files alike. For a file holding only 0xff, direct Command sourcing exits 0 with empty streams, direct Control emits one flags-1 success guard then consumes the hidden empty-command item and the ordinary source completion before the next guard, and a synchronous if-shell emits the parent and source guards with no visible diagnostic and continues the root file; none of these report `stream did not contain valid UTF-8` any more. Nothing substitutes lossy text: a parse whose surviving command name or argument still holds bytes that are not valid UTF-8 keeps the typed read error, because zz's typed UTF-8 command protocol cannot carry those bytes at all - the same limit `zz display-message -p` shows for a non-UTF-8 argv, which stays recorded as semantic:non-utf8-command-arguments under the accepted protocol.binary-streams group. Four focused CLI tests pin the direct, startup, control numbering, and if-shell shapes, and a differential fixture runs the direct, empty, continuation, if-shell, startup, and an eleven-row placement matrix against the pin."
     },
     {
       "id": "config.parser-abort",

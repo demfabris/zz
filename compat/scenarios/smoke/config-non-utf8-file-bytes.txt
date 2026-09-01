@@ -1,0 +1,19 @@
+corpus: none
+# The daemon reads config files as bytes: a runtime source-file carries the
+# pin's signed-buffer input, where 0xff reads back as one EOF that ends the
+# current line and lets the rest of the file continue, and the startup -f file
+# carries the pin's stdio input, where 0xff stays inside the command name.
+# A non-empty file that parses to no command still consumes the pin's empty
+# command item, so the direct, empty, and if-shell probes pin the surviving
+# commands, diagnostics, and statuses on both sides.
+# Rows whose surviving argument keeps a non-UTF-8 byte belong to the accepted
+# non-UTF-8 command-argument gap and stay out of the matrix.
+stage: fixtures/config-non-utf8-file-bytes.sh ~/config-non-utf8-file-bytes.sh
+run-shell 'sh ~/config-non-utf8-file-bytes.sh'
+out: show-environment -g CONFIG_BYTE_DIRECT
+out: show-environment -g CONFIG_BYTE_EMPTY
+out: show-environment -g CONFIG_BYTE_CONTINUED_SOURCE
+out: show-environment -g CONFIG_BYTE_CONTINUED_MARKER
+out: show-environment -g CONFIG_BYTE_IF_SHELL
+out: show-environment -g CONFIG_BYTE_MATRIX
+out: show-environment -g CONFIG_BYTE_STARTUP_RESULT

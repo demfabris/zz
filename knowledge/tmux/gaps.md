@@ -720,7 +720,7 @@ Slice 10p consumes the daemon-published popup terminal in raw zz-tui and proves 
 
 ### `formats.context-producer-fidelity`: Implement missing context-format producers
 
-Schema 5 classifies 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. One successor owner keeps that exact derived partition active without turning the registration milestone into 43 speculative runtime items; later slices must split it by the real producer dependency.
+Schema 5 classified 41 missing literal producer/name tuples plus current_file and next_@* or prev_@* derived families. The option-loop slice is done: format_loop_add_option and format_loop_add_array_item each own all twelve context formats, so 24 tuples moved into the implemented partition and 17 remain. What is left is format_loop_clients, format_loop_environ, notify_monitor_cb, current_file, and the window-neighbour user-option family; the slug stays until each of those producers lands with its own value and context tests.
 
 - Decision: `adopt`
 - Status: `open`
@@ -737,6 +737,8 @@ Schema 5 classifies 41 missing literal producer/name tuples plus current_file an
   - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-daemon/src/status.rs`
   - `resource:knowledge/tmux/divergences.md`
+  - `file:crates/zz-mux/tests/format_option_loop_context.rs`
+  - `scenario:compat/scenarios/format-option-loop-context.txt`
 - Acceptance:
   - `Split the source-registered missing partition by producer before implementation: option and array loops, environment and client loops, monitor hooks, current_file, and next or previous user-option copying retain independent value and context tests.`
   - `Each implemented producer moves its exact path:function/name tuples or derived family out of the active-gap partition without weakening the exhaustive schema-5 gate or treating a same-spelled global format as context proof.`

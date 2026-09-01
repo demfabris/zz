@@ -22,6 +22,7 @@
 | format-flags | 8 | yes | 0 | yes | yes | yes |
 | format-modifier-option-loop | 17 | yes | 0 | yes | yes | yes |
 | format-modifier-width | 9 | yes | 0 | yes | yes | yes |
+| format-option-loop-context | 14 | yes | 0 | yes | yes | yes |
 | formats-values | 45 | yes | 0 | yes | yes | yes |
 | formats | 16 | yes | 0 | yes | yes | yes |
 | honest-knobs-c1-defaults | 18 | yes | 0 | yes | yes | yes |

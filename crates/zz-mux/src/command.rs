@@ -355,31 +355,7 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         ],
     ),
 ];
-const OPTION_LOOP_CONTEXT_FORMATS: &[&str] = &[
-    "loop_index",
-    "loop_last_flag",
-    "option_array_count",
-    "option_array_first",
-    "option_array_index",
-    "option_array_key",
-    "option_array_last",
-    "option_is_array",
-    "option_is_hook",
-    "option_is_user",
-    "option_name",
-    "option_value",
-];
 const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
-    (
-        "format.c",
-        "format_loop_add_array_item",
-        OPTION_LOOP_CONTEXT_FORMATS,
-    ),
-    (
-        "format.c",
-        "format_loop_add_option",
-        OPTION_LOOP_CONTEXT_FORMATS,
-    ),
     (
         "format.c",
         "format_loop_clients",

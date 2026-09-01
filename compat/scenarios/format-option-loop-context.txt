@@ -1,0 +1,14 @@
+new-session -d -s octx
+set-option -t octx @a A
+set-option -t octx status-format[0] X
+set-option -t octx status-format[1] Y
+out: display-message -p -t octx [#{loop_index}|#{loop_last_flag}|#{option_name}|#{option_value}|#{option_array_count}|#{option_array_first}|#{option_array_index}|#{option_array_key}|#{option_array_last}|#{option_is_array}|#{option_is_hook}|#{option_is_user}]
+out: display-message -p -t octx [#{?option_is_array,arr,notarr}|#{?loop_last_flag,last,notlast}]
+out: display-message -p -t octx [#{O:<#{loop_index}#{loop_last_flag}#{option_array_count}#{option_array_first}#{option_array_index}>}]
+out: display-message -p -t octx [#{O:#{loop_index}|#{loop_last_flag}|#{option_array_count}|#{option_array_first}|#{option_array_index}|#{option_array_key}|#{option_array_last}|#{option_is_array}|#{option_is_hook}|#{option_is_user}|#{option_name}|#{option_value};}]
+out: display-message -p -t octx [#{O:#{?option_is_array,arr,notarr};}]
+new-session -d -s oempty
+set-option -t oempty update-environment ""
+out: display-message -p -t oempty [#{O:#{loop_index}|#{loop_last_flag}|#{option_array_count}|#{option_array_first}|#{option_array_index}|#{option_array_key}|#{option_array_last}|#{option_is_array}|#{option_is_hook}|#{option_is_user}|#{option_name}|#{option_value};}]
+out: display-message -p -t octx [#{S:#{O:<#{loop_index}:#{option_name}>}}]
+out: display-message -p -t octx [#{O:#{W:[#{loop_index}]}}]

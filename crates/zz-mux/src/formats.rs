@@ -14,7 +14,7 @@ const FORMAT_MAX_REPEAT: usize = 10_000;
 const FORMAT_MAX_REPEAT_BYTES: usize = MAX_STATUS_TEXT_BYTES * FORMAT_MAX_REPEAT;
 const FORMAT_MAX_WIDTH: isize = 10_000;
 const LOOP_CONTEXT_FORMATS: &[&str] = &["loop_index", "loop_last_flag"];
-pub(crate) const OPTION_LOOP_CONTEXT_FORMATS: &[&str] = &[
+const OPTION_LOOP_CONTEXT_FORMATS: &[&str] = &[
     "loop_index",
     "loop_last_flag",
     "option_array_count",
@@ -34,6 +34,16 @@ const WINDOW_NEIGHBOUR_ACTIVE_CONTEXT_FORMATS: &[&str] =
     &["next_window_active", "prev_window_active"];
 
 const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
+    (
+        "format.c",
+        "format_loop_add_array_item",
+        OPTION_LOOP_CONTEXT_FORMATS,
+    ),
+    (
+        "format.c",
+        "format_loop_add_option",
+        OPTION_LOOP_CONTEXT_FORMATS,
+    ),
     ("format.c", "format_loop_panes", LOOP_CONTEXT_FORMATS),
     ("format.c", "format_loop_sessions", LOOP_CONTEXT_FORMATS),
     ("format.c", "format_loop_windows", LOOP_CONTEXT_FORMATS),

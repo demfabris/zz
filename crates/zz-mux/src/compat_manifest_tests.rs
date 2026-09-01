@@ -547,7 +547,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(mux_literals.len(), 26);
+    assert_eq!(mux_literals.len(), 50);
     assert!(mux_literals.is_subset(&upstream_literals));
 
     let mut accepted_native_literals = BTreeSet::new();
@@ -576,7 +576,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(missing_literals.len(), 41);
+    assert_eq!(missing_literals.len(), 17);
     assert!(missing_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&missing_literals));
     assert!(accepted_native_literals.is_disjoint(&missing_literals));

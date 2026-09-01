@@ -4,6 +4,7 @@ mod catalog;
 mod framing;
 mod id;
 mod key;
+mod menu;
 mod message;
 mod snapshot;
 mod style;
@@ -22,6 +23,9 @@ pub use id::{ClientId, ClientInstanceId, PaneId, SessionId, SplitId, WindowId};
 pub use key::{
     Binding, KeyDecision, KeyEngine, KeyName, KeyTables, canonical_key, input_key_name,
     input_typed_text, is_key_name,
+};
+pub use menu::{
+    MENU_ROW_MARGIN, MenuRowLayout, layout_menu_row, menu_row_cells, menu_row_width, trim_menu_row,
 };
 pub use message::{
     AgentCommand, AgentConnectionPhase, AgentGitSummary, AgentImage, AgentPaneWire,

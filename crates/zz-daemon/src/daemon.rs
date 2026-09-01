@@ -26,8 +26,8 @@ use zz_mux::{
     FormatClient, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
     PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, StatusHooks,
     TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
-    copy_mode_action_is_read_only_safe, display_width, expand_format_values, expand_status,
-    format_command, format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
+    copy_mode_action_is_read_only_safe, expand_format_values, expand_status, format_command,
+    format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
     send_keys_is_read_only_safe, validate_static_command_chain,
 };
 use zz_protocol::{
@@ -43,12 +43,13 @@ use zz_protocol::{
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
     MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
     MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
-    MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions, MuxSnapshot,
-    NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator, PaneKindSnapshot,
-    PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines, PopupState,
-    PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage, SPLIT_RATIO_BASIS,
-    ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, WindowId,
-    canonical_key, encode_protocol_message_into, encode_terminal_viewport_event_into, is_key_name,
+    MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions,
+    MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator,
+    PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines,
+    PopupState, PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage,
+    SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId,
+    StatusLine, WindowId, canonical_key, encode_protocol_message_into,
+    encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
     read_protocol_message_into, resolve_command, terminal_patch_frame_len,
     terminal_viewport_frame_len,
 };
@@ -12774,6 +12775,7 @@ impl Shared {
             let title = parsed.title.as_deref().map_or_else(String::new, |title| {
                 expand_popup_value(&inner, &target, context.session, Some(command_name), title)
             });
+            let row_room = usize::from(geometry.columns.saturating_sub(MENU_ROW_MARGIN));
             let mut items = Vec::new();
             let mut commands = Vec::new();
             let mut index = 0;
@@ -12800,12 +12802,18 @@ impl Shared {
                     continue;
                 }
                 let enabled = !name.starts_with('-');
-                let name = if enabled {
-                    name
-                } else {
-                    name.strip_prefix('-').unwrap_or_default().to_owned()
-                };
                 let key = enabled.then(|| menu_shortcut(key)).flatten();
+                let layout = layout_menu_row(&name, key.as_deref(), row_room);
+                let name = if enabled {
+                    layout.name
+                } else {
+                    layout
+                        .name
+                        .strip_prefix('-')
+                        .unwrap_or(&layout.name)
+                        .to_owned()
+                };
+                let annotation = layout.annotation;
                 let action = if command.argument_is_command_block(
                     parsed.positional_start.saturating_add(command_index),
                 ) {
@@ -12820,7 +12828,12 @@ impl Shared {
                     Some(command_name),
                     action,
                 );
-                items.push(Some(MenuItem { name, key, enabled }));
+                items.push(Some(MenuItem {
+                    name,
+                    key,
+                    annotation,
+                    enabled,
+                }));
                 commands.push(Some(action));
             }
             if items.is_empty() {
@@ -12829,16 +12842,10 @@ impl Shared {
             let width = items
                 .iter()
                 .flatten()
-                .map(|item| {
-                    display_width(&item.name)
-                        + item
-                            .key
-                            .as_deref()
-                            .map_or(0, |key| display_width(key).saturating_add(3))
-                })
+                .map(|item| menu_row_cells(&item.name, item.annotation.as_deref()))
                 .max()
                 .unwrap_or_default()
-                .saturating_add(4);
+                .saturating_add(usize::from(MENU_ROW_MARGIN));
             let height = items.len().saturating_add(2);
             let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
                 return Ok(Execution::default());
@@ -73103,7 +73110,8 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(state.items[4].is_none());
         assert!(matches!(
             &state.items[2],
-            Some(MenuItem { name, enabled: false, key: None }) if name == "Disabled-display-menu"
+            Some(MenuItem { name, enabled: false, key: None, annotation: None })
+                if name == "Disabled-display-menu"
         ));
         assert!(
             take_reliable_messages(&mailbox)

@@ -522,24 +522,30 @@ Copy mode lives per client in zz and needs explicit target-client semantics.
 
 ### `display-menu.behavior-fidelity`: Match remaining display-menu behavior
 
-Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Descriptor construction, action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin.
+Row shortcuts now go through the pin's own key parser and keep only the spellings a client attached to the menu can press, and an owning-client resize re-fits the live descriptor the way menu_resize_cb does: the box keeps its width, rows, selection, stay-open policy and commands, takes the new client and cell geometry, slides back inside the viewport, parks at the origin when it no longer fits, and never closes. Rows are now built against the client's own cells the way menu_add_item does: the room is the client columns less four, an action key is annotated when its bracketed form fits a quarter of that room or the whole name still fits beside it, otherwise only the annotation is dropped while the row keeps answering the key, and an overlong name keeps its last cells through format_trim_right's reading and gains the `>` marker, so a name past the room trims instead of shedding the whole descriptor. The drawn key and the pressed key are separate wire facts on protocol v90 (MenuItem.annotation). Descriptor action queues, refresh behavior, mouse handling, and close-mid-paste ordering still need focused comparison with the pin.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `daemon`
 - User impact: daily, remote, scripts
-- Items: `semantic:display-menu-action-context-and-errors`, `semantic:display-menu-mouse-policy`, `semantic:display-menu-paste-close-ordering`, `semantic:display-menu-queue-ordering`, `semantic:display-menu-rendered-width`, `semantic:display-menu-shortcut-display`, `semantic:display-menu-style-refresh`
+- Items: `semantic:display-menu-action-context-and-errors`, `semantic:display-menu-mouse-policy`, `semantic:display-menu-paste-close-ordering`, `semantic:display-menu-queue-ordering`, `semantic:display-menu-style-refresh`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/command.rs`
   - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-protocol/src/menu.rs`
   - `resource:crates/zz-client/src/menu.rs`
   - `resource:crates/zz-tui/src/input.rs`
   - `resource:crates/zz-tui/src/render.rs`
   - `file:compat/attached-client.sh`
+  - `file:crates/zz-protocol/tests/display_menu_cell_layout.rs`
+  - `file:crates/zz-client/tests/display_menu_cell_layout.rs`
+  - `file:crates/zz-daemon/tests/display_menu_cell_layout.rs`
   - `scenario:compat/scenarios/smoke/display-menu-shortcut-grammar.txt`
   - `scenario:compat/scenarios/smoke/display-menu-resize-lifecycle.txt`
+  - `scenario:compat/scenarios/smoke/display-menu-cell-layout.txt`
+  - `resource:knowledge/protocol/wire-protocol.md`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
   - `Pinned attached probes cover selected-action client context, error delivery, overlay-close order, and blocking or -b command-queue continuation.`

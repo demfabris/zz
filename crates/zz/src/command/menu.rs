@@ -124,7 +124,9 @@ impl Render for MenuView {
                             cx.stop_propagation();
                         })
                         .child(item.name.clone())
-                        .when_some(item.key.clone(), |row, key| row.child(format!("({key})")))
+                        .when_some(item.annotation.clone(), |row, key| {
+                            row.child(format!("({key})"))
+                        })
                         .into_any_element()
                 }
             });
@@ -175,17 +177,20 @@ mod tests {
                 Some(MenuItem {
                     name: "Quit item".to_owned(),
                     key: Some("q".to_owned()),
+                    annotation: Some("q".to_owned()),
                     enabled: true,
                 }),
                 None,
                 Some(MenuItem {
                     name: "Disabled".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: false,
                 }),
                 Some(MenuItem {
                     name: "Last".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: true,
                 }),
             ],

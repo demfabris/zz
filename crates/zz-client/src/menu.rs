@@ -181,17 +181,20 @@ mod tests {
                 Some(MenuItem {
                     name: "Quit item".to_owned(),
                     key: Some("q".to_owned()),
+                    annotation: Some("q".to_owned()),
                     enabled: true,
                 }),
                 None,
                 Some(MenuItem {
                     name: "Disabled".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: false,
                 }),
                 Some(MenuItem {
                     name: "Last".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: true,
                 }),
             ],
@@ -228,6 +231,7 @@ mod tests {
             items: vec![Some(MenuItem {
                 name: "Disabled".to_owned(),
                 key: Some("q".to_owned()),
+                annotation: Some("q".to_owned()),
                 enabled: false,
             })],
             ..state()
@@ -269,11 +273,13 @@ mod tests {
                 Some(MenuItem {
                     name: "Disabled".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: false,
                 }),
                 Some(MenuItem {
                     name: "Enabled".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: true,
                 }),
             ],
@@ -295,6 +301,7 @@ mod tests {
                     Some(MenuItem {
                         name: format!("Disabled {index}"),
                         key: None,
+                        annotation: None,
                         enabled: false,
                     })
                 })
@@ -345,6 +352,7 @@ mod tests {
                     Some(MenuItem {
                         name: format!("item {index}"),
                         key: None,
+                        annotation: None,
                         enabled: true,
                     })
                 })
@@ -373,16 +381,19 @@ mod tests {
                 Some(MenuItem {
                     name: "One".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: true,
                 }),
                 Some(MenuItem {
                     name: "Two".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: true,
                 }),
                 Some(MenuItem {
                     name: "Three".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: true,
                 }),
             ],

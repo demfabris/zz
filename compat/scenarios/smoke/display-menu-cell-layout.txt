@@ -1,0 +1,11 @@
+corpus: none
+# Menu rows are laid out against the cells a client has (menu.c menu_add_item):
+# a row past that room is trimmed and marked instead of shedding the whole
+# descriptor, and a row whose bracketed key does not fit drops the annotation
+# but still answers the press. Both facts are read through which row a keypress
+# runs, so the probe compares behaviour rather than drawn cells.
+stage: fixtures/display-menu-cell-layout.sh ~/display-menu-cell-layout.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu DISPLAY_MENU_CELL_LAYOUT
+run-shell 'sh ~/display-menu-cell-layout.sh'
+out: show-environment -g DISPLAY_MENU_CELL_LAYOUT

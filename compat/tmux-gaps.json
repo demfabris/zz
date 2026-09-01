@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "updated_on": "2026-08-31",
+  "updated_on": "2026-09-01",
   "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
   "gaps": [
     {
@@ -58,10 +58,10 @@
     {
       "id": "capture.rich-transports",
       "title": "Add rich capture transports",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hardest",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "scripts"
       ],
@@ -78,16 +78,16 @@
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/divergences.md",
         "scenario:compat/scenarios/capture-pane.txt"
       ],
       "acceptance": [
-        "A retained terminal snapshot exposes alternate grids, raw bytes, hyperlinks, line flags, line numbers, and blank viewport rows without approximations."
+        "`capture-pane` keeps the pin's routing, boundary, and text semantics over the retained UTF-8 snapshot, and `-C`, `-F`, `-H`, `-L`, `-P`, and `-R` stay loudly unsupported rather than approximated.",
+        "The divergence matrix keeps the accepted text-snapshot shape visible, including the trailing blank viewport rows the pin emits and zz stops short of."
       ],
-      "depends_on": [
-        "protocol.binary-streams"
-      ],
-      "reason": "The retained UTF-8 text snapshot cannot represent the pin's richer grid and byte views."
+      "depends_on": [],
+      "reason": "Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The six rich transports stay loudly refused rather than approximated. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform."
     },
     {
       "id": "choosers.command-flags",
@@ -233,10 +233,10 @@
     {
       "id": "clients.interactive-refresh",
       "title": "Complete interactive client commands",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hard",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "remote"
       ],
@@ -248,15 +248,17 @@
         "semantic:switch-mode-transition"
       ],
       "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md",
         "file:compat/attached-client.sh"
       ],
       "acceptance": [
-        "A named workload justifies a cross-client mode and redraw contract, then attached-client tests pin it."
+        "Native pickers, the sidebar, and per-client copy and view mode keep the switcher and mode intent without advertising `switch-mode` or a server-driven redraw.",
+        "`refresh-client` keeps `-A -B -C -f -F -t` behaving while the interactive redraw and pan family stays loudly unsupported, and clientless `copy-mode`, `choose-tree`, and `choose-buffer` keep their attached-client errors."
       ],
       "depends_on": [],
-      "reason": "Mode state and redraw ownership span the daemon, protocol, TUI, and GUI."
+      "reason": "Pinned tmux keeps mode and redraw ownership on the server: `switch-mode` installs a session and window switcher in an ordinary pane, `refresh-client` bare, `-S`, and `-c -D -L -R -U -l -r` redraw or pan a terminal client's view, and `copy-mode` sets a pane mode whether or not a client is attached. zz splits those the other way. Each client renders itself from published frames, copy and view mode live on the per-client terminal view so `MuxEffect::TerminalView` answers `pane is not attached: %N` for a clientless target, and the switcher intent is served by zz's native picker, sidebar, and chooser surfaces. Reopen only if zz gives panes a server-owned mode object or lets the daemon drive a client's drawing."
     },
     {
       "id": "clients.parent-hup-exit",

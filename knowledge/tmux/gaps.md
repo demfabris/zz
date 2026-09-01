@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-08-31T00:00:00-03:00
+timestamp: 2026-09-01T00:00:00-03:00
 ---
 
 # Overview
@@ -19,9 +19,9 @@ Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
 Tracked gap groups: **82**. Classified items: **563**.
 
-- Status: open: 40, blocked: 20, accepted: 22.
-- Decision: adopt: 45, native: 16, park: 15, never: 6.
-- Priority: later: 60, none: 22.
+- Status: open: 40, blocked: 18, accepted: 24.
+- Decision: adopt: 45, native: 18, park: 13, never: 6.
+- Priority: later: 58, none: 24.
 - Closed history entries: 129.
 - Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 90, presentation: 8, protocol: 2.
 
@@ -73,7 +73,6 @@ structure as proof.
 | `clients.active-pane` | Retain per-client active panes | adopt | open | hard | daemon | daily, remote, scripts | none |
 | `clients.detach-exec` | Execute a command after detaching a client | adopt | open | hard | protocol | scripts, remote | none |
 | `clients.event-resize-context` | Defer client-resized until geometry settles | adopt | open | hard | protocol | scripts, remote | none |
-| `clients.interactive-refresh` | Complete interactive client commands | park | blocked | hard | client | remote | none |
 | `clients.parent-hup-exit` | Signal client parents after forced detach | adopt | open | hard | protocol | scripts, remote | none |
 | `config.non-utf8-file-bytes` | Match config-file byte parsing | adopt | open | hard | mux | scripts | none |
 | `config.tilde-home-path-encoding` | Preserve non-UTF-8 passwd home paths | adopt | open | hard | mux | scripts | config.non-utf8-file-bytes |
@@ -105,7 +104,6 @@ structure as proof.
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | park | blocked | hard | client | daily | clients.interactive-refresh |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
-| `capture.rich-transports` | Add rich capture transports | park | blocked | hardest | terminal | scripts | protocol.binary-streams |
 | `formats.terminal-runtime` | Expose terminal runtime formats | park | blocked | hardest | terminal | scripts | none |
 | `options.lock-program` | Defer tmux lock process execution | park | blocked | hardest | client | remote, admin | clients.interactive-refresh |
 | `pane.floating-model` | Defer tmux floating panes | park | blocked | hardest | mux | daily, scripts, gui | none |
@@ -116,7 +114,9 @@ structure as proof.
 
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `capture.rich-transports` | Add rich capture transports | native | accepted | none | terminal | scripts | none |
 | `choosers.native-presentation` | Keep native chooser presentation | native | accepted | none | gui | daily, gui | none |
+| `clients.interactive-refresh` | Complete interactive client commands | native | accepted | none | client | remote | none |
 | `clients.read-only-and-focus` | Retain native client focus semantics | native | accepted | none | daemon | daily, remote | none |
 | `commands.native-client-tools` | Use native client tools | native | accepted | none | gui | daily, gui | none |
 | `commands.native-superset` | Keep the zz-native command namespace explicit | native | accepted | none | protocol | daily, gui, scripts | none |
@@ -178,21 +178,23 @@ The buffer model exists, but clipboard delivery needs a client capability path.
 
 ### `capture.rich-transports`: Add rich capture transports
 
-The retained UTF-8 text snapshot cannot represent the pin's richer grid and byte views.
+Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The six rich transports stay loudly refused rather than approximated. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hardest`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `terminal`
 - User impact: scripts
 - Items: `flag:capture-pane:-C`, `flag:capture-pane:-F`, `flag:capture-pane:-H`, `flag:capture-pane:-L`, `flag:capture-pane:-P`, `flag:capture-pane:-R`, `semantic:capture-pane-saved-alternate`, `semantic:capture-pane-trailing-blank-rows`
-- Depends on: `protocol.binary-streams`
+- Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `scenario:compat/scenarios/capture-pane.txt`
 - Acceptance:
-  - `A retained terminal snapshot exposes alternate grids, raw bytes, hyperlinks, line flags, line numbers, and blank viewport rows without approximations.`
+  - ``capture-pane` keeps the pin's routing, boundary, and text semantics over the retained UTF-8 snapshot, and `-C`, `-F`, `-H`, `-L`, `-P`, and `-R` stay loudly unsupported rather than approximated.`
+  - `The divergence matrix keeps the accepted text-snapshot shape visible, including the trailing blank viewport rows the pin emits and zz stops short of.`
 
 ### `choosers.command-flags`: Complete chooser command controls
 
@@ -287,21 +289,23 @@ The TUI sends ClientTerminalSize before its deduplicated per-pane geometry messa
 
 ### `clients.interactive-refresh`: Complete interactive client commands
 
-Mode state and redraw ownership span the daemon, protocol, TUI, and GUI.
+Pinned tmux keeps mode and redraw ownership on the server: `switch-mode` installs a session and window switcher in an ordinary pane, `refresh-client` bare, `-S`, and `-c -D -L -R -U -l -r` redraw or pan a terminal client's view, and `copy-mode` sets a pane mode whether or not a client is attached. zz splits those the other way. Each client renders itself from published frames, copy and view mode live on the per-client terminal view so `MuxEffect::TerminalView` answers `pane is not attached: %N` for a clientless target, and the switcher intent is served by zz's native picker, sidebar, and chooser surfaces. Reopen only if zz gives panes a server-owned mode object or lets the daemon drive a client's drawing.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: remote
 - Items: `command:switch-mode`, `semantic:copy-mode-headless-target`, `semantic:refresh-client-interactive`, `semantic:switch-mode-transition`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
   - `file:compat/attached-client.sh`
 - Acceptance:
-  - `A named workload justifies a cross-client mode and redraw contract, then attached-client tests pin it.`
+  - `Native pickers, the sidebar, and per-client copy and view mode keep the switcher and mode intent without advertising `switch-mode` or a server-driven redraw.`
+  - ``refresh-client` keeps `-A -B -C -f -F -t` behaving while the interactive redraw and pan family stays loudly unsupported, and clientless `copy-mode`, `choose-tree`, and `choose-buffer` keep their attached-client errors.`
 
 ### `clients.parent-hup-exit`: Signal client parents after forced detach
 

@@ -73,7 +73,7 @@ structure as proof.
 | `clients.detach-exec` | Execute a command after detaching a client | adopt | open | hard | protocol | scripts, remote | none |
 | `clients.event-resize-context` | Defer client-resized until geometry settles | adopt | open | hard | protocol | scripts, remote | none |
 | `clients.parent-hup-exit` | Signal client parents after forced detach | adopt | open | hard | protocol | scripts, remote | none |
-| `config.tilde-home-path-encoding` | Preserve non-UTF-8 passwd home paths | adopt | open | hard | mux | scripts | none |
+| `config.tilde-home-path-encoding` | Preserve non-UTF-8 passwd home paths | adopt | open | hard | mux | scripts | protocol.binary-streams |
 | `control-mode.disconnect-cancels-command-queue` | Cancel client-owned Control queues after connection loss | adopt | open | hard | daemon | scripts | none |
 | `control-mode.local-parser-environment` | Parse Control tilde with daemon environment | adopt | open | hard | client | scripts | none |
 | `copy-mode.action-fidelity` | Complete the copy-mode action vocabulary | adopt | open | hard | terminal | daily, remote, scripts | none |
@@ -395,7 +395,7 @@ The GUI superset needs its own names so tmux spellings can keep frozen tmux mean
 
 ### `config.tilde-home-path-encoding`: Preserve non-UTF-8 passwd home paths
 
-The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, while the pin carries the returned bytes. The config-file byte contract is now closed under config.non-utf8-file-bytes, so this only needs the passwd path itself carried as bytes through the byte parser and the SourceFile path.
+The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, so a found user with unrepresentable bytes takes the pin's missing-user `syntax error` path instead of expanding. The config-file byte contract is closed under config.non-utf8-file-bytes, but the expansion result is not a path yet: it lands in the surrounding word, so `source-file ~user/x.conf` becomes an ordinary command argument holding those bytes. Measured on 2026-09-01 against the pin: a byte-parsed config line `source-file /tmp/zz-\200-missing.conf` runs in the pin and reports `No such file or directory` for the raw path, while zz refuses the whole file with `stream did not contain valid UTF-8` because CommandInvocation carries String arguments. That is semantic:non-utf8-command-arguments under the accepted protocol.binary-streams reading, so this needs a byte-capable command-argument representation before the parser's user_home and the SourceFile effect are worth converting.
 
 - Decision: `adopt`
 - Status: `open`
@@ -403,7 +403,7 @@ The Unix passwd lookup returns an OsString path. The current UTF-8 parser conver
 - Owner: `mux`
 - User impact: scripts
 - Items: `semantic:config-tilde-home-non-utf8`
-- Depends on: none
+- Depends on: `protocol.binary-streams`
 - Evidence:
   - `resource:crates/zz-mux/src/parser.rs`
   - `resource:third_party/tmux-reference/UPSTREAM.md`

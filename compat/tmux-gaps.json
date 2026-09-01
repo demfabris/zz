@@ -440,8 +440,10 @@
       "acceptance": [
         "On Unix, bare-tilde fallback and named-user expansion preserve passwd home-directory bytes that are not valid UTF-8 through config parsing and source-path execution, without replacement text or a false syntax error. Representable paths retain their current behavior."
       ],
-      "depends_on": [],
-      "reason": "The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, while the pin carries the returned bytes. The config-file byte contract is now closed under config.non-utf8-file-bytes, so this only needs the passwd path itself carried as bytes through the byte parser and the SourceFile path."
+      "depends_on": [
+        "protocol.binary-streams"
+      ],
+      "reason": "The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, so a found user with unrepresentable bytes takes the pin's missing-user `syntax error` path instead of expanding. The config-file byte contract is closed under config.non-utf8-file-bytes, but the expansion result is not a path yet: it lands in the surrounding word, so `source-file ~user/x.conf` becomes an ordinary command argument holding those bytes. Measured on 2026-09-01 against the pin: a byte-parsed config line `source-file /tmp/zz-\\200-missing.conf` runs in the pin and reports `No such file or directory` for the raw path, while zz refuses the whole file with `stream did not contain valid UTF-8` because CommandInvocation carries String arguments. That is semantic:non-utf8-command-arguments under the accepted protocol.binary-streams reading, so this needs a byte-capable command-argument representation before the parser's user_home and the SourceFile effect are worth converting."
     },
     {
       "id": "control-mode.diagnostic-typing",

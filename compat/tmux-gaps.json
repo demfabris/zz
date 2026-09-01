@@ -2446,10 +2446,10 @@
     {
       "id": "protocol.binary-streams",
       "title": "Design one bounded command stream",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hardest",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "scripts",
         "remote"
@@ -2466,22 +2466,24 @@
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/designs/tmux-superset-roadmap.md",
-        "resource:knowledge/tmux/divergences.md"
+        "resource:crates/zz/src/lib.rs",
+        "resource:knowledge/tmux/divergences.md",
+        "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "acceptance": [
-        "One reviewed protocol covers stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime for every stream command."
+        "The typed UTF-8 command protocol stays the contract, with the bounded stdin payload serving zz's own verbs while every tmux stream form stays loudly refused.",
+        "Any later stream support arrives as one reviewed channel covering stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime, not as five separate transports."
       ],
       "depends_on": [],
-      "reason": "Five commands need the same bounded binary transport; separate transports would duplicate risk. Protocol v78 matches the hidden completion number for `source-file -`, but the caller stdin transport and resulting source semantics remain absent."
+      "reason": "Five pinned forms move raw bytes between the invoking client's standard streams and the server: `display-message -I`, `split-window -I`, `load-buffer -`, `save-buffer -`, and `source-file -`, plus non-UTF-8 argv and `show-buffer`'s binary output. zz's client protocol carries typed UTF-8 messages, and its CLI already reads caller stdin for its own verbs as one bounded payload, where `agent-send` and `send-text` go through `read_stdin_payload` under the `MAX_AGENT_SEND_BYTES` cap. Every tmux `-` form stays loudly refused instead of pretending the daemon's cwd or process is the caller's. The superset roadmap's milestone 5 is explicit that one bounded command-stream channel would replace all five at once and only after demand is measured, so this is recorded as the reversible reading with no permanent exclusion. Reopen when a named workload needs unbounded or non-UTF-8 caller streams."
     },
     {
       "id": "protocol.socket-acl",
       "title": "Defer multi-user socket ACLs",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hardest",
+      "decision": "never",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "admin",
         "remote"
@@ -2492,14 +2494,16 @@
         "semantic:multi-user-socket-acl"
       ],
       "evidence": [
+        "resource:crates/zz-daemon/src/lifecycle.rs",
         "resource:crates/zz-protocol/src/catalog.rs",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "acceptance": [
-        "A multi-user deployment need defines identities, authorization, socket ownership, revocation, and audit behavior."
+        "`server-access` stays recognized and unimplemented, the daemon socket stays single-user at mode 0600, and no peer authorization model is added.",
+        "The divergence matrix keeps the single-user socket decision visible as a permanent exclusion."
       ],
       "depends_on": [],
-      "reason": "The current daemon and socket are single-user."
+      "reason": "`server-access` grants other Unix users read or write access to a shared tmux server socket, with a per-user ACL the server enforces on every connection. zz's daemon is single-user by construction: it creates its socket and identity at mode 0600, keeps no peer identity, and holds live PTYs, ssh sessions, browser profiles with imported cookies, and agent sessions inside one account, so admitting a second user would hand over all of it. The pin's same-uid check when re-marking a read-only client is already skipped for the same reason. This joins linked windows and tmux's private socket protocol as a permanent exclusion; a multi-user deployment would be a different product with its own identity, authorization, revocation, and audit design."
     },
     {
       "id": "protocol.socket-interop",

@@ -1116,12 +1116,24 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
 - `options.lock-program` (native): the pin spawns `lock -np` onto a client's tty because its server
   owns that terminal; zz's daemon publishes frames, so a zz lock is a client-rendered surface and
   the two options stay store-only.
-- `options.theme-palette` (native): zz already resolves the pin's ten `theme*` style colour names,
-  into zz theme tokens in the GUI and through the pin's own fallback indices in the daemon and raw
-  TUI, while the twenty-one options that would override those slots stay store-only.
+- `options.theme-palette` (native): zz already resolves the pin's ten `theme*` style colour
+  names into zz theme tokens in the GUI and through the pin's own fallback indices in the daemon and
+  raw TUI, while the twenty-one options that would override those slots stay store-only.
 - `pane.floating-model` (native): a tmux floating pane is a mux object placed by `new-pane` and
   `move-pane`, while zz's floating things are presentation objects its clients draw and its panes
   are layout-tree leaves.
+- `protocol.binary-streams` (native): zz's client protocol carries typed UTF-8 messages and its CLI
+  already reads caller stdin as one bounded payload for its own verbs, so the five tmux `-` forms
+  stay loudly refused; the roadmap's milestone 5 still owns the single bounded channel that would
+  replace all five at once, so this is the reversible reading rather than an exclusion.
+- `protocol.socket-acl` (never): `server-access` hands other Unix users a shared server socket,
+  while zz's daemon binds at 0600, keeps no peer identity, and holds one account's PTYs, ssh
+  sessions, browser profiles, and agent sessions.
+
+The fifteenth group, `display-panes.command-template`, is deliberately not settled. Its selection
+template is ordinary undone work rather than a model difference: the chooser template execution path
+that substitutes the selected value and runs the result already shipped on 2026-08-28, so wiring the
+overlay's selection to it is a delivery question, not a disposition. It stays blocked.
 
 # Related
 

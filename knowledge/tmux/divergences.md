@@ -1196,6 +1196,33 @@ And zz pushes into history unconditionally because `scroll-on-clear` itself is p
 An earlier draft used CAN rather than ST for the abort, and the `send-keys-reset` differential
 caught libghostty printing it as a cell that then rode into history.
 
+## Pane chrome basket split (2026-09-01)
+
+`options.pane-chrome` held nine options plus the two presentation residues from the 2026-08-31
+border-span closure. Measured on the pin the same day, on an 80x24 window split horizontally whose
+panes report `40x24@0,0` and `39x24@41,0`.
+
+- Native, `options.native-pane-scrollbars` (4): `set -gw pane-scrollbars on` makes those panes
+  `39x24` and `38x24`. The pin's scrollbar is made of pane cells, which is why
+  `pane-scrollbars-style` defaults to `bg=themedarkgrey,fg=themelightgrey,width=1,pad=0` and
+  prescribes a cell width and cell padding, `pane-scrollbars-position` picks a left or right column,
+  and `pane-scrollbars-timeout` needs tty.c to force `MODE_MOUSE_ALL` so hover reaches the server.
+  zz's scrollbar is GPUI chrome outside the grid, drawn and dragged from the scrollbar state
+  libghostty publishes per frame; the raw TUI draws none. `known/known-pane-scrollbar-columns` holds
+  the difference at 2 GEO and 1 OUT divergence: the layout string is identical in both, only
+  `#{pane_width}` moves.
+- Parked, `options.pane-border-chrome` (7): `pane-border-status top` makes the same panes
+  `40x23@0,1` and `39x23@41,1`, and `bottom` makes them `40x23@0,0`, so the status row is geometry a
+  script sees through `#{pane_height}` and `#{pane_top}`. The recipe puts border lines, indicators,
+  and the status row in the raw TUI, which already owns exact divider topology and per-span style
+  ownership, and leaves native GPUI border chrome theme-owned, the stance `options.theme-palette`
+  already takes for style colours. `pane-colours` needs no new engine primitive:
+  `colour_palette_from_option` copies the array into the pane's `default_palette` below any OSC 4
+  override, libghostty already accepts a 256-entry default palette through the per-pane appearance,
+  and `osc_palette_override_takes_precedence_over_configured_palette` already proves the precedence.
+  `presentation:border-style-owner-z-order` needs `MuxSnapshot` to transport mutable tiled pane
+  z-order, so closing it carries a protocol bump.
+
 ## What the last two format gaps need (2026-09-01)
 
 The `I` modifier and the `notify_monitor_cb` producer are both measured now, and neither is a format

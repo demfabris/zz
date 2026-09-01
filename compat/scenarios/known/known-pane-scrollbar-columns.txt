@@ -1,0 +1,7 @@
+# gap: options.native-pane-scrollbars
+# The pin's pane scrollbar lives in the grid and takes a column off every pane;
+# zz's scrollbar is client chrome outside the cell grid, so geometry is unmoved.
+split-window -h -t w:0.0
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+set-option -gw pane-scrollbars on
+out: list-panes -t w:0 -F #{pane_index}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}

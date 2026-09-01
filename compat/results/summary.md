@@ -95,6 +95,7 @@
 | update-environment | 6 | yes | 0 | yes | yes | yes |
 | windows | 9 | yes | 0 | yes | yes | yes |
 | zoom | 5 | yes | 0 | yes | yes | yes |
+| known/known-pane-scrollbar-columns | 4 | yes | 2 | yes | no | yes |
 | known/known-main-preset-two-panes | 2 | yes | 1 | yes | yes | yes |
 | known/known-spread-mixed | 6 | yes | 1 | yes | yes | yes |
 | smoke/args-parse-bind-key | 3 | yes | 0 | yes | yes | yes |

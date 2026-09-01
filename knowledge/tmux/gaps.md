@@ -17,12 +17,12 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **79**. Classified items: **543**.
+Tracked gap groups: **80**. Classified items: **543**.
 
-- Status: open: 33, blocked: 8, accepted: 38.
-- Decision: adopt: 38, native: 30, park: 3, never: 8.
-- Priority: later: 41, none: 38.
-- Closed history entries: 137.
+- Status: open: 32, blocked: 9, accepted: 39.
+- Decision: adopt: 37, native: 31, park: 4, never: 8.
+- Priority: later: 41, none: 39.
+- Closed history entries: 138.
 - Surface: command: 9, flag: 59, native-command: 21, option: 75, format: 69, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 84, presentation: 8, protocol: 2.
 
 ## Measured surface
@@ -59,7 +59,6 @@ structure as proof.
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
 | `options.client-attach-and-focus` | Consume the client attach command and mouse focus options | park | blocked | medium | client | daily, gui | none |
-| `options.pane-chrome` | Consume pane chrome options | adopt | open | medium | client | daily, gui | none |
 | `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
 | `pane.spawn-flags` | Complete split-window placement flags | adopt | open | medium | mux | scripts, daily | none |
 | `rendering.geometry-residue` | Close bounded geometry reporting gaps | adopt | open | medium | client | scripts, gui | none |
@@ -86,6 +85,7 @@ structure as proof.
 | `hooks.pane-events` | Produce pane focus and clipboard hooks | adopt | open | hard | daemon | scripts, gui | none |
 | `hooks.shutdown-window-unlinked-order` | Preserve forced-shutdown window-unlinked order | adopt | open | hard | mux | scripts | none |
 | `keys.copy-mode-binding-fidelity` | Match shared copy-mode binding commands | adopt | open | hard | protocol | daily, remote, scripts | copy-mode.command-fidelity |
+| `options.pane-border-chrome` | Draw the pin's pane border chrome | park | blocked | hard | client | daily, gui, remote | none |
 | `options.pane-engine-knobs` | Consume the pane VT engine knobs | park | blocked | hard | terminal | daily, remote, scripts | none |
 | `options.remain-on-exit-format` | Render remain-on-exit-format in retained panes | adopt | blocked | hard | terminal | daily, scripts | none |
 | `pane.command-completion` | Complete two-phase pane command completion | adopt | open | hard | daemon | scripts, daily | none |
@@ -127,6 +127,7 @@ structure as proof.
 | `options.lock-program` | Keep locking off the client terminal | native | accepted | none | client | remote, admin | none |
 | `options.native-mode-styles` | Keep native mode styling | native | accepted | none | client | daily, gui | none |
 | `options.native-overlay-styles` | Keep native overlay styling | native | accepted | none | client | daily, gui | none |
+| `options.native-pane-scrollbars` | Keep pane scrollbars outside the cell grid | native | accepted | none | client | gui, daily | none |
 | `options.theme-palette` | Map tmux theme palette options | native | accepted | none | client | gui | none |
 | `pane.floating-model` | Keep floating panes and the floating editor out of the mux model | native | accepted | none | mux | daily, scripts, gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
@@ -1267,22 +1268,47 @@ These options style tmux's cell-drawn surfaces. The GPUI client replaces that pr
 - Acceptance:
   - `The GPUI client keeps command and keyboard semantics while rendering overlays through native surfaces and zz theme tokens.`
 
-### `options.pane-chrome`: Consume pane chrome options
+### `options.native-pane-scrollbars`: Keep pane scrollbars outside the cell grid
 
-The appearance bridge handles colors and per-span divider ownership, but not border formats, scrollbars, mutable join/swap/serialized-layout tie order, or tiled z-order transport.
+The pin's pane scrollbar is made of pane cells. Measured on 2026-09-01 on an 80x24 window split horizontally, the panes report 40x24 at 0,0 and 39x24 at 41,0; `set -gw pane-scrollbars on` makes them 39x24 and 38x24, so the scrollbar takes a column off each pane and `#{pane_width}` reports it. `pane-scrollbars-style` matches, defaulting to `bg=themedarkgrey,fg=themelightgrey,width=1,pad=0`: it prescribes a cell width and cell padding. `pane-scrollbars-position` picks the left or right column, and `pane-scrollbars-timeout`, default 500 ms, times out the `modal` and `auto-hide` states, which tty.c also pays for by forcing MODE_MOUSE_ALL on the client so hover reaches the server. zz's scrollbar is client chrome outside the grid: the GPUI terminal view draws and drags one from the scrollbar state libghostty publishes per frame, at device-pixel width, and the raw TUI draws none, so no pane width or height moves and there is nothing for a cell width, a cell pad, or a server-side hover timeout to describe. `known-pane-scrollbar-columns` keeps that geometry difference measured rather than assumed: at strict geometry it holds 2 GEO and 1 OUT divergence, the layout string itself stays identical, and only `#{pane_width}` moves. Reopen only if zz decides pane geometry should shrink for chrome, which would change what every layout and `#{pane_width}` consumer sees, not just these four options.
 
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `later` / `medium`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `client`
-- User impact: daily, gui
-- Items: `option:pane-border-format`, `option:pane-border-indicators`, `option:pane-border-lines`, `option:pane-border-status`, `option:pane-colours`, `option:pane-scrollbars`, `option:pane-scrollbars-position`, `option:pane-scrollbars-style`, `option:pane-scrollbars-timeout`, `presentation:border-style-owner-z-order`, `presentation:renderer-style-residue`
+- User impact: gui, daily
+- Items: `option:pane-scrollbars`, `option:pane-scrollbars-position`, `option:pane-scrollbars-style`, `option:pane-scrollbars-timeout`
 - Depends on: none
 - Evidence:
-  - `resource:knowledge/tmux/divergences.md`
+  - `resource:crates/zz/src/terminal/view.rs`
   - `resource:crates/zz-mux/src/tmux_options.rs`
+  - `scenario:compat/scenarios/known/known-pane-scrollbar-columns.txt`
+  - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `GUI and TUI consume meaningful pane chrome fields and document unsupported cell-level attributes.`
+  - `The four options keep the pin's parsing, choice lists, defaults, and show-options output while staying store-only, and no pane loses a grid column when they are set.`
+  - `The GPUI client keeps its own scrollbar, driven by the terminal worker's published scrollbar state rather than by a window option.`
+
+### `options.pane-border-chrome`: Draw the pin's pane border chrome
+
+All five options are store-only and both presentation items are the remainder of earlier closures. Measured on the pin on 2026-09-01 on an 80x24 window split horizontally, whose panes report 40x24 at 0,0 and 39x24 at 41,0: `pane-border-status top` makes them 40x23 at 0,1 and 39x23 at 41,1, and `bottom` makes them 40x23 at 0,0, so the status row is real geometry a script can see through `#{pane_height}` and `#{pane_top}`, not decoration. That row carries the expanded `pane-border-format`, whose default is `#{?pane_active,#[reverse],}#{pane_index} "#{pane_title}"` followed by three mouse ranges when the mouse is on. `pane-border-indicators`, default `colour`, chooses between colouring the border, drawing arrow markers, or both, and `pane-border-lines`, default `single`, chooses among single, double, heavy, simple, number, spaces, and none for the divider glyphs. `pane-colours` is an array whose entries colour_palette_from_option copies into the pane's default_palette below any OSC 4 override. The recipe splits by client. The raw TUI already owns exact live divider topology and per-span style ownership, so it is where border lines, indicators, and the status row belong: give the layout the reserved row so pane rects shrink and shift like the pin's, then draw the row from the expanded format, and pick divider glyphs from a lines table beside the one popups already use. Native GPUI border chrome stays theme-owned by product decision, which is the same stance `options.theme-palette` takes for style colours. `pane-colours` needs no new engine primitive: libghostty already takes a 256-entry default palette through the appearance the daemon publishes per pane, and the precedence the pin wants is already proven by `osc_palette_override_takes_precedence_over_configured_palette`, so the work is resolving the array at effective global-window, window, and pane scope into TerminalWorkerOptions and overlaying it in pane_terminal_appearance, plus emitting TerminalKnobsChanged on set, append, unset, -U, relocation, and inheritance. `presentation:border-style-owner-z-order` is the residual of the 2026-08-31 per-span closure: same-side ties created by join-pane, swap-pane, or a serialized select-layout follow the pin's mutable tiled pane z-order, which MuxSnapshot does not transport, so closing it adds a snapshot field and takes the protocol bump with it. `presentation:renderer-style-residue` is the non-colour half of the appearance bridge: style attributes and dim, the `#()` shell branches inside style strings, non-colour border attributes and background fills, per-window mode styles that the single global appearance channel cannot carry, the store-only copy-mode position style and format, and the TUI flattening overlays to reverse video.
+
+- Decision: `park`
+- Status: `blocked`
+- Priority and ease: `later` / `hard`
+- Owner: `client`
+- User impact: daily, gui, remote
+- Items: `option:pane-border-format`, `option:pane-border-indicators`, `option:pane-border-lines`, `option:pane-border-status`, `option:pane-colours`, `presentation:border-style-owner-z-order`, `presentation:renderer-style-residue`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-tui/src/render.rs`
+  - `resource:crates/zz-tui/src/layout.rs`
+  - `resource:crates/zz-terminal/src/appearance.rs`
+  - `resource:crates/zz-mux/src/tmux_options.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - ``pane-border-status` reserves the pin's row and shifts pane geometry the same way, and the raw TUI draws the expanded `pane-border-format` on it.`
+  - ``pane-border-lines` and `pane-border-indicators` select the raw TUI's divider glyphs and active-pane marking, while native GPUI chrome stays theme-owned.`
+  - ``pane-colours` overlays the resolved indices on each target pane's base palette below any OSC 4 override, and the two presentation residues name what is left rather than sitting unwritten.`
 
 ### `options.pane-engine-knobs`: Consume the pane VT engine knobs
 
@@ -1668,6 +1694,7 @@ The mux cannot inspect cursor, history, or terminal mode state.
 | Scenario | Gap | TOPO | GEO | FMT | OUT | WARN |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | known/known-main-preset-two-panes.txt | layout.main-horizontal-upstream-bug | 0 | 1 | 0 | 0 | 0 |
+| known/known-pane-scrollbar-columns.txt | options.native-pane-scrollbars | 0 | 2 | 0 | 1 | 0 |
 | known/known-spread-mixed.txt | layout.spread-mixed-upstream-bug | 0 | 1 | 0 | 0 | 0 |
 
 ## Closed history
@@ -1774,6 +1801,7 @@ The mux cannot inspect cursor, history, or terminal mode state.
 | `mux.positional-minimums` | 2026-08-27 | A sorted catalog sidecar records the fourteen nonzero required positional bounds: thirteen commands require one argument and if-shell requires two. Every other command defaults to zero, keeping optional catalog slots optional. Mux parsing validates the minimum after flags and before maximum checks, targets, or effects. The shared daemon parser covers if-shell, load-buffer, save-buffer, and wait-for at the same boundary, while display-menu and confirm-before use the same validator before targets or effects. Focused production-path tests cover all fourteen aliases, canonical diagnostics, missing-target precedence, and unchanged sessions, menus, confirmations, waits, buffers, and source effects. The three-step differential exercises every canonical name and alias with exit status 1, empty stdout, exact stderr, and unchanged pane, buffer, and file state. The later mux.command-arity-errors closure applies the same minimum and maximum validation to stored bind-key and set-hook children before replacing state, and mux.command-flag-errors later closed the shared flag and usage diagnostics. No protocol change was needed. Callback bodies and incomplete menu triples remain under their existing owners. The later mux.error-shapes closure matched nested new-session precedence. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:compat/check.sh`, `scenario:compat/scenarios/smoke/positional-minimums.txt`, `resource:knowledge/tmux/divergences.md`, `resource:knowledge/designs/tmux-superset-roadmap.md` |
 | `mux.resize-pane-optional-values` | 2026-08-25 | This was a catalog-only reconciliation. Runtime already accepted bare -D, -L, -R, and -U with the default amount 1, plus attached and separated integer amounts. Static CommandOptionSpec metadata now marks the four direction values optional while retaining attached-value support, and manifest reconciliation compares that shape with the pinned oracle. No handler, effect, wire field, tag, or protocol version changed. Nine focused resize tests pass, along with 175 protocol unit tests and 14 protocol framing tests. The strict 16-step resize-directions differential and the checked-in canonical summary have zero differences and no skips. resize-pane -M and -T remain open under their existing owners. The later mux.command-flag-errors closure consumes these optional shapes for exact lookahead. The later mux.error-shapes closure matched nested new-session precedence. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:crates/zz-mux/tests/hunt_claims.rs`, `scenario:compat/scenarios/resize-directions.txt` |
 | `options.option-name-format-coverage` | 2026-08-29 | The exact 105-name option-consumer roster now resolves as format variables before format-table, command-item, and environment values. Server, session, window, and pane options follow the pinned target and inheritance chain, including active children, attached-client fallback, explicit missing targets, and S/W/P loop retargeting. Flags render as 0 or 1 while other types keep their raw tmux spelling. command-alias, status-format, and update-environment support whole arrays plus normalized numeric and literal named indices, with numeric-before-named ordering and whole-array local shadowing. Mux-owned expansion reads live state. Every direct daemon format producer uses the same live resolver, while detached status rendering builds one all-scope snapshot per refresh batch and shares it across clients. Missing run-shell -C and if-shell -F targets read global options while their inserted command or branch keeps the caller execution context. Focused exhaustive tests cover the complete roster and scope counts, the strict 60-step option-name-formats differential has zero topology, geometry, format, output, or warning differences, and the attached status probe passes with bounded polling and complete cleanup. No protocol, wire snapshot, or native GUI styling changed. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/formats.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `resource:crates/zz-daemon/src/status.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/option-name-formats.txt`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/status-line.md`, `resource:knowledge/tmux/divergences.md` |
+| `options.pane-chrome` | 2026-09-01 | The eleven items split by which side of the model they fall on instead of sharing one basket. The four scrollbar options went to `options.native-pane-scrollbars` as native: the pin's scrollbar is made of pane cells and takes a column off every pane, measured as 40x24 and 39x24 becoming 39x24 and 38x24 on an 80x24 horizontal split, and its style option prescribes a cell width and cell padding, while zz's scrollbar is GPUI chrome outside the grid drawn from the terminal worker's published scrollbar state. `known-pane-scrollbar-columns` keeps that difference measured. The remaining seven went to `options.pane-border-chrome` parked, with the pin's border-status geometry measured into that group's reason, a per-client recipe that puts border lines, indicators, and the status row in the raw TUI while native GPUI chrome stays theme-owned, and a `pane-colours` recipe that needs no new engine primitive because libghostty already takes a 256-entry default palette through the appearance the daemon publishes per pane. The two presentation items keep their earlier meanings and are now written down: mutable tiled z-order transport for the border-style owner, which will carry a protocol bump, and the non-colour half of the appearance bridge for the renderer residue. Nothing wire-reachable changed. | `resource:crates/zz/src/terminal/view.rs`, `resource:crates/zz-tui/src/render.rs`, `scenario:compat/scenarios/known/known-pane-scrollbar-columns.txt`, `resource:knowledge/tmux/divergences.md` |
 | `options.show-options-hook-rows` | 2026-08-24 | With `-H`, `show-options` augments only no-positional listings with hook arrays in the pin's final option-table block and hook declaration order. Plain listings exclude hooks, named hook queries work without `-H`, server scope has none, and global-session, global-window, and inherited pane listings expose 57, 11, and 7 hooks. Empty, populated, indexed, named, value-only, pane-fallback, and whole-array-shadowing shapes match the pin, including the inherited empty array's `name*` in a full listing and bare `name` in a named query. `show-window-options` retains its surface without `-H`. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `scenario:compat/scenarios/show-options-hooks.txt`, `resource:knowledge/tmux/commands.md` |
 | `options.terminal-behavior` | 2026-09-01 | All eighteen options now carry an explicit decision instead of sitting in one undifferentiated basket. Seven went to `options.client-terminal-negotiation` as native: terminal-features, terminal-overrides, user-keys, extended-keys, and extended-keys-format all exist to rewrite or query a terminfo entry for a client terminal that zz's daemon never opens, xterm-keys is marked `no longer used` in the pin's own options table, and assume-paste-time is a heuristic the pin itself disables on any terminal reporting bracketed paste, which is every zz client. Eight went to `options.pane-engine-knobs` parked: allow-rename, alternate-screen, scroll-on-clear, backspace, get-clipboard, codepoint-widths, variation-selector-always-wide, and input-buffer-size each need a per-pane knob channel, and half of them additionally need a libghostty primitive that does not exist, with the pinned behavior for each measured into that group's reason on 2026-09-01. Two went to `options.client-attach-and-focus` parked: default-client-command and focus-follows-mouse are ordinary client work blocked only on option values reaching the client. `editor` went to `pane.floating-model`, which already owns the floating-pane stance its only pin-side read depends on, and whose startup seeding zz already reproduces exactly. Three tests derived from those pin measurements now hold the classification honest: zz-terminal proves `send-keys BSpace` writes the pin's default 0x7f and that clearing the whole screen leaves history alone, which is the pin's scroll-on-clear off case and the parked divergence, and zz-tui proves a bracketed-paste run carrying 0x02 arrives as one Paste rather than as a C-b key, which is the case the pin's own assume-paste-time guard skips. Nothing wire-reachable changed. | `resource:crates/zz-mux/src/honest_knobs.rs`, `resource:crates/zz-terminal/src/session.rs`, `resource:crates/zz-tui/src/terminal_event.rs`, `resource:crates/zz-tui/src/tty.rs`, `resource:knowledge/tmux/divergences.md` |
 | `options.window-status-separator` | 2026-08-24 | The daemon expands `window-status-separator` after each nonfinal item in the `status-format[]` window loop. It resolves the separator in that window's option and format context, including per-window overrides, nested formats, and style directives; the last item emits no separator. The TUI owns exact tmux row output. The native GUI derives its window controls from snapshot state and does not paint this separator. | `resource:crates/zz-mux/src/tmux_options.rs`, `file:crates/zz-daemon/src/status.rs`, `scenario:compat/scenarios/status-options.txt`, `resource:knowledge/tmux/status-line.md` |

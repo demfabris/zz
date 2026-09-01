@@ -1969,15 +1969,47 @@
       "reason": "These options style tmux's cell-drawn surfaces. The GPUI client replaces that presentation with native chrome; this accepted GUI styling decision does not prove that another client implements or consumes the overlay."
     },
     {
-      "id": "options.pane-chrome",
-      "title": "Consume pane chrome options",
-      "decision": "adopt",
-      "status": "open",
+      "id": "options.native-pane-scrollbars",
+      "title": "Keep pane scrollbars outside the cell grid",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "gui",
+        "daily"
+      ],
+      "owner": "client",
+      "items": [
+        "option:pane-scrollbars",
+        "option:pane-scrollbars-position",
+        "option:pane-scrollbars-style",
+        "option:pane-scrollbars-timeout"
+      ],
+      "evidence": [
+        "resource:crates/zz/src/terminal/view.rs",
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "scenario:compat/scenarios/known/known-pane-scrollbar-columns.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "The four options keep the pin's parsing, choice lists, defaults, and show-options output while staying store-only, and no pane loses a grid column when they are set.",
+        "The GPUI client keeps its own scrollbar, driven by the terminal worker's published scrollbar state rather than by a window option."
+      ],
+      "depends_on": [],
+      "reason": "The pin's pane scrollbar is made of pane cells. Measured on 2026-09-01 on an 80x24 window split horizontally, the panes report 40x24 at 0,0 and 39x24 at 41,0; `set -gw pane-scrollbars on` makes them 39x24 and 38x24, so the scrollbar takes a column off each pane and `#{pane_width}` reports it. `pane-scrollbars-style` matches, defaulting to `bg=themedarkgrey,fg=themelightgrey,width=1,pad=0`: it prescribes a cell width and cell padding. `pane-scrollbars-position` picks the left or right column, and `pane-scrollbars-timeout`, default 500 ms, times out the `modal` and `auto-hide` states, which tty.c also pays for by forcing MODE_MOUSE_ALL on the client so hover reaches the server. zz's scrollbar is client chrome outside the grid: the GPUI terminal view draws and drags one from the scrollbar state libghostty publishes per frame, at device-pixel width, and the raw TUI draws none, so no pane width or height moves and there is nothing for a cell width, a cell pad, or a server-side hover timeout to describe. `known-pane-scrollbar-columns` keeps that geometry difference measured rather than assumed: at strict geometry it holds 2 GEO and 1 OUT divergence, the layout string itself stays identical, and only `#{pane_width}` moves. Reopen only if zz decides pane geometry should shrink for chrome, which would change what every layout and `#{pane_width}` consumer sees, not just these four options."
+    },
+    {
+      "id": "options.pane-border-chrome",
+      "title": "Draw the pin's pane border chrome",
+      "decision": "park",
+      "status": "blocked",
       "priority": "later",
-      "ease": "medium",
+      "ease": "hard",
       "impact": [
         "daily",
-        "gui"
+        "gui",
+        "remote"
       ],
       "owner": "client",
       "items": [
@@ -1986,22 +2018,23 @@
         "option:pane-border-lines",
         "option:pane-border-status",
         "option:pane-colours",
-        "option:pane-scrollbars",
-        "option:pane-scrollbars-position",
-        "option:pane-scrollbars-style",
-        "option:pane-scrollbars-timeout",
         "presentation:border-style-owner-z-order",
         "presentation:renderer-style-residue"
       ],
       "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
+        "resource:crates/zz-tui/src/render.rs",
+        "resource:crates/zz-tui/src/layout.rs",
+        "resource:crates/zz-terminal/src/appearance.rs",
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "GUI and TUI consume meaningful pane chrome fields and document unsupported cell-level attributes."
+        "`pane-border-status` reserves the pin's row and shifts pane geometry the same way, and the raw TUI draws the expanded `pane-border-format` on it.",
+        "`pane-border-lines` and `pane-border-indicators` select the raw TUI's divider glyphs and active-pane marking, while native GPUI chrome stays theme-owned.",
+        "`pane-colours` overlays the resolved indices on each target pane's base palette below any OSC 4 override, and the two presentation residues name what is left rather than sitting unwritten."
       ],
       "depends_on": [],
-      "reason": "The appearance bridge handles colors and per-span divider ownership, but not border formats, scrollbars, mutable join/swap/serialized-layout tie order, or tiled z-order transport."
+      "reason": "All five options are store-only and both presentation items are the remainder of earlier closures. Measured on the pin on 2026-09-01 on an 80x24 window split horizontally, whose panes report 40x24 at 0,0 and 39x24 at 41,0: `pane-border-status top` makes them 40x23 at 0,1 and 39x23 at 41,1, and `bottom` makes them 40x23 at 0,0, so the status row is real geometry a script can see through `#{pane_height}` and `#{pane_top}`, not decoration. That row carries the expanded `pane-border-format`, whose default is `#{?pane_active,#[reverse],}#{pane_index} \"#{pane_title}\"` followed by three mouse ranges when the mouse is on. `pane-border-indicators`, default `colour`, chooses between colouring the border, drawing arrow markers, or both, and `pane-border-lines`, default `single`, chooses among single, double, heavy, simple, number, spaces, and none for the divider glyphs. `pane-colours` is an array whose entries colour_palette_from_option copies into the pane's default_palette below any OSC 4 override. The recipe splits by client. The raw TUI already owns exact live divider topology and per-span style ownership, so it is where border lines, indicators, and the status row belong: give the layout the reserved row so pane rects shrink and shift like the pin's, then draw the row from the expanded format, and pick divider glyphs from a lines table beside the one popups already use. Native GPUI border chrome stays theme-owned by product decision, which is the same stance `options.theme-palette` takes for style colours. `pane-colours` needs no new engine primitive: libghostty already takes a 256-entry default palette through the appearance the daemon publishes per pane, and the precedence the pin wants is already proven by `osc_palette_override_takes_precedence_over_configured_palette`, so the work is resolving the array at effective global-window, window, and pane scope into TerminalWorkerOptions and overlaying it in pane_terminal_appearance, plus emitting TerminalKnobsChanged on set, append, unset, -U, relocation, and inheritance. `presentation:border-style-owner-z-order` is the residual of the 2026-08-31 per-span closure: same-side ties created by join-pane, swap-pane, or a serialized select-layout follow the pin's mutable tiled pane z-order, which MuxSnapshot does not transport, so closing it adds a snapshot field and takes the protocol bump with it. `presentation:renderer-style-residue` is the non-colour half of the appearance bridge: style attributes and dim, the `#()` shell branches inside style strings, non-colour border attributes and background fills, per-window mode styles that the single global appearance channel cannot carry, the store-only copy-mode position style and format, and the TUI flattening overlays to reverse video."
     },
     {
       "id": "options.pane-engine-knobs",
@@ -4133,6 +4166,18 @@
       "resolution": "The exact 105-name option-consumer roster now resolves as format variables before format-table, command-item, and environment values. Server, session, window, and pane options follow the pinned target and inheritance chain, including active children, attached-client fallback, explicit missing targets, and S/W/P loop retargeting. Flags render as 0 or 1 while other types keep their raw tmux spelling. command-alias, status-format, and update-environment support whole arrays plus normalized numeric and literal named indices, with numeric-before-named ordering and whole-array local shadowing. Mux-owned expansion reads live state. Every direct daemon format producer uses the same live resolver, while detached status rendering builds one all-scope snapshot per refresh batch and shares it across clients. Missing run-shell -C and if-shell -F targets read global options while their inserted command or branch keeps the caller execution context. Focused exhaustive tests cover the complete roster and scope counts, the strict 60-step option-name-formats differential has zero topology, geometry, format, output, or warning differences, and the attached status probe passes with bounded polling and complete cleanup. No protocol, wire snapshot, or native GUI styling changed."
     },
     {
+      "id": "options.pane-chrome",
+      "title": "Consume pane chrome options",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz/src/terminal/view.rs",
+        "resource:crates/zz-tui/src/render.rs",
+        "scenario:compat/scenarios/known/known-pane-scrollbar-columns.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "The eleven items split by which side of the model they fall on instead of sharing one basket. The four scrollbar options went to `options.native-pane-scrollbars` as native: the pin's scrollbar is made of pane cells and takes a column off every pane, measured as 40x24 and 39x24 becoming 39x24 and 38x24 on an 80x24 horizontal split, and its style option prescribes a cell width and cell padding, while zz's scrollbar is GPUI chrome outside the grid drawn from the terminal worker's published scrollbar state. `known-pane-scrollbar-columns` keeps that difference measured. The remaining seven went to `options.pane-border-chrome` parked, with the pin's border-status geometry measured into that group's reason, a per-client recipe that puts border lines, indicators, and the status row in the raw TUI while native GPUI chrome stays theme-owned, and a `pane-colours` recipe that needs no new engine primitive because libghostty already takes a 256-entry default palette through the appearance the daemon publishes per pane. The two presentation items keep their earlier meanings and are now written down: mutable tiled z-order transport for the border-style owner, which will carry a protocol bump, and the non-colour half of the appearance bridge for the renderer residue. Nothing wire-reachable changed."
+    },
+    {
       "id": "options.show-options-hook-rows",
       "title": "List hooks through show-options -H",
       "closed_on": "2026-08-24",
@@ -4679,6 +4724,15 @@
       "geo": 1,
       "fmt": 0,
       "out": 0,
+      "warn": 0
+    },
+    {
+      "scenario": "known/known-pane-scrollbar-columns.txt",
+      "gap": "options.native-pane-scrollbars",
+      "topo": 0,
+      "geo": 2,
+      "fmt": 0,
+      "out": 1,
       "warn": 0
     },
     {

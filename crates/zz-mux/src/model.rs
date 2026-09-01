@@ -361,7 +361,7 @@ pub struct MuxState {
     format_now: u64,
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
-    marked_pane: Option<PaneId>,
+    marked_pane: Option<(WindowId, PaneId)>,
     pub sessions: BTreeMap<SessionId, Session>,
     pub windows: BTreeMap<WindowId, Window>,
 }
@@ -3441,14 +3441,20 @@ impl MuxState {
         Err(ServerError::InvalidCommand("no last pane".to_owned()))
     }
 
-    /// The pin's `marked_pane`: one server-global mark, reported valid only
-    /// while its pane is still reachable (`server_check_marked` defers to
-    /// `cmd_find_valid_state`, so a killed or unlinked target reads as no
-    /// mark at all).
+    /// The pin's `marked_pane`: one server-global mark over a whole find
+    /// state, reported valid only while that window still holds that pane
+    /// (`server_check_marked` defers to `cmd_find_valid_state`, whose last
+    /// test is `window_has_pane`). Killing the pane or moving it into another
+    /// window through break-pane or join-pane reads as no mark at all, while a
+    /// swap inside the same window keeps it.
     #[must_use]
     pub fn marked_pane(&self) -> Option<PaneId> {
-        self.marked_pane
-            .filter(|pane| self.window_for_pane(*pane).is_some())
+        let (window, pane) = self.marked_pane?;
+        self.windows
+            .get(&window)?
+            .panes
+            .contains_key(&pane)
+            .then_some(pane)
     }
 
     fn marked_window(&self) -> Result<WindowId, ServerError> {
@@ -3460,10 +3466,10 @@ impl MuxState {
     /// The pin's `-m`: mark the target unless it already holds the mark, in
     /// which case `server_is_marked` makes the request a clear instead.
     pub(crate) fn toggle_marked_pane(&mut self, pane: PaneId) -> Result<(), ServerError> {
-        if self.window_for_pane(pane).is_none() {
-            return Err(ServerError::MissingTarget(pane.to_string()));
-        }
-        let next = (self.marked_pane() != Some(pane)).then_some(pane);
+        let window = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let next = (self.marked_pane() != Some(pane)).then_some((window, pane));
         if self.marked_pane != next {
             self.marked_pane = next;
             self.bump_generation();

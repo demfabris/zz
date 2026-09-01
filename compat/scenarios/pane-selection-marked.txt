@@ -51,3 +51,24 @@ out: display-message -p -t w:0.0 #{pane_marked}:#{pane_marked_set}
 out: display-message -p -t w:0 [#{window_flags}]
 select-pane -M -t w:0.1
 out: display-message -p -t w:0.0 #{pane_marked_set}
+
+# cmd_find_valid_state ends at window_has_pane, so moving the marked pane into
+# another window through break-pane or join-pane invalidates the mark while a
+# swap inside the same window keeps it.
+select-pane -M -t w:0.0
+new-window -d -t w:8 -n sidecar
+split-window -d -t w:0.0
+select-pane -m -t w:0.1
+out: display-message -p -t w:0.0 #{pane_marked_set}
+break-pane -d -s w:0.1 -t w:9 -n moved
+out: display-message -p -t w:0.0 #{pane_marked_set}
+select-pane -m -t w:moved.0
+out: display-message -p -t w:0.0 #{pane_marked_set}
+join-pane -d -s w:moved.0 -t w:sidecar.0
+out: display-message -p -t w:0.0 #{pane_marked_set}
+select-pane -m -t w:sidecar.1
+out: display-message -p -t {marked} #{window_name}.#{pane_index}
+swap-pane -d -s w:sidecar.1 -t w:sidecar.0
+out: display-message -p -t w:0.0 #{pane_marked_set}
+out: display-message -p -t {marked} #{window_name}.#{pane_index}
+select-pane -M -t w:0.0

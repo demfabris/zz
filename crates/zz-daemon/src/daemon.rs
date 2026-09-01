@@ -40,15 +40,15 @@ use zz_protocol::{
     CommandPromptType, CommandRequest, CommandResolution, CommandResponse, ConfigOverrideEntry,
     ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState,
     Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
-    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
-    MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
-    MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
-    MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey, MuxOptionSource, MuxOptions,
-    MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneIndicator,
-    PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines,
-    PopupState, PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage,
-    SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId,
-    StatusLine, WindowId, canonical_key, encode_protocol_message_into,
+    MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_ITEM_TEXT_BYTES,
+    MAX_CHOOSE_TREE_QUERY_BYTES, MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES,
+    MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
+    MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
+    MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
+    PaneId, PaneIndicator, PaneKindSnapshot, PasteUploadPurpose, PastedImageFormat, PopupAction,
+    PopupBorderLines, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId, SessionViewer,
+    SourceSpan, SplitId, StatusLine, WindowId, canonical_key, encode_protocol_message_into,
     encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
     menu_row_width, read_protocol_message_into, resolve_command, terminal_patch_frame_len,
     terminal_viewport_frame_len,
@@ -7313,6 +7313,9 @@ impl Shared {
                         kind: tree_kind,
                         sessions_only,
                         filter,
+                        format,
+                        hide_source,
+                        kill_source,
                         sort,
                         key_format,
                         template,
@@ -7335,6 +7338,9 @@ impl Shared {
                             attached_session,
                             &facts,
                             filter.clone(),
+                            format.clone(),
+                            *hide_source,
+                            *kill_source,
                             *sort,
                             key_format.clone(),
                         )?;
@@ -7359,6 +7365,8 @@ impl Shared {
                     MuxEffect::ChooseBuffer {
                         pane,
                         filter,
+                        format,
+                        kill_source,
                         sort,
                         key_format,
                         template,
@@ -7380,6 +7388,8 @@ impl Shared {
                             attached_session,
                             &facts,
                             filter.clone(),
+                            format.clone(),
+                            *kill_source,
                             *sort,
                             key_format.clone(),
                         )?
@@ -15857,6 +15867,8 @@ impl Shared {
             };
             if matches!(result, ChooseTreeResult::Updated(_)) {
                 inner.choose_trees.insert(client, chooser);
+            } else if chooser.kill_source {
+                inner.chooser_kill_panes.push(chooser.source_pane);
             }
             (result, state, delta, command)
         };
@@ -15874,7 +15886,7 @@ impl Shared {
             }
             ChooseTreeResult::Activate(target) => {
                 self.publish_to_client(client, EventPayload::ChooseTree { state: None });
-                if let Some((template, replacement)) = command {
+                let activated = if let Some((template, replacement)) = command {
                     match replacement {
                         Ok(replacement) => self.execute_chooser_command(
                             client,
@@ -15888,11 +15900,15 @@ impl Shared {
                             self.publish_background_command_error(client, context, &error, true);
                         }
                     }
+                    Ok(())
                 } else {
-                    self.activate_choose_tree_target(client, kind, context, target)?;
-                }
+                    self.activate_choose_tree_target(client, kind, context, target)
+                };
+                self.reap_chooser_kill_panes(client, kind, context);
+                activated?;
             }
         }
+        self.reap_chooser_kill_panes(client, kind, context);
         Ok(())
     }
 
@@ -15971,6 +15987,7 @@ impl Shared {
                     }
                 };
                 let mut deleted = None;
+                let kill_source = chooser.kill_source.then_some(chooser.source_pane);
                 let outcome = match result {
                     ChooseBufferResult::Updated => {
                         let search = chooser.rendered.search.clone();
@@ -16010,6 +16027,11 @@ impl Shared {
                         ChooseBufferInputOutcome::Close
                     }
                 };
+                if let Some(pane) = kill_source
+                    && !inner.choose_buffers.contains_key(&client)
+                {
+                    inner.chooser_kill_panes.push(pane);
+                }
                 (outcome, deleted)
             }
         };
@@ -16065,6 +16087,7 @@ impl Shared {
                 self.publish_to_client(client, EventPayload::ChooseBuffer { state: None });
             }
         }
+        self.reap_chooser_kill_panes(client, kind, context);
         Ok(())
     }
 
@@ -16368,6 +16391,29 @@ impl Shared {
             )?;
         }
         Ok(())
+    }
+
+    fn reap_chooser_kill_panes(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &mut ExecutionContext,
+    ) {
+        let panes = std::mem::take(&mut self.inner.lock().chooser_kill_panes);
+        for pane in panes {
+            let target = pane.to_string();
+            if let Err(error) = self.execute(
+                client,
+                kind,
+                context,
+                &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+            ) {
+                log::debug!(
+                    target: "zz_daemon::diagnostics::chooser",
+                    "failed to kill chooser source pane={pane}: {error}"
+                );
+            }
+        }
     }
 
     fn execute_chooser_command(
@@ -24228,6 +24274,7 @@ struct ServerState {
     command_prompts: BTreeMap<ClientId, CommandPrompt>,
     choose_trees: BTreeMap<ClientId, ChooseTreeSession>,
     choose_buffers: BTreeMap<ClientId, ChooseBufferSession>,
+    chooser_kill_panes: Vec<PaneId>,
     display_panes: BTreeMap<ClientId, DisplayPanesSession>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
     next_silence_token: u64,
@@ -24605,6 +24652,8 @@ struct ChooseBufferSession {
     source_pane: PaneId,
     source_session: SessionId,
     filter: Option<String>,
+    format: Option<String>,
+    kill_source: bool,
     sort: TmuxSort,
     key_format: Option<String>,
     template: Option<String>,
@@ -24623,6 +24672,8 @@ impl ChooseBufferSession {
         attached_session: Option<SessionId>,
         facts: &FormatHookFacts,
         filter: Option<String>,
+        format: Option<String>,
+        kill_source: bool,
         sort: TmuxSort,
         key_format: Option<String>,
     ) -> Result<Option<Self>, ServerError> {
@@ -24638,6 +24689,8 @@ impl ChooseBufferSession {
             source_pane,
             source_session,
             filter,
+            format,
+            kill_source,
             sort,
             key_format,
             template: None,
@@ -24735,6 +24788,23 @@ impl ChooseBufferSession {
                 }
                 (Some(_), None) => String::new(),
             };
+            let text = match (self.format.as_deref(), source_context.as_ref()) {
+                (None, _) | (Some(_), None) => String::new(),
+                (Some(format), Some(source_context)) => {
+                    let row_facts = FormatHookFacts {
+                        buffer: Some(buffer_format_facts(buffer)),
+                        ..facts.clone()
+                    };
+                    let mut hooks = DaemonFormatHooks::command(&row_facts);
+                    bounded_choose_item_text(&engine.expand_pane_format(
+                        format,
+                        source_context,
+                        attached_session,
+                        FormatClient::NoClient,
+                        &mut hooks,
+                    ))
+                }
+            };
             items.push(ChooseBufferItem {
                 name: bounded_choose_buffer_name(&buffer.name),
                 preview: bounded_choose_buffer_preview(&buffer.data),
@@ -24745,6 +24815,7 @@ impl ChooseBufferSession {
                     .unwrap_or_default()
                     .as_secs(),
                 key,
+                text,
             });
         }
         let previous_index = usize::try_from(self.rendered.selected).unwrap_or(usize::MAX);
@@ -24923,6 +24994,17 @@ fn contains_buffer_query(haystack: &[u8], query: &str) -> bool {
             .any(|candidate| candidate.eq_ignore_ascii_case(needle))
 }
 
+fn bounded_choose_item_text(text: &str) -> String {
+    let mut bounded = String::with_capacity(text.len().min(MAX_CHOOSE_ITEM_TEXT_BYTES));
+    for character in text.chars() {
+        if bounded.len() + character.len_utf8() > MAX_CHOOSE_ITEM_TEXT_BYTES {
+            break;
+        }
+        bounded.push(character);
+    }
+    bounded
+}
+
 fn bounded_choose_buffer_name(name: &str) -> String {
     if name.len() <= MAX_CHOOSE_BUFFER_NAME_BYTES {
         return name.to_owned();
@@ -25028,6 +25110,9 @@ struct ChooseTreeSession {
     kind: ChooseTreeKind,
     sessions_only: bool,
     filter: Option<String>,
+    format: Option<String>,
+    hide_source: bool,
+    kill_source: bool,
     sort: TmuxSort,
     key_format: Option<String>,
     template: Option<String>,
@@ -25048,6 +25133,9 @@ impl ChooseTreeSession {
         attached_session: Option<SessionId>,
         facts: &FormatHookFacts,
         filter: Option<String>,
+        format: Option<String>,
+        hide_source: bool,
+        kill_source: bool,
         sort: TmuxSort,
         key_format: Option<String>,
     ) -> Result<Self, ServerError> {
@@ -25083,6 +25171,9 @@ impl ChooseTreeSession {
             kind,
             sessions_only,
             filter,
+            format,
+            hide_source,
+            kill_source,
             sort,
             key_format,
             template: None,
@@ -25227,7 +25318,11 @@ impl ChooseTreeSession {
                         ))
                     });
                 }
-                if !apply_filter || !panes.is_empty() {
+                let window_visible = !apply_filter || !panes.is_empty();
+                if self.hide_source {
+                    panes.retain(|pane| *pane != self.source_pane);
+                }
+                if window_visible {
                     visible_windows.push((window_id, panes));
                 }
             }
@@ -25280,6 +25375,41 @@ impl ChooseTreeSession {
         }
     }
 
+    fn assign_row_text(
+        &self,
+        items: &mut [ChooseTreeItem],
+        engine: &MuxEngine,
+        attached_session: Option<SessionId>,
+        facts: &FormatHookFacts,
+    ) {
+        let Some(format) = self.format.as_deref() else {
+            return;
+        };
+        for item in items.iter_mut() {
+            let context = match item.target {
+                ChooseTreeTarget::Session(session) => {
+                    Some(ExecutionContext::new(Some(session), None, None))
+                }
+                ChooseTreeTarget::Window(window) => engine
+                    .state
+                    .windows
+                    .get(&window)
+                    .map(|entry| ExecutionContext::new(Some(entry.session), Some(window), None)),
+                ChooseTreeTarget::Pane(pane) => ExecutionContext::for_pane(&engine.state, pane),
+            };
+            item.text = context.map_or_else(String::new, |context| {
+                let mut hooks = DaemonFormatHooks::command(facts);
+                bounded_choose_item_text(&engine.expand_pane_format(
+                    format,
+                    &context,
+                    attached_session,
+                    FormatClient::NoClient,
+                    &mut hooks,
+                ))
+            });
+        }
+    }
+
     fn rebuild(
         &mut self,
         engine: &MuxEngine,
@@ -25312,6 +25442,7 @@ impl ChooseTreeSession {
                     ),
                     pane_kind: None,
                     key: String::new(),
+                    text: String::new(),
                 },
             ) {
                 break;
@@ -25342,6 +25473,7 @@ impl ChooseTreeSession {
                         ),
                         pane_kind: None,
                         key: String::new(),
+                        text: String::new(),
                     },
                 ) {
                     break 'sessions;
@@ -25382,6 +25514,7 @@ impl ChooseTreeSession {
                             flags: choose_tree_flags(false, false, window.active_pane == pane_id),
                             pane_kind,
                             key: String::new(),
+                            text: String::new(),
                         },
                     ) {
                         break 'sessions;
@@ -25391,6 +25524,7 @@ impl ChooseTreeSession {
         }
 
         self.assign_row_keys(&mut items, engine, attached_session, facts);
+        self.assign_row_text(&mut items, engine, attached_session, facts);
 
         let fallback = state.window_for_pane(self.source_pane).map(|window| {
             if self.sessions_only {
@@ -68228,6 +68362,9 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(session),
             &facts,
             None,
+            None,
+            false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -68317,6 +68454,8 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(session),
             &FormatHookFacts::default(),
             None,
+            None,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
             None,
         )
@@ -68572,6 +68711,9 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(first),
             &facts,
             None,
+            None,
+            false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
             None,
         )
@@ -68639,6 +68781,9 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some(first),
                 &facts,
                 None,
+                None,
+                false,
+                false,
                 TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
                 Some(format.to_owned()),
             )
@@ -68679,6 +68824,9 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(first),
             &facts,
             None,
+            None,
+            false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
             Some("x".to_owned()),
         )
@@ -68731,6 +68879,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some(session),
                 &facts,
                 None,
+                None,
+                false,
                 TmuxSort::parse(None, false, Some(TmuxSortOrder::Name)).unwrap(),
                 key_format.map(str::to_owned),
             )
@@ -68775,6 +68925,9 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some(z),
                 &facts,
                 filter.map(str::to_owned),
+                None,
+                false,
+                false,
                 TmuxSort::parse(None, reversed, Some(TmuxSortOrder::Index)).unwrap(),
                 None,
             )
@@ -68829,6 +68982,9 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(z),
             &facts,
             None,
+            None,
+            false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -68852,6 +69008,9 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(z),
             &facts,
             None,
+            None,
+            false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -68879,6 +69038,9 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(z),
             &facts,
             None,
+            None,
+            false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -68897,6 +69059,9 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(z),
             &facts,
             Some("#{==:#{session_name},missing}".to_owned()),
+            None,
+            false,
+            false,
             TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             None,
         )
@@ -68947,6 +69112,8 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(z),
             &facts,
             Some("#{==:#{buffer_name},older}".to_owned()),
+            None,
+            false,
             TmuxSort::parse(None, true, Some(TmuxSortOrder::Creation)).unwrap(),
             None,
         )
@@ -68962,6 +69129,8 @@ bind - split-window -v -c "#{pane_current_path}"
             Some(z),
             &facts,
             Some("#{==:#{buffer_name},missing}".to_owned()),
+            None,
+            false,
             TmuxSort::parse(None, true, Some(TmuxSortOrder::Creation)).unwrap(),
             None,
         )
@@ -84266,6 +84435,9 @@ bind - split-window -v -c "#{pane_current_path}"
                 Some(session),
                 &facts,
                 None,
+                None,
+                false,
+                false,
                 TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
                 None,
             )

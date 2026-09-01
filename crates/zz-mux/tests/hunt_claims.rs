@@ -1497,6 +1497,9 @@ fn choosers_take_a_key_format_and_refuse_the_large_preview() {
             kind: ChooseTreeKind::Panes,
             sessions_only: false,
             filter: None,
+            format: None,
+            hide_source: false,
+            kill_source: false,
             sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Index)).unwrap(),
             key_format: Some("#{line}".to_owned()),
             template: None,
@@ -1511,6 +1514,8 @@ fn choosers_take_a_key_format_and_refuse_the_large_preview() {
         [MuxEffect::ChooseBuffer {
             pane,
             filter: None,
+            format: None,
+            kill_source: false,
             sort: TmuxSort::parse(None, false, Some(TmuxSortOrder::Creation)).unwrap(),
             key_format: Some("x".to_owned()),
             template: None,

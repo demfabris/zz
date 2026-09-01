@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **75**. Classified items: **527**.
+Tracked gap groups: **75**. Classified items: **521**.
 
 - Status: open: 27, blocked: 9, accepted: 39.
 - Decision: adopt: 32, native: 31, park: 4, never: 8.
 - Priority: later: 36, none: 39.
 - Closed history entries: 142.
-- Surface: command: 9, flag: 51, native-command: 21, option: 75, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 80, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 45, native-command: 21, option: 75, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 80, presentation: 8, protocol: 2.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 51 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 65 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 95 omitted default keys, 61 divergent shared default bindings, 58 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 83 of those commands. The registry classifies 45 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 0 zz-only flags on tmux command names, 21 native command names, 75 options absent from `BEHAVES`, 65 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 2 currently documented hook-producer gaps, 95 omitted default keys, 61 divergent shared default bindings, 58 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -174,19 +174,26 @@ Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and i
 
 ### `choosers.command-flags`: Complete chooser command controls
 
-The native chooser already owns rows and actions; the remaining controls need exact command semantics.
+Measured against the pin on 2026-09-01 through clients attached on real ptys, because a chooser only answers a client that is attached to it. -F is expanded once per visible row in that row's own context and becomes the text the row draws: window_tree_build_session, _window and _pane pass the product to mode_tree_add as the row text, window_buffer_build does the same in each paste-buffer's context, and the row keeps its shortcut, its order and its target. The board recipe claimed #{line} is part of that context; it is not. format_add(ft, "line") is only in window_tree_get_key and window_buffer_get_key, so #{line} belongs to -K and expands empty inside -F; measured with choose-tree -F '<L#{line}|P#{pane_id}>' on an attached 80x24 client, which drew '<L|P%0>'. zz now expands -F the same way and carries the product as ChooseTreeItem.text and ChooseBufferItem.text on protocol v93, empty when the command had no -F; the raw TUI draws it in place of the label/detail and name/size/preview row it composes otherwise, and the GPUI chooser substitutes it for the row's primary text and drops the secondary columns. -h drops the invoking pane's own row: window_tree_build_window counts the filtered panes first and skips the source only afterwards, so a window whose only match is the source keeps its row with no pane children, the session row is untouched, and a selection that would have landed on the hidden row falls to the first row while a single-pane source window keeps the window row it already started on. -k is stored on the mode entry and read by window_pane_reset_mode, which kills the pane the chooser was entered on after the mode is freed, on cancel, on Enter, on a row shortcut, and when the buffer chooser closes because its last buffer was deleted; the chosen template still runs. choose-buffer parses -y and never reads it, since window_buffer_init copies only -F, -K and the template and buffer-mode deletes without a prompt, so the flag is accepted and inert alone, clustered and repeated. Two divergences stay recorded rather than copied. zz's chooser is a per-client overlay and not a pane-mode stack, so a client that detaches drops the chooser instead of leaving it and the -k pane survives, which is what the pin does too because the mode outlives the detach; but raising another overlay retires zz's chooser outright where the pin keeps the mode underneath and kills the pane only when it is finally left, so a -k chooser replaced by an overlay never kills its pane in zz. While probing that, display-menu -c on a client that already has a chooser open was measured to leave the client's keys with the chooser in zz: the menu item never ran and 'q' cancelled the chooser instead, where the pin's menu takes the key and leaves the mode alone. flag:choose-tree:-y stays open: its only consumer on the pin is the PROMPT_ACCEPT that auto-answers the 'Kill session/window/pane?' prompt raised by x and X, and zz's choose-tree table delivers neither key, so accepting the flag would claim a semantic zz has no place to spend. semantic:chooser-key-vocabulary stays open with the same measurement: the pin's mode_tree_key also answers t, T, C-t, K, J, S-Up, S-Down, O, r, F1, C-h, M-- and M-+, and window_tree_key adds m, x, X and ':', none of which zz's choose-tree or choose-buffer tables name.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
 - Owner: `daemon`
 - User impact: daily, scripts
-- Items: `flag:choose-buffer:-F`, `flag:choose-buffer:-k`, `flag:choose-buffer:-y`, `flag:choose-tree:-F`, `flag:choose-tree:-h`, `flag:choose-tree:-k`, `flag:choose-tree:-y`, `semantic:chooser-key-vocabulary`
+- Items: `flag:choose-tree:-y`, `semantic:chooser-key-vocabulary`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-tui/src/render.rs`
+  - `resource:crates/zz/src/chooser/tree.rs`
+  - `resource:crates/zz/src/chooser/buffer.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `file:compat/attached-client.sh`
+  - `scenario:compat/scenarios/smoke/chooser-row-flags.txt`
+  - `scenario:compat/scenarios/smoke/chooser-kill-on-exit.txt`
+  - `scenario:compat/scenarios/smoke/chooser-buffer-confirm-flag.txt`
 - Acceptance:
   - `Attached-client tests cover chooser formatting, key actions, and zz-deliverable key names.`
 

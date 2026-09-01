@@ -2089,18 +2089,18 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "choose-tree",
         aliases: &[],
         description: "Choose a session, window, or pane",
-        usage: "[-NrswZ] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
+        usage: "[-hkNrswZ] [-F format] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-s", "show sessions"),
             CommandOptionSpec::flag("-w", "show windows"),
             CommandOptionSpec::flag("-Z", "zoom the chooser, always full window in zz"),
-            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::value("-F", FreeForm, "per-row format"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
             CommandOptionSpec::unsupported_flag("-G"),
-            CommandOptionSpec::unsupported_flag("-h"),
+            CommandOptionSpec::flag("-h", "hide the pane the chooser was opened from"),
             CommandOptionSpec::value("-K", FreeForm, "per-row shortcut key format"),
-            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::flag("-k", "kill the source pane when the chooser exits"),
             CommandOptionSpec::flag("-N", "disable the preview, already zz's only layout"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
             CommandOptionSpec::flag("-r", "reverse sort order"),
@@ -2122,18 +2122,18 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "choose-buffer",
         aliases: &[],
         description: "Choose a paste buffer",
-        usage: "[-NrZ] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
+        usage: "[-kNryZ] [-F format] [-f filter] [-K key-format] [-O order] [-t target-pane] [template]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-Z", "zoom the chooser, always full window in zz"),
-            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::value("-F", FreeForm, "per-row format"),
             CommandOptionSpec::value("-f", FreeForm, "filter"),
             CommandOptionSpec::value("-K", FreeForm, "per-row shortcut key format"),
-            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::flag("-k", "kill the source pane when the chooser exits"),
             CommandOptionSpec::flag("-N", "disable the preview, already zz's only layout"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
             CommandOptionSpec::flag("-r", "reverse sort order"),
-            CommandOptionSpec::unsupported_flag("-y"),
+            CommandOptionSpec::flag("-y", "buffer mode never reads it, as on the pin"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2817,7 +2817,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (452, 51));
+        assert_eq!((supported, unsupported), (458, 45));
         assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,

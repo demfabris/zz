@@ -1347,7 +1347,12 @@ impl Renderer {
                 };
                 let indent = "  ".repeat(usize::from(item.depth));
                 let key = chooser_key_cell(&item.key, key_column);
-                let text = format!("{marker} {key}{indent}{}  {}", item.label, item.detail);
+                let row_text = if item.text.is_empty() {
+                    format!("{}  {}", item.label, item.detail)
+                } else {
+                    item.text.clone()
+                };
+                let text = format!("{marker} {key}{indent}{row_text}");
                 write_colored_text(
                     &mut self.output,
                     0,
@@ -1401,10 +1406,12 @@ impl Renderer {
                     " "
                 };
                 let key = chooser_key_cell(&item.key, key_column);
-                let text = format!(
-                    "{marker} {key}{}  {} bytes  {}",
-                    item.name, item.size_bytes, item.preview
-                );
+                let row_text = if item.text.is_empty() {
+                    format!("{}  {} bytes  {}", item.name, item.size_bytes, item.preview)
+                } else {
+                    item.text.clone()
+                };
+                let text = format!("{marker} {key}{row_text}");
                 write_colored_text(
                     &mut self.output,
                     0,

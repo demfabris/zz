@@ -1,0 +1,10 @@
+corpus: none
+# choose-tree -k and choose-buffer -k make window_pane_reset_mode kill the pane
+# the chooser was entered on, whichever exit the attached client takes, while
+# the same exits without the flag leave it. The probe presses a root binding on
+# a real pty because the chooser only answers a client that is attached to it.
+stage: fixtures/chooser-kill-on-exit.sh ~/chooser-kill-on-exit.sh
+stage: fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu CHOOSER_KILL_ON_EXIT
+run-shell 'sh ~/chooser-kill-on-exit.sh'
+out: show-environment -g CHOOSER_KILL_ON_EXIT

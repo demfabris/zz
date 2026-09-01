@@ -49,7 +49,8 @@ pub use model::{
 };
 pub use parser::{
     ConfigCommandBytes, ConfigDiagnostic, ConfigEnvironmentAssignmentBytes, ParsedConfig,
-    ParsedConfigBytes, command_block_body, parse_config,
+    ParsedConfigBytes, command_block_body, config_home_directory_names, parse_config,
+    parse_config_with_home_directories, user_home,
 };
 pub use sort::{TmuxSort, TmuxSortOrder};
 pub use status::{

@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v91)
+title: zz wire protocol (v92)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 91`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 92`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (91) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (92) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -283,10 +283,13 @@ exact history-dependent multi-window `window-unlinked` sequence remains tracked 
 `hooks.shutdown-window-unlinked-order`; no shutdown field or version bump can reconstruct tmux's
 winlink-tree history.
 
-Direct Control config construction still runs before daemon execution. Source, startup, alias, and
-callback parsing therefore see daemon-global `HOME`, while a direct Control line sees the client's
-local parser context. `control-mode.local-parser-environment` owns moving that lookup to daemon
-state without adding visible guards or changing command numbering.
+Direct Control config construction still runs in the client process before daemon execution, but
+since v92 its `~` lookups do not. A line containing a tilde is walked once with a recording context,
+the names it needs cross as one `HomeDirectoryRequest`, and the line is re-parsed with the answers,
+so source, startup, alias, callback, and direct Control parsing all read the same daemon-global
+`HOME` and the same daemon-host passwd database. The round trip is invisible: no guard, no frame, no
+command number. Variable expansion is unaffected, so `$NAME` stays literal in direct Control input
+where the pin's lexer expands it.
 
 v76 introduced `SourcedCommandGuard { output, error, client_failure }` at `EventPayload` tail tag 47.
 It gave parser-owned source replay and synchronous foreground inserted lists one flags-1 command
@@ -608,9 +611,20 @@ now validate on both encode and decode.
 
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 91`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 92`** is stamped into every frame's envelope and re-checked inside
   `ServerHello` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v92 appends `ProtocolMessage::HomeDirectoryRequest { request_id, users }` at tail tag 36 and
+  `ProtocolMessage::HomeDirectoryResponse { request_id, homes }` at tail tag 37. A Control client
+  parsing its own direct input asks the daemon to resolve the `~` names one line needs before it
+  re-parses that line, so a bare tilde reads the server's global `HOME` and a named tilde reads the
+  daemon host's passwd database, the way the pin's own lexer does. The empty name is the bare
+  tilde; `homes` answers one entry per requested name, in order, with `None` for a failed lookup
+  that becomes the pin's located syntax error. The request only leaves a client when the line
+  actually needs a home, and it consumes no command number, so Control framing and numbering are
+  unchanged. `users` is bounded by `MAX_HOME_DIRECTORY_USERS` (1024) entries of
+  `MAX_HOME_DIRECTORY_USER_BYTES` (1 KiB), answers by `MAX_HOME_DIRECTORY_BYTES` (16 KiB). A v91
+  peer cannot decode the appended variants.
 - v91 appends `action: ClientExitAction` after `reason` on `EventPayload::Detached` and adds that
   enum (`Exit`, `ParentHangup`, `Exec { command, shell }`). It is what `detach-client -E` and `-P`
   ask the presentation process to do, matching the pin's `MSG_EXEC` and `MSG_DETACHKILL`: `Exec`

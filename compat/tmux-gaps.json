@@ -394,34 +394,6 @@
       "reason": "zz now cancels a background if-shell or run-shell callback when its origin is gone before callback entry, but immediate hook and source replay has no connection-owned cancellation token once command execution has started. Pinned tmux frees the remaining client-owned queue on hard connection loss while letting the in-flight worker finish. The daemon reader cannot see that loss yet: crates/zz-daemon/src/daemon.rs gives only ClientKind::Command a per-connection command worker and moves the execution context into it, while a Control client runs every request inline on the same thread that reads the socket, so a blocked command holds the reader. Giving Control the same worker means sharing the context the reader still needs for attach and session-change handling, which is the architecture half of this group. Graceful EOF follows a different drain path, re-measured against the pin on 2026-09-01 by piping three commands at once into `-C attach-session` and closing stdin: three `display-message -p` lines run all three on the pin and only the first on zz; a blocking `run-shell` first runs nothing on either; blocking second runs the first on both; blocking third runs the first two on the pin and only the first on zz. So the pin executes every queued command up to and including the first queue-yielding one and discards the rest. zz's control client truncates the pending stdin queue to a single command (retain_first_initial_stdin_before_eof in crates/zz/src/control_mode.rs), which only matches the shape where the first queued command blocks. The client cannot tell a yielding command from a fast one on its own, and a static roster of blocking verbs would be a guess, so the drain fix wants the same per-connection worker to report that a request yielded the queue."
     },
     {
-      "id": "control-mode.local-parser-environment",
-      "title": "Parse Control tilde with daemon environment",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "client",
-      "items": [
-        "semantic:control-mode-tilde-server-environment"
-      ],
-      "evidence": [
-        "resource:crates/zz/src/control_mode.rs",
-        "resource:crates/zz-mux/src/parser.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:knowledge/protocol/wire-protocol.md",
-        "resource:knowledge/tmux/conf-parser.md",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Direct Control input expands bare tilde from the daemon's nonempty server-global HOME, falls back through the daemon host's current passwd entry when HOME is empty or unset, and performs named-user lookup in the same host context, without adding visible guards or changing command numbering."
-      ],
-      "depends_on": [],
-      "reason": "Startup, runtime source, aliases, and callbacks parse through the daemon MuxEngine and see server globals. Direct Control input still parses locally with a context-free environment, so a server-global HOME that differs from the Control process is ignored before the request reaches the daemon."
-    },
-    {
       "id": "copy-mode.action-fidelity",
       "title": "Complete the copy-mode action vocabulary",
       "decision": "adopt",
@@ -3326,6 +3298,21 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Shutdown now freezes new response admissions under the same lock that counts active requests, waits a bounded interval for admitted Control and Command responses to enter their mailboxes, publishes ServerStopping, and drains every registered client writer through one bounded deadline. Late requests cannot execute after the freeze. The foreground thread regains and holds the actual listener through admission and writer drain, then removes the endpoint before dropping the listener, so a replacement cannot bind while the old path guard remains armed. Controlled regressions cover an active response, zero-to-late Control and Command requests, a stalled writer, a disconnected mailbox, and replacement binding during cleanup. Command and Control CLI tests prove empty successful kill-server replies, one final Control exit, no unexpected-exit text, and immediate fresh-daemon startup."
+    },
+    {
+      "id": "control-mode.local-parser-environment",
+      "title": "Parse Control tilde with daemon environment",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz/src/control_mode.rs",
+        "resource:crates/zz-mux/src/parser.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:knowledge/protocol/wire-protocol.md",
+        "resource:knowledge/tmux/conf-parser.md",
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/control-tilde-environment.txt"
+      ],
+      "resolution": "Direct Control input now expands `~` from the daemon instead of the Control process. Measured on a throwaway pinned server whose global HOME is /server/home with a pty-less control client holding HOME=/client/home: `display-message -p ~` answers /server/home, `~<user>` answers that user's entry in the server host's passwd database, a missing user is the located `parse error: syntax error`, a single-quoted tilde stays literal, and an empty (`set-environment -g HOME ''`) or unset (`-gu HOME`) server HOME falls back to the server host's own passwd home, not the client's. Protocol v92 carries that lookup as HomeDirectoryRequest/HomeDirectoryResponse: control_mode's parse_line runs one recording pass that answers every tilde with an empty home so the whole line is walked instead of aborting at the first name, collects the names, makes one batched round trip only when the line actually needs a home, and re-parses with the answers. The daemon reads its own engine's global HOME when nonempty and otherwise the daemon host's passwd entry, which is the rule ConfigBuilder::home_directory already applies to every other parser context. The round trip consumes no command number and adds no frame, proved by the differential's rebased %begin/%end timeline: thirteen contiguous command frames matched the pin exactly on both binaries. Variables are still not expanded in direct Control input, which stays a separate divergence: the pin's lexer reads $NAME from the server's global environment and zz keeps the literal text."
     },
     {
       "id": "control-mode.source-diagnostic-typing",

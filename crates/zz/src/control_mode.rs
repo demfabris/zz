@@ -19,6 +19,7 @@ use super::{
     tmux_command_starts_server, tmux_label_creation_error,
 };
 
+const CONTROL_PARSE_SOURCE: &str = "<control>";
 const DCS: &[u8] = b"\x1bP1000p";
 const ST: &[u8] = b"\x1b\\";
 
@@ -101,6 +102,7 @@ fn drive<W: Write>(
         vec![initial],
         &mut state,
         &mut pending_stdin,
+        None,
     )?;
     if prepared.exit.is_some() {
         finish_exit(
@@ -200,57 +202,53 @@ fn drive<W: Write>(
             },
         );
         match event {
-            MainEvent::Stdin(StdinEvent::Line(line)) => match parse_line(&line) {
-                ParsedLine::Return => {
-                    return finish_control_return(
-                        client.as_ref(),
-                        PendingReturn::Blank {
-                            code: state.return_code,
-                            preceding_input: 0,
-                            observed_preceding_input: false,
-                        },
+            MainEvent::Stdin(StdinEvent::Line(line)) => {
+                let mut resolved = resolve_home_directories(
+                    client.as_ref(),
+                    &receiver,
+                    output,
+                    &line,
+                    &mut state,
+                    &mut pending_stdin,
+                )?;
+                if resolved.exit.is_some() {
+                    finish_exit(
                         output,
-                        &mut state,
+                        resolved.exit.reason(),
+                        state.wait_exit,
+                        false,
                         &events,
                         &mut stdin_started,
                         &receiver,
                         &mut pending_stdin,
-                    );
-                }
-                ParsedLine::Ignore => {}
-                ParsedLine::Error(error) => output.parse_error(&error)?,
-                ParsedLine::Commands(commands) => {
-                    let mut prepared = prepare_command_unit(
-                        client.as_ref(),
-                        &receiver,
-                        output,
-                        commands,
-                        &mut state,
-                        &mut pending_stdin,
                     )?;
-                    if prepared.exit.is_some() {
-                        finish_exit(
+                    return Ok(match resolved.exit {
+                        ExitSignal::Clean => state.return_code,
+                        ExitSignal::Detached => 0,
+                        _ => 1,
+                    });
+                }
+                match parse_line(&line, &resolved.homes) {
+                    ParsedLine::Return => {
+                        return finish_control_return(
+                            client.as_ref(),
+                            PendingReturn::Blank {
+                                code: state.return_code,
+                                preceding_input: 0,
+                                observed_preceding_input: false,
+                            },
                             output,
-                            prepared.exit.reason(),
-                            state.wait_exit,
-                            false,
+                            &mut state,
                             &events,
                             &mut stdin_started,
                             &receiver,
                             &mut pending_stdin,
-                        )?;
-                        return Ok(match prepared.exit {
-                            ExitSignal::Clean => state.return_code,
-                            ExitSignal::Detached => 0,
-                            _ => 1,
-                        });
+                        );
                     }
-                    if let Some(error) = prepared_error(&prepared.commands) {
-                        output.parse_error(&format!("parse error: {}", error.tmux_message()))?;
-                        if let Some(pending_return) = settle_preparation_error_return(
-                            &mut prepared.pending_return,
-                            &mut state.pending_return,
-                        ) {
+                    ParsedLine::Ignore => {
+                        if let Some(pending_return) =
+                            settle_home_directory_return(&mut resolved, &mut state)
+                        {
                             return finish_control_return(
                                 client.as_ref(),
                                 pending_return,
@@ -262,34 +260,38 @@ fn drive<W: Write>(
                                 &mut pending_stdin,
                             );
                         }
-                        continue;
                     }
-                    let first_is_detach = prepared
-                        .commands
-                        .first()
-                        .is_some_and(prepared_command_is_detach);
-                    if !first_is_detach && state.pending_return.is_none() {
-                        state.pending_return = prepared.pending_return.take();
+                    ParsedLine::Error(error) => {
+                        output.parse_error(&error)?;
+                        if let Some(pending_return) =
+                            settle_home_directory_return(&mut resolved, &mut state)
+                        {
+                            return finish_control_return(
+                                client.as_ref(),
+                                pending_return,
+                                output,
+                                &mut state,
+                                &events,
+                                &mut stdin_started,
+                                &receiver,
+                                &mut pending_stdin,
+                            );
+                        }
                     }
-                    for (index, command) in prepared.commands.into_iter().enumerate() {
-                        let result = execute_prepared_command(
+                    ParsedLine::Commands(commands) => {
+                        let mut prepared = prepare_command_unit(
                             client.as_ref(),
                             &receiver,
                             output,
-                            command,
-                            1,
+                            commands,
                             &mut state,
                             &mut pending_stdin,
-                            if index == 0 && first_is_detach {
-                                prepared.pending_return.take()
-                            } else {
-                                None
-                            },
+                            resolved.pending_return.take(),
                         )?;
-                        if result.exit.is_some() {
+                        if prepared.exit.is_some() {
                             finish_exit(
                                 output,
-                                result.exit.reason(),
+                                prepared.exit.reason(),
                                 state.wait_exit,
                                 false,
                                 &events,
@@ -297,32 +299,92 @@ fn drive<W: Write>(
                                 &receiver,
                                 &mut pending_stdin,
                             )?;
-                            return Ok(match result.exit {
-                                ExitSignal::Detached => 0,
+                            return Ok(match prepared.exit {
                                 ExitSignal::Clean => state.return_code,
-                                _ => result.exit_code,
+                                ExitSignal::Detached => 0,
+                                _ => 1,
                             });
                         }
-                        if result.abort_line {
-                            break;
+                        if let Some(error) = prepared_error(&prepared.commands) {
+                            output
+                                .parse_error(&format!("parse error: {}", error.tmux_message()))?;
+                            if let Some(pending_return) = settle_preparation_error_return(
+                                &mut prepared.pending_return,
+                                &mut state.pending_return,
+                            ) {
+                                return finish_control_return(
+                                    client.as_ref(),
+                                    pending_return,
+                                    output,
+                                    &mut state,
+                                    &events,
+                                    &mut stdin_started,
+                                    &receiver,
+                                    &mut pending_stdin,
+                                );
+                            }
+                            continue;
+                        }
+                        let first_is_detach = prepared
+                            .commands
+                            .first()
+                            .is_some_and(prepared_command_is_detach);
+                        if !first_is_detach && state.pending_return.is_none() {
+                            state.pending_return = prepared.pending_return.take();
+                        }
+                        for (index, command) in prepared.commands.into_iter().enumerate() {
+                            let result = execute_prepared_command(
+                                client.as_ref(),
+                                &receiver,
+                                output,
+                                command,
+                                1,
+                                &mut state,
+                                &mut pending_stdin,
+                                if index == 0 && first_is_detach {
+                                    prepared.pending_return.take()
+                                } else {
+                                    None
+                                },
+                            )?;
+                            if result.exit.is_some() {
+                                finish_exit(
+                                    output,
+                                    result.exit.reason(),
+                                    state.wait_exit,
+                                    false,
+                                    &events,
+                                    &mut stdin_started,
+                                    &receiver,
+                                    &mut pending_stdin,
+                                )?;
+                                return Ok(match result.exit {
+                                    ExitSignal::Detached => 0,
+                                    ExitSignal::Clean => state.return_code,
+                                    _ => result.exit_code,
+                                });
+                            }
+                            if result.abort_line {
+                                break;
+                            }
+                        }
+                        if let Some(pending_return) =
+                            take_ready_pending_return(&mut state.pending_return)
+                        {
+                            return finish_control_return(
+                                client.as_ref(),
+                                pending_return,
+                                output,
+                                &mut state,
+                                &events,
+                                &mut stdin_started,
+                                &receiver,
+                                &mut pending_stdin,
+                            );
                         }
                     }
-                    if let Some(pending_return) =
-                        take_ready_pending_return(&mut state.pending_return)
-                    {
-                        return finish_control_return(
-                            client.as_ref(),
-                            pending_return,
-                            output,
-                            &mut state,
-                            &events,
-                            &mut stdin_started,
-                            &receiver,
-                            &mut pending_stdin,
-                        );
-                    }
                 }
-            },
+            }
             MainEvent::Stdin(StdinEvent::Eof) => {
                 return finish_control_return(
                     client.as_ref(),
@@ -410,13 +472,13 @@ fn prepare_command_unit<W: Write>(
     commands: Vec<CommandInvocation>,
     state: &mut ControlState,
     pending_stdin: &mut VecDeque<StdinEvent>,
+    mut pending_return: Option<PendingReturn>,
 ) -> io::Result<PreparedUnit> {
     let expected = commands.len();
     let request_id = client
         .prepare_commands(commands)
         .map_err(io::Error::other)?;
     let mut exit = ExitSignal::None;
-    let mut pending_return = None;
     loop {
         match receiver.recv().unwrap_or(MainEvent::Disconnected) {
             MainEvent::Protocol(message) => match match_prepared_response(*message, request_id) {
@@ -459,6 +521,86 @@ fn prepare_command_unit<W: Write>(
                     },
                     pending_return,
                 });
+            }
+        }
+    }
+}
+
+fn match_home_directory_response(
+    message: ProtocolMessage,
+    request_id: u64,
+) -> Result<Vec<Option<String>>, ProtocolMessage> {
+    match message {
+        ProtocolMessage::HomeDirectoryResponse {
+            request_id: response_id,
+            homes,
+        } if response_id == request_id => Ok(homes),
+        message => Err(message),
+    }
+}
+
+fn resolve_home_directories<W: Write>(
+    client: &InteractiveClient,
+    receiver: &mpsc::Receiver<MainEvent>,
+    output: &mut ControlWriter<W>,
+    line: &str,
+    state: &mut ControlState,
+    pending_stdin: &mut VecDeque<StdinEvent>,
+) -> io::Result<HomeUnit> {
+    let mut unit = HomeUnit::default();
+    if !line.contains('~') {
+        return Ok(unit);
+    }
+    let users = zz_mux::config_home_directory_names(CONTROL_PARSE_SOURCE, line);
+    if users.is_empty() {
+        return Ok(unit);
+    }
+    let users: Vec<String> = users.into_iter().collect();
+    let request_id = client
+        .request_home_directories(users.clone())
+        .map_err(io::Error::other)?;
+    loop {
+        match receiver.recv().unwrap_or(MainEvent::Disconnected) {
+            MainEvent::Protocol(message) => {
+                match match_home_directory_response(*message, request_id) {
+                    Ok(homes) => {
+                        if homes.len() != users.len() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "home directory count mismatch",
+                            ));
+                        }
+                        unit.homes = users
+                            .into_iter()
+                            .zip(homes)
+                            .filter_map(|(user, home)| home.map(|home| (user, home)))
+                            .collect();
+                        return Ok(unit);
+                    }
+                    Err(message) => {
+                        let signal = handle_protocol(message, state, output)?;
+                        if signal.is_some() && unit.exit != ExitSignal::Detached {
+                            unit.exit = signal;
+                        }
+                    }
+                }
+            }
+            MainEvent::Stdin(stdin) => {
+                capture_pending_return(
+                    stdin,
+                    state.return_code,
+                    &mut unit.pending_return,
+                    pending_stdin,
+                    output,
+                );
+            }
+            MainEvent::Disconnected => {
+                unit.exit = if unit.exit.is_some() {
+                    unit.exit
+                } else {
+                    ExitSignal::Unexpected
+                };
+                return Ok(unit);
             }
         }
     }
@@ -1191,6 +1333,14 @@ fn settle_preparation_error_return(
     take_ready_pending_return(state_return)
 }
 
+fn settle_home_directory_return(
+    resolved: &mut HomeUnit,
+    state: &mut ControlState,
+) -> Option<PendingReturn> {
+    resolved.pending_return.as_ref()?;
+    settle_preparation_error_return(&mut resolved.pending_return, &mut state.pending_return)
+}
+
 fn settle_deferred_return(
     caller_detached: bool,
     deferred_return: &mut Option<PendingReturn>,
@@ -1368,11 +1518,11 @@ fn wait_for_exit_input(
     }
 }
 
-fn parse_line(line: &str) -> ParsedLine {
+fn parse_line(line: &str, homes: &BTreeMap<String, String>) -> ParsedLine {
     if line.is_empty() {
         return ParsedLine::Return;
     }
-    let parsed = zz_mux::MuxEngine::parse_config_without_variable_expansion("<control>", line);
+    let parsed = zz_mux::parse_config_with_home_directories(CONTROL_PARSE_SOURCE, line, homes);
     if let Some(diagnostic) = parsed.diagnostics.first() {
         return ParsedLine::Error(format!("parse error: {}", diagnostic.message));
     }
@@ -1774,8 +1924,16 @@ struct PreparedUnit {
     pending_return: Option<PendingReturn>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default)]
+struct HomeUnit {
+    homes: BTreeMap<String, String>,
+    exit: ExitSignal,
+    pending_return: Option<PendingReturn>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ExitSignal {
+    #[default]
     None,
     Clean,
     Detached,
@@ -2599,7 +2757,7 @@ mod tests {
             .as_mut()
             .expect("pending EOF")
             .consume_preceding_input();
-        let ParsedLine::Commands(mut commands) = parse_line(&line) else {
+        let ParsedLine::Commands(mut commands) = parse_line(&line, &BTreeMap::new()) else {
             panic!("invalid bind-key did not parse for preparation");
         };
         let prepared = PreparedCommand {
@@ -2888,10 +3046,13 @@ mod tests {
 
     #[test]
     fn parser_distinguishes_return_ignores_chains_and_errors() {
-        assert_eq!(parse_line(""), ParsedLine::Return);
-        assert_eq!(parse_line("   "), ParsedLine::Ignore);
-        assert_eq!(parse_line(" # ignored"), ParsedLine::Ignore);
-        let ParsedLine::Commands(commands) = parse_line("ls ; list-panes") else {
+        assert_eq!(parse_line("", &BTreeMap::new()), ParsedLine::Return);
+        assert_eq!(parse_line("   ", &BTreeMap::new()), ParsedLine::Ignore);
+        assert_eq!(
+            parse_line(" # ignored", &BTreeMap::new()),
+            ParsedLine::Ignore
+        );
+        let ParsedLine::Commands(commands) = parse_line("ls ; list-panes", &BTreeMap::new()) else {
             panic!("semicolon chain was not parsed");
         };
         assert_eq!(
@@ -2901,16 +3062,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["ls", "list-panes"]
         );
-        let ParsedLine::Commands(commands) = parse_line("bogus-command") else {
+        let ParsedLine::Commands(commands) = parse_line("bogus-command", &BTreeMap::new()) else {
             panic!("unknown command was rejected before live preparation");
         };
         assert_eq!(commands[0].name, "bogus-command");
-        let ParsedLine::Commands(commands) = parse_line("set 'oops") else {
+        let ParsedLine::Commands(commands) = parse_line("set 'oops", &BTreeMap::new()) else {
             panic!("open quote at EOF was rejected");
         };
         assert_eq!(commands[0].name, "set");
         assert_eq!(commands[0].args, ["oops"]);
-        let ParsedLine::Commands(commands) = parse_line("set-environment -g CONTROL_LITERAL $FOO")
+        let ParsedLine::Commands(commands) =
+            parse_line("set-environment -g CONTROL_LITERAL $FOO", &BTreeMap::new())
         else {
             panic!("literal variable command was not parsed");
         };
@@ -2944,6 +3106,60 @@ mod tests {
             .unwrap(),
             [command]
         );
+    }
+
+    #[test]
+    fn home_directory_response_matching_ignores_stale_request_ids() {
+        let stale = ProtocolMessage::HomeDirectoryResponse {
+            request_id: 8,
+            homes: Vec::new(),
+        };
+        assert!(matches!(
+            match_home_directory_response(stale, 9),
+            Err(ProtocolMessage::HomeDirectoryResponse { request_id: 8, .. })
+        ));
+        assert_eq!(
+            match_home_directory_response(
+                ProtocolMessage::HomeDirectoryResponse {
+                    request_id: 9,
+                    homes: vec![Some("/server/home".to_owned()), None],
+                },
+                9,
+            )
+            .unwrap(),
+            [Some("/server/home".to_owned()), None]
+        );
+    }
+
+    #[test]
+    fn control_lines_expand_tildes_from_the_daemon_answer() {
+        let homes = BTreeMap::from([
+            (String::new(), "/server/home".to_owned()),
+            ("alice".to_owned(), "/users/alice".to_owned()),
+        ]);
+        let ParsedLine::Commands(commands) =
+            parse_line("display-message -p ~ ~/x ~alice/y $LITERAL", &homes)
+        else {
+            panic!("tilde line was not parsed");
+        };
+        assert_eq!(
+            commands[0].args,
+            [
+                "-p",
+                "/server/home",
+                "/server/home/x",
+                "/users/alice/y",
+                "$LITERAL"
+            ]
+        );
+        assert_eq!(
+            parse_line("display-message -p ~nobody", &homes),
+            ParsedLine::Error("parse error: syntax error".to_owned())
+        );
+        let ParsedLine::Commands(commands) = parse_line("display-message -p '~'", &homes) else {
+            panic!("single-quoted tilde was not parsed");
+        };
+        assert_eq!(commands[0].args, ["-p", "~"]);
     }
 
     #[test]

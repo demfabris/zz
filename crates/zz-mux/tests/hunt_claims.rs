@@ -1298,7 +1298,13 @@ fn send_keys_reports_the_flags_it_cannot_honor() {
         .unwrap();
     assert_eq!(formatted, plain);
 
-    for flag in ["-R", "-M", "-K"] {
+    let reset = engine
+        .execute(&mut context, &command("send-keys", &["-R", "x"]))
+        .unwrap();
+    assert_eq!(reset.effects.len(), plain.effects.len() + 1);
+    assert_eq!(reset.effects[1..], plain.effects[..]);
+
+    for flag in ["-M", "-K"] {
         let error = engine
             .execute(&mut context, &command("send-keys", &[flag, "x"]))
             .unwrap_err();

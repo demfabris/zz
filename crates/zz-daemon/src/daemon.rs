@@ -7120,6 +7120,18 @@ impl Shared {
                             });
                         }
                     }
+                    MuxEffect::ResetPane { pane } => {
+                        let mut terminals = Vec::new();
+                        for sink in resolve_input_sinks(&inner, *pane)? {
+                            if let PaneSink::Terminal(terminal) = sink {
+                                terminals.push(terminal);
+                            }
+                        }
+                        if !terminals.is_empty() {
+                            deferred_terminal_commands
+                                .push(DeferredTerminalCommand::ResetScreen { terminals });
+                        }
+                    }
                     MuxEffect::CopyModeRepeat { pane, count } => {
                         if inner
                             .copy_sessions
@@ -29053,6 +29065,9 @@ enum DeferredTerminalCommand {
         keys: Vec<zz_protocol::KeyToken>,
         repeat: u32,
     },
+    ResetScreen {
+        terminals: Vec<Arc<TerminalSession>>,
+    },
 }
 
 impl DeferredTerminalCommand {
@@ -29079,6 +29094,11 @@ impl DeferredTerminalCommand {
                 appearance,
             } => terminal.set_appearance(appearance),
             Self::AttachView { terminal, view } => terminal.attach_view(view),
+            Self::ResetScreen { terminals } => {
+                for terminal in terminals {
+                    terminal.reset_screen();
+                }
+            }
             Self::Resize { terminal, geometry } => terminal.resize(
                 geometry.columns,
                 geometry.rows,

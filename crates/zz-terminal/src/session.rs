@@ -989,6 +989,11 @@ impl TerminalSession {
         self.send_command(Command::SetWrapSearch(enabled));
     }
 
+    /// Apply pinned tmux's `send-keys -R` pane reset, preserving scrollback.
+    pub fn reset_screen(&self) {
+        self.send_command(Command::ResetScreen);
+    }
+
     #[must_use]
     pub fn word_separators(&self) -> WordSeparators {
         self.word_separators.read().clone()
@@ -1539,6 +1544,7 @@ enum Command {
     SetAppearance(Arc<TerminalAppearance>),
     SetAllowPassthrough(AllowPassthrough),
     SetWrapSearch(bool),
+    ResetScreen,
     AttachView(TerminalViewId),
     DetachView(TerminalViewId),
     ReleaseView(TerminalViewId),
@@ -1603,6 +1609,7 @@ impl Command {
             Self::KittyImageGeneration(_) => "kitty-image-generation",
             Self::PendingPasteOpened { .. } => "pending-paste-opened",
             Self::UnbindPastedImage { .. } => "unbind-pasted-image",
+            Self::ResetScreen => "reset-screen",
             Self::Terminate => "terminate",
             Self::Shutdown => "shutdown",
         }
@@ -3684,6 +3691,7 @@ fn run_output_view(
                         | Command::RawInput(_)
                         | Command::SetAllowPassthrough(_)
                         | Command::PendingPasteOpened { .. }
+                    | Command::ResetScreen
                     | Command::UnbindPastedImage { .. },
                 ) => {}
                 Ok(Command::Output(bytes)) => {
@@ -4552,6 +4560,28 @@ fn run_terminal(
                 }
                 Command::SetWrapSearch(next) => {
                     wrap_search = next;
+                }
+                Command::ResetScreen => {
+                    reset_pane_screen(&mut terminal)?;
+                    for view in active_views.values_mut().chain(inactive_views.values_mut()) {
+                        let state = view.active_mut();
+                        state.selection = None;
+                        state.hover_link = None;
+                    }
+                    terminal.set_selection(None)?;
+                    publish_active_views(
+                        &mut terminal,
+                        publisher,
+                        &mut render_state,
+                        &mut row_iterator,
+                        &mut cell_iterator,
+                        &mut generations,
+                        SnapshotChange::Content,
+                        &mut dictionary,
+                        &mut active_views,
+                        &word_separators,
+                        SessionStatus::Running,
+                    )?;
                 }
                 Command::SetAppearance(next) => {
                     reported_color_scheme.set(ghostty_color_scheme(next.color_scheme));
@@ -7016,6 +7046,53 @@ fn capture_terminal(
     let written = formatter.format_buf(&mut output).map_err(capture_failure)?;
     output.truncate(written);
     String::from_utf8(output).map_err(|error| TerminalCaptureError::Failed(error.to_string()))
+}
+
+const PANE_RESET_PRELUDE: &[u8] = b"\x1b\\\x1b[!p\x1b[m\x1b(B\x1b)B\x1b[r\x1b[?7h\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l\x1b[?1004l\x1b[?2004l\x1b[3g";
+
+const PANE_RESET_PALETTE: &[u8] = b"\x1b]104\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\";
+
+/// Count the visible rows the pin's `grid_view_clear_history` would push into
+/// history: every row up to and including the last one holding content.
+fn used_visible_rows(terminal: &Terminal<'_, '_>) -> u16 {
+    let rows = terminal.rows().unwrap_or(0);
+    match capture_terminal(terminal, None, CaptureOptions::default()) {
+        Ok(text) if text.is_empty() => 0,
+        Ok(text) => u16::try_from(text.split('\n').count())
+            .unwrap_or(rows)
+            .min(rows),
+        Err(_) => rows,
+    }
+}
+
+/// Apply pinned tmux's `send-keys -R` to the pane without losing scrollback.
+///
+/// `cmd-send-keys.c` runs `colour_palette_clear` plus `input_reset(ictx, 1)`,
+/// whose `screen_write_reset` restores default tab stops, drops the scroll
+/// region, sets the screen mode back to cursor plus wrap, clears the screen
+/// through the `scroll-on-clear` path, and homes the cursor. libghostty's own
+/// `reset` is RIS and discards history, so the same result is composed here out
+/// of a scroll-up sized to the used rows plus explicit mode, tab, and palette
+/// resets. The leading ST terminates any string sequence the pane left half
+/// parsed without printing a cell, which is what `input_clear` plus the return
+/// to the ground state does.
+fn reset_pane_screen(terminal: &mut Terminal<'_, '_>) -> Result<(), WorkerError> {
+    let used = used_visible_rows(terminal);
+    let columns = terminal.cols()?;
+    let mut program = PANE_RESET_PRELUDE.to_vec();
+    let mut column = 8_u16;
+    while column < columns {
+        write!(program, "\x1b[1;{}H\x1bH", column.saturating_add(1))?;
+        column = column.saturating_add(8);
+    }
+    if used > 0 {
+        write!(program, "\x1b[{used}S")?;
+    }
+    program.extend_from_slice(b"\x1b[2J\x1b[H");
+    program.extend_from_slice(PANE_RESET_PALETTE);
+    terminal.vt_write(&program);
+    terminal.scroll_viewport(ScrollViewport::Bottom);
+    Ok(())
 }
 
 fn capture_viewport(
@@ -16517,6 +16594,141 @@ mod tests {
 
         assert!(matches!(result, ViewActionResult::OverlaySnapshot));
         assert_eq!(hover_link.expect("alternate hover").uri, "zz-image://6");
+    }
+
+    #[test]
+    fn pane_reset_scrolls_the_used_rows_into_history_like_the_pinned_send_keys_r() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 6,
+            max_scrollback: 1 << 16,
+        })
+        .expect("terminal");
+        for line in 1..=20 {
+            terminal.vt_write(format!("L{line:02}\r\n").as_bytes());
+        }
+        assert_eq!(terminal.scrollback_rows().expect("scrollback"), 15);
+
+        reset_pane_screen(&mut terminal).expect("reset");
+
+        assert_eq!(
+            terminal.scrollback_rows().expect("scrollback"),
+            20,
+            "pinned tmux answers history_size 15 before send-keys -R and 20 after on this pane"
+        );
+        assert_eq!(terminal.cursor_x().expect("cursor x"), 0);
+        assert_eq!(terminal.cursor_y().expect("cursor y"), 0);
+        let history = capture_terminal(
+            &terminal,
+            None,
+            CaptureOptions {
+                start: CaptureBoundary::HistoryStart,
+                ..CaptureOptions::default()
+            },
+        )
+        .expect("capture history");
+        let lines = history.split('\n').collect::<Vec<_>>();
+        assert_eq!(lines.first().copied(), Some("L01"));
+        assert_eq!(lines.get(19).copied(), Some("L20"));
+        assert!(
+            lines[20..].iter().all(|line| line.is_empty()),
+            "the pin leaves the visible rows blank after -R: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn pane_reset_restores_the_pinned_default_tab_stops() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 40,
+            rows: 6,
+            max_scrollback: 1 << 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"\x1b[3g\x1b[1;5H\x1bH\x1b[2;1H\t");
+        assert_eq!(terminal.cursor_x().expect("cursor x"), 4);
+
+        reset_pane_screen(&mut terminal).expect("reset");
+        terminal.vt_write(b"\t");
+
+        assert_eq!(
+            terminal.cursor_x().expect("cursor x"),
+            8,
+            "pinned tmux answers cursor_x 4 with a custom tab stop and 8 after send-keys -R"
+        );
+    }
+
+    #[test]
+    fn pane_reset_clears_the_pane_palette_and_the_active_pen() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 4,
+            max_scrollback: 1 << 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"\x1b]4;42;rgb:12/34/56\x1b\\\x1b[38;5;42mA");
+        let before = snapshot_fixture(&terminal);
+        let cell = before.row(0).expect("first row")[0];
+        assert_eq!(
+            before.style(cell).expect("style").foreground(),
+            Color::rgb(0x12, 0x34, 0x56)
+        );
+
+        reset_pane_screen(&mut terminal).expect("reset");
+        terminal.vt_write(b"B\x1b[38;5;42mC");
+
+        let mut fresh = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 4,
+            max_scrollback: 1 << 16,
+        })
+        .expect("terminal");
+        fresh.vt_write(b"B\x1b[38;5;42mC");
+        let expected = snapshot_fixture(&fresh);
+        let expected_row = expected.row(0).expect("first row");
+
+        let after = snapshot_fixture(&terminal);
+        let row = after.row(0).expect("first row");
+        assert_eq!(
+            after.style(row[0]).expect("style").foreground(),
+            expected.style(expected_row[0]).expect("style").foreground(),
+            "the pin's input_reset_cell puts the pen back to the default cell"
+        );
+        assert_eq!(
+            after.style(row[1]).expect("style").foreground(),
+            expected.style(expected_row[1]).expect("style").foreground(),
+            "the pin's colour_palette_clear drops the pane's OSC 4 overrides"
+        );
+        assert_ne!(
+            after.style(row[1]).expect("style").foreground(),
+            Color::rgb(0x12, 0x34, 0x56)
+        );
+    }
+
+    #[test]
+    fn pane_reset_drops_the_scroll_region_and_abandons_a_partial_sequence() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 6,
+            max_scrollback: 1 << 16,
+        })
+        .expect("terminal");
+        terminal.vt_write(b"one\r\ntwo\r\n\x1b[2;4r\x1bPtmux;partial");
+        let before = terminal.scrollback_rows().expect("scrollback");
+
+        reset_pane_screen(&mut terminal).expect("reset");
+        terminal.vt_write(b"after");
+
+        assert_eq!(
+            terminal.scrollback_rows().expect("scrollback"),
+            before + 2,
+            "the pin's screen_write_scrollregion restores the full region before the clear scrolls"
+        );
+        let visible = capture_terminal(&terminal, None, CaptureOptions::default())
+            .expect("capture visible");
+        assert_eq!(
+            visible, "after",
+            "the pin's input_reset abandons the half-parsed sequence and returns to ground"
+        );
     }
 
     #[test]

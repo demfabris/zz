@@ -2618,35 +2618,6 @@
       "reason": "Pinned tmux routes -K through the selected client's key handler and reuses the invoking queue key when no positional key is supplied. Implementers need protocol-catalog, protocol-key, mux-command, and daemon-core for this path and the retained high-byte, count, and copy-mode items; terminal.key-client-selection owns -c and terminal.key-reset owns -R."
     },
     {
-      "id": "terminal.key-reset",
-      "title": "Reset terminal input and palette state",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts",
-        "daily"
-      ],
-      "owner": "terminal",
-      "items": [
-        "flag:send-keys:-R"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz-terminal/src/session.rs",
-        "resource:third_party/ghostty-reference/UPSTREAM.md",
-        "resource:knowledge/tmux/divergences.md",
-        "resource:third_party/tmux-reference/UPSTREAM.md"
-      ],
-      "acceptance": [
-        "Terminal tests prove send-keys -R clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, then preserves any requested key delivery."
-      ],
-      "depends_on": [],
-      "reason": "Pinned tmux clears the pane palette, hard-resets terminal input state, marks style, theme, and redraw state, and still delivers any supplied keys. cmd-send-keys.c's -R block and input.c's INPUT_ESC_RIS run the same colour_palette_clear plus screen_write_reset pair, so -R is RIS applied to the pane from the command side. zz drives every pane-level screen operation by writing VT bytes, and libghostty's only reset entry point is ghostty_terminal_reset, whose RIS also drops scrollback. Measured on 2026-09-01 with a 6-row pane printing 20 lines: the pin's RIS leaves history_size 17 -> 23 with the visible rows pushed into history and capture-pane -S - still holding every line, while zz's RIS leaves capture-pane -S - holding only the fresh prompt. Implementing -R on that primitive would ship history loss the pin does not have, and a composed DECSTR plus scroll-up prelude still cannot restore default tab stops. This needs a scrollback-preserving screen reset in the terminal engine before the catalog flag and the send-keys command surface are worth promoting."
-    },
-    {
       "id": "terminal.resize-pane-trim",
       "title": "Add terminal history trim action",
       "decision": "adopt",
@@ -4403,6 +4374,20 @@
         "scenario:compat/scenarios/smoke/source-file-tilde.txt"
       ],
       "resolution": "source-file no longer rewrites a literal leading ~/ after parsing: parser-expanded leading tildes still arrive as absolute paths, top-level literal tildes pass through cwd resolution, and registered-client nested literal tildes use the stable invoking base closed under source-file.nested-client-cwd. Startup and deferred event-hook base selection remain active. The CLI regression pins the top-level choice against a metacharacter-bearing daemon HOME."
+    },
+    {
+      "id": "terminal.key-reset",
+      "title": "Reset terminal input and palette state",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/send-keys-reset.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "`send-keys -R` is implemented and the catalog flag is promoted. zz composes the pin's `screen_write_reset` out of VT bytes instead of calling libghostty's `reset`, which is RIS and discards history: a bare ST abandons any half-parsed string sequence without printing a cell, DECSTR plus an explicit SGR and charset reset restores the pen the way `input_reset_cell` does, DECSTBM drops the scroll region, DECAWM and DECTCEM come back on while the mouse, focus, and bracketed-paste modes go off to match `s->mode = MODE_CURSOR|MODE_WRAP`, TBC 3 plus one HTS every eight columns reproduces `screen_reset_tabs`, a scroll-up sized to the used visible rows reproduces `grid_view_clear_history`, and OSC 104, 110, 111, and 112 reproduce `colour_palette_clear`. Measured against the pin on 2026-09-01 with a 20x6 pane printing twenty lines: history_size goes 15 to 20, the cursor lands at 0,0, `capture-pane -S -` still holds L01 through L20 followed by six blank rows, a custom tab stop at column 4 goes back to the default 8, and a pane whose scroll region was narrowed scrolls the full screen again afterwards. Four zz-terminal tests assert each of those, and `send_keys_reset_runs_before_the_requested_key_delivery` asserts the command shape the pin's exec has: `-R` alone resets and sends nothing, `-R` with strings resets and then injects exactly what a bare `send-keys` would, and `-X` returns before the `-R` block ever runs. The differential scenario `send-keys-reset` runs the whole thing against the pin and is clean on all six axes at strict geometry. One qualification the acceptance did not name: the pin's clear runs through `screen_write_clearscreen`, so it only pushes into history because `scroll-on-clear` defaults on; zz reproduces that default unconditionally because the option itself is parked in `options.pane-engine-knobs`, which is where turning it off belongs. Nothing wire-reachable changed: the reset rides an internal MuxEffect and a terminal worker command, not a protocol message."
     },
     {
       "id": "tracker.args-parse-bind-key",

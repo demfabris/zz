@@ -1169,6 +1169,33 @@ Three tests hold the classification honest rather than leaving it as prose: zz-t
 `clearing_the_whole_screen_keeps_history_where_the_pin_scrolls_into_it`, and zz-tui's
 `bracketed_paste_swallows_control_bytes_the_pin_would_time`.
 
+## `send-keys -R` composed from VT bytes (2026-09-01)
+
+`cmd-send-keys.c`'s `-R` block is `colour_palette_clear` plus `input_reset(ictx, 1)`, and that
+`input_reset` runs `screen_write_reset`: default tab stops, full scroll region,
+`s->mode = MODE_CURSOR|MODE_WRAP`, `screen_write_clearscreen`, cursor home. The clear goes through
+the `scroll-on-clear` path, so on its default the used visible rows land in history rather than
+being discarded. Measured on the pin with a 20x6 pane printing twenty lines: `history_size` 15 to
+20, cursor 0,0, `capture-pane -S -` still holding L01 through L20 followed by six blank rows, and a
+custom tab stop at column 4 back to the default 8.
+
+libghostty's only reset entry point is `ghostty_terminal_reset`, whose RIS drops scrollback (7 rows
+to 0 in a probe), so zz composes the same result out of VT bytes instead: a bare ST to abandon a
+half-parsed string sequence without printing a cell, DECSTR plus an explicit `ESC[m` and ASCII
+charset designations for the pen, `ESC[r` for the scroll region because DECSTR does not touch it
+here, DECAWM and DECTCEM back on with the mouse, focus, and bracketed-paste modes off, `ESC[3g`
+plus one HTS every eight columns for the tab stops, `ESC[<used>S` for the history push, then
+`ESC[2J ESC[H` and OSC 104, 110, 111, 112. `used` is the pin's `grid_view_clear_history` count:
+rows up to and including the last one holding content.
+
+Two things this does not do. The scroll-up only reaches history on the primary screen, which
+matches the pin, whose `grid_view_clear_history` falls back to a plain clear without `GRID_HISTORY`.
+And zz pushes into history unconditionally because `scroll-on-clear` itself is parked in
+`options.pane-engine-knobs`; turning that push off belongs to that group, not to `-R`.
+
+An earlier draft used CAN rather than ST for the abort, and the `send-keys-reset` differential
+caught libghostty printing it as a cell that then rode into history.
+
 ## What the last two format gaps need (2026-09-01)
 
 The `I` modifier and the `notify_monitor_cb` producer are both measured now, and neither is a format

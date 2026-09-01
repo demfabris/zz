@@ -1,0 +1,19 @@
+# send-keys -R is RIS applied from the command side: the screen clears and the
+# cursor homes, but scroll-on-clear pushes the used rows into history instead of
+# discarding them, and any supplied keys still go out after the reset.
+new-window -d -t w -n reset -- cat
+send-keys -t w:reset.0 alpha Enter
+send-keys -t w:reset.0 beta Enter
+send-keys -t w:reset.0 gamma Enter
+run-shell "sleep 0.3"
+out: capture-pane -p -S 0 -E 5 -t w:reset.0
+send-keys -R -t w:reset.0
+run-shell "sleep 0.3"
+out: capture-pane -p -S -6 -E -1 -t w:reset.0
+send-keys -l -t w:reset.0 marker
+run-shell "sleep 0.3"
+out: capture-pane -p -S 0 -E 0 -t w:reset.0
+send-keys -R -t w:reset.0 delta Enter
+run-shell "sleep 0.3"
+out: capture-pane -p -S 0 -E 1 -t w:reset.0
+out: capture-pane -p -S -1 -E -1 -t w:reset.0

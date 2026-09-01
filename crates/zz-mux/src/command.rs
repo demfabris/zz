@@ -853,6 +853,9 @@ pub enum MuxEffect {
         keys: Vec<KeyToken>,
         repeat: u32,
     },
+    ResetPane {
+        pane: PaneId,
+    },
     CopyModeRepeat {
         pane: PaneId,
         count: u32,
@@ -6957,10 +6960,14 @@ impl MuxEngine {
             1
         };
         if options.value("-N").is_some() && positional.is_empty() && !options.has("-X") {
-            return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
+            let mut execution = Execution::effect(MuxEffect::CopyModeRepeat {
                 pane,
                 count: repeat,
-            }));
+            });
+            if options.has("-R") {
+                execution.effects.push(MuxEffect::ResetPane { pane });
+            }
+            return Ok(execution);
         }
         if options.has("-X") {
             let Some(command) = positional.first() else {
@@ -6988,6 +6995,10 @@ impl MuxEngine {
             };
             return Ok(Execution::effect(MuxEffect::TerminalView { pane, action }));
         }
+        let reset = options.has("-R");
+        if reset && positional.is_empty() {
+            return Ok(Execution::effect(MuxEffect::ResetPane { pane }));
+        }
         let keys = if options.has("-H") {
             positional
                 .iter()
@@ -7014,13 +7025,22 @@ impl MuxEngine {
             && positional.iter().any(|value| value == "BSpace")
             && self.server_options.backspace == "C-\x7f"
         {
-            return Ok(Execution::default());
+            return Ok(if reset {
+                Execution::effect(MuxEffect::ResetPane { pane })
+            } else {
+                Execution::default()
+            });
         }
-        Ok(Execution::effect(MuxEffect::SendKeys {
+        let mut execution = Execution::default();
+        if reset {
+            execution.effects.push(MuxEffect::ResetPane { pane });
+        }
+        execution.effects.push(MuxEffect::SendKeys {
             pane,
             keys,
             repeat,
-        }))
+        });
+        Ok(execution)
     }
 
     fn send_prefix(
@@ -22302,6 +22322,50 @@ mod tests {
             engine.execute(&mut context, &command("reload-config", &["unexpected"])),
             Err(ServerError::CommandParse(_))
         ));
+    }
+
+    #[test]
+    fn send_keys_reset_runs_before_the_requested_key_delivery() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &[]))
+            .expect("session");
+
+        let reset_only = engine
+            .execute(&mut context, &command("send-keys", &["-R"]))
+            .expect("reset only");
+        let [MuxEffect::ResetPane { pane }] = reset_only.effects.as_slice() else {
+            panic!("send-keys -R resets the pane and sends nothing: {reset_only:?}");
+        };
+        let pane = *pane;
+
+        let plain = engine
+            .execute(&mut context, &command("send-keys", &["hello"]))
+            .expect("plain keys");
+        let reset_and_keys = engine
+            .execute(&mut context, &command("send-keys", &["-R", "hello"]))
+            .expect("reset then keys");
+        let mut expected = vec![MuxEffect::ResetPane { pane }];
+        expected.extend(plain.effects.iter().cloned());
+        assert_eq!(
+            reset_and_keys.effects, expected,
+            "pinned cmd-send-keys.c resets, skips the count==0 early return, then injects the strings"
+        );
+
+        let copy_action = engine
+            .execute(
+                &mut context,
+                &command("send-keys", &["-R", "-X", "copy-selection"]),
+            )
+            .expect("copy action");
+        assert!(
+            !copy_action
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, MuxEffect::ResetPane { .. })),
+            "the pin returns inside the -X block before it reaches the -R block"
+        );
     }
 
     #[test]

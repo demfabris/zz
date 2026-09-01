@@ -75,6 +75,7 @@
 | resize-window | 16 | yes | 0 | yes | yes | yes |
 | resize | 6 | yes | 0 | yes | yes | yes |
 | send-keys-repeat | 16 | yes | 0 | yes | yes | yes |
+| send-keys-reset | 16 | yes | 0 | yes | yes | yes |
 | session-activity | 5 | yes | 0 | yes | yes | yes |
 | sessions | 3 | yes | 0 | yes | yes | yes |
 | set-buffer-rename | 12 | yes | 0 | yes | yes | yes |

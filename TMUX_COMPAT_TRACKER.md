@@ -106,11 +106,11 @@ found during that wave.
 | Previous completed cohort | Three-front trial: 3 of 3 frozen chunks closed |
 | New residual groups | `F-ALIASES-MULTI-BODY`: 1; Wave 2: 0; prior trial: 3 |
 | Unresolved movement | Wave 2: 65 at freeze, 62 at close |
-| Live unresolved | 42 open + 20 blocked = 62 |
+| Live unresolved | 40 open + 6 blocked = 46 |
 | Practical exit gate | Open; continue from the next dispatch-board claim |
 | Latest differential | 120 scenarios, 1,862 steps, attached-client `PASS`, 2 registered GEO rows, and all other channels clean |
 | Differential SHA-256 | `1ff63ef2beb89731a84708681be491e6f0cb67ac2de42a6cb48fe5e2117862c0` |
-| Ledger settlement | 149 of 211 known groups = 70.6% |
+| Ledger settlement | 165 of 211 known groups = 78.2% |
 
 Use every row above ledger settlement as the campaign headline. Keep ledger settlement as a
 secondary diagnostic.
@@ -124,7 +124,7 @@ Ledger settlement counts a group as resolved when it is either in closed history
 
 ```text
 (closed records + accepted active groups) / (closed records + all active groups)
-(127 + 22) / (127 + 84) = 149 / 211 = 70.6%
+(129 + 36) / (129 + 82) = 165 / 211 = 78.2%
 ```
 
 Recompute it from the registry after every tracker change:

@@ -1094,6 +1094,16 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
 - `clients.interactive-refresh` (native): the pin keeps mode and redraw ownership on the server,
   while zz's clients render themselves and copy or view mode lives on the per-client terminal view,
   so `switch-mode` and the interactive redraw and pan family have no zz counterpart.
+- `formats.mouse-context` (native): the eight `mouse_*` names are filled only from the mouse key
+  event that invoked a command, and zz installs no tmux mouse key tables, so no command ever carries
+  one.
+- `formats.pane-runtime` (native): the pin's mode names read one shared pane mode stack, while zz's
+  copy, view, and search state is per client, so a pane with two viewers has no single answer.
+- `formats.terminal-cells` (native): the cursor cell, tab stops, and progress state live in the
+  terminal worker's VT, and the mux format engine models topology rather than a grid.
+- `formats.terminal-runtime` (native): the 28 VT runtime names keep the pin's inactive or default
+  value, which the [status line reference](/tmux/status-line.md) already records as default state
+  rather than support.
 
 # Related
 

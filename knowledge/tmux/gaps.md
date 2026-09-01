@@ -19,9 +19,9 @@ Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
 Tracked gap groups: **82**. Classified items: **563**.
 
-- Status: open: 40, blocked: 18, accepted: 24.
-- Decision: adopt: 45, native: 18, park: 13, never: 6.
-- Priority: later: 58, none: 24.
+- Status: open: 40, blocked: 14, accepted: 28.
+- Decision: adopt: 45, native: 22, park: 9, never: 6.
+- Priority: later: 54, none: 28.
 - Closed history entries: 129.
 - Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 90, presentation: 8, protocol: 2.
 
@@ -88,10 +88,7 @@ structure as proof.
 | `display-popup.behavior-fidelity` | Match remaining display-popup behavior | adopt | open | hard | daemon | daily, remote, scripts | none |
 | `formats.context-producer-fidelity` | Implement missing context-format producers | adopt | open | hard | mux | scripts, gui | none |
 | `formats.modifier-fidelity` | Implement remaining format modifiers | adopt | open | hard | mux | scripts | none |
-| `formats.mouse-context` | Expose mouse event formats | park | blocked | hard | protocol | scripts, gui | mouse.bound-context |
 | `formats.pane-process` | Expose remaining pane process formats | adopt | blocked | hard | daemon | scripts | protocol.binary-streams |
-| `formats.pane-runtime` | Expose pane mode formats | park | blocked | hard | client | scripts, daily | clients.interactive-refresh |
-| `formats.terminal-cells` | Expose terminal cell formats | park | blocked | hard | terminal | scripts | none |
 | `hooks.pane-events` | Produce pane focus and clipboard hooks | adopt | open | hard | daemon | scripts, gui | none |
 | `hooks.shutdown-window-unlinked-order` | Preserve forced-shutdown window-unlinked order | adopt | open | hard | mux | scripts | none |
 | `keys.copy-mode-binding-fidelity` | Match shared copy-mode binding commands | adopt | open | hard | protocol | daily, remote, scripts | copy-mode.command-fidelity |
@@ -104,7 +101,6 @@ structure as proof.
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | park | blocked | hard | client | daily | clients.interactive-refresh |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
-| `formats.terminal-runtime` | Expose terminal runtime formats | park | blocked | hardest | terminal | scripts | none |
 | `options.lock-program` | Defer tmux lock process execution | park | blocked | hardest | client | remote, admin | clients.interactive-refresh |
 | `pane.floating-model` | Defer tmux floating panes | park | blocked | hardest | mux | daily, scripts, gui | none |
 | `protocol.binary-streams` | Design one bounded command stream | park | blocked | hardest | protocol | scripts, remote | none |
@@ -120,9 +116,13 @@ structure as proof.
 | `clients.read-only-and-focus` | Retain native client focus semantics | native | accepted | none | daemon | daily, remote | none |
 | `commands.native-client-tools` | Use native client tools | native | accepted | none | gui | daily, gui | none |
 | `commands.native-superset` | Keep the zz-native command namespace explicit | native | accepted | none | protocol | daily, gui, scripts | none |
+| `formats.mouse-context` | Expose mouse event formats | native | accepted | none | protocol | scripts, gui | none |
 | `formats.native-modes` | Keep native mode row formats | native | accepted | none | client | daily, gui | none |
 | `formats.native-typed-context-producers` | Keep typed native context producers explicit | native | accepted | none | client | gui | none |
+| `formats.pane-runtime` | Expose pane mode formats | native | accepted | none | client | scripts, daily | none |
 | `formats.session-activity-wake-lifecycle` | Keep native wake lifecycle outside session activity | native | accepted | none | daemon | remote | none |
+| `formats.terminal-cells` | Expose terminal cell formats | native | accepted | none | terminal | scripts | none |
+| `formats.terminal-runtime` | Expose terminal runtime formats | native | accepted | none | terminal | scripts | none |
 | `keys.copy-mode-native-mouse` | Keep native copy-mode mouse handling | native | accepted | none | client | daily, gui | none |
 | `keys.copy-mode-native-numeric-prefix` | Keep native vi numeric prefix capture | native | accepted | none | protocol | daily, gui, scripts | none |
 | `keys.default-prefix` | Keep the native default prefix table | native | accepted | none | protocol | daily, gui | none |
@@ -756,19 +756,22 @@ The post-10v rerank split the six-token umbrella and selected R separately. w re
 
 ### `formats.mouse-context`: Expose mouse event formats
 
-Command expansion does not retain the originating mouse event.
+The pin fills `mouse_x`, `mouse_y`, `mouse_pane`, `mouse_line`, `mouse_word`, `mouse_hyperlink`, `mouse_status_line`, and `mouse_status_range` only from the mouse key event that invoked a command through its mouse key tables. zz installs no tmux mouse key names at all, because pointer gestures belong to each rendering client, which is already accepted under `keys.root-native-mouse` and `keys.copy-mode-native-mouse`. No command ever runs with an originating mouse record to publish, so the eight names stay unavailable and `mouse_x` and `mouse_y` keep the pin's null. Reopen only if zz installs tmux mouse key tables, which revives `mouse.bound-context` first.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `protocol`
 - User impact: scripts, gui
 - Items: `format:mouse_hyperlink`, `format:mouse_line`, `format:mouse_pane`, `format:mouse_status_line`, `format:mouse_status_range`, `format:mouse_word`, `format:mouse_x`, `format:mouse_y`
-- Depends on: `mouse.bound-context`
+- Depends on: none
 - Evidence:
+  - `resource:crates/zz-mux/src/formats.rs`
   - `resource:knowledge/tmux/divergences.md`
+  - `resource:knowledge/tmux/status-line.md`
 - Acceptance:
-  - `Mouse-originated commands receive one normalized event record across terminal and GUI clients.`
+  - `Native pointer handling keeps selection, scrolling, border, status, and menu behavior without installing tmux mouse key tables.`
+  - `The eight mouse formats stay unavailable, with `mouse_x` and `mouse_y` keeping the pin's null, for as long as no command carries an originating mouse event.`
 
 ### `formats.native-modes`: Keep native mode row formats
 
@@ -825,19 +828,22 @@ These runtime facts live outside the mux format context or do not have a retaine
 
 ### `formats.pane-runtime`: Expose pane mode formats
 
-Native mode and search state live per view, not on the shared pane.
+`pane_in_mode`, `pane_mode`, `pane_key_mode`, and `pane_search_string` read tmux's `window_pane` mode stack, one shared object per pane. zz's copy, view, and search state lives on the per-client terminal view, where the daemon keys `copy_sessions` by client, so two clients can view one pane in different modes with different queries and there is no single pane-level answer to publish. The four names stay unavailable next to the already accepted `buffer_mode_format`, `client_mode_format`, and `tree_mode_format` in `formats.native-modes`. Reopen when a named workload defines how multiple viewers aggregate, or if zz gives panes a server-owned mode.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: scripts, daily
 - Items: `format:pane_in_mode`, `format:pane_key_mode`, `format:pane_mode`, `format:pane_search_string`
-- Depends on: `clients.interactive-refresh`
+- Depends on: none
 - Evidence:
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:crates/zz-mux/src/formats.rs`
   - `resource:knowledge/tmux/divergences.md`
+  - `resource:knowledge/tmux/status-line.md`
 - Acceptance:
-  - `Per-client native view state has defined aggregation when a pane has multiple viewers.`
+  - `Per-client copy, view, and search state stays the authority for native mode rendering, and the four pane mode formats stay unavailable rather than reporting one viewer's state as the pane's.`
 
 ### `formats.session-activity-wake-lifecycle`: Keep native wake lifecycle outside session activity
 
@@ -860,27 +866,30 @@ Pinned tmux refreshes session activity when a suspended tty client wakes or unlo
 
 ### `formats.terminal-cells`: Expose terminal cell formats
 
-The mux format engine cannot inspect live terminal grid internals.
+`cursor_character`, `cursor_colour`, `pane_bg`, `pane_fg`, `pane_tabs`, and `pane_pb_state` read live cells and terminal state out of tmux's own screen, because in tmux the multiplexer is the terminal. In zz the terminal worker owns the VT and publishes frames to the clients that draw them, while the mux format engine models sessions, windows, and panes; it holds no grid and cannot sample one without reaching across the PTY drain. The six names stay in the always-unavailable set the status-line reference records. Reopen when a named scripted workload justifies a bounded terminal-fact channel that publishes cursor cell, tab stops, and progress state without blocking drain.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `terminal`
 - User impact: scripts
 - Items: `format:cursor_character`, `format:cursor_colour`, `format:pane_bg`, `format:pane_fg`, `format:pane_pb_state`, `format:pane_tabs`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-terminal/src/session.rs`
   - `resource:knowledge/tmux/divergences.md`
+  - `resource:knowledge/tmux/status-line.md`
 - Acceptance:
-  - `A bounded terminal snapshot publishes cursor cell, tab stops, and progress state without blocking PTY drain.`
+  - `The terminal worker stays the only owner of live VT state, and the six cell formats stay unavailable rather than being sampled from the format engine.`
 
 ### `formats.terminal-runtime`: Expose terminal runtime formats
 
-The mux currently substitutes constants for live VT state that only the terminal worker owns.
+These 28 names report live VT state the pin reads straight from its own screen: cursor position and shape, alternate screen and saved cursor, DEC private modes, mouse reporting modes, history byte counts, scroll region, and graphics support. zz keeps that state in the terminal worker and the clients that draw it, so the mux publishes the pin's inactive or default value for each name, with `cursor_flag` and `wrap_flag` enabled and the rest zero, which the status-line reference already records as pinned default state rather than support. Zero is also the true answer for `sixel_support`, which zz does not implement. Reopen through the same bounded terminal-fact channel `formats.terminal-cells` names, once a workload asks for live VT facts in formats.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hardest`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `terminal`
 - User impact: scripts
 - Items: `format:alternate_on`, `format:alternate_saved_x`, `format:alternate_saved_y`, `format:bracket_paste_flag`, `format:cursor_blinking`, `format:cursor_flag`, `format:cursor_shape`, `format:cursor_very_visible`, `format:cursor_x`, `format:cursor_y`, `format:history_all_bytes`, `format:history_bytes`, `format:history_size`, `format:insert_flag`, `format:keypad_cursor_flag`, `format:keypad_flag`, `format:mouse_all_flag`, `format:mouse_any_flag`, `format:mouse_button_flag`, `format:mouse_sgr_flag`, `format:mouse_standard_flag`, `format:mouse_utf8_flag`, `format:origin_flag`, `format:scroll_region_lower`, `format:scroll_region_upper`, `format:sixel_support`, `format:synchronized_output_flag`, `format:wrap_flag`
@@ -888,8 +897,10 @@ The mux currently substitutes constants for live VT state that only the terminal
 - Evidence:
   - `resource:crates/zz-mux/src/formats.rs`
   - `resource:knowledge/tmux/divergences.md`
+  - `resource:knowledge/tmux/status-line.md`
 - Acceptance:
-  - `A bounded terminal snapshot publishes cursor, mode, mouse, history, scroll-region, and graphics facts without blocking PTY drain.`
+  - `The mux keeps publishing the pin's inactive or default value for each of the 28 names, and the divergence matrix keeps them listed as unbacked rather than supported.`
+  - `Any later backing arrives through one bounded terminal-fact channel that does not block PTY drain.`
 
 ### `formats.window-runtime`: Expose remaining window formats
 

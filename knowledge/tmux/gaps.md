@@ -19,9 +19,9 @@ Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
 Tracked gap groups: **82**. Classified items: **563**.
 
-- Status: open: 40, blocked: 14, accepted: 28.
-- Decision: adopt: 45, native: 22, park: 9, never: 6.
-- Priority: later: 54, none: 28.
+- Status: open: 40, blocked: 11, accepted: 31.
+- Decision: adopt: 45, native: 24, park: 6, never: 7.
+- Priority: later: 51, none: 31.
 - Closed history entries: 129.
 - Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 90, presentation: 8, protocol: 2.
 
@@ -92,14 +92,11 @@ structure as proof.
 | `hooks.pane-events` | Produce pane focus and clipboard hooks | adopt | open | hard | daemon | scripts, gui | none |
 | `hooks.shutdown-window-unlinked-order` | Preserve forced-shutdown window-unlinked order | adopt | open | hard | mux | scripts | none |
 | `keys.copy-mode-binding-fidelity` | Match shared copy-mode binding commands | adopt | open | hard | protocol | daily, remote, scripts | copy-mode.command-fidelity |
-| `messages.tty-model` | Model tmux message and TTY reports | park | blocked | hard | daemon | admin, remote | none |
-| `mouse.bound-context` | Carry bound mouse event context | park | blocked | hard | protocol | daily, scripts, gui | none |
 | `options.remain-on-exit-format` | Render remain-on-exit-format in retained panes | adopt | blocked | hard | terminal | daily, scripts | none |
 | `options.terminal-behavior` | Consume terminal behavior options | adopt | open | hard | terminal | daily, remote, scripts | none |
 | `pane.command-completion` | Complete two-phase pane command completion | adopt | open | hard | daemon | scripts, daily | none |
 | `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
-| `prompt.pane-rendered` | Defer pane-rendered prompts | park | blocked | hard | client | daily | clients.interactive-refresh |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
 | `options.lock-program` | Defer tmux lock process execution | park | blocked | hardest | client | remote, admin | clients.interactive-refresh |
 | `pane.floating-model` | Defer tmux floating panes | park | blocked | hardest | mux | daily, scripts, gui | none |
@@ -133,9 +130,12 @@ structure as proof.
 | `layout.safety-invariants` | Keep bounded valid layouts | never | accepted | none | mux | daily, scripts | none |
 | `layout.spread-mixed-upstream-bug` | Reject corrupt mixed-parent spread | never | accepted | none | mux | daily, scripts | none |
 | `list-keys.deterministic-sort-ties` | Keep list-keys sorting total and deterministic | never | accepted | none | mux | scripts | none |
+| `messages.tty-model` | Model tmux message and TTY reports | never | accepted | none | daemon | admin, remote | none |
+| `mouse.bound-context` | Carry bound mouse event context | native | accepted | none | protocol | daily, scripts, gui | none |
 | `options.native-mode-styles` | Keep native mode styling | native | accepted | none | client | daily, gui | none |
 | `options.native-overlay-styles` | Keep native overlay styling | native | accepted | none | client | daily, gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
+| `prompt.pane-rendered` | Defer pane-rendered prompts | native | accepted | none | client | daily | none |
 | `protocol.socket-interop` | Do not speak tmux private protocol | never | accepted | none | protocol | admin | none |
 | `sessions.linked-groups` | Do not add linked session groups | never | accepted | none | mux | scripts, admin | none |
 
@@ -1207,37 +1207,40 @@ The pin's comparator truncates 64-bit key differences into int, returns equality
 
 ### `messages.tty-model`: Model tmux message and TTY reports
 
-zz does not retain tmux's TTY capability and job-message model.
+`show-messages -T` prints one block per entry in the server's `tty_terms` list, naming the terminal, its owning client, and every terminfo capability tmux resolved for it; a probe against the pin answers `Terminal 0: tmux-256color for /dev/ttys033, flags=0x31:` followed by the capability dump, and `-t` filters that list to one client's terminal. zz's daemon never opens or drives a client terminal through terminfo, because clients receive published frames and render themselves, so there is no capability table to filter or print. `-J` belongs with them: zz's `shell_jobs` map is internal spawn-cap bookkeeping, and the pin's `Job n: cmd [fd=, pid=, status=]` line publishes libevent internals rather than a modeled job. A terminfo-driven server renderer or a published job registry would be new scope, not this gap reopening.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
+- Decision: `never`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `daemon`
 - User impact: admin, remote
 - Items: `flag:show-messages:-J`, `flag:show-messages:-T`, `flag:show-messages:-t`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `The daemon retains job and terminal capability records with target-aware output matching the pin.`
+  - ``show-messages` keeps the pin's message log behavior, and `-J`, `-T`, and `-t` stay loudly unsupported.`
+  - `The divergence matrix keeps the absent TTY capability and job-report model visible as a permanent exclusion.`
 
 ### `mouse.bound-context`: Carry bound mouse event context
 
-These flags depend on the input event that invoked the command.
+`copy-mode -S`, `resize-pane -M`, `move-pane -M`, and `send-keys -M` all consume the mouse event that invoked the command, so the pin resolves the target from the event and drives a scrollbar slider drag, a border drag, or a mouse-keyed send. zz installs no tmux mouse key tables, so no command is ever invoked from a mouse event; the same gestures are handled directly by each rendering client, already accepted under `keys.root-native-mouse` and `keys.copy-mode-native-mouse`. The four flags stay loudly unsupported instead of quietly falling back to a keyboard path. Reopen only if zz installs tmux mouse key tables and a normalized event record travels with bound commands.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `protocol`
 - User impact: daily, scripts, gui
 - Items: `flag:copy-mode:-S`, `flag:move-pane:-M`, `flag:resize-pane:-M`, `flag:send-keys:-M`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:knowledge/tmux/key-tables.md`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
-  - `A normalized mouse record reaches bound commands without changing direct GUI mouse behavior.`
+  - `Native pointer handling keeps scrollbar, border, and drag gestures without installing tmux mouse key tables, and the four mouse-context flags stay loudly unsupported.`
 
 ### `options.lock-program`: Defer tmux lock process execution
 
@@ -1492,20 +1495,20 @@ Native chrome and a persistent daemon need explicit behavior where tmux assumes 
 
 ### `prompt.pane-rendered`: Defer pane-rendered prompts
 
-zz prompts are native client surfaces rather than pane cell overlays.
+`command-prompt -P` draws the prompt in the target pane's cells rather than on the status line, and the pin uses it for the copy-mode numeric prefix. zz's prompts are client surfaces: the raw TUI replaces its `message_line` row and the GPUI client draws a native prompt, while the copy-mode numeric prefix already uses zz's own per-client `copy-mode-repeat` command shape, accepted under `keys.copy-mode-native-numeric-prefix`. Painting a prompt into pane cells would mean the daemon writing another client's grid, so the flag stays loudly unsupported. Reopen only if a product need appears for a prompt anchored to a pane rather than to the client.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hard`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: daily
 - Items: `flag:command-prompt:-P`
-- Depends on: `clients.interactive-refresh`
+- Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `A product need defines how pane-rendered prompts coexist with native prompt surfaces.`
+  - `Native client prompt surfaces keep the prompt contract, and `command-prompt -P` stays loudly unsupported rather than being accepted as a no-op.`
 
 ### `protocol.binary-streams`: Design one bounded command stream
 

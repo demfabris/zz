@@ -21,13 +21,14 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use zz_mux::{
-    CellLayout, CommandAliasResolution, CommandPromptTemplate, CopyModeStyleValues,
-    DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext, FormatClient, KeyDecision,
-    KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind, PaneRuntimeFacts, ParsedConfig,
-    RetainedJobEnvironment, StatusHooks, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize,
-    canonical_command, command_block_body, copy_mode_action_is_read_only_safe, display_width,
-    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, parse_tmux_colour, send_keys_is_read_only_safe, validate_static_command_chain,
+    CellLayout, CommandAliasResolution, CommandPromptTemplate, ConfigDiagnostic,
+    CopyModeStyleValues, DEFAULT_BUFFER_LIMIT, DetachScope, Execution, ExecutionContext,
+    FormatClient, KeyDecision, KeyEngine, KeyTables, MuxEffect, MuxEngine, PaneKind,
+    PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes, RetainedJobEnvironment, StatusHooks,
+    TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
+    copy_mode_action_is_read_only_safe, display_width, expand_format_values, expand_status,
+    format_command, format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
+    send_keys_is_read_only_safe, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -21383,8 +21384,8 @@ impl Shared {
         top_level: bool,
     ) -> Result<Option<PreparedConfig>, DaemonError> {
         report.control_guarded |= options.control_target.is_some();
-        let input = match fs::read_to_string(path) {
-            Ok(input) => input,
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
             Err(error)
                 if error.kind() == ErrorKind::NotFound && options.control_target.is_none() =>
             {
@@ -21393,9 +21394,10 @@ impl Shared {
             }
             Err(error) => return Err(error.into()),
         };
-        Ok(Some(self.parse_config_input(
-            path, &input, report, options, top_level,
-        )))
+        let input = ConfigInput::sourced(&bytes);
+        self.parse_config_input(path, input, report, options, top_level)
+            .map(Some)
+            .ok_or_else(|| non_utf8_config_error().into())
     }
 
     fn parse_startup_config_file(
@@ -21404,8 +21406,8 @@ impl Shared {
         report: &mut ConfigLoadReport,
         explicit: bool,
     ) -> Option<PreparedConfig> {
-        let input = match fs::read_to_string(path) {
-            Ok(input) => input,
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
             Err(error) => {
                 log::warn!(
                     "ignoring unreadable config file {}: {error}",
@@ -21415,25 +21417,54 @@ impl Shared {
                 return None;
             }
         };
-        Some(self.parse_config_input(path, &input, report, SourceFileLoadOptions::default(), true))
+        let input = ConfigInput::startup(&bytes);
+        let parsed =
+            self.parse_config_input(path, input, report, SourceFileLoadOptions::default(), true);
+        if parsed.is_none() {
+            let error = non_utf8_config_error();
+            log::warn!(
+                "ignoring unreadable config file {}: {error}",
+                path.display()
+            );
+            report.note_startup_root_read_error(path, &error, explicit);
+        }
+        parsed
     }
 
     fn parse_config_input(
         &self,
         path: &Path,
-        input: &str,
+        input: ConfigInput<'_>,
         report: &mut ConfigLoadReport,
         options: SourceFileLoadOptions,
         top_level: bool,
-    ) -> PreparedConfig {
+    ) -> Option<PreparedConfig> {
+        let source = path.display().to_string();
+        let non_empty = !input.is_empty();
         let (parsed, construction, verbose_groups) = {
             let mut inner = self.inner.lock();
-            let parsed = if options.parse_only {
-                inner
-                    .engine
-                    .parse_config_parse_only(path.display().to_string(), input)
-            } else {
-                inner.engine.parse_config(path.display().to_string(), input)
+            let parsed = match input {
+                ConfigInput::Text(text) => {
+                    let parsed = if options.parse_only {
+                        inner.engine.parse_config_parse_only(source, text)
+                    } else {
+                        inner.engine.parse_config(source, text)
+                    };
+                    ConfigParse::from_text(parsed)
+                }
+                ConfigInput::FileBytes(bytes) => {
+                    let parsed = if options.parse_only {
+                        inner
+                            .engine
+                            .parse_config_file_bytes_parse_only(source, bytes)
+                    } else {
+                        inner.engine.parse_config_file_bytes(source, bytes)
+                    };
+                    ConfigParse::from_bytes(parsed)?
+                }
+                ConfigInput::BufferBytes(bytes) => {
+                    ConfigParse::from_bytes(inner.engine.parse_config_buffer_bytes(source, bytes))?
+                }
             };
             if !options.parse_only {
                 for assignment in &parsed.environment {
@@ -21510,7 +21541,13 @@ impl Shared {
                 report.note_verbose_commands(group, top_level);
             }
         }
-        PreparedConfig { construction }
+        let empty_command_item = non_empty
+            && parsed.diagnostics.is_empty()
+            && construction.as_ref().is_ok_and(Vec::is_empty);
+        Some(PreparedConfig {
+            construction,
+            empty_command_item,
+        })
     }
 
     fn replay_config_file(
@@ -21619,6 +21656,9 @@ impl Shared {
         } else {
             None
         };
+        if parsed.empty_command_item && !options.parse_only {
+            self.publish_control_source_complete(options.control_target);
+        }
         let commands = match parsed.construction {
             Ok(_) if options.parse_only => return Ok(()),
             Ok(commands) => commands,
@@ -23015,8 +23055,101 @@ struct PendingConfigFile {
     options: SourceFileLoadOptions,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ConfigInput<'a> {
+    Text(&'a str),
+    FileBytes(&'a [u8]),
+    BufferBytes(&'a [u8]),
+}
+
+impl<'a> ConfigInput<'a> {
+    fn startup(bytes: &'a [u8]) -> Self {
+        str::from_utf8(bytes).map_or(Self::FileBytes(bytes), Self::Text)
+    }
+
+    fn sourced(bytes: &'a [u8]) -> Self {
+        str::from_utf8(bytes).map_or(Self::BufferBytes(bytes), Self::Text)
+    }
+
+    fn is_empty(self) -> bool {
+        match self {
+            Self::Text(text) => text.is_empty(),
+            Self::FileBytes(bytes) | Self::BufferBytes(bytes) => bytes.is_empty(),
+        }
+    }
+}
+
+struct ConfigEnvironmentEntry {
+    name: String,
+    value: String,
+    hidden: bool,
+}
+
+struct ConfigParse {
+    commands: Vec<CommandInvocation>,
+    environment: Vec<ConfigEnvironmentEntry>,
+    diagnostics: Vec<ConfigDiagnostic>,
+}
+
+impl ConfigParse {
+    fn from_text(parsed: ParsedConfig) -> Self {
+        Self {
+            commands: parsed.commands,
+            environment: parsed
+                .environment
+                .into_iter()
+                .map(|assignment| ConfigEnvironmentEntry {
+                    name: assignment.name,
+                    value: assignment.value,
+                    hidden: assignment.hidden,
+                })
+                .collect(),
+            diagnostics: parsed.diagnostics,
+        }
+    }
+
+    fn from_bytes(parsed: ParsedConfigBytes) -> Option<Self> {
+        let mut commands = Vec::with_capacity(parsed.commands.len());
+        for command in parsed.commands {
+            let blocks = (0..command.args.len())
+                .filter(|index| command.argument_is_command_block(*index))
+                .collect::<Vec<_>>();
+            let name = String::from_utf8(command.name).ok()?;
+            let args = command
+                .args
+                .into_iter()
+                .map(String::from_utf8)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            let invocation = CommandInvocation::new(name, args).with_command_blocks(blocks);
+            commands.push(match command.source {
+                Some(source) => invocation.with_source(source),
+                None => invocation,
+            });
+        }
+        let mut environment = Vec::with_capacity(parsed.environment.len());
+        for assignment in parsed.environment {
+            environment.push(ConfigEnvironmentEntry {
+                name: String::from_utf8(assignment.name).ok()?,
+                value: String::from_utf8(assignment.value).ok()?,
+                hidden: assignment.hidden,
+            });
+        }
+        Some(Self {
+            commands,
+            environment,
+            diagnostics: parsed.diagnostics,
+        })
+    }
+}
+
+fn non_utf8_config_error() -> std::io::Error {
+    std::io::Error::new(ErrorKind::InvalidData, "stream did not contain valid UTF-8")
+}
+
 struct PreparedConfig {
     construction: Result<Vec<PreparedConfigCommand>, PreparedConfigFailure>,
+    empty_command_item: bool,
 }
 
 struct PreparedConfigCommand {
@@ -49760,7 +49893,7 @@ set-option -g @alias-mixed-next yes
         )
         .expect("unknown root source");
         let invalid_utf8 = directory.path().join("invalid-utf8.conf");
-        fs::write(&invalid_utf8, [0xff]).expect("invalid UTF-8 source");
+        fs::write(&invalid_utf8, b"display-message -p \x80\n").expect("invalid UTF-8 source");
         let invalid_utf8_root = directory.path().join("invalid-utf8-root.conf");
         fs::write(
             &invalid_utf8_root,
@@ -51130,7 +51263,8 @@ set-option -g @alias-mixed-next yes
             "source-file missing-c.conf\nsource-file missing-d.conf\n",
         )
         .expect("separate nested source fixture");
-        fs::write(&invalid_utf8, [0xff]).expect("invalid UTF-8 source fixture");
+        fs::write(&invalid_utf8, b"display-message -p \x80\n")
+            .expect("invalid UTF-8 source fixture");
         fs::write(
             &mixed_read,
             format!(
@@ -51316,7 +51450,8 @@ set-option -g @alias-mixed-next yes
         {
             let colon_invalid_utf8 = directory.path().join("a: b");
             let colon_read = directory.path().join("colon-read.conf");
-            fs::write(&colon_invalid_utf8, [0xff]).expect("colon-space invalid UTF-8 fixture");
+            fs::write(&colon_invalid_utf8, b"display-message -p \x80\n")
+                .expect("colon-space invalid UTF-8 fixture");
             fs::write(
                 &colon_read,
                 format!("source-file '{}'\n", colon_invalid_utf8.display()),

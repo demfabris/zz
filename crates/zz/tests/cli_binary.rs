@@ -5244,6 +5244,166 @@ mod daemon_autostart {
         }
 
         #[test]
+        fn config_file_bytes_load_like_the_pinned_signed_buffer() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("config byte input");
+            std::fs::create_dir(&directory).expect("create byte config directory");
+            let isolated = directory.join("isolated-ff.conf");
+            std::fs::write(&isolated, b"\xff").expect("write isolated byte config");
+            let isolated_path = isolated.to_str().expect("UTF-8 byte config path");
+            let continued = directory.join("continued-ff.conf");
+            std::fs::write(
+                &continued,
+                b"\xffset-environment -g CONFIG_BYTE_INPUT continued\n",
+            )
+            .expect("write continued byte config");
+            let continued_path = continued.to_str().expect("UTF-8 continued config path");
+
+            assert_eq!(
+                fixture
+                    .run(&["new-session", "-d", "-s", "byte-input"])
+                    .status
+                    .code(),
+                Some(0)
+            );
+            let sourced = fixture.run(&["source-file", "-v", isolated_path]);
+            assert_eq!(sourced.status.code(), Some(0));
+            assert!(sourced.stdout.is_empty());
+            assert!(sourced.stderr.is_empty());
+
+            let continued_run = fixture.run(&["source-file", "-v", continued_path]);
+            assert_eq!(continued_run.status.code(), Some(0));
+            assert!(continued_run.stderr.is_empty());
+            assert_eq!(
+                String::from_utf8_lossy(&continued_run.stdout),
+                format!("{continued_path}:1: set-environment -g CONFIG_BYTE_INPUT continued\n")
+            );
+            let shown = fixture.run(&["show-environment", "-g", "CONFIG_BYTE_INPUT"]);
+            assert_eq!(shown.status.code(), Some(0));
+            assert_eq!(shown.stdout, b"CONFIG_BYTE_INPUT=continued\n");
+            fixture.run(&["kill-server"]);
+            fixture.assert_stopped();
+        }
+
+        #[test]
+        fn startup_config_bytes_keep_the_pinned_file_command_name() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let startup = fixture._directory.path().join("startup-ff.conf");
+            std::fs::write(
+                &startup,
+                b"\xffset-environment -g CONFIG_BYTE_STARTUP set\n",
+            )
+            .expect("write startup byte config");
+
+            let started =
+                fixture.run_with_configs(&[&startup], &["new-session", "-d", "-s", "byte-startup"]);
+            assert_eq!(started.status.code(), Some(0));
+            assert!(started.stdout.is_empty());
+            assert!(started.stderr.is_empty());
+
+            let shown = fixture.run_with_configs(
+                &[&startup],
+                &["show-environment", "-g", "CONFIG_BYTE_STARTUP"],
+            );
+            assert_eq!(shown.status.code(), Some(1));
+            assert!(shown.stdout.is_empty());
+            assert_eq!(shown.stderr, b"unknown variable: CONFIG_BYTE_STARTUP\n");
+            fixture.run_with_configs(&[&startup], &["kill-server"]);
+            fixture.assert_stopped();
+        }
+
+        #[test]
+        fn control_config_file_bytes_keep_the_pinned_hidden_item_numbering() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control byte input");
+            std::fs::create_dir(&directory).expect("create control byte directory");
+            let isolated = directory.join("isolated-ff.conf");
+            std::fs::write(&isolated, b"\xff").expect("write isolated byte config");
+            let isolated_path = isolated.to_str().expect("UTF-8 byte config path");
+            let empty = write_source(&directory, "empty.conf", "");
+
+            let input = format!(
+                "source-file '{empty}'\n\
+                 display-message -p empty-fresh\n\
+                 source-file '{isolated_path}'\n\
+                 display-message -p byte-fresh\n"
+            );
+            let marker = directory.join("byte.complete");
+            let output = run_control_until_return(
+                &fixture,
+                &["-C", "new-session", "-s", "byte-frames"],
+                &input,
+                &marker,
+                "byte guard completion",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 6);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 4, 1, &["empty-fresh"], false);
+            assert_block(&stream.blocks[3], 5, 1, &[], false);
+            assert_block(&stream.blocks[4], 8, 1, &["byte-fresh"], false);
+            assert_block(&stream.blocks[5], 9, 1, &[], false);
+            assert_attached_startup(&stream.outside, "byte-frames");
+        }
+
+        #[test]
+        fn control_if_shell_config_file_bytes_continue_the_root_file() {
+            let fixture = Fixture::new();
+            if !local_socket_bind_available(&fixture.socket) {
+                return;
+            }
+            let directory = fixture._directory.path().join("control byte if-shell");
+            std::fs::create_dir(&directory).expect("create byte if-shell directory");
+            let isolated = directory.join("isolated-ff.conf");
+            std::fs::write(&isolated, b"\xff").expect("write isolated byte config");
+            let root = write_source(
+                &directory,
+                "root.conf",
+                &format!(
+                    "display-message -p root-before\n\
+                     if-shell -F 1 \"source-file '{}'\"\n\
+                     display-message -p root-after\n",
+                    isolated.display()
+                ),
+            );
+
+            let input = format!("source-file '{root}'\ndisplay-message -p if-shell-fresh\n");
+            let marker = directory.join("if-shell.complete");
+            let output = run_control_until_return(
+                &fixture,
+                &["-C", "new-session", "-s", "byte-if-shell"],
+                &input,
+                &marker,
+                "byte if-shell completion",
+            );
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            let stream = parse_stream_allow_gaps(&output.stdout, false);
+            assert_eq!(stream.blocks.len(), 8);
+            assert_block(&stream.blocks[0], 1, 0, &[], false);
+            assert_block(&stream.blocks[1], 2, 1, &[], false);
+            assert_block(&stream.blocks[2], 3, 1, &["root-before"], false);
+            assert_block(&stream.blocks[3], 4, 1, &[], false);
+            assert_block(&stream.blocks[4], 5, 1, &[], false);
+            assert_block(&stream.blocks[5], 8, 1, &["root-after"], false);
+            assert_block(&stream.blocks[6], 10, 1, &["if-shell-fresh"], false);
+            assert_block(&stream.blocks[7], 11, 1, &[], false);
+            assert_attached_startup(&stream.outside, "byte-if-shell");
+        }
+
+        #[test]
         fn control_source_read_error_follows_the_parent_guard_and_sets_retval() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {

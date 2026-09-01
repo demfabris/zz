@@ -6066,17 +6066,61 @@ impl MuxEngine {
                 .window_for_pane(start)
                 .expect("resolved pane has a window");
             let pane = self.state.last_pane(window)?;
+            if options.has("-e") {
+                self.state.set_pane_input_off(pane, false)?;
+                return Ok(Execution::default());
+            }
+            if options.has("-d") {
+                self.state.set_pane_input_off(pane, true)?;
+                return Ok(Execution::default());
+            }
             self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
             return Ok(Execution::default());
         }
+        if options.has("-m") || options.has("-M") {
+            if options.has("-m") && !self.pane_is_visible(start) {
+                return Ok(Execution::default());
+            }
+            if options.has("-M") {
+                self.state.clear_marked_pane();
+            } else {
+                self.state.toggle_marked_pane(start)?;
+            }
+            return Ok(Execution::default());
+        }
+        let mut execution = Execution::default();
+        if let Some(style) = options.value("-P") {
+            let style = style.to_owned();
+            let pane_options = self.scalar_table_mut_or_insert(TmuxOptionTarget::Pane(start));
+            pane_options.insert("window-style", style.clone());
+            pane_options.insert("window-active-style", style);
+            execution.effects.push(MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: Some(start),
+            });
+        }
+        if options.has("-g") {
+            self.scalar_option_effective(TmuxOptionTarget::Pane(start), "window-style")
+                .unwrap_or_default()
+                .clone_into(&mut execution.output);
+            return Ok(execution);
+        }
         let pane = if let Some(direction) = direction {
             let Some(pane) = self.state.pane_in_direction(start, direction)? else {
-                return Ok(Execution::default());
+                return Ok(execution);
             };
             pane
         } else {
             start
         };
+        if options.has("-e") {
+            self.state.set_pane_input_off(pane, false)?;
+            return Ok(execution);
+        }
+        if options.has("-d") {
+            self.state.set_pane_input_off(pane, true)?;
+            return Ok(execution);
+        }
         if let Some(title) = options.value("-T") {
             let target =
                 ExecutionContext::for_pane(&self.state, start).expect("resolved pane exists");
@@ -6090,10 +6134,19 @@ impl MuxEngine {
             if let Some(title) = tmux_clean_title(&title) {
                 self.state.update_pane_title(pane, title)?;
             }
-            return Ok(Execution::default());
+            return Ok(execution);
         }
         self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
-        Ok(Execution::default())
+        Ok(execution)
+    }
+
+    /// The pin's `window_pane_is_visible`: everything is visible until a zoom,
+    /// and a zoomed window shows only its active pane (window.c).
+    fn pane_is_visible(&self, pane: PaneId) -> bool {
+        self.state
+            .window_for_pane(pane)
+            .and_then(|window| self.state.windows.get(&window))
+            .is_none_or(|window| window.zoomed_pane.is_none() || window.active_pane == pane)
     }
 
     fn select_pane_target(
@@ -36752,6 +36805,542 @@ mod tests {
         assert_eq!(engine.state.windows[&window].zoomed_pane, None);
     }
 
+    fn format_of(
+        engine: &mut MuxEngine,
+        context: &mut ExecutionContext,
+        target: &str,
+        format: &str,
+    ) -> String {
+        engine
+            .execute(
+                context,
+                &command("display-message", &["-p", "-t", target, format]),
+            )
+            .expect("format readback")
+            .output
+    }
+
+    #[test]
+    fn select_pane_mark_moves_toggles_and_dies_like_the_pin() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let first = context.pane.expect("first pane");
+        engine
+            .execute(&mut context, &command("split-window", &["-d"]))
+            .expect("split");
+        let window = context.window.expect("window");
+        let second = engine.state.windows[&window]
+            .pane_order()
+            .iter()
+            .copied()
+            .find(|pane| *pane != first)
+            .expect("second pane");
+
+        let marks = |engine: &mut MuxEngine, context: &mut ExecutionContext| {
+            (
+                format_of(engine, context, &first.to_string(), "#{pane_marked}"),
+                format_of(engine, context, &second.to_string(), "#{pane_marked}"),
+                format_of(engine, context, &first.to_string(), "#{pane_marked_set}"),
+                format_of(engine, context, "work", "#{session_marked}"),
+                format_of(engine, context, "work:0", "#{window_marked_flag}"),
+                format_of(engine, context, "work:0", "#{window_flags}"),
+            )
+        };
+
+        assert_eq!(
+            marks(&mut engine, &mut context),
+            (
+                "0".to_owned(),
+                "0".to_owned(),
+                "0".to_owned(),
+                "0".to_owned(),
+                "0".to_owned(),
+                "*".to_owned()
+            )
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &first.to_string()]),
+            )
+            .expect("mark first");
+        assert_eq!(engine.state.marked_pane(), Some(first));
+        assert_eq!(
+            marks(&mut engine, &mut context),
+            (
+                "1".to_owned(),
+                "0".to_owned(),
+                "1".to_owned(),
+                "1".to_owned(),
+                "1".to_owned(),
+                "*M".to_owned()
+            )
+        );
+        assert_eq!(engine.state.windows[&window].active_pane, first);
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &second.to_string()]),
+            )
+            .expect("mark second");
+        assert_eq!(engine.state.marked_pane(), Some(second));
+        assert_eq!(engine.state.windows[&window].active_pane, first);
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &second.to_string()]),
+            )
+            .expect("re-mark second");
+        assert_eq!(engine.state.marked_pane(), None);
+        assert_eq!(
+            format_of(&mut engine, &mut context, "work:0", "#{window_flags}"),
+            "*"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &first.to_string()]),
+            )
+            .expect("mark first again");
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-M", "-t", &second.to_string()]),
+            )
+            .expect("clear mark");
+        assert_eq!(engine.state.marked_pane(), None);
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &first.to_string()]),
+            )
+            .expect("mark first once more");
+        engine
+            .execute(
+                &mut context,
+                &command("kill-pane", &["-t", &first.to_string()]),
+            )
+            .expect("kill the marked pane");
+        assert_eq!(engine.state.marked_pane(), None);
+        assert_eq!(
+            format_of(
+                &mut engine,
+                &mut context,
+                &second.to_string(),
+                "#{pane_marked_set}"
+            ),
+            "0"
+        );
+    }
+
+    #[test]
+    fn marked_pane_formats_scope_to_the_marked_session_and_window() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "alpha"]))
+            .expect("alpha");
+        let marked = context.pane.expect("alpha pane");
+        engine
+            .execute(
+                &mut context,
+                &command("new-window", &["-d", "-t", "alpha", "-n", "second"]),
+            )
+            .expect("second window");
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "beta"]))
+            .expect("beta");
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &marked.to_string()]),
+            )
+            .expect("mark alpha");
+
+        for (target, session_marked, window_marked, marked_set) in [
+            ("alpha:0", "1", "1", "1"),
+            ("alpha:second", "1", "0", "1"),
+            ("beta:0", "0", "0", "1"),
+        ] {
+            assert_eq!(
+                format_of(&mut engine, &mut context, target, "#{session_marked}"),
+                session_marked,
+                "session_marked for {target}"
+            );
+            assert_eq!(
+                format_of(&mut engine, &mut context, target, "#{window_marked_flag}"),
+                window_marked,
+                "window_marked_flag for {target}"
+            );
+            assert_eq!(
+                format_of(&mut engine, &mut context, target, "#{pane_marked_set}"),
+                marked_set,
+                "pane_marked_set for {target}"
+            );
+        }
+        assert!(format_of(&mut engine, &mut context, "alpha:0", "#{window_flags}").contains('M'));
+        assert!(
+            !format_of(&mut engine, &mut context, "alpha:second", "#{window_flags}").contains('M')
+        );
+    }
+
+    #[test]
+    fn select_pane_mark_skips_zoom_hidden_panes_but_clear_still_lands() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let first = context.pane.expect("first pane");
+        engine
+            .execute(&mut context, &command("split-window", &["-d"]))
+            .expect("split");
+        let window = context.window.expect("window");
+        let second = engine.state.windows[&window]
+            .pane_order()
+            .iter()
+            .copied()
+            .find(|pane| *pane != first)
+            .expect("second pane");
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &first.to_string()]),
+            )
+            .expect("zoom");
+        assert_eq!(engine.state.windows[&window].zoomed_pane, Some(first));
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &second.to_string()]),
+            )
+            .expect("mark hidden pane");
+        assert_eq!(engine.state.marked_pane(), None);
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &first.to_string()]),
+            )
+            .expect("mark the zoomed pane");
+        assert_eq!(engine.state.marked_pane(), Some(first));
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-M", "-t", &second.to_string()]),
+            )
+            .expect("clear through a hidden target");
+        assert_eq!(engine.state.marked_pane(), None);
+    }
+
+    #[test]
+    fn select_pane_input_flags_retarget_without_selecting() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let first = context.pane.expect("first pane");
+        engine
+            .execute(&mut context, &command("split-window", &["-d"]))
+            .expect("split");
+        let window = context.window.expect("window");
+        let second = engine.state.windows[&window]
+            .pane_order()
+            .iter()
+            .copied()
+            .find(|pane| *pane != first)
+            .expect("second pane");
+
+        for (arguments, first_off, second_off) in [
+            (vec!["-d", "-t", &second.to_string()[..]], "0", "1"),
+            (vec!["-e", "-t", &second.to_string()[..]], "0", "0"),
+            (vec!["-d", "-t", &first.to_string()[..]], "1", "0"),
+            (vec!["-e", "-t", &first.to_string()[..]], "0", "0"),
+        ] {
+            engine
+                .execute(&mut context, &command("select-pane", &arguments))
+                .expect("input toggle");
+            assert_eq!(
+                format_of(
+                    &mut engine,
+                    &mut context,
+                    &first.to_string(),
+                    "#{pane_input_off}"
+                ),
+                first_off
+            );
+            assert_eq!(
+                format_of(
+                    &mut engine,
+                    &mut context,
+                    &second.to_string(),
+                    "#{pane_input_off}"
+                ),
+                second_off
+            );
+            assert_eq!(engine.state.windows[&window].active_pane, first);
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-d", "-t", &second.to_string()]),
+            )
+            .expect("disable input");
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-d", "-e", "-t", &second.to_string()]),
+            )
+            .expect("enable wins over disable");
+        assert_eq!(
+            format_of(
+                &mut engine,
+                &mut context,
+                &second.to_string(),
+                "#{pane_input_off}"
+            ),
+            "0"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-D", "-d", "-t", &first.to_string()]),
+            )
+            .expect("direction resolves before the input flag");
+        assert_eq!(
+            format_of(
+                &mut engine,
+                &mut context,
+                &second.to_string(),
+                "#{pane_input_off}"
+            ),
+            "1"
+        );
+        assert_eq!(engine.state.windows[&window].active_pane, first);
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &second.to_string()]),
+            )
+            .expect("visit second");
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &first.to_string()]),
+            )
+            .expect("back to first");
+        engine
+            .execute(&mut context, &command("select-pane", &["-l", "-e"]))
+            .expect("enable input on the last pane");
+        assert_eq!(
+            format_of(
+                &mut engine,
+                &mut context,
+                &second.to_string(),
+                "#{pane_input_off}"
+            ),
+            "0"
+        );
+        engine
+            .execute(&mut context, &command("select-pane", &["-l", "-d"]))
+            .expect("disable input on the last pane");
+        assert_eq!(
+            format_of(
+                &mut engine,
+                &mut context,
+                &second.to_string(),
+                "#{pane_input_off}"
+            ),
+            "1"
+        );
+        assert_eq!(engine.state.windows[&window].active_pane, first);
+    }
+
+    #[test]
+    fn select_pane_style_flag_writes_both_pane_styles_and_then_selects() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let first = context.pane.expect("first pane");
+        engine
+            .execute(&mut context, &command("split-window", &["-d"]))
+            .expect("split");
+        let window = context.window.expect("window");
+        let second = engine.state.windows[&window]
+            .pane_order()
+            .iter()
+            .copied()
+            .find(|pane| *pane != first)
+            .expect("second pane");
+
+        let styled = engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-P", "bg=red", "-t", &second.to_string()]),
+            )
+            .expect("pane style");
+        assert_eq!(
+            styled.effects,
+            vec![
+                MuxEffect::TerminalKnobsChanged {
+                    window: None,
+                    pane: Some(second),
+                },
+                MuxEffect::SnapshotChanged,
+            ]
+        );
+        assert_eq!(engine.state.windows[&window].active_pane, second);
+        for name in ["window-style", "window-active-style"] {
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command("show-options", &["-pv", "-t", &second.to_string(), name]),
+                    )
+                    .expect("style readback")
+                    .output,
+                "bg=red"
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &first.to_string()]),
+            )
+            .expect("back to first");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("select-pane", &["-g", "-t", &second.to_string()]),
+                )
+                .expect("print pane style")
+                .output,
+            "bg=red"
+        );
+        assert_eq!(engine.state.windows[&window].active_pane, first);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("select-pane", &["-g", "-t", &first.to_string()]),
+                )
+                .expect("print default pane style")
+                .output,
+            "default"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-w", "-t", "work:0", "window-style", "bg=green"],
+                ),
+            )
+            .expect("window style");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("select-pane", &["-g", "-t", &first.to_string()]),
+                )
+                .expect("print inherited pane style")
+                .output,
+            "bg=green"
+        );
+
+        assert!(matches!(
+            engine.execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-p", "-t", &first.to_string(), "window-style", "bogus=zzz"],
+                ),
+            ),
+            Err(ServerError::InvalidCommand(message)) if message == "invalid style: bogus=zzz"
+        ));
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "select-pane",
+                    &["-P", "bogus=zzz", "-t", &first.to_string()],
+                ),
+            )
+            .expect("the pin's -P never validates the style");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("select-pane", &["-g", "-t", &first.to_string()]),
+                )
+                .expect("print unvalidated pane style")
+                .output,
+            "bogus=zzz"
+        );
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &second.to_string()]),
+            )
+            .expect("select second");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "select-pane",
+                        &["-P", "bg=blue", "-g", "-t", &first.to_string()],
+                    ),
+                )
+                .expect("style then print")
+                .output,
+            "bg=blue"
+        );
+        assert_eq!(engine.state.windows[&window].active_pane, second);
+
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "select-pane",
+                    &["-m", "-P", "bg=yellow", "-t", &second.to_string()],
+                ),
+            )
+            .expect("mark wins over style");
+        assert_eq!(engine.state.marked_pane(), Some(second));
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("select-pane", &["-g", "-t", &second.to_string()]),
+                )
+                .expect("style untouched by the mark path")
+                .output,
+            "bg=red"
+        );
+    }
+
     #[test]
     fn split_window_zoom_follows_the_post_spawn_active_pane() {
         let mut engine = MuxEngine::default();
@@ -39060,11 +39649,10 @@ mod tests {
             Err(ServerError::CommandParse(message))
                 if message == "command rotate-window: unknown flag -d"
         ));
-        assert!(matches!(
-            engine.execute(&mut context, &command("select-pane", &["-m"])),
-            Err(ServerError::UnsupportedCommand(message))
-                if message == "select-pane -m"
-        ));
+        engine
+            .execute(&mut context, &command("select-pane", &["-m"]))
+            .expect("mark the zoomed active pane");
+        assert_eq!(engine.state.marked_pane(), Some(second));
     }
 
     #[test]

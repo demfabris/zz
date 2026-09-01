@@ -1,0 +1,49 @@
+# -e and -d retarget the pane's input flag after the direction search and
+# return before any selection (cmd-select-pane.c). -e is tested first, so it
+# wins when both are given, and -l routes them at the last pane instead.
+split-window -d -t w:0.0
+select-pane -d -t w:0.1
+out: display-message -p -t w:0.1 #{pane_input_off}
+out: display-message -p -t w:0 #{pane_index}
+select-pane -e -t w:0.1
+out: display-message -p -t w:0.1 #{pane_input_off}
+select-pane -d -t w:0.1
+select-pane -d -e -t w:0.1
+out: display-message -p -t w:0.1 #{pane_input_off}
+select-pane -D -d -t w:0.0
+out: display-message -p -t w:0.1 #{pane_input_off}
+out: display-message -p -t w:0 #{pane_index}
+select-pane -t w:0.1
+select-pane -t w:0.0
+select-pane -l -e
+out: display-message -p -t w:0.1 #{pane_input_off}
+select-pane -l -d
+out: display-message -p -t w:0.1 #{pane_input_off}
+out: display-message -p -t w:0 #{pane_index}
+select-pane -e -t w:0.1
+
+# -P writes the pane-local window-style and window-active-style with
+# options_set_string, which never validates, then falls through to the
+# selection. -g prints that style and returns before selecting.
+out: select-pane -g -t w:0.0
+select-pane -P bg=red -t w:0.1
+out: show-options -pv -t w:0.1 window-style
+out: show-options -pv -t w:0.1 window-active-style
+out: display-message -p -t w:0 #{pane_index}
+select-pane -t w:0.0
+out: select-pane -g -t w:0.1
+out: display-message -p -t w:0 #{pane_index}
+out: select-pane -P bg=blue -g -t w:0.1
+out: show-options -pv -t w:0.1 window-style
+out: display-message -p -t w:0 #{pane_index}
+out: select-pane -P bogus=zzz -g -t w:0.1
+out: show-options -pv -t w:0.1 window-active-style
+set-window-option -t w:0 window-style fg=colour10
+out: select-pane -g -t w:0.0
+out: select-pane -g -t w:0.1
+
+# -m short-circuits before -P, so the mark path leaves the style alone.
+select-pane -m -P bg=yellow -t w:0.0
+out: display-message -p -t w:0.0 #{pane_marked}
+out: select-pane -g -t w:0.0
+select-pane -M -t w:0.0

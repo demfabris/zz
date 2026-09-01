@@ -1801,22 +1801,22 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "select-pane",
         aliases: &["selectp"],
         description: "Select a pane",
-        usage: "[-DLlRUZ] [-T title] [-t target-pane]",
+        usage: "[-DdegLlMmRUZ] [-P style] [-T title] [-t target-pane]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-T", FreeForm, "pane title"),
+            CommandOptionSpec::value("-P", FreeForm, "pane style"),
             CommandOptionSpec::flag("-D", "pane below"),
             CommandOptionSpec::flag("-L", "pane to the left"),
+            CommandOptionSpec::flag("-M", "clear the marked pane"),
             CommandOptionSpec::flag("-R", "pane to the right"),
             CommandOptionSpec::flag("-U", "pane above"),
             CommandOptionSpec::flag("-Z", "preserve zoom"),
+            CommandOptionSpec::flag("-d", "disable input to the pane"),
+            CommandOptionSpec::flag("-e", "enable input to the pane"),
+            CommandOptionSpec::flag("-g", "print the pane style"),
             CommandOptionSpec::flag("-l", "last pane"),
-            CommandOptionSpec::unsupported_flag("-d"),
-            CommandOptionSpec::unsupported_flag("-e"),
-            CommandOptionSpec::unsupported_flag("-g"),
-            CommandOptionSpec::unsupported_flag("-M"),
-            CommandOptionSpec::unsupported_flag("-m"),
-            CommandOptionSpec::unsupported_value("-P"),
+            CommandOptionSpec::flag("-m", "mark the pane"),
         ],
         positionals: &[],
         variadic: None,
@@ -2817,7 +2817,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (443, 60));
+        assert_eq!((supported, unsupported), (449, 54));
         assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,

@@ -1,0 +1,53 @@
+# One server-global mark (server.c server_set_marked, cmd-select-pane.c -m/-M).
+# A second -m moves it, re-marking the holder clears it through
+# server_is_marked, -M clears whatever holds it, and the marked formats read
+# per pane, window, and session.
+split-window -d -t w:0.0
+out: display-message -p -t w:0.0 #{pane_marked}:#{pane_marked_set}
+out: display-message -p -t w:0 #{window_marked_flag}:[#{window_flags}]
+out: display-message -p -t w #{session_marked}
+select-pane -m -t w:0.0
+out: display-message -p -t w:0.0 #{pane_marked}:#{pane_marked_set}
+out: display-message -p -t w:0.1 #{pane_marked}:#{pane_marked_set}
+out: display-message -p -t w:0 #{window_marked_flag}:[#{window_flags}]
+out: display-message -p -t w #{session_marked}
+select-pane -m -t w:0.1
+out: display-message -p -t w:0.0 #{pane_marked}:#{pane_marked_set}
+out: display-message -p -t w:0.1 #{pane_marked}:#{pane_marked_set}
+select-pane -m -t w:0.1
+out: display-message -p -t w:0.1 #{pane_marked}:#{pane_marked_set}
+out: display-message -p -t w:0 [#{window_flags}]
+select-pane -m -t w:0.0
+select-pane -M -t w:0.1
+out: display-message -p -t w:0.0 #{pane_marked}:#{pane_marked_set}
+select-pane -M -t w:0.0
+out: display-message -p -t w:0.0 #{pane_marked_set}
+
+# The mark scopes to the session and window that own it, while pane_marked_set
+# answers server-wide.
+new-window -d -t w -n second
+new-session -d -s other
+select-pane -m -t w:0.0
+out: display-message -p -t w #{session_marked}
+out: display-message -p -t other #{session_marked}
+out: display-message -p -t w:0 #{window_marked_flag}:[#{window_flags}]
+out: display-message -p -t w:second #{window_marked_flag}:[#{window_flags}]
+out: display-message -p -t other:0 #{window_marked_flag}
+out: display-message -p -t w:second.0 #{pane_marked_set}
+
+# window_lost_pane clears the mark when the marked pane dies.
+kill-pane -t w:0.0
+out: display-message -p -t w:0.0 #{pane_marked}:#{pane_marked_set}
+out: display-message -p -t w #{session_marked}
+out: display-message -p -t w:0 [#{window_flags}]
+
+# -m refuses a pane hidden by zoom (window_pane_is_visible) but -M still clears.
+split-window -d -t w:0.0
+resize-pane -Z -t w:0.0
+select-pane -m -t w:0.1
+out: display-message -p -t w:0.0 #{pane_marked_set}
+select-pane -m -t w:0.0
+out: display-message -p -t w:0.0 #{pane_marked}:#{pane_marked_set}
+out: display-message -p -t w:0 [#{window_flags}]
+select-pane -M -t w:0.1
+out: display-message -p -t w:0.0 #{pane_marked_set}

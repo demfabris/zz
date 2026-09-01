@@ -361,6 +361,7 @@ pub struct MuxState {
     format_now: u64,
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
+    marked_pane: Option<PaneId>,
     pub sessions: BTreeMap<SessionId, Session>,
     pub windows: BTreeMap<WindowId, Window>,
 }
@@ -3325,6 +3326,38 @@ impl MuxState {
                 .ok_or_else(|| ServerError::InvalidCommand("no last pane".to_owned()));
         }
         Err(ServerError::InvalidCommand("no last pane".to_owned()))
+    }
+
+    /// The pin's `marked_pane`: one server-global mark, reported valid only
+    /// while its pane is still reachable (`server_check_marked` defers to
+    /// `cmd_find_valid_state`, so a killed or unlinked target reads as no
+    /// mark at all).
+    #[must_use]
+    pub fn marked_pane(&self) -> Option<PaneId> {
+        self.marked_pane
+            .filter(|pane| self.window_for_pane(*pane).is_some())
+    }
+
+    /// The pin's `-m`: mark the target unless it already holds the mark, in
+    /// which case `server_is_marked` makes the request a clear instead.
+    pub(crate) fn toggle_marked_pane(&mut self, pane: PaneId) -> Result<(), ServerError> {
+        if self.window_for_pane(pane).is_none() {
+            return Err(ServerError::MissingTarget(pane.to_string()));
+        }
+        let next = (self.marked_pane() != Some(pane)).then_some(pane);
+        if self.marked_pane != next {
+            self.marked_pane = next;
+            self.bump_generation();
+        }
+        Ok(())
+    }
+
+    /// The pin's `-M`: `server_clear_marked` whatever the target was.
+    pub(crate) fn clear_marked_pane(&mut self) {
+        if self.marked_pane.is_some() {
+            self.marked_pane = None;
+            self.bump_generation();
+        }
     }
 
     pub(crate) fn pane_input_off(&self, pane: PaneId) -> Result<bool, ServerError> {

@@ -67,6 +67,7 @@
 | pane-selection-input-style | 40 | yes | 0 | yes | yes | yes |
 | pane-selection-marked | 42 | yes | 0 | yes | yes | yes |
 | pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
+| pane-spawn-retain | 27 | yes | 0 | yes | yes | yes |
 | pane-spawn-style-title-v2 | 18 | yes | 0 | yes | yes | yes |
 | panes | 9 | yes | 0 | yes | yes | yes |
 | pane-target-grammar | 70 | yes | 0 | yes | yes | yes |

@@ -5924,6 +5924,13 @@ impl MuxEngine {
                 pane_options.insert("pane-border-style", style.to_owned());
             }
         }
+        if options.has("-k") || options.value("-m").is_some() {
+            self.pane_remain_on_exit.insert(pane, RemainOnExit::Key);
+            if let Some(message) = options.value("-m") {
+                self.scalar_table_mut_or_insert(TmuxOptionTarget::Pane(pane))
+                    .insert("remain-on-exit-format", message.to_owned());
+            }
+        }
         if let Some(title) = options.value("-T") {
             let target =
                 ExecutionContext::for_pane(&self.state, target).expect("resolved pane exists");
@@ -37682,6 +37689,108 @@ mod tests {
         engine
             .execute(&mut context, &command("has-session", &["-t", "=alpha"]))
             .expect("has-session resolves a session target");
+    }
+
+    #[test]
+    fn split_window_retain_flags_write_the_pins_pane_local_key_retention() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let first = context.pane.expect("first pane");
+        let window = context.window.expect("window");
+
+        for (arguments, format) in [
+            (vec!["-d", "-k", "-t", "%0"], None),
+            (
+                vec!["-d", "-m", "gone #{pane_dead_status}", "-t", "%0"],
+                Some("gone #{pane_dead_status}"),
+            ),
+            (vec!["-d", "-k", "-m", "both", "-t", "%0"], Some("both")),
+        ] {
+            let arguments = arguments
+                .into_iter()
+                .map(|argument| {
+                    if argument == "%0" {
+                        first.to_string()
+                    } else {
+                        argument.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>();
+            let arguments = arguments.iter().map(String::as_str).collect::<Vec<_>>();
+            let execution = engine
+                .execute(&mut context, &command("split-window", &arguments))
+                .expect("retained split");
+            let Some(MuxEffect::PaneCreated { pane, .. }) = execution.effects.first() else {
+                panic!("missing pane creation effect");
+            };
+            let pane = *pane;
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command(
+                            "show-options",
+                            &["-pv", "-t", &pane.to_string(), "remain-on-exit"]
+                        ),
+                    )
+                    .expect("remain-on-exit readback")
+                    .output,
+                "key"
+            );
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command(
+                            "show-options",
+                            &["-pv", "-t", &pane.to_string(), "remain-on-exit-format"],
+                        ),
+                    )
+                    .expect("remain-on-exit-format readback")
+                    .output,
+                format.unwrap_or_default()
+            );
+            assert!(engine.retain_exited_pane(pane, false).expect("clean exit"));
+            assert!(engine.retain_exited_pane(pane, true).expect("failed exit"));
+            engine
+                .state
+                .mark_pane_dead(pane, Some(0))
+                .expect("retained pane dies");
+            assert!(engine.dead_pane_dismisses_on_key(pane));
+            assert!(!engine.dead_pane_dismisses_on_key(first));
+            engine
+                .execute(
+                    &mut context,
+                    &command("kill-pane", &["-t", &pane.to_string()]),
+                )
+                .expect("kill the retained pane");
+        }
+
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "show-window-options",
+                        &["-v", "-t", "work:0", "remain-on-exit"]
+                    ),
+                )
+                .expect("window scope readback")
+                .output,
+            ""
+        );
+        assert_eq!(engine.state.windows[&window].panes.len(), 1);
+
+        for arguments in [vec!["-d", "-m"], vec!["-d", "-k", "-m"]] {
+            assert!(matches!(
+                engine.execute(&mut context, &command("split-window", &arguments)),
+                Err(ServerError::CommandParse(message))
+                    if message == "command split-window: -m expects an argument"
+            ));
+        }
     }
 
     #[test]

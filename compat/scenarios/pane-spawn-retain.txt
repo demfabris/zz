@@ -1,0 +1,33 @@
+# split-window -k and -m set the new pane's own remain-on-exit to key and
+# leave every wider scope alone; -m additionally stores its argument as that
+# pane's remain-on-exit-format, raw and unexpanded (cmd-split-window.c).
+set-option -g remain-on-exit off
+split-window -d -k -t w:0.0 true
+run-shell "sleep 0.5"
+out: show-options -pv -t w:0.1 remain-on-exit
+out: show-options -pv -t w:0.1 remain-on-exit-format
+out: show-window-options -v -t w:0 remain-on-exit
+out: show-options -gv remain-on-exit
+out: display-message -p -t w:0.1 #{pane_dead}:#{pane_dead_status}
+out: list-panes -t w:0 -F #{pane_index}:#{pane_dead}
+kill-pane -t w:0.1
+split-window -d -m "gone #{pane_dead_status}" -t w:0.0 false
+run-shell "sleep 0.5"
+out: show-options -pv -t w:0.1 remain-on-exit
+out: show-options -pv -t w:0.1 remain-on-exit-format
+out: display-message -p -t w:0.1 #{pane_dead}:#{pane_dead_status}
+kill-pane -t w:0.1
+split-window -d -k -m both -t w:0.0 true
+run-shell "sleep 0.5"
+out: show-options -pv -t w:0.1 remain-on-exit
+out: show-options -pv -t w:0.1 remain-on-exit-format
+kill-pane -t w:0.1
+
+# A retained sibling leaves the untouched scopes alone, and -m keeps the pin's
+# required argument.
+split-window -d -t w:0.0 true
+run-shell "sleep 0.5"
+out: list-panes -t w:0 -F #{pane_index}:#{pane_dead}
+split-window -d -m
+split-window -d -k -m
+out: display-message -p -t w:0 #{window_panes}

@@ -19,9 +19,9 @@ Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
 Tracked gap groups: **84**. Classified items: **573**.
 
-- Status: open: 42, blocked: 8, accepted: 34.
-- Decision: adopt: 47, native: 27, park: 3, never: 7.
-- Priority: later: 50, none: 34.
+- Status: open: 42, blocked: 6, accepted: 36.
+- Decision: adopt: 47, native: 28, park: 1, never: 8.
+- Priority: later: 48, none: 36.
 - Closed history entries: 127.
 - Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 100, presentation: 8, protocol: 2.
 
@@ -99,8 +99,6 @@ structure as proof.
 | `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
-| `protocol.binary-streams` | Design one bounded command stream | park | blocked | hardest | protocol | scripts, remote | none |
-| `protocol.socket-acl` | Defer multi-user socket ACLs | park | blocked | hardest | daemon | admin, remote | none |
 
 ## None
 
@@ -138,6 +136,8 @@ structure as proof.
 | `pane.floating-model` | Defer tmux floating panes | native | accepted | none | mux | daily, scripts, gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | native | accepted | none | client | daily | none |
+| `protocol.binary-streams` | Design one bounded command stream | native | accepted | none | protocol | scripts, remote | none |
+| `protocol.socket-acl` | Defer multi-user socket ACLs | never | accepted | none | daemon | admin, remote | none |
 | `protocol.socket-interop` | Do not speak tmux private protocol | never | accepted | none | protocol | admin | none |
 | `sessions.linked-groups` | Do not add linked session groups | never | accepted | none | mux | scripts, admin | none |
 
@@ -1550,38 +1550,42 @@ Native chrome and a persistent daemon need explicit behavior where tmux assumes 
 
 ### `protocol.binary-streams`: Design one bounded command stream
 
-Five commands need the same bounded binary transport; separate transports would duplicate risk. Protocol v78 matches the hidden completion number for `source-file -`, but the caller stdin transport and resulting source semantics remain absent.
+Five pinned forms move raw bytes between the invoking client's standard streams and the server: `display-message -I`, `split-window -I`, `load-buffer -`, `save-buffer -`, and `source-file -`, plus non-UTF-8 argv and `show-buffer`'s binary output. zz's client protocol carries typed UTF-8 messages, and its CLI already reads caller stdin for its own verbs as one bounded payload, where `agent-send` and `send-text` go through `read_stdin_payload` under the `MAX_AGENT_SEND_BYTES` cap. Every tmux `-` form stays loudly refused instead of pretending the daemon's cwd or process is the caller's. The superset roadmap's milestone 5 is explicit that one bounded command-stream channel would replace all five at once and only after demand is measured, so this is recorded as the reversible reading with no permanent exclusion. Reopen when a named workload needs unbounded or non-UTF-8 caller streams.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hardest`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `protocol`
 - User impact: scripts, remote
 - Items: `flag:display-message:-I`, `flag:split-window:-I`, `protocol:command-stream`, `semantic:buffer-standard-streams`, `semantic:non-utf8-command-arguments`, `semantic:show-buffer-binary-policy`, `semantic:source-file-stdin`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/catalog.rs`
-  - `resource:knowledge/designs/tmux-superset-roadmap.md`
+  - `resource:crates/zz/src/lib.rs`
   - `resource:knowledge/tmux/divergences.md`
+  - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
-  - `One reviewed protocol covers stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime for every stream command.`
+  - `The typed UTF-8 command protocol stays the contract, with the bounded stdin payload serving zz's own verbs while every tmux stream form stays loudly refused.`
+  - `Any later stream support arrives as one reviewed channel covering stdin, stdout, binary bytes, backpressure, cancellation, and process lifetime, not as five separate transports.`
 
 ### `protocol.socket-acl`: Defer multi-user socket ACLs
 
-The current daemon and socket are single-user.
+`server-access` grants other Unix users read or write access to a shared tmux server socket, with a per-user ACL the server enforces on every connection. zz's daemon is single-user by construction: it creates its socket and identity at mode 0600, keeps no peer identity, and holds live PTYs, ssh sessions, browser profiles with imported cookies, and agent sessions inside one account, so admitting a second user would hand over all of it. The pin's same-uid check when re-marking a read-only client is already skipped for the same reason. This joins linked windows and tmux's private socket protocol as a permanent exclusion; a multi-user deployment would be a different product with its own identity, authorization, revocation, and audit design.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hardest`
+- Decision: `never`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `daemon`
 - User impact: admin, remote
 - Items: `command:server-access`, `semantic:multi-user-socket-acl`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-daemon/src/lifecycle.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
 - Acceptance:
-  - `A multi-user deployment need defines identities, authorization, socket ownership, revocation, and audit behavior.`
+  - ``server-access` stays recognized and unimplemented, the daemon socket stays single-user at mode 0600, and no peer authorization model is added.`
+  - `The divergence matrix keeps the single-user socket decision visible as a permanent exclusion.`
 
 ### `protocol.socket-interop`: Do not speak tmux private protocol
 

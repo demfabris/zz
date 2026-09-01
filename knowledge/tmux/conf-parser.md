@@ -95,8 +95,10 @@ format and replay target. Command and Interactive
 clients receive those diagnostics directly. Protocol v77 gives Control one
 `ControlCommandGuard { output, error, sticky_failure, flags }` for each parser-owned replay command
 that survives command-name resolution. An alias resolved to `source-file` before replay stays on
-this path. Unknown or ambiguous command names and malformed alias names publish a located Warning
-that Control renders as `%config-error`, without a guard. Ordinary success and a quiet all-miss
+this path. Unknown or ambiguous command names and malformed alias names publish a located protocol v91
+`ControlConfigError` that Control renders as `%config-error`, without a guard. The identity is the
+payload type, the way the pin decides from `cfg_add_cause` rather than from the wording, so a
+reworded or localized diagnostic still routes there. Ordinary success and a quiet all-miss
 produce an empty flags-1 `%end` guard. A nested hit plus miss carries its declared-path diagnostic
 inside `%end`; an all-miss, flag or arity failure, runtime failure, or depth refusal ends `%error`.
 `sticky_failure` is separate from the terminator, so runtime failures set Control retval 1 while
@@ -114,7 +116,7 @@ The parser-owned path now uses the v77 event shape; its command frames remain fl
 An unsupported zz-only command in an inserted list receives an empty success guard and later
 inserted siblings continue. It does not join `ConfigLoadReport`'s skipped summary, so existing
 unimplemented command and semantic groups still own reporting parity. An unknown command in a child
-file follows the pin: the parent and source guards succeed, then a `%config-error` Warning appears
+file follows the pin: the parent and source guards succeed, then a `%config-error` appears
 without its own command guard.
 
 Immediate `after-*` and `command-error` hooks retain the originating Control recipient but clear the

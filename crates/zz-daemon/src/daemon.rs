@@ -8389,7 +8389,6 @@ impl Shared {
                 deferred_control_config_warnings.extend(report.diagnostics().iter().map(
                     |diagnostic| DeferredControlConfigWarning {
                         client,
-                        pane: pending.context.pane,
                         text: diagnostic.clone(),
                     },
                 ));
@@ -19604,6 +19603,7 @@ impl Shared {
             EventPayload::ControlCommandGuard { .. }
                 | EventPayload::ControlSourceFile { .. }
                 | EventPayload::ControlCommandOutput { .. }
+                | EventPayload::ControlConfigError { .. }
                 | EventPayload::ClientMessage { .. }
                 | EventPayload::ServerStopping
         ) || matches!(&payload, EventPayload::ControlExit { reason } if reason.is_empty())
@@ -19850,16 +19850,13 @@ impl Shared {
     fn publish_sourced_config_warning(
         &self,
         client: Option<ClientId>,
-        pane: Option<PaneId>,
         command: &CommandInvocation,
         message: &str,
     ) {
         if let Some(client) = client {
             self.publish_to_client(
                 client,
-                EventPayload::ClientMessage {
-                    pane,
-                    kind: ClientMessageKind::Warning,
+                EventPayload::ControlConfigError {
                     text: config_command_error(command, message),
                 },
             );
@@ -19873,11 +19870,7 @@ impl Shared {
         for warning in warnings {
             self.publish_to_client(
                 warning.client,
-                EventPayload::ClientMessage {
-                    pane: warning.pane,
-                    kind: ClientMessageKind::Warning,
-                    text: warning.text,
-                },
+                EventPayload::ControlConfigError { text: warning.text },
             );
         }
     }
@@ -21765,7 +21758,6 @@ impl Shared {
                 {
                     deferred_control_config_warnings.push(DeferredControlConfigWarning {
                         client,
-                        pane: context.pane,
                         text: config_command_error(&failure.original, &failure.message),
                     });
                 }
@@ -22046,13 +22038,11 @@ impl Shared {
                 let mut nested_control_config_warnings = Vec::new();
                 for (pending, parsed, diagnostics) in parsed_sources {
                     if let Some((client, _)) = pending.options.control_target {
-                        nested_control_config_warnings.extend(diagnostics.into_iter().map(
-                            |text| DeferredControlConfigWarning {
-                                client,
-                                pane: pending.context.pane,
-                                text,
-                            },
-                        ));
+                        nested_control_config_warnings.extend(
+                            diagnostics
+                                .into_iter()
+                                .map(|text| DeferredControlConfigWarning { client, text }),
+                        );
                     }
                     let mut source_context = pending.context.clone();
                     match self.replay_config_file_with_parent_queue(
@@ -22120,7 +22110,6 @@ impl Shared {
                     report.note_invalid_command(&command, &name_error);
                     self.publish_sourced_config_warning(
                         options.control_target.map(|(client, _)| client),
-                        context.pane,
                         &command,
                         &name_error,
                     );
@@ -23234,7 +23223,6 @@ struct PreparedConfigFailure {
 
 struct DeferredControlConfigWarning {
     client: ClientId,
-    pane: Option<PaneId>,
     text: String,
 }
 
@@ -47985,12 +47973,7 @@ set-option -g @alias-mixed-next yes
                     .iter()
                     .filter_map(|message| match message {
                         ProtocolMessage::Event(Event {
-                            payload:
-                                EventPayload::ClientMessage {
-                                    kind: ClientMessageKind::Warning,
-                                    text,
-                                    ..
-                                },
+                            payload: EventPayload::ControlConfigError { text },
                             ..
                         }) => Some(text.as_str()),
                         _ => None,
@@ -48306,12 +48289,7 @@ set-option -g @alias-mixed-next yes
                     ..
                 }) => Some("guard".to_owned()),
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
+                    payload: EventPayload::ControlConfigError { text },
                     ..
                 }) => Some(format!("warning:{text}")),
                 _ => None,
@@ -48683,12 +48661,7 @@ set-option -g @alias-mixed-next yes
                     ..
                 }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
+                    payload: EventPayload::ControlConfigError { text },
                     ..
                 }) => Some(format!("warning:{text}")),
                 _ => None,
@@ -48700,6 +48673,58 @@ set-option -g @alias-mixed-next yes
             [format!("warning:{source}:1: unknown command: source")]
         );
         assert!(read_global_option(&shared, "@after-name-errors").is_empty());
+    }
+
+    #[test]
+    fn control_config_diagnostics_are_typed_rather_than_recognized_by_prose() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("typed-config.conf");
+        fs::write(&source, "wibble\n").expect("typed config source");
+        let shared = Arc::new(Shared::new(76));
+        let mut context = ExecutionContext::default();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        assert_eq!(
+            shared.execute_command_request(
+                control,
+                ClientKind::Control,
+                &mut context,
+                1,
+                &CommandInvocation::new("source-file", [source.display().to_string()]),
+            ),
+            CommandResponse::Success {
+                request_id: 1,
+                output: String::new(),
+                exit_code: 1,
+                stderr: String::new(),
+            }
+        );
+
+        // The pin decides %config-error from cfg_add_cause, so the diagnostic
+        // carries its own identity on the wire and no generic warning is sent
+        // alongside it for Control to classify by wording.
+        let mut config_errors = Vec::new();
+        let mut client_messages = Vec::new();
+        for message in take_reliable_messages(&mailbox) {
+            match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ControlConfigError { text },
+                    ..
+                }) => config_errors.push(text),
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::ClientMessage { kind, text, .. },
+                    ..
+                }) => client_messages.push(format!("{kind:?}:{text}")),
+                _ => {}
+            }
+        }
+        assert_eq!(
+            config_errors,
+            [format!("{}:1: unknown command: wibble", source.display())]
+        );
+        assert!(client_messages.is_empty(), "{client_messages:?}");
     }
 
     #[test]
@@ -48770,12 +48795,7 @@ set-option -g @alias-mixed-next yes
                     ..
                 }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
+                    payload: EventPayload::ControlConfigError { text },
                     ..
                 }) => Some(format!("warning:{text}")),
                 _ => None,
@@ -48854,12 +48874,7 @@ set-option -g @alias-mixed-next yes
                     ..
                 }) => Some("guard".to_owned()),
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
+                    payload: EventPayload::ControlConfigError { text },
                     ..
                 }) => Some(format!("warning:{text}")),
                 _ => None,
@@ -50135,12 +50150,7 @@ set-option -g @alias-mixed-next yes
                         ..
                     }) => Some(format!("guard:{error}:{sticky_failure}:{output}")),
                     ProtocolMessage::Event(Event {
-                        payload:
-                            EventPayload::ClientMessage {
-                                kind: ClientMessageKind::Warning,
-                                text,
-                                ..
-                            },
+                        payload: EventPayload::ControlConfigError { text },
                         ..
                     }) => Some(format!("warning:{text}")),
                     ProtocolMessage::Event(Event {
@@ -50465,12 +50475,7 @@ set-option -g @alias-mixed-next yes
                     ..
                 }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
+                    payload: EventPayload::ControlConfigError { text },
                     ..
                 }) => Some(format!("warning:{text}")),
                 ProtocolMessage::Event(
@@ -51330,12 +51335,7 @@ set-option -g @alias-mixed-next yes
                     ..
                 }) => Some(("guard", output, error, sticky_failure)),
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
+                    payload: EventPayload::ControlConfigError { text },
                     ..
                 }) => Some(("warning", text, false, false)),
                 _ => None,
@@ -88929,12 +88929,7 @@ bind - split-window -v -c "#{pane_current_path}"
                     ..
                 }) => Some(format!("guard:{flags}:{error}:{sticky_failure}:{output}")),
                 ProtocolMessage::Event(Event {
-                    payload:
-                        EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Warning,
-                            text,
-                            ..
-                        },
+                    payload: EventPayload::ControlConfigError { text },
                     ..
                 }) => Some(format!("warning:{text}")),
                 ProtocolMessage::Event(Event {

@@ -420,31 +420,6 @@
       "reason": "The Unix passwd lookup returns an OsString path. The current UTF-8 parser converts that path with into_string and treats a valid non-UTF-8 home as a failed account lookup, so a found user with unrepresentable bytes takes the pin's missing-user `syntax error` path instead of expanding. The config-file byte contract is closed under config.non-utf8-file-bytes, but the expansion result is not a path yet: it lands in the surrounding word, so `source-file ~user/x.conf` becomes an ordinary command argument holding those bytes. Measured on 2026-09-01 against the pin: a byte-parsed config line `source-file /tmp/zz-\\200-missing.conf` runs in the pin and reports `No such file or directory` for the raw path, while zz refuses the whole file with `stream did not contain valid UTF-8` because CommandInvocation carries String arguments. That is semantic:non-utf8-command-arguments under the accepted protocol.binary-streams reading, so this needs a byte-capable command-argument representation before the parser's user_home and the SourceFile effect are worth converting."
     },
     {
-      "id": "control-mode.diagnostic-typing",
-      "title": "Type Control-mode config diagnostics",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "protocol",
-      "items": [
-        "semantic:control-mode-typed-config-diagnostics"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/message.rs",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "resource:crates/zz/src/control_mode.rs"
-      ],
-      "acceptance": [
-        "Typed protocol identity routes config diagnostics to %config-error independently of localized or future prose."
-      ],
-      "depends_on": [],
-      "reason": "Config diagnostics remain generic Warning events that Control classifies by English text. Protocol v78 gives source-read failures typed identity and closes their external raw placement and source-completion numbering without changing the generic config Warning path."
-    },
-    {
       "id": "control-mode.disconnect-cancels-command-queue",
       "title": "Cancel client-owned Control queues after connection loss",
       "decision": "adopt",
@@ -3325,6 +3300,21 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Shell-evaluated if-shell -b and run-shell -bC now retain the originating Control client separately from replay_client and map its inserted work to protocol v77 flags 0. The triggering flags-1 frame closes first, later flags-1 input may overtake the callback, and each inserted command, source command, and sourced child receives an independent frame in parent-before-child order. Successful and false-branch output stays inside its callback frame. Missing sources and runtime failures end their flags-0 frames with %error and set sticky status 1; a later flags-1 success does not clear that status before Return. Both producers keep a malformed delayed command list silent, unframed, and status-neutral. Ordinary run-shell -b shell jobs remain unframed, immediate if-shell -bF remains synchronous flags 1, and foreground run-shell -C retains the closed synchronous path. The callback clears replay_client and checks that its exact Control client is still registered before callback execution begins. A client disconnected before that point gets no callback frame or inserted side effect, and no output migrates to a later client. control-mode.disconnect-cancels-command-queue owns hard disconnect after an immediate hook or source queue has already started. Non-Control background behavior is unchanged. The implementation reuses protocol v77 without a wire bump. Focused daemon and serialized Control CLI regressions pass, shell syntax and formatting checks pass, and the strict 11-step smoke/source-file-control differential has zero topology, geometry, format, output, or warning differences with no skips. The partial differential leaves the stored canonical summary unchanged."
+    },
+    {
+      "id": "control-mode.diagnostic-typing",
+      "title": "Type Control-mode config diagnostics",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz/src/control_mode.rs",
+        "scenario:compat/scenarios/smoke/source-file-control.txt",
+        "scenario:compat/scenarios/smoke/source-replay-diagnostics.txt",
+        "resource:knowledge/protocol/wire-protocol.md",
+        "resource:knowledge/tmux/conf-parser.md"
+      ],
+      "resolution": "Protocol v91 appends EventPayload::ControlConfigError, and the two producers that raise configuration diagnostics for a Control client -- the unknown or ambiguous replayed command name and the deferred construction diagnostics of a sourced file -- now publish it instead of a generic Warning ClientMessage. Control renders %config-error from the payload type alone; the English text classifier that recognized `source-file `, ` invalid line`, `skipped N unsupported tmux command`, and the `path:line: ` shape is deleted, so a reworded, empty, or localized diagnostic still routes there and a generic warning that merely reads like one no longer promotes itself. This matches the pin, where cfg_add_cause records a cause by where it was raised and cfg_print_causes / cfg_show_causes write %%config-error for any control client without inspecting the text. Both producers were already Control-only, so no interactive surface changed. Typed source-read failures keep their separate v78 ControlSourceFile channel."
     },
     {
       "id": "control-mode.exit-pane-output",

@@ -37794,6 +37794,55 @@ mod tests {
     }
 
     #[test]
+    fn break_pane_floating_placement_flags_stay_loudly_unsupported() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        engine
+            .execute(&mut context, &command("split-window", &["-d"]))
+            .expect("split");
+        let window = context.window.expect("window");
+        let source = engine.state.windows[&window].pane_order()[1].to_string();
+
+        for (flag, value) in [
+            ("-W", None),
+            ("-x", Some("20")),
+            ("-y", Some("6")),
+            ("-X", Some("10")),
+            ("-Y", Some("3")),
+        ] {
+            let mut arguments = vec![flag];
+            arguments.extend(value);
+            arguments.extend(["-s", source.as_str()]);
+            assert!(
+                matches!(
+                    engine.execute(&mut context, &command("break-pane", &arguments)),
+                    Err(ServerError::UnsupportedCommand(message))
+                        if message == format!("break-pane {flag}")
+                ),
+                "break-pane {flag}"
+            );
+        }
+        assert_eq!(engine.state.windows[&window].panes.len(), 2);
+        assert_eq!(engine.state.windows.len(), 1);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "-t", &source, "#{pane_floating_flag}"]
+                    ),
+                )
+                .expect("floating flag readback")
+                .output,
+            "0"
+        );
+    }
+
+    #[test]
     fn split_window_zoom_follows_the_post_spawn_active_pane() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();

@@ -17,11 +17,11 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **77**. Classified items: **529**.
+Tracked gap groups: **76**. Classified items: **529**.
 
-- Status: open: 29, blocked: 9, accepted: 39.
-- Decision: adopt: 34, native: 31, park: 4, never: 8.
-- Priority: later: 38, none: 39.
+- Status: open: 28, blocked: 9, accepted: 39.
+- Decision: adopt: 33, native: 31, park: 4, never: 8.
+- Priority: later: 37, none: 39.
 - Closed history entries: 141.
 - Surface: command: 9, flag: 51, native-command: 21, option: 75, format: 65, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 82, presentation: 8, protocol: 2.
 
@@ -58,7 +58,6 @@ structure as proof.
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
 | `options.client-attach-and-focus` | Consume the client attach command and mouse focus options | park | blocked | medium | client | daily, gui | none |
-| `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
 | `rendering.geometry-residue` | Close bounded geometry reporting gaps | adopt | open | medium | client | scripts, gui | none |
 | `terminal.key-client-selection` | Select the send-keys target client | adopt | open | medium | daemon | scripts, daily | none |
 | `terminal.resize-pane-trim` | Add terminal history trim action | adopt | blocked | medium | terminal | daily, scripts | none |
@@ -126,7 +125,7 @@ structure as proof.
 | `options.native-overlay-styles` | Keep native overlay styling | native | accepted | none | client | daily, gui | none |
 | `options.native-pane-scrollbars` | Keep pane scrollbars outside the cell grid | native | accepted | none | client | gui, daily | none |
 | `options.theme-palette` | Map tmux theme palette options | native | accepted | none | client | gui | none |
-| `pane.floating-model` | Keep floating panes and the floating editor out of the mux model | native | accepted | none | mux | daily, scripts, gui | none |
+| `pane.floating-model` | Keep floating panes, their placement flags, and the floating editor out of the mux model | native | accepted | none | mux | daily, scripts, gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
 | `prompt.pane-rendered` | Keep prompts on client surfaces | native | accepted | none | client | daily | none |
 | `protocol.binary-streams` | Design one bounded command stream | native | accepted | none | protocol | scripts, remote | none |
@@ -1366,23 +1365,6 @@ The pin's `theme` choice plus the twenty `dark-theme-*` and `light-theme-*` colo
   - `Style strings keep resolving the ten pinned theme colour names through zz's theme in the GUI and through the pin's fallback indices in the daemon and raw TUI.`
   - `The twenty-one theme options stay store-only, with client light or dark selection owned by the client rather than by the `theme` option.`
 
-### `pane.break-geometry`: Complete floating break-pane placement
-
-Pinned -W enters the floating-pane path, where -x, -y, -X, and -Y size and place the floating pane. These flags do not describe ordinary tiled destination-window geometry and cannot ship before pane.floating-model.
-
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `later` / `medium`
-- Owner: `mux`
-- User impact: scripts, daily
-- Items: `flag:break-pane:-W`, `flag:break-pane:-X`, `flag:break-pane:-Y`, `flag:break-pane:-x`, `flag:break-pane:-y`
-- Depends on: `pane.floating-model`
-- Evidence:
-  - `resource:crates/zz-protocol/src/catalog.rs`
-  - `scenario:compat/scenarios/break-pane.txt`
-- Acceptance:
-  - `Differential geometry tests cover target window creation, name, size, and placement coordinates.`
-
 ### `pane.command-completion`: Complete two-phase pane command completion
 
 Pinned tmux closes the successful Control guard immediately, parks later queue items on the pane wait item, then propagates exit or signal status and wakes the queue before retention or removal. -W stays loudly unsupported until this foundation integrates across protocol-message, control-client, daemon-core, mux-command, and protocol-catalog.
@@ -1406,25 +1388,27 @@ Pinned tmux closes the successful Control guard immediately, parks later queue i
   - `A bounded two-phase command lifecycle closes a successful Control guard as soon as split-window -W creates its pane, then parks later items from that command queue until the pane exits.`
   - `Pane exit or signal resumes the parked queue before remain-on-exit retention or pane removal and propagates the exact exit status or 128 plus signal status to the originating unattached client.`
 
-### `pane.floating-model`: Keep floating panes and the floating editor out of the mux model
+### `pane.floating-model`: Keep floating panes, their placement flags, and the floating editor out of the mux model
 
-In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays. `option:editor` joined this group because its only read in the pin is spawn_editor, which writes the buffer to a temp file and spawns `$editor <path>` as a SPAWN_FLOATING pane sized to nine tenths of the window, reached from window-buffer.c when choose-buffer edits a buffer. The write side of the option is already exact in zz: tmux.c seeds `editor` from VISUAL or EDITOR at startup and derives status-keys and mode-keys from whether the basename contains `vi`, and the daemon's editor_from_environment and mode_keys_from_environment reproduce both, including the `/usr/bin/vi` fallback. What is left is a floating pane running an external editor, which this group already answers: zz edits a buffer on a client surface instead. Reopen it with the floating model, not on its own.
+In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. The five `break-pane` placement flags joined this group on 2026-09-01 after being measured on a throwaway server, because the earlier contract assumed they described a destination window and they do not. `break-pane -W -s <pane>` creates no window at all: cmd_break_pane_float removes the source pane's tile, marks its layout cell LAYOUT_CELL_FLOATING, moves it to the head of the window's z-index, and leaves it in the same window, so the window count is unchanged and the remaining tiled pane grows to the full extent. `-x` and `-y` size that floating cell and `-X` and `-Y` place it, all through layout_floating_args_parse: on an 80x24 window a bare `-W` measures 40x6 at 4,2 from the `w->sx / 2` and `w->sy / 4` defaults and the cascading `last_new_pane_x`/`last_new_pane_y` origin, `-x 20 -y 6 -X 10 -Y 3` measures 18x4 at 11,4 because pane border lines take two cells off each size and add one to each offset, and `-x 50% -y 25%` measures 38x4 with the cascade continuing to 8,4. A bad value answers `failed to float pane: position invalid`, a second `-W` on the same pane answers `pane is already floating`, and `-W` on a zoomed window answers `can't float a pane while window is zoomed`. Every one of those facts is about a mux floating-pane object with a z-index and a floating layout cell, which is exactly what this group declines to model, so the five flags stay loudly unsupported alongside the `move-pane` placement flags rather than describing tiled destination-window geometry. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays. `option:editor` joined this group because its only read in the pin is spawn_editor, which writes the buffer to a temp file and spawns `$editor <path>` as a SPAWN_FLOATING pane sized to nine tenths of the window, reached from window-buffer.c when choose-buffer edits a buffer. The write side of the option is already exact in zz: tmux.c seeds `editor` from VISUAL or EDITOR at startup and derives status-keys and mode-keys from whether the basename contains `vi`, and the daemon's editor_from_environment and mode_keys_from_environment reproduce both, including the `/usr/bin/vi` fallback. What is left is a floating pane running an external editor, which this group already answers: zz edits a buffer on a client surface instead. Reopen it with the floating model, not on its own.
 
 - Decision: `native`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `mux`
 - User impact: daily, scripts, gui
-- Items: `command:new-pane`, `flag:move-pane:-D`, `flag:move-pane:-L`, `flag:move-pane:-P`, `flag:move-pane:-R`, `flag:move-pane:-U`, `flag:move-pane:-X`, `flag:move-pane:-Y`, `flag:move-pane:-z`, `format:pane_floating_flag`, `option:editor`, `semantic:floating-pane-model`, `semantic:move-pane-tiled-extension`
+- Items: `command:new-pane`, `flag:break-pane:-W`, `flag:break-pane:-X`, `flag:break-pane:-Y`, `flag:break-pane:-x`, `flag:break-pane:-y`, `flag:move-pane:-D`, `flag:move-pane:-L`, `flag:move-pane:-P`, `flag:move-pane:-R`, `flag:move-pane:-U`, `flag:move-pane:-X`, `flag:move-pane:-Y`, `flag:move-pane:-z`, `format:pane_floating_flag`, `option:editor`, `semantic:floating-pane-model`, `semantic:move-pane-tiled-extension`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/command.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `scenario:compat/scenarios/break-pane.txt`
   - `resource:knowledge/tmux/divergences.md`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
   - `resource:crates/zz-mux/src/tmux_options.rs`
 - Acceptance:
-  - `Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` placement flags stay loudly unsupported.`
+  - `Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` and `break-pane` placement flags stay loudly unsupported.`
   - ``pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior.`
   - ``editor` keeps the pin's startup seeding from VISUAL or EDITOR and its vi or emacs key-table derivation, and stays store-only beyond that because its only read in the pin spawns a floating pane.`
 

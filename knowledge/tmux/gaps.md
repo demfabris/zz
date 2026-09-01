@@ -17,12 +17,12 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **78**. Classified items: **544**.
+Tracked gap groups: **80**. Classified items: **544**.
 
-- Status: open: 35, blocked: 6, accepted: 37.
-- Decision: adopt: 40, native: 29, park: 1, never: 8.
-- Priority: later: 41, none: 37.
-- Closed history entries: 135.
+- Status: open: 34, blocked: 8, accepted: 38.
+- Decision: adopt: 39, native: 30, park: 3, never: 8.
+- Priority: later: 42, none: 38.
+- Closed history entries: 136.
 - Surface: command: 9, flag: 60, native-command: 21, option: 75, format: 69, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 84, presentation: 8, protocol: 2.
 
 ## Measured surface
@@ -58,6 +58,7 @@ structure as proof.
 | `formats.window-runtime` | Expose remaining window formats | adopt | open | medium | daemon | scripts, remote | none |
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
+| `options.client-attach-and-focus` | Consume the client attach command and mouse focus options | park | blocked | medium | client | daily, gui | none |
 | `options.pane-chrome` | Consume pane chrome options | adopt | open | medium | client | daily, gui | none |
 | `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
 | `pane.spawn-flags` | Complete split-window placement flags | adopt | open | medium | mux | scripts, daily | none |
@@ -86,8 +87,8 @@ structure as proof.
 | `hooks.pane-events` | Produce pane focus and clipboard hooks | adopt | open | hard | daemon | scripts, gui | none |
 | `hooks.shutdown-window-unlinked-order` | Preserve forced-shutdown window-unlinked order | adopt | open | hard | mux | scripts | none |
 | `keys.copy-mode-binding-fidelity` | Match shared copy-mode binding commands | adopt | open | hard | protocol | daily, remote, scripts | copy-mode.command-fidelity |
+| `options.pane-engine-knobs` | Consume the pane VT engine knobs | park | blocked | hard | terminal | daily, remote, scripts | none |
 | `options.remain-on-exit-format` | Render remain-on-exit-format in retained panes | adopt | blocked | hard | terminal | daily, scripts | none |
-| `options.terminal-behavior` | Consume terminal behavior options | adopt | open | hard | terminal | daily, remote, scripts | none |
 | `pane.command-completion` | Complete two-phase pane command completion | adopt | open | hard | daemon | scripts, daily | none |
 | `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
@@ -123,11 +124,12 @@ structure as proof.
 | `list-keys.deterministic-sort-ties` | Keep list-keys sorting total and deterministic | never | accepted | none | mux | scripts | none |
 | `messages.tty-model` | Model tmux message and TTY reports | never | accepted | none | daemon | admin, remote | none |
 | `mouse.bound-context` | Carry bound mouse event context | native | accepted | none | protocol | daily, scripts, gui | none |
+| `options.client-terminal-negotiation` | Keep client terminal negotiation native | native | accepted | none | client | daily, remote, scripts | none |
 | `options.lock-program` | Keep locking off the client terminal | native | accepted | none | client | remote, admin | none |
 | `options.native-mode-styles` | Keep native mode styling | native | accepted | none | client | daily, gui | none |
 | `options.native-overlay-styles` | Keep native overlay styling | native | accepted | none | client | daily, gui | none |
 | `options.theme-palette` | Map tmux theme palette options | native | accepted | none | client | gui | none |
-| `pane.floating-model` | Keep floating panes out of the mux model | native | accepted | none | mux | daily, scripts, gui | none |
+| `pane.floating-model` | Keep floating panes and the floating editor out of the mux model | native | accepted | none | mux | daily, scripts, gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
 | `prompt.pane-rendered` | Keep prompts on client surfaces | native | accepted | none | client | daily | none |
 | `protocol.binary-streams` | Design one bounded command stream | native | accepted | none | protocol | scripts, remote | none |
@@ -1171,6 +1173,45 @@ The pin's comparator truncates 64-bit key differences into int, returns equality
 - Acceptance:
   - `Native pointer handling keeps scrollbar, border, and drag gestures without installing tmux mouse key tables, and the four mouse-context flags stay loudly unsupported.`
 
+### `options.client-attach-and-focus`: Consume the client attach command and mouse focus options
+
+Both are stored with the pin's parsing and defaults and are read by nothing. server_client_default_command in server-client.c fetches `default-client-command`, default `new-session`, as a command list whenever a client arrives with no command of its own, and substitutes the read-only refusal when the client is read-only and the list is not made entirely of CMD_READONLY commands; zz's CLI hard-codes that default instead, routing a bare `zz` straight at new-session, so setting the option changes nothing. server-client.c turns a KEYC_TYPE_MOUSEMOVE over a pane that is not the active one into window_set_active_pane when `focus-follows-mouse` is on, and tty.c forces MODE_MOUSE_ALL on that client so motion events arrive at all; zz has no consumer, and its clients already receive pointer motion without asking the terminal for all-motion tracking. The recipe: publish both session-scoped and server-scoped values the clients need on the existing option snapshot, have the launcher ask the daemon for `default-client-command` before it synthesizes new-session and run the parsed list through the same command path an explicit argument takes, and gate the GPUI pane hover handler and the TUI pointer route on the session's `focus-follows-mouse` value. Neither is blocked on an engine primitive; both are blocked on option values reaching the client, which is why they are parked together rather than closed with the engine knobs.
+
+- Decision: `park`
+- Status: `blocked`
+- Priority and ease: `later` / `medium`
+- Owner: `client`
+- User impact: daily, gui
+- Items: `option:default-client-command`, `option:focus-follows-mouse`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz/src/lib.rs`
+  - `resource:crates/zz-mux/src/honest_knobs.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `A client that attaches with no command runs the stored `default-client-command` list, keeping the pin's read-only refusal for a list that is not all read-only commands.`
+  - `Moving the pointer onto an inactive pane makes it active while `focus-follows-mouse` is on, in the GPUI client and in the raw TUI, and leaves the active pane alone while it is off.`
+
+### `options.client-terminal-negotiation`: Keep client terminal negotiation native
+
+The pin resolves one terminfo entry per client terminal and then rewrites it. tty-term.c walks `terminal-overrides` and applies every capability string whose fnmatch pattern matches the terminal name, then walks `terminal-features` and adds the named feature sets; tty-keys.c inserts each `user-keys` entry into that client's key tree as User0 through User9; tty.c's tty_update_features writes the terminal's TTYC_ENEKS string whenever `extended-keys` is nonzero; and input-keys.c picks `ESC[27;<mod>;<key>~` over `ESC[<key>;<mod>u` when `extended-keys-format` is 1. `xterm-keys` is already dead inside the pin: its options-table.c entry carries the comment `/* no longer used */` and the help text `This option is no longer used.`, so storing it and acting on nothing is exactly the pin's behavior. `assume-paste-time` has the same shape: server_client_is_assume_paste in server-client.c only times consecutive key arrivals when the client is not already bracket pasting and its terminal lacks TTYC_ENBP, so the pin itself switches the heuristic off on any terminal that reports bracketed paste. zz never opens a terminfo database; there is no terminfo, tigetstr, setupterm, or tputs call anywhere in the tree, because the daemon publishes frames and clients render them. The GPUI client owns its own terminal engine and receives paste as a typed action, and the raw TUI client writes a fixed sequence set (`ESC[?1049h`, `ESC[?2004h`, `ESC[>3u`), probes with DA1 and Kitty graphics queries, and selects pixel mouse and Kitty keyboard by TERM and TERM_PROGRAM name rather than by capability lookup, so there is no capability table for an override to patch and no key tree for a user key to join. Pane key encoding is already finer-grained than the option: libghostty's key encoder follows the Kitty keyboard flags and modifyOtherKeys state the program in that pane asked for, per pane, where the pin has one global format switch. Reopen only if zz grows a terminfo-driven client renderer, which is new scope rather than this gap.
+
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
+- Owner: `client`
+- User impact: daily, remote, scripts
+- Items: `option:assume-paste-time`, `option:extended-keys`, `option:extended-keys-format`, `option:terminal-features`, `option:terminal-overrides`, `option:user-keys`, `option:xterm-keys`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-tui/src/tty.rs`
+  - `resource:crates/zz-terminal/src/session.rs`
+  - `resource:crates/zz-mux/src/honest_knobs.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `The seven options keep pin-exact parsing, defaults, and show-options output while staying store-only, because no client terminal is driven through a terminfo entry.`
+  - `The raw TUI keeps arming bracketed paste and the Kitty keyboard protocol itself, and pane key encoding keeps following the mode the program in the pane requested rather than a server option.`
+
 ### `options.lock-program`: Keep locking off the client terminal
 
 The pin's `lock-after-time` arms a server timer per client and `lock-command`, default `lock -np`, is spawned onto that client's tty, which works because tmux's server owns the terminal. zz's daemon publishes frames and its clients draw them, so it cannot run a program on a client's terminal, and a GPUI window running `lock -np` has no meaning. `lock-server`, `lock-session`, and `lock-client` already parse with the pin's clientless error shapes and fire `after-lock-server`, while both options stay store-only. A zz lock, when it is wanted, is a client-rendered surface plus a daemon idle timer, not a spawned tty process. Reopen when that native lock surface is specified, including ownership, cancellation, and what a raw-terminal client shows.
@@ -1244,6 +1285,25 @@ The appearance bridge handles colors and per-span divider ownership, but not bor
 - Acceptance:
   - `GUI and TUI consume meaningful pane chrome fields and document unsupported cell-level attributes.`
 
+### `options.pane-engine-knobs`: Consume the pane VT engine knobs
+
+All eight parse and store exactly like the pin and are read by nothing, and each needs a per-pane knob channel that does not exist plus, for half of them, a libghostty primitive that does not exist. Measured against the pin on 2026-09-01. `scroll-on-clear`, default on: a 20x5 pane holding L01 through L12 reports history_size 8 before `ESC[H ESC[2J` and 12 after, and `capture-pane -S -` still holds all twelve lines; with the option off history stays 8 and L09 through L12 are gone. libghostty is unconditionally the second case: the same bytes leave scrollback_rows at 8. `alternate-screen`, default on: with it off a pane writing `ESC[?1049h` keeps printing on the primary screen and `#{alternate_on}` stays 0, while libghostty always honors the mode and reports Alternate. `allow-rename`, default off: with it on a pane writing `ESC k RENAMED ESC \\` renames the window and clears automatic-rename, with it off the name stays `sh` and automatic-rename stays 1; zz implements no `ESC k` handler at all, so the flag has nothing to gate. `backspace`, default C-?: `send-keys BSpace` writes 0x7f, writes 0x08 under `backspace C-h` and 0x17 under `backspace C-w`, and spawn.c separately forces the child's VERASE to the same key; zz always writes 0x7f, which is the pin's default, and sets no VERASE. `get-clipboard`, default buffer: 0 ignores an OSC 52 read, 1 answers it from the top paste buffer, and 2 and 3 forward the request to the client's terminal and relay its reply; libghostty documents that clipboard read requests are always ignored and exposes only a clipboard write callback, so zz can answer none of the three. `codepoint-widths` and `variation-selector-always-wide` override utf8.c's width table and screen-write.c's variation-selector rule per codepoint; ghostty_unicode_codepoint_width and ghostty_unicode_grapheme_width are pure functions over fixed tables with no override hook. `input-buffer-size`, default 1048576, caps input.c's escape-string collector; libghostty exposes only APC_MAX_BYTES and APC_MAX_BYTES_KITTY, which is one collector out of several. The recipe is one shared piece plus per-item work: widen the existing terminal knob path that SetWrapSearch and SetAllowPassthrough already use (MuxEffect::TerminalKnobsChanged, terminal_worker_options, a TerminalSession setter) to carry these values, then honor scroll-on-clear and alternate-screen by rewriting or dropping the matching sequences in zz-terminal's byte filter ahead of vt_write, honor allow-rename by adding the `ESC k` handler behind the flag, honor backspace in encode_key and in the pty's termios at spawn, and take codepoint-widths, variation-selector-always-wide, get-clipboard, and input-buffer-size only once libghostty grows a width override hook, a clipboard read callback, and a general string-collector cap.
+
+- Decision: `park`
+- Status: `blocked`
+- Priority and ease: `later` / `hard`
+- Owner: `terminal`
+- User impact: daily, remote, scripts
+- Items: `option:allow-rename`, `option:alternate-screen`, `option:backspace`, `option:codepoint-widths`, `option:get-clipboard`, `option:input-buffer-size`, `option:scroll-on-clear`, `option:variation-selector-always-wide`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-terminal/src/session.rs`
+  - `resource:crates/zz-mux/src/tmux_options.rs`
+  - `resource:third_party/rust/libghostty-vt-sys/src/bindings.rs`
+  - `resource:knowledge/tmux/divergences.md`
+- Acceptance:
+  - `Each knob reaches its pane's terminal through a per-pane channel and changes engine behavior to match the pinned values measured in this group's reason.`
+
 ### `options.remain-on-exit-format`: Render remain-on-exit-format in retained panes
 
 The retained-pane path marks the pane dead after the terminal worker exits, and terminal core has no post-worker VT injection or frozen-view reconstruction seam.
@@ -1261,23 +1321,6 @@ The retained-pane path marks the pane dead after the terminal worker exits, and 
   - `resource:crates/zz-terminal/src/session.rs`
 - Acceptance:
   - `A retained dead pane renders the target-scoped format after worker exit without reviving the PTY or inventing a second terminal-state owner.`
-
-### `options.terminal-behavior`: Consume terminal behavior options
-
-These values need terminal negotiation, input, width, or process consumers.
-
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `later` / `hard`
-- Owner: `terminal`
-- User impact: daily, remote, scripts
-- Items: `option:allow-rename`, `option:alternate-screen`, `option:assume-paste-time`, `option:backspace`, `option:codepoint-widths`, `option:default-client-command`, `option:editor`, `option:extended-keys`, `option:extended-keys-format`, `option:focus-follows-mouse`, `option:get-clipboard`, `option:input-buffer-size`, `option:scroll-on-clear`, `option:terminal-features`, `option:terminal-overrides`, `option:user-keys`, `option:variation-selector-always-wide`, `option:xterm-keys`
-- Depends on: none
-- Evidence:
-  - `resource:knowledge/tmux/divergences.md`
-  - `resource:crates/zz-mux/src/tmux_options.rs`
-- Acceptance:
-  - `Each option has a traced consumer or moves to an explicit native or parked decision.`
 
 ### `options.theme-palette`: Map tmux theme palette options
 
@@ -1340,25 +1383,27 @@ Pinned tmux closes the successful Control guard immediately, parks later queue i
   - `A bounded two-phase command lifecycle closes a successful Control guard as soon as split-window -W creates its pane, then parks later items from that command queue until the pane exits.`
   - `Pane exit or signal resumes the parked queue before remain-on-exit retention or pane removal and propagates the exact exit status or 128 plus signal status to the originating unattached client.`
 
-### `pane.floating-model`: Keep floating panes out of the mux model
+### `pane.floating-model`: Keep floating panes and the floating editor out of the mux model
 
-In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays.
+In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays. `option:editor` joined this group because its only read in the pin is spawn_editor, which writes the buffer to a temp file and spawns `$editor <path>` as a SPAWN_FLOATING pane sized to nine tenths of the window, reached from window-buffer.c when choose-buffer edits a buffer. The write side of the option is already exact in zz: tmux.c seeds `editor` from VISUAL or EDITOR at startup and derives status-keys and mode-keys from whether the basename contains `vi`, and the daemon's editor_from_environment and mode_keys_from_environment reproduce both, including the `/usr/bin/vi` fallback. What is left is a floating pane running an external editor, which this group already answers: zz edits a buffer on a client surface instead. Reopen it with the floating model, not on its own.
 
 - Decision: `native`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `mux`
 - User impact: daily, scripts, gui
-- Items: `command:new-pane`, `flag:move-pane:-D`, `flag:move-pane:-L`, `flag:move-pane:-P`, `flag:move-pane:-R`, `flag:move-pane:-U`, `flag:move-pane:-X`, `flag:move-pane:-Y`, `flag:move-pane:-z`, `format:pane_floating_flag`, `semantic:floating-pane-model`, `semantic:move-pane-tiled-extension`
+- Items: `command:new-pane`, `flag:move-pane:-D`, `flag:move-pane:-L`, `flag:move-pane:-P`, `flag:move-pane:-R`, `flag:move-pane:-U`, `flag:move-pane:-X`, `flag:move-pane:-Y`, `flag:move-pane:-z`, `format:pane_floating_flag`, `option:editor`, `semantic:floating-pane-model`, `semantic:move-pane-tiled-extension`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/command.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `resource:knowledge/designs/tmux-superset-roadmap.md`
+  - `resource:crates/zz-mux/src/tmux_options.rs`
 - Acceptance:
   - `Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` placement flags stay loudly unsupported.`
   - ``pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior.`
+  - ``editor` keeps the pin's startup seeding from VISUAL or EDITOR and its vi or emacs key-table derivation, and stays store-only beyond that because its only read in the pin spawns a floating pane.`
 
 ### `pane.selection-state`: Model pane selection controls
 
@@ -1752,6 +1797,7 @@ The mux cannot inspect cursor, history, or terminal mode state.
 | `mux.resize-pane-optional-values` | 2026-08-25 | This was a catalog-only reconciliation. Runtime already accepted bare -D, -L, -R, and -U with the default amount 1, plus attached and separated integer amounts. Static CommandOptionSpec metadata now marks the four direction values optional while retaining attached-value support, and manifest reconciliation compares that shape with the pinned oracle. No handler, effect, wire field, tag, or protocol version changed. Nine focused resize tests pass, along with 175 protocol unit tests and 14 protocol framing tests. The strict 16-step resize-directions differential and the checked-in canonical summary have zero differences and no skips. resize-pane -M and -T remain open under their existing owners. The later mux.command-flag-errors closure consumes these optional shapes for exact lookahead. The later mux.error-shapes closure matched nested new-session precedence. | `resource:crates/zz-protocol/src/catalog.rs`, `resource:crates/zz-mux/src/compat_manifest_tests.rs`, `file:crates/zz-mux/tests/hunt_claims.rs`, `scenario:compat/scenarios/resize-directions.txt` |
 | `options.option-name-format-coverage` | 2026-08-29 | The exact 105-name option-consumer roster now resolves as format variables before format-table, command-item, and environment values. Server, session, window, and pane options follow the pinned target and inheritance chain, including active children, attached-client fallback, explicit missing targets, and S/W/P loop retargeting. Flags render as 0 or 1 while other types keep their raw tmux spelling. command-alias, status-format, and update-environment support whole arrays plus normalized numeric and literal named indices, with numeric-before-named ordering and whole-array local shadowing. Mux-owned expansion reads live state. Every direct daemon format producer uses the same live resolver, while detached status rendering builds one all-scope snapshot per refresh batch and shares it across clients. Missing run-shell -C and if-shell -F targets read global options while their inserted command or branch keeps the caller execution context. Focused exhaustive tests cover the complete roster and scope counts, the strict 60-step option-name-formats differential has zero topology, geometry, format, output, or warning differences, and the attached status probe passes with bounded polling and complete cleanup. No protocol, wire snapshot, or native GUI styling changed. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/formats.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `resource:crates/zz-daemon/src/status.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/option-name-formats.txt`, `file:compat/attached-client.sh`, `resource:knowledge/tmux/status-line.md`, `resource:knowledge/tmux/divergences.md` |
 | `options.show-options-hook-rows` | 2026-08-24 | With `-H`, `show-options` augments only no-positional listings with hook arrays in the pin's final option-table block and hook declaration order. Plain listings exclude hooks, named hook queries work without `-H`, server scope has none, and global-session, global-window, and inherited pane listings expose 57, 11, and 7 hooks. Empty, populated, indexed, named, value-only, pane-fallback, and whole-array-shadowing shapes match the pin, including the inherited empty array's `name*` in a full listing and bare `name` in a named query. `show-window-options` retains its surface without `-H`. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-mux/src/tmux_options.rs`, `scenario:compat/scenarios/show-options-hooks.txt`, `resource:knowledge/tmux/commands.md` |
+| `options.terminal-behavior` | 2026-09-01 | All eighteen options now carry an explicit decision instead of sitting in one undifferentiated basket. Seven went to `options.client-terminal-negotiation` as native: terminal-features, terminal-overrides, user-keys, extended-keys, and extended-keys-format all exist to rewrite or query a terminfo entry for a client terminal that zz's daemon never opens, xterm-keys is marked `no longer used` in the pin's own options table, and assume-paste-time is a heuristic the pin itself disables on any terminal reporting bracketed paste, which is every zz client. Eight went to `options.pane-engine-knobs` parked: allow-rename, alternate-screen, scroll-on-clear, backspace, get-clipboard, codepoint-widths, variation-selector-always-wide, and input-buffer-size each need a per-pane knob channel, and half of them additionally need a libghostty primitive that does not exist, with the pinned behavior for each measured into that group's reason on 2026-09-01. Two went to `options.client-attach-and-focus` parked: default-client-command and focus-follows-mouse are ordinary client work blocked only on option values reaching the client. `editor` went to `pane.floating-model`, which already owns the floating-pane stance its only pin-side read depends on, and whose startup seeding zz already reproduces exactly. Three tests derived from those pin measurements now hold the classification honest: zz-terminal proves `send-keys BSpace` writes the pin's default 0x7f and that clearing the whole screen leaves history alone, which is the pin's scroll-on-clear off case and the parked divergence, and zz-tui proves a bracketed-paste run carrying 0x02 arrives as one Paste rather than as a C-b key, which is the case the pin's own assume-paste-time guard skips. Nothing wire-reachable changed. | `resource:crates/zz-mux/src/honest_knobs.rs`, `resource:crates/zz-terminal/src/session.rs`, `resource:crates/zz-tui/src/terminal_event.rs`, `resource:crates/zz-tui/src/tty.rs`, `resource:knowledge/tmux/divergences.md` |
 | `options.window-status-separator` | 2026-08-24 | The daemon expands `window-status-separator` after each nonfinal item in the `status-format[]` window loop. It resolves the separator in that window's option and format context, including per-window overrides, nested formats, and style directives; the last item emits no separator. The TUI owns exact tmux row output. The native GUI derives its window controls from snapshot state and does not paint this separator. | `resource:crates/zz-mux/src/tmux_options.rs`, `file:crates/zz-daemon/src/status.rs`, `scenario:compat/scenarios/status-options.txt`, `resource:knowledge/tmux/status-line.md` |
 | `presentation.border-span-owner` | 2026-08-31 | Raw zz-tui styles each shared divider per adjacent pane span instead of per full segment. In an A\|(B/C) split with C active, the A/B span renders inactive, while the junction cell and the A/C span render with the active style; directional fallback resolves top, bottom, left, then right. Aligned same-side ties from splits resolve by PaneId creation order. The 10-step LC_ALL=C strict differential proves the red upper span with green junction, horizontal, and lower spans against pinned tmux with zero divergence, and the exact base fails its renderer marker row, so the coverage discriminates. This closure is bounded: same-side ties after join-pane, swap-pane, or serialized select-layout stay open under presentation:border-style-owner-z-order, and tiled z-order transport belongs to the pane-border z-order contract. | `resource:crates/zz-tui/src/layout.rs`, `scenario:compat/scenarios/pane-border-span-owner.txt`, `resource:knowledge/tmux/divergences.md` |
 | `sessions.new-session-attach-cwd` | 2026-08-29 | When new-session -A finds an existing session, zz now shares the attach-session retargeting path: it resolves the target first, expands -c exactly once with the invoking client and resolved target session, window, and pane, stores the cwd before terminal preflight, and publishes that mutation even when opening the terminal fails. Clientless calls remain inert, permitted Control clients attach and update the target, and nested Control, attached Interactive, and -A -d calls refuse before target selection, expansion, retargeting, or mutation. Fresh creation and an -A miss now preserve an explicitly empty session cwd while leaving the initial pane cwd unset so the existing donor or caller fallback still applies; omitted -c continues to inherit normally. Focused mux and daemon tests cover single expansion, target isolation, failure ordering, every refusal class, and explicit-empty behavior. The strict 10-step new-session-cwd differential matches the pinned tmux build with zero topology, geometry, format, output, or warning differences. | `resource:crates/zz-mux/src/command.rs`, `resource:crates/zz-daemon/src/daemon.rs`, `scenario:compat/scenarios/new-session-cwd.txt`, `resource:knowledge/tmux/divergences.md` |

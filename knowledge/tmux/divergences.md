@@ -1135,6 +1135,40 @@ template is ordinary undone work rather than a model difference: the chooser tem
 that substitutes the selected value and runs the result already shipped on 2026-08-28, so wiring the
 overlay's selection to it is a delivery question, not a disposition. It stays blocked.
 
+## Terminal behavior option basket split (2026-09-01)
+
+`options.terminal-behavior` held eighteen options in one basket with no classification. Each is now
+settled, with the pinned behavior measured against `d77c9dc6` on a throwaway server the same day.
+
+- Native, `options.client-terminal-negotiation` (7): `terminal-overrides` and `terminal-features`
+  patch the terminfo entry tty-term.c resolved for a client terminal, `user-keys` inserts escape
+  strings into that client's key tree as User0 through User9, `extended-keys` writes the terminal's
+  `TTYC_ENEKS` string, and `extended-keys-format` chooses `ESC[27;<mod>;<key>~` over
+  `ESC[<key>;<mod>u`. zz opens no terminfo database anywhere in the tree: the daemon publishes
+  frames, the GPUI client owns its own engine, and the raw TUI writes a fixed sequence set and
+  probes with DA1 and Kitty queries. `xterm-keys` is annotated `no longer used` in the pin's own
+  options table. `assume-paste-time` is a heuristic `server_client_is_assume_paste` skips whenever
+  the client terminal reports bracketed paste, which every zz client does.
+- Parked, `options.pane-engine-knobs` (8): measured pin values live in that group's reason. The two
+  that matter most day to day are `scroll-on-clear`, whose default on makes `ESC[H ESC[2J` push the
+  visible rows into history (history_size 8 to 12 on a 20x5 pane holding twelve lines) where
+  libghostty unconditionally discards them, and `alternate-screen`, whose off value makes
+  `ESC[?1049h` a no-op where libghostty always honors it. `get-clipboard`, `codepoint-widths`,
+  `variation-selector-always-wide`, and `input-buffer-size` additionally need libghostty primitives
+  that do not exist: a clipboard read callback, a per-codepoint width override, and a general
+  string-collector cap.
+- Parked, `options.client-attach-and-focus` (2): `default-client-command` and `focus-follows-mouse`
+  are ordinary client work blocked only on option values reaching the client, not on the engine.
+- Native, folded into `pane.floating-model` (1): the pin's only read of `editor` is `spawn_editor`,
+  which runs the editor in a `SPAWN_FLOATING` pane for `choose-buffer`. zz already reproduces the
+  write side exactly, seeding `editor` from `VISUAL` or `EDITOR` and deriving vi or emacs key tables
+  from the basename.
+
+Three tests hold the classification honest rather than leaving it as prose: zz-terminal's
+`backspace_encodes_the_pinned_default_erase_byte` and
+`clearing_the_whole_screen_keeps_history_where_the_pin_scrolls_into_it`, and zz-tui's
+`bracketed_paste_swallows_control_bytes_the_pin_would_time`.
+
 ## What the last two format gaps need (2026-09-01)
 
 The `I` modifier and the `notify_monitor_cb` producer are both measured now, and neither is a format

@@ -673,6 +673,24 @@ mod tests {
     }
 
     #[test]
+    fn bracketed_paste_swallows_control_bytes_the_pin_would_time() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b[200~a\x02b\x1b[201~\x02", &mut events);
+        assert_eq!(
+            events,
+            vec![
+                Event::Paste("a\u{2}b".to_owned()),
+                Event::Key(KeyEvent::new(
+                    KeyCode::Char('b'),
+                    KeyModifiers::CONTROL
+                )),
+            ],
+            "pinned tmux only times key arrivals for assume-paste-time when the client terminal lacks bracketed paste; the raw TUI always arms it, so a pasted C-b never reaches the key path"
+        );
+    }
+
+    #[test]
     fn parses_terminal_cell_pixel_report() {
         assert_eq!(
             parse(b"\x1b[6;18;9t"),

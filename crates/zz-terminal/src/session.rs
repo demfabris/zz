@@ -16520,6 +16520,64 @@ mod tests {
     }
 
     #[test]
+    fn backspace_encodes_the_pinned_default_erase_byte() {
+        let terminal = Terminal::new(TerminalOptions {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 16,
+        })
+        .expect("terminal");
+        let mut key_encoder = key::Encoder::new().expect("key encoder");
+        let mut key_event = key::Event::new().expect("key event");
+        let mut writer: Box<dyn Write + Send> = Box::new(std::io::sink());
+        let mut input_bytes = Vec::new();
+
+        encode_key(
+            &terminal,
+            &mut key_encoder,
+            &mut key_event,
+            KeyInput {
+                action: KeyAction::Press,
+                key: KeyCode::Backspace,
+                modifiers: crate::Modifiers::default(),
+                text: None,
+                unshifted_codepoint: None,
+            },
+            &mut writer,
+            &mut input_bytes,
+        )
+        .expect("encode backspace");
+
+        assert_eq!(
+            input_bytes.as_slice(),
+            b"\x7f",
+            "pinned tmux writes 0x7f for send-keys BSpace while the backspace option holds its C-? default"
+        );
+    }
+
+    #[test]
+    fn clearing_the_whole_screen_keeps_history_where_the_pin_scrolls_into_it() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 20,
+            rows: 5,
+            max_scrollback: 1 << 16,
+        })
+        .expect("terminal");
+        for line in 1..=12 {
+            terminal.vt_write(format!("L{line:02}\r\n").as_bytes());
+        }
+        assert_eq!(terminal.scrollback_rows().expect("scrollback"), 8);
+
+        terminal.vt_write(b"\x1b[H\x1b[2J");
+
+        assert_eq!(
+            terminal.scrollback_rows().expect("scrollback"),
+            8,
+            "pinned tmux answers history_size 12 here with scroll-on-clear on and 8 with it off; zz is unconditionally the off case"
+        );
+    }
+
+    #[test]
     fn key_and_mouse_encoding_reuse_the_actor_scratch_buffer() {
         let mut terminal = Terminal::new(TerminalOptions {
             cols: 80,

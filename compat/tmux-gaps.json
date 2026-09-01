@@ -1801,6 +1801,69 @@
       "reason": "`copy-mode -S`, `resize-pane -M`, `move-pane -M`, and `send-keys -M` all consume the mouse event that invoked the command, so the pin resolves the target from the event and drives a scrollbar slider drag, a border drag, or a mouse-keyed send. zz installs no tmux mouse key tables, so no command is ever invoked from a mouse event; the same gestures are handled directly by each rendering client, already accepted under `keys.root-native-mouse` and `keys.copy-mode-native-mouse`. The four flags stay loudly unsupported instead of quietly falling back to a keyboard path. Reopen only if zz installs tmux mouse key tables and a normalized event record travels with bound commands."
     },
     {
+      "id": "options.client-attach-and-focus",
+      "title": "Consume the client attach command and mouse focus options",
+      "decision": "park",
+      "status": "blocked",
+      "priority": "later",
+      "ease": "medium",
+      "impact": [
+        "daily",
+        "gui"
+      ],
+      "owner": "client",
+      "items": [
+        "option:default-client-command",
+        "option:focus-follows-mouse"
+      ],
+      "evidence": [
+        "resource:crates/zz/src/lib.rs",
+        "resource:crates/zz-mux/src/honest_knobs.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "A client that attaches with no command runs the stored `default-client-command` list, keeping the pin's read-only refusal for a list that is not all read-only commands.",
+        "Moving the pointer onto an inactive pane makes it active while `focus-follows-mouse` is on, in the GPUI client and in the raw TUI, and leaves the active pane alone while it is off."
+      ],
+      "depends_on": [],
+      "reason": "Both are stored with the pin's parsing and defaults and are read by nothing. server_client_default_command in server-client.c fetches `default-client-command`, default `new-session`, as a command list whenever a client arrives with no command of its own, and substitutes the read-only refusal when the client is read-only and the list is not made entirely of CMD_READONLY commands; zz's CLI hard-codes that default instead, routing a bare `zz` straight at new-session, so setting the option changes nothing. server-client.c turns a KEYC_TYPE_MOUSEMOVE over a pane that is not the active one into window_set_active_pane when `focus-follows-mouse` is on, and tty.c forces MODE_MOUSE_ALL on that client so motion events arrive at all; zz has no consumer, and its clients already receive pointer motion without asking the terminal for all-motion tracking. The recipe: publish both session-scoped and server-scoped values the clients need on the existing option snapshot, have the launcher ask the daemon for `default-client-command` before it synthesizes new-session and run the parsed list through the same command path an explicit argument takes, and gate the GPUI pane hover handler and the TUI pointer route on the session's `focus-follows-mouse` value. Neither is blocked on an engine primitive; both are blocked on option values reaching the client, which is why they are parked together rather than closed with the engine knobs."
+    },
+    {
+      "id": "options.client-terminal-negotiation",
+      "title": "Keep client terminal negotiation native",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "client",
+      "items": [
+        "option:assume-paste-time",
+        "option:extended-keys",
+        "option:extended-keys-format",
+        "option:terminal-features",
+        "option:terminal-overrides",
+        "option:user-keys",
+        "option:xterm-keys"
+      ],
+      "evidence": [
+        "resource:crates/zz-tui/src/tty.rs",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-mux/src/honest_knobs.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "The seven options keep pin-exact parsing, defaults, and show-options output while staying store-only, because no client terminal is driven through a terminfo entry.",
+        "The raw TUI keeps arming bracketed paste and the Kitty keyboard protocol itself, and pane key encoding keeps following the mode the program in the pane requested rather than a server option."
+      ],
+      "depends_on": [],
+      "reason": "The pin resolves one terminfo entry per client terminal and then rewrites it. tty-term.c walks `terminal-overrides` and applies every capability string whose fnmatch pattern matches the terminal name, then walks `terminal-features` and adds the named feature sets; tty-keys.c inserts each `user-keys` entry into that client's key tree as User0 through User9; tty.c's tty_update_features writes the terminal's TTYC_ENEKS string whenever `extended-keys` is nonzero; and input-keys.c picks `ESC[27;<mod>;<key>~` over `ESC[<key>;<mod>u` when `extended-keys-format` is 1. `xterm-keys` is already dead inside the pin: its options-table.c entry carries the comment `/* no longer used */` and the help text `This option is no longer used.`, so storing it and acting on nothing is exactly the pin's behavior. `assume-paste-time` has the same shape: server_client_is_assume_paste in server-client.c only times consecutive key arrivals when the client is not already bracket pasting and its terminal lacks TTYC_ENBP, so the pin itself switches the heuristic off on any terminal that reports bracketed paste. zz never opens a terminfo database; there is no terminfo, tigetstr, setupterm, or tputs call anywhere in the tree, because the daemon publishes frames and clients render them. The GPUI client owns its own terminal engine and receives paste as a typed action, and the raw TUI client writes a fixed sequence set (`ESC[?1049h`, `ESC[?2004h`, `ESC[>3u`), probes with DA1 and Kitty graphics queries, and selects pixel mouse and Kitty keyboard by TERM and TERM_PROGRAM name rather than by capability lookup, so there is no capability table for an override to patch and no key tree for a user key to join. Pane key encoding is already finer-grained than the option: libghostty's key encoder follows the Kitty keyboard flags and modifyOtherKeys state the program in that pane asked for, per pane, where the pin has one global format switch. Reopen only if zz grows a terminfo-driven client renderer, which is new scope rather than this gap."
+    },
+    {
       "id": "options.lock-program",
       "title": "Keep locking off the client terminal",
       "decision": "native",
@@ -1941,6 +2004,41 @@
       "reason": "The appearance bridge handles colors and per-span divider ownership, but not border formats, scrollbars, mutable join/swap/serialized-layout tie order, or tiled z-order transport."
     },
     {
+      "id": "options.pane-engine-knobs",
+      "title": "Consume the pane VT engine knobs",
+      "decision": "park",
+      "status": "blocked",
+      "priority": "later",
+      "ease": "hard",
+      "impact": [
+        "daily",
+        "remote",
+        "scripts"
+      ],
+      "owner": "terminal",
+      "items": [
+        "option:allow-rename",
+        "option:alternate-screen",
+        "option:backspace",
+        "option:codepoint-widths",
+        "option:get-clipboard",
+        "option:input-buffer-size",
+        "option:scroll-on-clear",
+        "option:variation-selector-always-wide"
+      ],
+      "evidence": [
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:third_party/rust/libghostty-vt-sys/src/bindings.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "acceptance": [
+        "Each knob reaches its pane's terminal through a per-pane channel and changes engine behavior to match the pinned values measured in this group's reason."
+      ],
+      "depends_on": [],
+      "reason": "All eight parse and store exactly like the pin and are read by nothing, and each needs a per-pane knob channel that does not exist plus, for half of them, a libghostty primitive that does not exist. Measured against the pin on 2026-09-01. `scroll-on-clear`, default on: a 20x5 pane holding L01 through L12 reports history_size 8 before `ESC[H ESC[2J` and 12 after, and `capture-pane -S -` still holds all twelve lines; with the option off history stays 8 and L09 through L12 are gone. libghostty is unconditionally the second case: the same bytes leave scrollback_rows at 8. `alternate-screen`, default on: with it off a pane writing `ESC[?1049h` keeps printing on the primary screen and `#{alternate_on}` stays 0, while libghostty always honors the mode and reports Alternate. `allow-rename`, default off: with it on a pane writing `ESC k RENAMED ESC \\\\` renames the window and clears automatic-rename, with it off the name stays `sh` and automatic-rename stays 1; zz implements no `ESC k` handler at all, so the flag has nothing to gate. `backspace`, default C-?: `send-keys BSpace` writes 0x7f, writes 0x08 under `backspace C-h` and 0x17 under `backspace C-w`, and spawn.c separately forces the child's VERASE to the same key; zz always writes 0x7f, which is the pin's default, and sets no VERASE. `get-clipboard`, default buffer: 0 ignores an OSC 52 read, 1 answers it from the top paste buffer, and 2 and 3 forward the request to the client's terminal and relay its reply; libghostty documents that clipboard read requests are always ignored and exposes only a clipboard write callback, so zz can answer none of the three. `codepoint-widths` and `variation-selector-always-wide` override utf8.c's width table and screen-write.c's variation-selector rule per codepoint; ghostty_unicode_codepoint_width and ghostty_unicode_grapheme_width are pure functions over fixed tables with no override hook. `input-buffer-size`, default 1048576, caps input.c's escape-string collector; libghostty exposes only APC_MAX_BYTES and APC_MAX_BYTES_KITTY, which is one collector out of several. The recipe is one shared piece plus per-item work: widen the existing terminal knob path that SetWrapSearch and SetAllowPassthrough already use (MuxEffect::TerminalKnobsChanged, terminal_worker_options, a TerminalSession setter) to carry these values, then honor scroll-on-clear and alternate-screen by rewriting or dropping the matching sequences in zz-terminal's byte filter ahead of vt_write, honor allow-rename by adding the `ESC k` handler behind the flag, honor backspace in encode_key and in the pty's termios at spawn, and take codepoint-widths, variation-selector-always-wide, get-clipboard, and input-buffer-size only once libghostty grows a width override hook, a clipboard read callback, and a general string-collector cap."
+    },
+    {
       "id": "options.remain-on-exit-format",
       "title": "Render remain-on-exit-format in retained panes",
       "decision": "adopt",
@@ -1965,49 +2063,6 @@
       ],
       "depends_on": [],
       "reason": "The retained-pane path marks the pane dead after the terminal worker exits, and terminal core has no post-worker VT injection or frozen-view reconstruction seam."
-    },
-    {
-      "id": "options.terminal-behavior",
-      "title": "Consume terminal behavior options",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "daily",
-        "remote",
-        "scripts"
-      ],
-      "owner": "terminal",
-      "items": [
-        "option:allow-rename",
-        "option:alternate-screen",
-        "option:assume-paste-time",
-        "option:backspace",
-        "option:codepoint-widths",
-        "option:default-client-command",
-        "option:editor",
-        "option:extended-keys",
-        "option:extended-keys-format",
-        "option:focus-follows-mouse",
-        "option:get-clipboard",
-        "option:input-buffer-size",
-        "option:scroll-on-clear",
-        "option:terminal-features",
-        "option:terminal-overrides",
-        "option:user-keys",
-        "option:variation-selector-always-wide",
-        "option:xterm-keys"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
-      ],
-      "acceptance": [
-        "Each option has a traced consumer or moves to an explicit native or parked decision."
-      ],
-      "depends_on": [],
-      "reason": "These values need terminal negotiation, input, width, or process consumers."
     },
     {
       "id": "options.theme-palette",
@@ -2121,7 +2176,7 @@
     },
     {
       "id": "pane.floating-model",
-      "title": "Keep floating panes out of the mux model",
+      "title": "Keep floating panes and the floating editor out of the mux model",
       "decision": "native",
       "status": "accepted",
       "priority": "none",
@@ -2143,6 +2198,7 @@
         "flag:move-pane:-Y",
         "flag:move-pane:-z",
         "format:pane_floating_flag",
+        "option:editor",
         "semantic:floating-pane-model",
         "semantic:move-pane-tiled-extension"
       ],
@@ -2150,14 +2206,16 @@
         "resource:crates/zz-mux/src/command.rs",
         "resource:crates/zz-protocol/src/catalog.rs",
         "resource:knowledge/tmux/divergences.md",
-        "resource:knowledge/designs/tmux-superset-roadmap.md"
+        "resource:knowledge/designs/tmux-superset-roadmap.md",
+        "resource:crates/zz-mux/src/tmux_options.rs"
       ],
       "acceptance": [
         "Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` placement flags stay loudly unsupported.",
-        "`pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior."
+        "`pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior.",
+        "`editor` keeps the pin's startup seeding from VISUAL or EDITOR and its vi or emacs key-table derivation, and stays store-only beyond that because its only read in the pin spawns a floating pane."
       ],
       "depends_on": [],
-      "reason": "In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays."
+      "reason": "In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays. `option:editor` joined this group because its only read in the pin is spawn_editor, which writes the buffer to a temp file and spawns `$editor <path>` as a SPAWN_FLOATING pane sized to nine tenths of the window, reached from window-buffer.c when choose-buffer edits a buffer. The write side of the option is already exact in zz: tmux.c seeds `editor` from VISUAL or EDITOR at startup and derives status-keys and mode-keys from whether the basename contains `vi`, and the daemon's editor_from_environment and mode_keys_from_environment reproduce both, including the `/usr/bin/vi` fallback. What is left is a floating pane running an external editor, which this group already answers: zz edits a buffer on a client surface instead. Reopen it with the floating model, not on its own."
     },
     {
       "id": "pane.selection-state",
@@ -4114,6 +4172,19 @@
         "resource:knowledge/tmux/commands.md"
       ],
       "resolution": "With `-H`, `show-options` augments only no-positional listings with hook arrays in the pin's final option-table block and hook declaration order. Plain listings exclude hooks, named hook queries work without `-H`, server scope has none, and global-session, global-window, and inherited pane listings expose 57, 11, and 7 hooks. Empty, populated, indexed, named, value-only, pane-fallback, and whole-array-shadowing shapes match the pin, including the inherited empty array's `name*` in a full listing and bare `name` in a named query. `show-window-options` retains its surface without `-H`."
+    },
+    {
+      "id": "options.terminal-behavior",
+      "title": "Consume terminal behavior options",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-mux/src/honest_knobs.rs",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-tui/src/terminal_event.rs",
+        "resource:crates/zz-tui/src/tty.rs",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "All eighteen options now carry an explicit decision instead of sitting in one undifferentiated basket. Seven went to `options.client-terminal-negotiation` as native: terminal-features, terminal-overrides, user-keys, extended-keys, and extended-keys-format all exist to rewrite or query a terminfo entry for a client terminal that zz's daemon never opens, xterm-keys is marked `no longer used` in the pin's own options table, and assume-paste-time is a heuristic the pin itself disables on any terminal reporting bracketed paste, which is every zz client. Eight went to `options.pane-engine-knobs` parked: allow-rename, alternate-screen, scroll-on-clear, backspace, get-clipboard, codepoint-widths, variation-selector-always-wide, and input-buffer-size each need a per-pane knob channel, and half of them additionally need a libghostty primitive that does not exist, with the pinned behavior for each measured into that group's reason on 2026-09-01. Two went to `options.client-attach-and-focus` parked: default-client-command and focus-follows-mouse are ordinary client work blocked only on option values reaching the client. `editor` went to `pane.floating-model`, which already owns the floating-pane stance its only pin-side read depends on, and whose startup seeding zz already reproduces exactly. Three tests derived from those pin measurements now hold the classification honest: zz-terminal proves `send-keys BSpace` writes the pin's default 0x7f and that clearing the whole screen leaves history alone, which is the pin's scroll-on-clear off case and the parked divergence, and zz-tui proves a bracketed-paste run carrying 0x02 arrives as one Paste rather than as a C-b key, which is the case the pin's own assume-paste-time guard skips. Nothing wire-reachable changed."
     },
     {
       "id": "options.window-status-separator",

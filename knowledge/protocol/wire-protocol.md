@@ -625,6 +625,15 @@ now validate on both encode and decode.
   unchanged. `users` is bounded by `MAX_HOME_DIRECTORY_USERS` (1024) entries of
   `MAX_HOME_DIRECTORY_USER_BYTES` (1 KiB), answers by `MAX_HOME_DIRECTORY_BYTES` (16 KiB). A v91
   peer cannot decode the appended variants.
+- v92 also replaces `ClientHello.working_directory`'s UTF-8 string encoding with `ClientPath`, a
+  bounded byte string. A Unix path is a byte string, not text, so the wire now carries the client's
+  own `OsStr` bytes and registration rebuilds the exact absolute `PathBuf`; other platforms carry
+  UTF-8 bytes. A client launched in a directory holding byte `0xff` therefore resolves a relative
+  `source-file` path the way the pin does, instead of having its cwd dropped for failing
+  `to_str()`. Omission is unchanged: a relative cwd is discarded at registration, and a cwd past
+  `MAX_CLIENT_WORKING_DIRECTORY_BYTES` (16 KiB) is omitted by the client rather than failing the
+  connection, with the encode and decode guards still rejecting an oversized one. The client
+  environment keeps its v82 UTF-8 `NAME=VALUE` shape.
 - v91 appends `action: ClientExitAction` after `reason` on `EventPayload::Detached` and adds that
   enum (`Exit`, `ParentHangup`, `Exec { command, shell }`). It is what `detach-client -E` and `-P`
   ask the presentation process to do, matching the pin's `MSG_EXEC` and `MSG_DETACHKILL`: `Exec`

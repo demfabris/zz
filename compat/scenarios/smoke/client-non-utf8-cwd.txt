@@ -1,0 +1,10 @@
+corpus: none
+# A local client launched from a directory whose name holds byte 0xff still
+# resolves relative source-file paths against that directory. The cwd is a Unix
+# byte string, not text, so the wire carries it verbatim and the daemon rebuilds
+# the exact path; quiet and loud misses keep their statuses and channels.
+stage: fixtures/client-non-utf8-cwd.sh ~/client-non-utf8-cwd.sh
+run-shell 'sh ~/client-non-utf8-cwd.sh'
+out: show-environment -g NON_UTF8_CWD
+out: show-environment -g NON_UTF8_CWD_DIRECT
+out: show-environment -g NON_UTF8_CWD_NESTED

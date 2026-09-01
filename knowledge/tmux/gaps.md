@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **77**. Classified items: **543**.
+Tracked gap groups: **77**. Classified items: **542**.
 
 - Status: open: 34, blocked: 6, accepted: 37.
 - Decision: adopt: 39, native: 29, park: 1, never: 8.
 - Priority: later: 40, none: 37.
 - Closed history entries: 136.
-- Surface: command: 9, flag: 60, native-command: 21, option: 75, format: 69, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 83, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 60, native-command: 21, option: 75, format: 69, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 82, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -230,7 +230,7 @@ The requested flag is retained and reported, but zz still has one window-global 
 
 ### `clients.event-resize-context`: Defer client-resized until geometry settles
 
-The TUI sends ClientTerminalSize before its deduplicated per-pane geometry messages, while the daemon currently runs client-resized from the first message. A changed resize can therefore expand old pane and window dimensions even though repeated unchanged reports must still fire.
+Remeasured 2026-09-01 against the pin with a real pty client (pty-drive.py) on both binaries, and the acceptance clause as written does not describe the pin. server-client.c's MSG_RESIZE arm runs server_client_update_latest, tty_resize, recalculate_sizes and the redraw before notify_client("client-resized"), but recalculate_sizes only marks the window; the actual layout resize lands in a later server-loop pass, after the hook's queued command has already expanded its formats. Measured on a client driven 80x24 -> 100x30 -> 61x19 with the hook body reading '#{client_width}x#{client_height}' and '#{window_width}x#{window_height}': the pin reports 80x24/80x23, then 100x30/80x23, then 61x19/100x29. The client size is current and the window and pane geometry is exactly one resize behind. zz reports the same one-resize window and pane lag (51x22 then 71x28 for the same drive, its own chrome reserving 29 columns and 2 rows), so deferring the hook to the end of the input batch would make zz lead the pin rather than match it. The two clauses that are testable already hold: a changed Interactive outer resize emits client-resized exactly once on both, and Control refresh-client -C 120,40 emits neither client-resized nor client-active on either binary while still resizing the window to 120x40 (repeat invocations included). One real divergence was found and it is not this group's: the pin's hook body carries the resized client as its format client, so '#{client_tty}' and '#{client_width}' answer, while zz populates only '#{hook_client}' and leaves the client-scoped variables empty. That producer gap belongs to formats.context-producer-fidelity. This group needs re-scoping to the client-context clause plus the measured lag before it can be closed.
 
 - Decision: `adopt`
 - Status: `open`
@@ -269,20 +269,23 @@ Pinned tmux keeps mode and redraw ownership on the server: `switch-mode` install
 
 ### `clients.path-encoding`: Preserve non-UTF-8 client facts
 
-Protocol v72 uses a portable UTF-8 PathBuf representation for cwd and protocol v82 uses UTF-8 NAME=VALUE strings for the environment. Both omit unrepresentable client facts to preserve connection availability; byte-preserving Unix paths and environment entries need an explicit wire shape.
+The cwd half closed on 2026-09-01. Protocol v92 replaces the UTF-8-only cwd on ClientHello with ClientPath, a bounded byte string that is the client's own OsStr bytes on Unix and UTF-8 everywhere else, and registration rebuilds the exact absolute PathBuf from it. Measured before the change against a client launched in /tmp/cwd-<0xff>-dir: the pin resolved `source-file rel.conf` and zz answered `No such file or directory: rel.conf`, because the client filtered any path whose to_str() was None out of its hello. Both binaries now resolve the direct and nested relative paths, keep a quiet miss at status 0 with empty channels, and keep a loud miss at status 1 on stderr, differentially clean in smoke/client-non-utf8-cwd. Omission is unchanged where it was already correct: a relative cwd is still dropped at registration and a cwd past MAX_CLIENT_WORKING_DIRECTORY_BYTES is still omitted by the client rather than failing the connection, which the encode and decode guards still reject if one is constructed directly. Protocol v82's UTF-8 NAME=VALUE client environment is untouched and still substitutes or drops unrepresentable entries; that half needs its own byte-preserving entry shape plus the pin's update-environment byte behavior.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `medium`
 - Owner: `protocol`
 - User impact: scripts
-- Items: `semantic:client-cwd-non-utf8`, `semantic:client-environment-non-utf8`
+- Items: `semantic:client-environment-non-utf8`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz-protocol/src/message.rs`
+  - `resource:crates/zz-daemon/src/client.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:knowledge/protocol/wire-protocol.md`
   - `resource:knowledge/tmux/divergences.md`
+  - `scenario:compat/scenarios/smoke/client-non-utf8-cwd.txt`
 - Acceptance:
-  - `A local Unix client launched from a non-UTF-8 cwd still resolves relative source-file paths like the pin without weakening path handling on other platforms.`
   - `A Unix client carries non-UTF-8 environment names and values without substitution, and selected update-environment entries retain the pin's byte behavior.`
 
 ### `clients.read-only-and-focus`: Retain native client focus semantics

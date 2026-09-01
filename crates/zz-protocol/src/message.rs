@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -850,68 +854,77 @@ where
     Ok(text)
 }
 
-struct BoundedClientWorkingDirectory(PathBuf);
+/// A client-reported absolute path carried as the client's own OS bytes. A Unix
+/// path is a byte string, not text, so the wire keeps it verbatim and the daemon
+/// rebuilds the exact `PathBuf`; every other platform carries UTF-8 bytes.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientPath(#[serde(deserialize_with = "deserialize_client_path")] Vec<u8>);
 
-impl<'de> Deserialize<'de> for BoundedClientWorkingDirectory {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct WorkingDirectoryVisitor;
+impl ClientPath {
+    /// The wire form of `path`, or `None` when this platform cannot represent it.
+    /// A client that gets `None`, or a path past
+    /// [`MAX_CLIENT_WORKING_DIRECTORY_BYTES`], omits the fact instead of failing
+    /// its connection.
+    #[must_use]
+    pub fn from_path(path: &Path) -> Option<Self> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt as _;
 
-        impl<'de> Visitor<'de> for WorkingDirectoryVisitor {
-            type Value = BoundedClientWorkingDirectory;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(
-                    formatter,
-                    "a client working directory no longer than \
-                     {MAX_CLIENT_WORKING_DIRECTORY_BYTES} bytes"
-                )
-            }
-
-            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                self.visit_str(value)
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                if value.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES {
-                    return Err(E::invalid_length(value.len(), &self));
-                }
-                Ok(BoundedClientWorkingDirectory(PathBuf::from(value)))
-            }
-
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                if value.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES {
-                    return Err(E::invalid_length(value.len(), &self));
-                }
-                Ok(BoundedClientWorkingDirectory(PathBuf::from(value)))
-            }
+            Some(Self(path.as_os_str().as_bytes().to_vec()))
         }
+        #[cfg(not(unix))]
+        {
+            Some(Self(path.to_str()?.as_bytes().to_vec()))
+        }
+    }
 
-        deserializer.deserialize_str(WorkingDirectoryVisitor)
+    #[must_use]
+    pub fn to_path_buf(&self) -> Option<PathBuf> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt as _;
+
+            Some(PathBuf::from(std::ffi::OsString::from_vec(self.0.clone())))
+        }
+        #[cfg(not(unix))]
+        {
+            String::from_utf8(self.0.clone()).ok().map(PathBuf::from)
+        }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
-fn deserialize_client_working_directory<'de, D>(
-    deserializer: D,
-) -> Result<Option<PathBuf>, D::Error>
+impl fmt::Debug for ClientPath {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.to_path_buf() {
+            Some(path) => fmt::Debug::fmt(&path, formatter),
+            None => formatter.write_str("<unrepresentable client path>"),
+        }
+    }
+}
+
+fn deserialize_client_path<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    Ok(
-        Option::<BoundedClientWorkingDirectory>::deserialize(deserializer)?
-            .map(|working_directory| working_directory.0),
-    )
+    let bytes = Vec::<u8>::deserialize(deserializer)?;
+    if bytes.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES {
+        return Err(D::Error::invalid_length(
+            bytes.len(),
+            &"a client path within the wire byte limit",
+        ));
+    }
+    Ok(bytes)
 }
 
 struct BoundedClientEnvironmentEntry(String);
@@ -1054,8 +1067,7 @@ pub struct ClientHello {
     /// The pane the client was invoked from (`$ZZ_PANE`). Untargeted commands
     /// resolve against it, matching tmux's `$TMUX_PANE`.
     pub origin: Option<PaneId>,
-    #[serde(deserialize_with = "deserialize_client_working_directory")]
-    pub working_directory: Option<PathBuf>,
+    pub working_directory: Option<ClientPath>,
     #[serde(deserialize_with = "deserialize_client_environment")]
     pub environment: Vec<String>,
     pub process_id: u32,

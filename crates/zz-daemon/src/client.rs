@@ -13,8 +13,8 @@ use std::{
 use parking_lot::Mutex;
 use zz_protocol::{
     AgentImage, AgentSessionOpKind, ClientFileOperation, ClientFileRequest, ClientFileResponse,
-    ClientHello, ClientInstanceId, ClientKind, CommandInvocation, CommandRequest, CommandResponse,
-    ConfigOverrideEntry, GuiResponse, InputMessage, MAX_CLIENT_ENVIRONMENT_BYTES,
+    ClientHello, ClientInstanceId, ClientKind, ClientPath, CommandInvocation, CommandRequest,
+    CommandResponse, ConfigOverrideEntry, GuiResponse, InputMessage, MAX_CLIENT_ENVIRONMENT_BYTES,
     MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_FILE_BYTES,
     MAX_CLIENT_WORKING_DIRECTORY_BYTES, MAX_PASTE_UPLOAD_CHUNK_BYTES, PROTOCOL_VERSION, PaneId,
     PasteUploadPurpose, PreparedCommand, ProtocolMessage, ServerError, ServerHello,
@@ -1145,16 +1145,14 @@ fn terminal_facts_capabilities_with(
 fn client_working_directory(
     scope: EndpointFactsScope,
     current_dir: impl FnOnce() -> Option<PathBuf>,
-) -> Option<PathBuf> {
+) -> Option<ClientPath> {
     scope
         .includes_working_directory()
         .then(current_dir)
         .flatten()
-        .filter(|working_directory| working_directory.to_str().is_some())
-        .filter(|working_directory| {
-            working_directory.as_os_str().as_encoded_bytes().len()
-                <= MAX_CLIENT_WORKING_DIRECTORY_BYTES
-        })
+        .as_deref()
+        .and_then(ClientPath::from_path)
+        .filter(|working_directory| working_directory.len() <= MAX_CLIENT_WORKING_DIRECTORY_BYTES)
 }
 
 /// The directory this client reports as its own. The pin's `find_cwd` prefers
@@ -1405,8 +1403,9 @@ mod tests {
     use std::{ffi::OsString, path::PathBuf};
 
     use zz_protocol::{
-        ClientHello, ClientKind, MAX_CLIENT_ENVIRONMENT_BYTES, MAX_CLIENT_ENVIRONMENT_ENTRIES,
-        MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES, MAX_CLIENT_WORKING_DIRECTORY_BYTES,
+        ClientHello, ClientKind, ClientPath, MAX_CLIENT_ENVIRONMENT_BYTES,
+        MAX_CLIENT_ENVIRONMENT_ENTRIES, MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES,
+        MAX_CLIENT_WORKING_DIRECTORY_BYTES,
     };
 
     use super::{
@@ -1441,7 +1440,7 @@ mod tests {
         ] {
             assert_eq!(
                 client_working_directory(scope, || Some(fixture.clone())),
-                Some(fixture.clone())
+                ClientPath::from_path(&fixture)
             );
         }
     }
@@ -1469,16 +1468,16 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn local_client_fact_scopes_omit_non_utf8_working_directories() {
+    fn local_client_fact_scopes_carry_non_utf8_working_directory_bytes() {
         use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
         let fixture = PathBuf::from(OsString::from_vec(vec![b'/', b't', b'm', b'p', b'/', 0xff]));
-        assert_eq!(
-            client_working_directory(EndpointFactsScope::LocalHostWorkingDirectory, || Some(
-                fixture
-            )),
-            None
-        );
+        let published =
+            client_working_directory(EndpointFactsScope::LocalHostWorkingDirectory, || {
+                Some(fixture.clone())
+            })
+            .expect("non-UTF-8 working directory is published");
+        assert_eq!(published.to_path_buf(), Some(fixture));
     }
 
     #[test]

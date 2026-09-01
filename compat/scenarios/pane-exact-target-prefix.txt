@@ -1,0 +1,38 @@
+# A colon-less target lands in the slot named by the command's own target type
+# (cmd-find.c cmd_find_target), so the leading equals sign only marks an exact
+# match where the token reaches the session or window slot. set-option resolves
+# CMD_FIND_PANE, so =name is a pane name there and matches nothing.
+rename-window -t w:0 win0
+new-window -d -t w:1 -n win1
+split-window -d -t w:0.0
+set-option -t =w history-limit 1234
+out: show-options -v -t w history-limit
+set-option -t =w: history-limit 1234
+out: show-options -v -t w history-limit
+set-option -t =wi history-limit 4321
+out: show-options -v -t w history-limit
+set-option -w -t =win0 aggressive-resize on
+out: show-window-options -v -t w:0 aggressive-resize
+set-window-option -t =win0 aggressive-resize on
+out: show-window-options -v -t w:0 aggressive-resize
+set-option -p -t =w remain-on-exit on
+out: show-options -pv -t w:0.0 remain-on-exit
+kill-pane -t =w
+out: list-panes -t w:0 -F #{pane_index}
+out: has-session -t =w
+has-session -t =wi
+kill-window -t =wi
+
+# The window and session slots keep the exactness they parse, and a colon moves
+# a token into the session slot.
+out: list-panes -t =win0 -F #{pane_index}
+out: display-message -p -t =win0 #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t =win #{session_name}:#{window_index}.#{pane_index}
+out: display-message -p -t =w: #{session_name}:#{window_index}.#{pane_index}
+select-window -t =win1
+out: display-message -p -t w #{window_index}
+select-window -t =win0
+out: display-message -p -t w #{window_index}
+select-window -t =win
+select-pane -t =win0
+out: display-message -p -t w:0 #{pane_index}

@@ -1,12 +1,12 @@
 # tmux compatibility campaign tracker
 
-> Campaign delivery: **`F-PANE-SPAWN-STYLE-TITLE-V2` DELIVERED (4 OF 6 SPAWN-FLAG ITEMS); CONTINUE THROUGH THE DISPATCH BOARD**
+> Campaign delivery: **THREE OPUS BATCHES INTEGRATED (FORMAT LOOPS, DAEMON BYTE LOADERS + MENU LAYOUT, REGISTRY HYGIENE); CONTINUE THROUGH THE DISPATCH BOARD**
 >
-> Live work: **65 UNRESOLVED GROUPS (45 OPEN, 20 BLOCKED)**
+> Live work: **47 UNRESOLVED GROUPS (41 OPEN + 6 BLOCKED = 47)**
 >
-> Ledger settlement: **69.2% (146 of 211 known groups); SECONDARY DIAGNOSTIC**
+> Ledger settlement: **77.9% (166 of 213 known groups: 100 x (130 CLOSED + 36 ACCEPTED) / (130 CLOSED + 83 LIVE)); SECONDARY DIAGNOSTIC**
 >
-> Exit evidence: **120 SCENARIOS, 1,862 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
+> Exit evidence: **139 SCENARIOS, 2,038 STEPS, ATTACHED-CLIENT PASS, 2 APPROVED GEO ROWS**
 >
 > Launch rule: **START FROM PUBLISHED `origin/main`; CLAIM THE FRONT IN ISSUE #7**
 
@@ -149,6 +149,16 @@ campaign decision.
 | Clean-main gate defects | `daemon::tests::direct_shutdown_runs_session_close_hooks` failed alone on `origin/main` `4146340d`; `smoke/args-parse-if-shell` and `smoke/args-parse-run-shell` reproduced their single OUT/WARN rows on the same clean base |
 | Summary SHA-256 | `b7236c220735d917649fd4ce9e1ad0480479a3242779b0a38b98bdd90160afc8` |
 | Remaining config-byte work | `F-CONFIG-BYTE-ENGINE` owns MuxEngine adapters; `F-CONFIG-BYTE-LOADERS` owns startup and runtime filesystem reads plus Command, Control, and synchronous if-shell behavior; source-path encoding stays separate |
+
+### 2026-09-01 three-batch integration checkpoint
+
+| Evidence | Result |
+| --- | --- |
+| Merges | `a3562a34` (format loops), `1d4ab6b8` (daemon byte loaders + menu cell layout, protocol v90), `039c47b7` (registry hygiene) |
+| Workspace gates | Full workspace tests and clippy with warnings denied, green on both code lanes; every red row was a known timing flake that passed exact-solo |
+| Differential | Formats delta: 112 scenarios; daemon delta: 95 scenarios; every channel clean under `--strict-geometry` |
+| Records gate | Tracker check, board fold tests, and the stored summary check pass: 139 scenarios, 2,038 steps, attached-client `PASS` |
+| Summary SHA-256 | `628db7750e3691570b2da02d01770420c886c9c58beddc4b3d64ca96bc4cbaa7` |
 
 ## Source-of-truth order
 

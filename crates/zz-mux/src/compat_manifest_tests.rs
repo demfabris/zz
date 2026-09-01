@@ -111,7 +111,7 @@ struct OracleKey {
 }
 
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] =
-    &[("copy-mode", 49), ("copy-mode-vi", 61), ("prefix", 32)];
+    &[("copy-mode", 53), ("copy-mode-vi", 62), ("prefix", 32)];
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -1388,15 +1388,15 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         303,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 251, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 256, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        193,
+        198,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        110,
+        105,
         "missing default binding count changed"
     );
     assert_eq!(
@@ -1411,7 +1411,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        142,
+        147,
         "structurally matching shared binding count changed"
     );
     assert_eq!(
@@ -1422,6 +1422,39 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
             .collect(),
         "structurally matching shared binding tables changed"
     );
+}
+
+#[test]
+fn stock_copy_mode_action_keys_render_the_pinned_binding() {
+    let (oracle, _) = inventory();
+    let key_tables = KeyTables::default();
+    let zz = key_tables
+        .list(None)
+        .map(|(table, key, binding)| {
+            (
+                (table, item_key(key)),
+                (binding.repeat, format_key_command(binding)),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    for (table, key) in [
+        ("copy-mode-vi", "P"),
+        ("copy-mode", "P"),
+        ("copy-mode", "C-M-b"),
+        ("copy-mode", "C-l"),
+        ("copy-mode", "M-l"),
+    ] {
+        let pinned = oracle
+            .key_bindings
+            .iter()
+            .find(|binding| binding.table == table && item_key(&binding.key) == key)
+            .unwrap_or_else(|| panic!("the pin binds {table} {key}"));
+        assert_eq!(
+            zz.get(&(table, key.to_owned())),
+            Some(&(pinned.repeat, pinned.command.clone())),
+            "{table} {key}"
+        );
+    }
 }
 
 #[test]

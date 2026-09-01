@@ -1489,12 +1489,7 @@
       ],
       "owner": "terminal",
       "items": [
-        "key:copy-mode-vi:P",
         "key:copy-mode-vi:r",
-        "key:copy-mode:C-M-b",
-        "key:copy-mode:C-l",
-        "key:copy-mode:M-l",
-        "key:copy-mode:P",
         "key:copy-mode:r"
       ],
       "evidence": [
@@ -1502,7 +1497,8 @@
         "resource:crates/zz-protocol/src/key.rs",
         "resource:crates/zz-mux/src/command.rs",
         "resource:crates/zz-terminal/src/interaction.rs",
-        "resource:knowledge/tmux/key-tables.md"
+        "resource:knowledge/tmux/key-tables.md",
+        "file:compat/scenarios/copy-mode-stock-action-keys.txt"
       ],
       "acceptance": [
         "previous-matching-bracket, recentre-top-bottom, cursor-centre-horizontal, toggle-position, and refresh-toggle have typed terminal behavior before their seven stock keys are installed."
@@ -1510,7 +1506,7 @@
       "depends_on": [
         "copy-mode.action-fidelity"
       ],
-      "reason": "These seven absent default keys name five actions tracked under `copy-mode.action-fidelity`. Four now have typed terminal behavior (previous-matching-bracket, recentre-top-bottom, cursor-centre-horizontal, and toggle-position), so `copy-mode:C-M-b`, `copy-mode:C-l`, `copy-mode:M-l`, `copy-mode:P`, and `copy-mode-vi:P` are ready to install. The two `r` keys still wait on refresh-toggle, which stays unmapped because a frozen copy revision has no live refresh to switch off."
+      "reason": "Five of the seven keys are installed. `copy-mode-vi P` and `copy-mode P` send toggle-position, `copy-mode C-M-b` sends previous-matching-bracket, `copy-mode C-l` sends recentre-top-bottom, and `copy-mode M-l` sends cursor-centre-horizontal, each rendering the pin's stored `send-keys -X <action>` shape with the pin's nonrepeat metadata, so all five are structurally matching shared bindings now. The two `r` keys stay open because refresh-toggle stays unmapped, and the earlier reading of why was wrong: the pinned action does not need a live pane to switch off, it unfreezes the copy backing. Measured on the pin with a detached throwaway server against a pane printing a line every 200ms, `#{scroll_position}` holds at 0 for a second after entry with refresh off, climbs 3 to 8 across a second after `send-keys -X refresh-on` as window_copy_do_refresh re-clones the backing screen on its 50ms timer, and freezes again at 8 after `send-keys -X refresh-toggle`. window-copy.c also refuses to start the timer for a view of another pane (`copy-mode -s`) or for view-mode, and skips a tick while a selection or a cursor drag is live, following the bottom only when oy is 0 and the cursor is on the last row. That is a re-sync of the frozen revision, which in zz is owned by the daemon's single-writer copy_sessions map and its published revisions, not by the mux key tables or the terminal engine. Installing `r` before that re-sync exists would bind a key to nothing, so both `r` keys wait on a daemon-owned refresh revision."
     },
     {
       "id": "keys.default-prefix",

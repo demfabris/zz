@@ -7416,7 +7416,6 @@ fn apply_copy_mode_action(
         | CopyModeAction::PreviousParagraph
         | CopyModeAction::NextMatchingBracket
         | CopyModeAction::PreviousMatchingBracket
-        | CopyModeAction::GotoLine(_)
         | CopyModeAction::NextPrompt { .. }
         | CopyModeAction::PreviousPrompt { .. }
         | CopyModeAction::CursorCentreVertical
@@ -7498,6 +7497,14 @@ fn apply_copy_mode_action(
                 _ => last / 2,
             };
             scroll_copy_view_to_screen_row(&mut mode, row);
+            if mode.selecting {
+                update_copy_selection(&mut mode, Some(word_separators));
+            }
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::GotoLine(line) => {
+            goto_copy_line(&mut mode, line);
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
             }
@@ -7845,6 +7852,23 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
 /// The pin's `window_copy_cmd_scroll_to`: move the view so the cursor's line
 /// lands on `row`, keeping the cursor on the same line, or do nothing when the
 /// retained revision cannot reach that far.
+/// The pin's `window_copy_goto_line` with line numbers off: the argument is a
+/// scrollback offset counted from the bottom, clamped to the retained history,
+/// and the cursor keeps the screen row it was on.
+fn goto_copy_line(mode: &mut CopyModeState, line: u32) {
+    if i32::try_from(line).is_err() {
+        return;
+    }
+    let maximum = mode.revision.maximum_offset();
+    let offset = maximum.saturating_sub(line.min(maximum));
+    let delta = i64::from(offset) - i64::from(mode.viewport_offset);
+    mode.viewport_offset = offset;
+    let last = i64::from(mode.revision.total_rows().saturating_sub(1));
+    let row = (i64::from(mode.cursor.y) + delta).clamp(0, last);
+    mode.cursor.y = u32::try_from(row).unwrap_or(0);
+    mode.cursor = mode.revision.clamp_point(mode.cursor);
+}
+
 fn scroll_copy_view_to_screen_row(mode: &mut CopyModeState, row: u32) {
     let Some(target) = mode.cursor.y.checked_sub(row) else {
         return;
@@ -8038,9 +8062,6 @@ fn move_copy_cursor(
             if let Some(target) = revision_matching_bracket(&mode.revision, point, false) {
                 point = target;
             }
-        }
-        CopyModeAction::GotoLine(line) => {
-            point.y = line.saturating_sub(1).min(total.saturating_sub(1));
         }
         CopyModeAction::NextParagraph => {
             point.y = revision_paragraph_target(&mode.revision, point.y, 1);
@@ -17914,6 +17935,88 @@ mod tests {
                 mode.viewport_offset,
                 anchor - screen_row,
                 "{action:?} placed the wrong view"
+            );
+        }
+    }
+
+    #[test]
+    fn goto_line_scrolls_back_from_the_bottom_and_holds_the_cursor_screen_row() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 64,
+        })
+        .expect("terminal");
+        for line in 0..20_u32 {
+            terminal.vt_write(format!("L{line}\r\n").as_bytes());
+        }
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(&mut terminal, &mut selection, &mut copy_mode, false, false)
+            .expect("copy mode");
+        let mut unseen_output = 0;
+        let (maximum, screen_row) = {
+            let mode = copy_mode.as_mut().expect("mode");
+            let maximum = mode.revision.maximum_offset();
+            assert!(maximum >= 8);
+            mode.viewport_offset = maximum;
+            mode.cursor = PointCoordinate {
+                x: 0,
+                y: maximum + 1,
+            };
+            (maximum, 1)
+        };
+        let goto = |copy_mode: &mut CopyModeSlot,
+                    terminal: &mut Terminal<'_, '_>,
+                    selection: &mut Option<SelectionState>,
+                    unseen_output: &mut u32,
+                    line: u32| {
+            apply_copy_mode_action(
+                terminal,
+                selection,
+                copy_mode,
+                unseen_output,
+                CopyModeAction::GotoLine(line),
+                &WordSeparators::default(),
+            )
+            .expect("goto-line");
+        };
+        {
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(mode.viewport_offset, maximum);
+        }
+        goto(
+            &mut copy_mode,
+            &mut terminal,
+            &mut selection,
+            &mut unseen_output,
+            u32::MAX,
+        );
+        {
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(
+                mode.viewport_offset, maximum,
+                "an argument the pin's strtonum rejects must move nothing"
+            );
+        }
+        for line in [0_u32, 1, 5, maximum, maximum + 1, i32::MAX.unsigned_abs()] {
+            goto(
+                &mut copy_mode,
+                &mut terminal,
+                &mut selection,
+                &mut unseen_output,
+                line,
+            );
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(
+                mode.viewport_offset,
+                maximum - line.min(maximum),
+                "goto-line {line} placed the wrong view"
+            );
+            assert_eq!(
+                mode.cursor.y - mode.viewport_offset,
+                screen_row,
+                "goto-line {line} moved the cursor screen row"
             );
         }
     }

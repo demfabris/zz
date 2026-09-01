@@ -91,7 +91,7 @@ unsupported `window-copy` actions below remain open.
 | --- | --- |
 | Cursor | `cursor-left/right/up/down`, `start-of-line`, `back-to-indentation`, `end-of-line` |
 | Word/para | `next-word`, `previous-word`, `next-word-end`, `next-space`, `previous-space`, `next-space-end`, `next-paragraph`, `previous-paragraph` |
-| Page/history | `page-up/down`, `halfpage-up/down`, `scroll-up/down`, `goto-line`, `history-top`, `history-bottom` |
+| Page/history | `page-up/down`, `halfpage-up/down`, `scroll-up/down`, `goto-line` (a scrollback offset from the bottom, not a screen row), `history-top`, `history-bottom` |
 | View geometry | `top-line`, `middle-line`, `bottom-line`, `cursor-centre-vertical`, `cursor-centre-horizontal`, `scroll-top`, `scroll-middle`, `scroll-bottom`, `recentre-top-bottom`, `toggle-position` |
 | Scroll exit | `scroll-exit-on/off/toggle`, `page-down-and-cancel`, `halfpage-down-and-cancel`, `scroll-down-and-cancel`, `cursor-down-and-cancel` |
 | Semantic prompt | `next-prompt`, `previous-prompt` (`-o` = output only, via OSC 133 marks) |
@@ -110,7 +110,8 @@ them: each carries the behavior category that owns it and the pin's `WINDOW_COPY
 bit, while support is derived from the `send-keys -X` parser rather than stored. The categories are
 the `copy-mode.action-fidelity` items: vocabulary, cursor geometry, logical-line and mode-key
 behavior, goto-line, selection lifecycle, jump/page/prompt actions, and copy formatting and
-destination effects. Its tests pin the mapped count, assert every mapped name reproduces the pin's
+destination effects. Cursor geometry, goto-line, selection lifecycle, and the jump, page, and
+prompt family are settled; logical-line and mode-key behavior and copy formatting stay open. Its tests pin the mapped count, assert every mapped name reproduces the pin's
 read-only classification, and list the missing names per category, so mapping one action shrinks
 that list instead of drifting from the code. The table above describes the mapped surface only.
 
@@ -220,14 +221,14 @@ The emacs table also installs `C-[`, `C-k`, `C-w`, `N`, `R`, and `n` for cancel,
 reverse search, rectangle toggle, and forward search. Each binding stores the pin's command and has
 no repeat bit.
 
-Seventeen keyboard defaults remain tracked. Ten require the pin's numeric-repeat or goto-line
-command-prompt flow. Seven emacs or vi keys depend on five missing actions:
-`previous-matching-bracket`, `recentre-top-bottom`, `cursor-centre-horizontal`, `toggle-position`,
-and `refresh-toggle`. `keys.copy-mode-unsupported-default-actions` owns only those seven keys and
-depends on the wider 29-action inventory in `copy-mode.action-fidelity`. zz presents the position
-label in native chrome and freezes the copy revision, but the tracker keeps both tmux toggles open
-until the project makes a product decision. Mouse pseudo-keys use the direct pointer route instead
-of `KeyEngine` bindings.
+Two keyboard defaults remain tracked. The emacs table now binds `M-1` through `M-9` to zz's own
+numeric capture, `g` to the goto-line prompt vi `:` opens, and `P`, `C-M-b`, `C-l` and `M-l` to
+`toggle-position`, `previous-matching-bracket`, `recentre-top-bottom` and
+`cursor-centre-horizontal`; the vi table gained `P`. Only the two `r` keys are left, and they wait
+on `refresh-toggle`, the pin's live re-sync of the frozen copy backing, which belongs to the
+daemon's copy revisions. `keys.copy-mode-unsupported-default-actions` owns those two keys and
+depends on the action inventory in `copy-mode.action-fidelity`. Mouse pseudo-keys use the direct
+pointer route instead of `KeyEngine` bindings.
 
 Copy-pipe worker exit failures are silent on Control clients. Pinned tmux starts the worker without
 a completion callback, so a delayed nonzero exit produces no `%message`, `%error`, or extra command

@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **82**. Classified items: **557**.
+Tracked gap groups: **82**. Classified items: **556**.
 
 - Status: open: 40, blocked: 6, accepted: 36.
 - Decision: adopt: 45, native: 28, park: 1, never: 8.
 - Priority: later: 46, none: 36.
 - Closed history entries: 131.
-- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 89, presentation: 8, protocol: 2.
+- Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 95, binding: 61, native-key: 58, semantic: 88, presentation: 8, protocol: 2.
 
 ## Measured surface
 
@@ -478,14 +478,14 @@ Startup, runtime source, aliases, and callbacks parse through the daemon MuxEngi
 
 ### `copy-mode.action-fidelity`: Complete the copy-mode action vocabulary
 
-crates/zz-mux/src/copy_actions.rs owns all 95 pinned window-copy names with a behavior category and the pin read-only bit, and derives support from the send-keys -X parser, so 81 mapped and 14 missing names stay in step with the code. The selection lifecycle is complete: selection-mode carries the pin selflag with its abbreviations and silent no-op, stop-selection is typed apart from clear-selection, and begin-selection, other-end, select-word, and select-line arm or reset the unit the pin does. Word and line extension is measured against the pin through a throwaway-server copy-mode probe: a whitespace cursor resolves outward to the neighboring word and select-word lands on the last cell of its word. Cursor geometry, goto-line, logical-line and mode-key behavior, jump/page/prompt actions, and copy formatting keep their own items. The scroll-exit latch is now writable in the mode: scroll-exit-on, -off, and -toggle rearm the bit `copy-mode -e` latches at entry, page-down-and-cancel and halfpage-down-and-cancel force the exit for one action, scroll-down-and-cancel exits on reaching the bottom whether or not a selection is live, and cursor-down-and-cancel exits only when a whole counted run stayed stuck. previous-matching-bracket completes the jump, page, and prompt family: it scans back to the nearest closing bracket inside the logical line and walks its depth back to the opener, leaving the cursor alone when there is none, which is the pinned emacs branch widened from one column to the whole line. View-relative geometry is typed too: cursor-centre-vertical and cursor-centre-horizontal park the cursor mid-view and mid-row without moving the view, scroll-top, scroll-middle, and scroll-bottom move the view so the cursor line lands on that screen row and do nothing at all when the retained revision cannot reach it, and toggle-position flips the published position readout. recentre-top-bottom completes the category: it cycles the cursor line through the middle, top, and bottom of the view, restarts at the middle whenever the cursor changed line since the last press, and clamps to what the revision allows instead of refusing like the scroll placements.
+crates/zz-mux/src/copy_actions.rs owns all 95 pinned window-copy names with a behavior category and the pin read-only bit, and derives support from the send-keys -X parser, so 81 mapped and 14 missing names stay in step with the code. The selection lifecycle is complete: selection-mode carries the pin selflag with its abbreviations and silent no-op, stop-selection is typed apart from clear-selection, and begin-selection, other-end, select-word, and select-line arm or reset the unit the pin does. Word and line extension is measured against the pin through a throwaway-server copy-mode probe: a whitespace cursor resolves outward to the neighboring word and select-word lands on the last cell of its word. Cursor geometry, logical-line and mode-key behavior, jump/page/prompt actions, and copy formatting keep their own items. The scroll-exit latch is now writable in the mode: scroll-exit-on, -off, and -toggle rearm the bit `copy-mode -e` latches at entry, page-down-and-cancel and halfpage-down-and-cancel force the exit for one action, scroll-down-and-cancel exits on reaching the bottom whether or not a selection is live, and cursor-down-and-cancel exits only when a whole counted run stayed stuck. previous-matching-bracket completes the jump, page, and prompt family: it scans back to the nearest closing bracket inside the logical line and walks its depth back to the opener, leaving the cursor alone when there is none, which is the pinned emacs branch widened from one column to the whole line. View-relative geometry is typed too: cursor-centre-vertical and cursor-centre-horizontal park the cursor mid-view and mid-row without moving the view, scroll-top, scroll-middle, and scroll-bottom move the view so the cursor line lands on that screen row and do nothing at all when the retained revision cannot reach it, and toggle-position flips the published position readout. recentre-top-bottom completes the category: it cycles the cursor line through the middle, top, and bottom of the view, restarts at the middle whenever the cursor changed line since the last press, and clamps to what the revision allows instead of refusing like the scroll placements. goto-line is measured against the pin and rebuilt: window_copy_goto_line reads its argument with strtonum over the whole string, base ten, one optional sign and leading whitespace allowed, in the inclusive range -1 through INT_MAX, and with line numbers off the number is a scrollback offset counted from the bottom, clamped to the retained history, that moves the view and leaves the cursor on the screen row it already had. Probed on a throwaway server against forty lines in a six-row pane, `#{scroll_position}` answered 5, 7, 9, 41 and 41 for 5, 7, 9, 2147483647 and a value past the history, 6 for '+6' and 13 for ' 13', while 'abc', '3x', '0x10', '2147483648' and the empty string each left the previous position untouched, and `#{copy_cursor_y}` stayed on 5 throughout. zz now parses the same grammar and moves the same viewport instead of parking the cursor on an absolute row, and a rejected argument still reaches the mode rather than being swallowed by the mux: outside a mode `send-keys -X goto-line abc` now fails on both engines, which is the pin's order of checks. Targets past INT_MAX are not pinned targets, so the terminal treats them as no move at all.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `later` / `hard`
 - Owner: `terminal`
 - User impact: daily, remote, scripts
-- Items: `semantic:copy-mode-copy-format-and-destination`, `semantic:copy-mode-goto-line`, `semantic:copy-mode-logical-line-and-mode-keys`
+- Items: `semantic:copy-mode-copy-format-and-destination`, `semantic:copy-mode-logical-line-and-mode-keys`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-mux/src/copy_actions.rs`
@@ -499,6 +499,7 @@ crates/zz-mux/src/copy_actions.rs owns all 95 pinned window-copy names with a be
   - `file:compat/scenarios/copy-mode-cursor-view.txt`
   - `file:compat/scenarios/copy-mode-recentre.txt`
   - `file:compat/scenarios/copy-mode-previous-bracket.txt`
+  - `file:compat/scenarios/copy-mode-goto-line.txt`
 - Acceptance:
   - `A source-owned inventory keeps all 95 pinned window-copy action names classified: the 66 mapped names retain typed mux and terminal behavior, and the 29 missing names stay explicit across the seven action categories until each has measured behavior or a named product decision.`
   - `Action-specific tests cover cursor geometry, logical-line and mode-key behavior, goto-line, selection lifecycle, jump/page/prompt behavior, and copy formatting and destination effects without using the fixed-row placement close as proof for history-bottom or wider action semantics.`

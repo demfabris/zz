@@ -1,0 +1,27 @@
+# goto-line reads its argument with the pin's strtonum: base ten over the whole
+# string, leading whitespace and one sign allowed, inclusive range -1 through
+# INT_MAX. window_copy_command tests the mode before window_copy_goto_line ever
+# looks at the argument, so outside a mode every spelling fails the same way and
+# argument validity never changes the exit class.
+new-window -d -t w -n goto -- cat
+send-keys -t w:goto.0 -X goto-line 0
+send-keys -t w:goto.0 -X goto-line 5
+send-keys -t w:goto.0 -X goto-line +6
+send-keys -t w:goto.0 -X goto-line 2147483647
+send-keys -t w:goto.0 -X goto-line -- -1
+send-keys -t w:goto.0 -X goto-line abc
+send-keys -t w:goto.0 -X goto-line 3x
+send-keys -t w:goto.0 -X goto-line 0x10
+send-keys -t w:goto.0 -X goto-line 2147483648
+send-keys -t w:goto.0 -X goto-line -- -2
+send-keys -t w:goto.0 -X goto-line 4294967295
+
+# A count in front of it changes nothing: goto-line takes no repeat.
+send-keys -t w:goto.0 -N 3 -X goto-line 5
+send-keys -t w:goto.0 -N 3 -X goto-line abc
+
+# A user binding on either table stores and renders the whole command.
+bind-key -T copy-mode-vi Y send-keys -X goto-line 5
+out: list-keys -T copy-mode-vi -1 Y
+bind-key -T copy-mode Y send-keys -X goto-line -- -1
+out: list-keys -T copy-mode -1 Y

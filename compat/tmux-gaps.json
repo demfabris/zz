@@ -30,32 +30,6 @@
       "reason": "The local CLI now prepares against an already-running compatible daemon, but --host intentionally retains static routing because the only current SSH forward constructor starts a new lifecycle."
     },
     {
-      "id": "buffers.clipboard-write",
-      "title": "Honor buffer clipboard writes",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts",
-        "remote"
-      ],
-      "owner": "daemon",
-      "items": [
-        "flag:load-buffer:-w",
-        "flag:set-buffer:-w"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/tmux/divergences.md"
-      ],
-      "acceptance": [
-        "Both flags match the pin across clipboard-enabled and clipboard-disabled clients."
-      ],
-      "depends_on": [],
-      "reason": "The buffer model exists, but clipboard delivery needs a client capability path."
-    },
-    {
       "id": "capture.rich-transports",
       "title": "Add rich capture transports",
       "decision": "native",
@@ -2871,6 +2845,18 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "load-buffer and save-buffer now route their file through the client that invoked them, the way file_read and file_write do. The daemon expands the path exactly once in its own format context, a leading ~/ against the server's own home and anything else relative against server_client_get_cwd(c, NULL) \u2014 the config client during startup, an unattached client's own working directory, then that client's attached session cwd, then home. An unattached command client then does the bounded read, or the create-truncate or -a append, on its own host over the protocol v89 ClientFileRequest/ClientFileResponse pair, correlated by request id and released when the connection ends; an attached Interactive or Control client keeps daemon-side IO, as the pin keeps server-side IO for an attached client. Failures read `strerror: path` the way cmd-load-buffer.c and cmd-save-buffer.c print them, and a client-side read that fails after the open reports Input/output error, which is what the pin's bufferevent path reports. The client reports its working directory the way find_cwd does, preferring PWD when it resolves to the same place as getcwd. Eleven focused CLI tests drive a daemon whose directory and home are deliberately not the client's; the two three-step differentials run seven and nine checks per engine over relative, nested, tilde, absolute, append, truncate, and failure paths."
+    },
+    {
+      "id": "buffers.clipboard-write",
+      "title": "Honor buffer clipboard writes",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/smoke/buffer-clipboard-write.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "load-buffer -w and set-buffer -w now write the stored buffer to the selected client's clipboard. The target follows the pin's CMD_CLIENT_TFLAG plus CMD_CLIENT_CANFAIL rule: -t picks an attached client, no -t picks the current one, and an unresolvable -t is quiet and still stores the buffer. As in cmd-set-buffer.c and cmd-load-buffer.c the write goes straight to that one client and never through the set-clipboard gate that guards the application OSC 52 path, so it fires with set-clipboard off and raises no pane-set-clipboard hook; -a writes the joined buffer the way the pin writes bufdata. A client that advertises no clipboard terminal feature is the pin's Ms-less client: the command succeeds, stores the buffer, and writes nothing. The scenario attaches a real pty client beside a control client on both binaries and compares the decoded OSC 52 payload stream, which matched on all ten checks. zz still encodes the selection field as `c` where the pin sends the empty field, and a non-UTF-8 buffer is not written because the wire clipboard payload is a String."
     },
     {
       "id": "choosers.cross-client-pane-mode-routing",

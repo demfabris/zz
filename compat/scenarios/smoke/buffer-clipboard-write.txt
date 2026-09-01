@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/buffer-clipboard-write.sh ~/buffer-clipboard-write.sh
+stage: fixtures/buffer-clipboard-write-pty.py ~/buffer-clipboard-write-pty.py
+out: set-environment -gu BUFFER_CLIPBOARD_WRITE
+run-shell 'sh ~/buffer-clipboard-write.sh'
+out: show-environment -g BUFFER_CLIPBOARD_WRITE

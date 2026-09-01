@@ -13157,7 +13157,7 @@ impl Shared {
     ) -> Result<Execution, DaemonError> {
         match name {
             "set-buffer" | "setb" => {
-                let parsed = parse_buffer_command_args(name, args, &['b', 'n', 't'], &['a'])?;
+                let parsed = parse_buffer_command_args(name, args, &['b', 'n', 't'], &['a', 'w'])?;
                 if let Some(new_name) = parsed.value('n') {
                     let events = {
                         let mut inner = self.inner.lock();
@@ -13199,6 +13199,7 @@ impl Shared {
                     appended.append(&mut data);
                     data = appended;
                 }
+                let clipboard = parsed.has('w').then(|| data.clone());
                 let events = insert_paste_buffer(
                     &mut inner,
                     requested_name,
@@ -13207,6 +13208,13 @@ impl Shared {
                     !parsed.has('a'),
                 )?;
                 drop(inner);
+                if let Some(clipboard) = clipboard {
+                    self.deliver_buffer_clipboard_write(
+                        invoking_client,
+                        parsed.value('t'),
+                        &clipboard,
+                    );
+                }
                 if !context.no_hooks {
                     self.run_event_hooks(events);
                 }
@@ -13287,7 +13295,7 @@ impl Shared {
                 })
             }
             "load-buffer" | "loadb" => {
-                let parsed = parse_buffer_command_args(name, args, &['b', 't'], &[])?;
+                let parsed = parse_buffer_command_args(name, args, &['b', 't'], &['w'])?;
                 let path = require_one_positional(name, &parsed)?;
                 let path = {
                     let mut inner = self.inner.lock();
@@ -13326,9 +13334,17 @@ impl Shared {
                     validate_paste_buffer_name(name)?;
                 }
                 let mut inner = self.inner.lock();
+                let clipboard = parsed.has('w').then(|| data.clone());
                 let events =
                     insert_paste_buffer(&mut inner, parsed.value('b'), "buffer", data, true)?;
                 drop(inner);
+                if let Some(clipboard) = clipboard {
+                    self.deliver_buffer_clipboard_write(
+                        invoking_client,
+                        parsed.value('t'),
+                        &clipboard,
+                    );
+                }
                 if !context.no_hooks {
                     self.run_event_hooks(events);
                 }
@@ -20362,6 +20378,43 @@ impl Shared {
         if clipboard_hook {
             self.raise_pane_set_clipboard(pane);
         }
+    }
+
+    fn deliver_buffer_clipboard_write(
+        self: &Arc<Self>,
+        invoking_client: Option<ClientId>,
+        target_client: Option<&str>,
+        data: &[u8],
+    ) {
+        let Ok(text) = std::str::from_utf8(data) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        let destination = {
+            let inner = self.inner.lock();
+            match target_client {
+                Some(target) => find_attached_client(&inner, target),
+                None => invoking_client.and_then(|client| current_format_client(&inner, client)),
+            }
+            .filter(|client| client_colour_count(&inner, *client).is_some())
+            .and_then(|client| {
+                buffer_path_client_context(&inner, client).map(|(_, _, pane)| (client, pane))
+            })
+        };
+        let Some((client, pane)) = destination else {
+            return;
+        };
+        self.publish_to_client(
+            client,
+            EventPayload::Clipboard {
+                pane,
+                request_id: 0,
+                target: ClipboardTarget::Clipboard,
+                text: text.to_owned(),
+            },
+        );
     }
 
     fn raise_pane_set_clipboard(self: &Arc<Self>, pane: PaneId) {
@@ -63581,18 +63634,6 @@ set-option -g @alias-mixed-next yes
 
         for (command, arguments, expected, parse) in [
             (
-                "load-buffer",
-                vec!["-t", "missing", "-w", "fixture"],
-                "unsupported command: load-buffer -w",
-                true,
-            ),
-            (
-                "set-buffer",
-                vec!["-t", "missing", "-w", "fixture"],
-                "unsupported command: set-buffer -w",
-                true,
-            ),
-            (
                 "save-buffer",
                 vec!["-"],
                 "unsupported command: save-buffer to standard output",
@@ -64885,6 +64926,182 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(take_clipboard_writes(&mailbox, pane).is_empty());
         assert!(take_clipboard_writes(&observer_mailbox, pane).is_empty());
         assert_eq!(shared.inner.lock().paste_buffers.len(), 1);
+    }
+
+    #[test]
+    fn buffer_writes_reach_only_the_target_client_and_ignore_set_clipboard() {
+        let shared = Arc::new(Shared::new(1));
+        let alpha_mailbox = OutboundMailbox::new();
+        let (alpha, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("alpha".to_owned()),
+            None,
+            Arc::clone(&alpha_mailbox),
+        );
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                alpha,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "clipwrite"]),
+            )
+            .expect("session");
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+        shared.attach(alpha, session).expect("attach alpha");
+
+        let bravo_mailbox = OutboundMailbox::new();
+        let (bravo, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("bravo".to_owned()),
+            None,
+            Arc::clone(&bravo_mailbox),
+        );
+        shared.attach(bravo, session).expect("attach bravo");
+
+        let charlie_mailbox = OutboundMailbox::new();
+        let (charlie, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("charlie".to_owned()),
+            None,
+            Arc::clone(&charlie_mailbox),
+        );
+        shared.attach(charlie, session).expect("attach charlie");
+
+        let run = |arguments: Vec<&str>| {
+            shared
+                .execute(
+                    alpha,
+                    ClientKind::Interactive,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(arguments[0], arguments[1..].to_vec()),
+                )
+                .unwrap_or_else(|error| panic!("{arguments:?}: {error:?}"))
+        };
+
+        run(vec!["set-option", "-g", "set-clipboard", "off"]);
+        run(vec![
+            "set-hook",
+            "-g",
+            "pane-set-clipboard",
+            "set-environment -g CLIPBOARD_HOOK fired",
+        ]);
+        take_reliable_messages(&alpha_mailbox);
+        take_reliable_messages(&bravo_mailbox);
+        take_reliable_messages(&charlie_mailbox);
+
+        // The pin writes the selection straight to the target client's tty from
+        // cmd-set-buffer.c, never through the set-clipboard gate that guards the
+        // application OSC 52 path.
+        run(vec!["set-buffer", "-w", "-t", "bravo", "payload-one"]);
+        assert!(take_clipboard_writes(&alpha_mailbox, pane).is_empty());
+        assert_eq!(
+            take_clipboard_writes(&bravo_mailbox, pane),
+            vec![(ClipboardTarget::Clipboard, "payload-one".to_owned())]
+        );
+        assert!(take_clipboard_writes(&charlie_mailbox, pane).is_empty());
+
+        // Without -w nothing reaches any client.
+        run(vec!["set-buffer", "-t", "bravo", "payload-two"]);
+        assert!(take_clipboard_writes(&alpha_mailbox, pane).is_empty());
+        assert!(take_clipboard_writes(&bravo_mailbox, pane).is_empty());
+
+        // -a writes the joined buffer, matching the pin's bufdata.
+        run(vec![
+            "set-buffer",
+            "-w",
+            "-a",
+            "-b",
+            "joined",
+            "-t",
+            "alpha",
+            "head-",
+        ]);
+        take_reliable_messages(&alpha_mailbox);
+        run(vec![
+            "set-buffer",
+            "-w",
+            "-a",
+            "-b",
+            "joined",
+            "-t",
+            "alpha",
+            "tail",
+        ]);
+        assert_eq!(
+            take_clipboard_writes(&alpha_mailbox, pane),
+            vec![(ClipboardTarget::Clipboard, "head-tail".to_owned())]
+        );
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let file = directory.path().join("payload");
+        std::fs::write(&file, b"payload-three").expect("write payload");
+        run(vec![
+            "load-buffer",
+            "-w",
+            "-t",
+            "bravo",
+            &file.to_string_lossy(),
+        ]);
+        assert!(take_clipboard_writes(&alpha_mailbox, pane).is_empty());
+        assert_eq!(
+            take_clipboard_writes(&bravo_mailbox, pane),
+            vec![(ClipboardTarget::Clipboard, "payload-three".to_owned())]
+        );
+
+        // A Control client advertises no clipboard terminal feature, so it is the
+        // pin's Ms-less client: the command still succeeds and stores the buffer.
+        run(vec!["set-buffer", "-w", "-t", "charlie", "payload-four"]);
+        assert!(take_clipboard_writes(&charlie_mailbox, pane).is_empty());
+
+        // CMD_CLIENT_CANFAIL: an unknown -t is quiet and still stores the buffer.
+        run(vec!["set-buffer", "-w", "-t", "missing", "payload-five"]);
+        assert!(take_clipboard_writes(&alpha_mailbox, pane).is_empty());
+        assert!(take_clipboard_writes(&bravo_mailbox, pane).is_empty());
+
+        // The application OSC 52 path does raise pane-set-clipboard, which is what
+        // makes the buffer-write silence below a real difference and not a dead
+        // hook registration.
+        run(vec!["set-option", "-g", "set-clipboard", "on"]);
+        shared.deliver_clipboard_write(pane, ClipboardTarget::Clipboard, "app".to_owned());
+        assert!(
+            run(vec!["show-environment", "-g", "CLIPBOARD_HOOK"])
+                .output
+                .contains("fired")
+        );
+        run(vec!["set-environment", "-gu", "CLIPBOARD_HOOK"]);
+        take_reliable_messages(&alpha_mailbox);
+        take_reliable_messages(&bravo_mailbox);
+
+        // cmd-set-buffer.c never calls notify_pane, in either set-clipboard mode.
+        run(vec!["set-buffer", "-w", "-t", "alpha", "payload-six"]);
+        assert_eq!(
+            take_clipboard_writes(&alpha_mailbox, pane),
+            vec![(ClipboardTarget::Clipboard, "payload-six".to_owned())]
+        );
+        shared
+            .execute(
+                alpha,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-environment", ["-g", "CLIPBOARD_HOOK"]),
+            )
+            .expect_err("pane-set-clipboard never fires for a buffer write");
+
+        let inner = shared.inner.lock();
+        let stored = inner
+            .paste_buffers
+            .iter()
+            .map(|buffer| String::from_utf8_lossy(&buffer.data).into_owned())
+            .collect::<BTreeSet<_>>();
+        assert!(stored.contains("payload-one"));
+        assert!(stored.contains("payload-two"));
+        assert!(stored.contains("payload-three"));
+        assert!(stored.contains("payload-four"));
+        assert!(stored.contains("payload-five"));
+        assert!(stored.contains("payload-six"));
+        assert!(stored.contains("head-tail"));
     }
 
     fn test_copy_pipe_environment() -> CopyPipeEnvironment {

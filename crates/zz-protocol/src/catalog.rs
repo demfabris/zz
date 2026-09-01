@@ -534,6 +534,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "list-windows",
         "[-ar] [-F format] [-f filter] [-O order][-t target-session]",
     ),
+    ("load-buffer", "[-b buffer-name] [-t target-client] path"),
     (
         "move-pane",
         "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
@@ -550,10 +551,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     (
         "send-keys",
         "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
-    ),
-    (
-        "set-buffer",
-        "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
     ),
     ("show-messages", "[-JT] [-t target-client]"),
     (
@@ -1036,11 +1033,11 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "load-buffer",
         aliases: &["loadb"],
         description: "Load a file into a paste buffer",
-        usage: "[-b buffer-name] [-t target-client] path",
+        usage: "[-w] [-b buffer-name] [-t target-client] path",
         options: &[
             CommandOptionSpec::value("-b", FreeForm, "buffer name"),
-            CommandOptionSpec::value("-t", FreeForm, "compatibility target client"),
-            CommandOptionSpec::unsupported_flag("-w"),
+            CommandOptionSpec::value("-t", FreeForm, "target client"),
+            CommandOptionSpec::flag("-w", "write the buffer to the client clipboard"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -1078,13 +1075,13 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "set-buffer",
         aliases: &["setb"],
         description: "Set the contents of a paste buffer",
-        usage: "[-a] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
+        usage: "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]",
         options: &[
             CommandOptionSpec::flag("-a", "append to the buffer"),
             CommandOptionSpec::value("-b", FreeForm, "buffer name"),
             CommandOptionSpec::value("-n", FreeForm, "rename the source buffer"),
-            CommandOptionSpec::value("-t", FreeForm, "compatibility target client"),
-            CommandOptionSpec::unsupported_flag("-w"),
+            CommandOptionSpec::value("-t", FreeForm, "target client"),
+            CommandOptionSpec::flag("-w", "write the buffer to the client clipboard"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2825,7 +2822,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (437, 66));
+        assert_eq!((supported, unsupported), (439, 64));
         assert_eq!(usage_overrides.len(), 24);
         assert_eq!(
             usage_overrides,

@@ -1566,7 +1566,7 @@ Private socket compatibility would replace zz's cross-client protocol without im
 
 ### `rendering.geometry-residue`: Close bounded geometry reporting gaps
 
-These mismatches occur where client measurements meet durable mux geometry. The manual policy transition is closed: a window keeps the extent resize-window stored, an automatic policy is free to reach a different measured size, and returning to manual restores the stored extent and reports it through window_manual_width and window_manual_height. A detached split-window -Z is closed too: the new pane keeps the screen it was created with while the zoom hides it, and the next layout fix takes it back. Attached-pane width stays open, and with it the measured half of the manual transition: the attached-client fixture shows zz does not re-measure a window when window-size changes to an automatic policy, and the grid it would measure is the chrome-reduced one, so that trigger belongs with the attached-pane width work.
+These mismatches occur where client measurements meet durable mux geometry. The manual policy transition is closed: a window keeps the extent resize-window stored, an automatic policy is free to reach a different measured size, and returning to manual restores the stored extent and reports it through window_manual_width and window_manual_height. A detached split-window -Z is closed too: the new pane keeps the screen it was created with while the zoom hides it, and the next layout fix takes it back. Attached-pane width stays open, and with it the measured half of the manual transition: the attached-client fixture shows zz does not re-measure a window when window-size changes to an automatic policy, and the grid it would measure is the chrome-reduced one, so that trigger belongs with the attached-pane width work. The residue is GUI-only by construction: the divergence is the cell of drift between the engine's allocation and a PTY still sized by the GPUI client's pixel measurement, and the divergence note already records that headless is exact. compat/attached-client.sh drives the raw-terminal attach client, whose measured grid is chrome-reduced, so it cannot stand in for the GPUI producer, and nothing in the harness runs a real GPUI window. Closing this needs a way to drive the desktop client's TerminalView measurement under test before the writeback order is worth changing.
 
 - Decision: `adopt`
 - Status: `open`
@@ -1576,6 +1576,9 @@ These mismatches occur where client measurements meet durable mux geometry. The 
 - Items: `semantic:attached-gui-pane-width`
 - Depends on: none
 - Evidence:
+  - `resource:crates/zz/src/terminal/view.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `file:compat/attached-client.sh`
   - `resource:knowledge/tmux/divergences.md`
   - `scenario:compat/scenarios/split-window-zoom.txt`
   - `scenario:compat/scenarios/manual-window-size-transition.txt`

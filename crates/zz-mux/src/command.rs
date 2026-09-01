@@ -10388,6 +10388,10 @@ impl MuxEngine {
         }))
     }
 
+    /// The pin resolves an option target with `CMD_FIND_CANFAIL` and then lets
+    /// `options_scope_from_flags` name the slot the option's own scope needs,
+    /// echoing the raw `-t` argument rather than the target parser's message
+    /// (options.c).
     fn resolve_tmux_option_target(
         &self,
         context: &ExecutionContext,
@@ -10395,24 +10399,30 @@ impl MuxEngine {
         force_window: bool,
         scope: TmuxOptionScope,
     ) -> Result<TmuxOptionTarget, ServerError> {
+        let missing = |slot: &str| {
+            ServerError::InvalidCommand(match options.value("-t") {
+                Some(target) => format!("no such {slot}: {target}"),
+                None => format!("no current {slot}"),
+            })
+        };
         match scope {
             TmuxOptionScope::Server => Ok(TmuxOptionTarget::Server),
             TmuxOptionScope::Session if options.has("-g") => Ok(TmuxOptionTarget::GlobalSession),
-            TmuxOptionScope::Session => {
-                let window = self.resolve_option_window(context, options, force_window)?;
-                Ok(TmuxOptionTarget::Session(
-                    self.state.windows[&window].session,
-                ))
-            }
+            TmuxOptionScope::Session => self
+                .resolve_option_window(context, options, force_window)
+                .map(|window| TmuxOptionTarget::Session(self.state.windows[&window].session))
+                .map_err(|_| missing("session")),
             TmuxOptionScope::WindowPane if options.has("-p") => self
                 .resolve_pane(options.value("-t"), context.window, context.pane)
-                .map(TmuxOptionTarget::Pane),
+                .map(TmuxOptionTarget::Pane)
+                .map_err(|_| missing("pane")),
             TmuxOptionScope::Window | TmuxOptionScope::WindowPane if options.has("-g") => {
                 Ok(TmuxOptionTarget::GlobalWindow)
             }
             TmuxOptionScope::Window | TmuxOptionScope::WindowPane => self
                 .resolve_option_window(context, options, force_window)
-                .map(TmuxOptionTarget::Window),
+                .map(TmuxOptionTarget::Window)
+                .map_err(|_| missing("window")),
         }
     }
 
@@ -37573,6 +37583,105 @@ mod tests {
                 "zoomed target {target}"
             );
         }
+    }
+
+    #[test]
+    fn exact_match_prefix_is_scoped_to_the_session_and_window_slots() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "alpha"]))
+            .expect("session");
+        engine
+            .execute(
+                &mut context,
+                &command("rename-window", &["-t", "alpha:0", "win0"]),
+            )
+            .expect("rename");
+
+        for (arguments, message) in [
+            (
+                vec!["-t", "=alpha", "history-limit", "1234"],
+                "no such session: =alpha",
+            ),
+            (
+                vec!["-t", "=alp", "history-limit", "1234"],
+                "no such session: =alp",
+            ),
+            (
+                vec!["-t", "nope", "history-limit", "1234"],
+                "no such session: nope",
+            ),
+            (
+                vec!["-w", "-t", "=win0", "aggressive-resize", "on"],
+                "no such window: =win0",
+            ),
+            (
+                vec!["-p", "-t", "=alpha", "remain-on-exit", "on"],
+                "no such pane: =alpha",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    engine.execute(&mut context, &command("set-option", &arguments)),
+                    Err(ServerError::InvalidCommand(actual)) if actual == message
+                ),
+                "set-option {arguments:?}"
+            );
+        }
+
+        assert!(matches!(
+            engine.execute(&mut context, &command("kill-pane", &["-t", "=alpha"])),
+            Err(ServerError::PaneNotFound(target)) if target == "=alpha"
+        ));
+        assert!(matches!(
+            engine.execute(&mut context, &command("select-pane", &["-t", "=win0"])),
+            Err(ServerError::PaneNotFound(target)) if target == "=win0"
+        ));
+        assert!(matches!(
+            engine.execute(&mut context, &command("has-session", &["-t", "=alp"])),
+            Err(ServerError::SessionNotFound(target)) if target == "alp"
+        ));
+        assert!(matches!(
+            engine.execute(&mut context, &command("kill-window", &["-t", "=wi"])),
+            Err(ServerError::WindowNotFound(target)) if target == "wi"
+        ));
+
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-t", "=alpha:", "history-limit", "1234"]),
+            )
+            .expect("a colon moves the token into the session slot");
+        assert_eq!(
+            engine.history_limit_for_session(context.session.expect("session")),
+            1234
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-window-option",
+                    &["-t", "=win0", "aggressive-resize", "on"],
+                ),
+            )
+            .expect("set-window-option resolves a window target");
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "show-window-options",
+                        &["-v", "-t", "alpha:0", "aggressive-resize"]
+                    ),
+                )
+                .expect("aggressive-resize readback")
+                .output,
+            "on"
+        );
+        engine
+            .execute(&mut context, &command("has-session", &["-t", "=alpha"]))
+            .expect("has-session resolves a session target");
     }
 
     #[test]

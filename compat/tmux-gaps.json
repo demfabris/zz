@@ -2530,31 +2530,6 @@
       "reason": "One window belongs to one session in zz."
     },
     {
-      "id": "targets.exact-match-prefix",
-      "title": "Scope the exact-match target prefix by slot",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:target-exact-match-prefix-scope"
-      ],
-      "evidence": [
-        "resource:crates/zz-mux/src/model.rs",
-        "resource:crates/zz-mux/src/command.rs"
-      ],
-      "acceptance": [
-        "A colon-less target keeps the pin's slot classification, so the leading equals sign marks an exact match only where the token lands in the session or window slot named by the command's own target type.",
-        "set-option -t =name answers `no such session: =name` and exits 1 while set-option -t =name: still succeeds, and the parsed exactness survives the window-to-session fallback instead of degrading into a prefix search."
-      ],
-      "depends_on": [],
-      "reason": "The pin strips a leading equals sign only where the token lands in the session or window slot of cmd_find_target, and a colon-less token lands in the slot the command's own target type names, so set-option, whose target is CMD_FIND_PANE, reads `=alpha` as a pane name. Measured against the pin on a throwaway server: `set-option -t =alpha history-limit 1234` answers `no such session: =alpha` and exits 1, `set-option -w -t =win0` answers `no such window: =win0`, `set-option -p -t =alpha` answers `no such pane: =alpha`, and `kill-pane -t =alpha` answers `can't find pane: =alpha`, while `set-option -t =alpha:` succeeds because the colon moves the token into the session slot, and `set-window-option -t =win0` and `has-session -t =alpha` succeed because their target types put it in the window and session slots. zz has no slot classification: resolve_pane falls through resolve_window_core to resolve_session, and normalize_window_target and resolve_session each strip the equals sign wherever they see it. Measured against a headless zz daemon on a scratch socket, `set-option -t =alpha`, `set-option -t =alpha:`, `set-option -w -t =win0`, and `set-option -p -t =alpha` all exit 0 and write the option, and `-t =alp` exits 0 too because the fallback drops the exactness it just parsed and hands the stripped name to a prefix search. Only a name matching nothing fails, and `-t =nope` fails as `can't find pane: =nope` where the pin says `no such session: =nope`."
-    },
-    {
       "id": "terminal.key-client-selection",
       "title": "Select the send-keys target client",
       "decision": "adopt",
@@ -4398,6 +4373,18 @@
         "scenario:compat/scenarios/smoke/source-file-tilde.txt"
       ],
       "resolution": "source-file no longer rewrites a literal leading ~/ after parsing: parser-expanded leading tildes still arrive as absolute paths, top-level literal tildes pass through cwd resolution, and registered-client nested literal tildes use the stable invoking base closed under source-file.nested-client-cwd. Startup and deferred event-hook base selection remain active. The CLI regression pins the top-level choice against a metacharacter-bearing daemon HOME."
+    },
+    {
+      "id": "targets.exact-match-prefix",
+      "title": "Scope the exact-match target prefix by slot",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "file:compat/scenarios/pane-exact-target-prefix.txt",
+        "resource:knowledge/tmux/commands.md"
+      ],
+      "resolution": "The resolver now records which slot of cmd_find_target a token reached. A session or window slot strips the leading equals sign into an exact-match flag and maps the window alias table; a colon-less token for a pane target lands in the pane slot, so the window and session lookups that run after the pane miss search for it exactly as written, alias table included. Every measured row now matches the pin byte for byte on a throwaway server and a scratch daemon: `set-option -t =w history-limit 1234` answers `no such session: =w` and exits 1, `-t =alp` answers `no such session: =alp` instead of degrading into a session prefix search, `set-option -w -t =win0` answers `no such window: =win0`, `set-option -p -t =w` answers `no such pane: =w`, `kill-pane -t =w` and `select-pane -t =win0` answer `can't find pane:` with the equals sign kept, while `set-option -t =w:` succeeds because the colon moves the token into the session slot, and `set-window-option -t =win0` and `has-session -t =w` succeed because their own target types put it in the window and session slots. The cmd-find diagnostics keep reporting the stripped name (`has-session -t =wi` answers `can't find session: wi`, `kill-window -t =wi` answers `can't find window: wi`) while the option-scope diagnostics echo the raw `-t` argument, because the pin resolves an option target with CMD_FIND_CANFAIL and then lets options_scope_from_flags name the slot the option's own scope needs. That rewrite also fixes three adjacent messages measured the same way: `set-option -t nope`, `-t 9.9`, `-w -t :nope`, and `-p -t :nope` now answer with the pin's exact text. One residue case stays divergent and is not claimed here: the pin's `set-option -t :nope history-limit` succeeds on the retained session while zz still fails, because zz's option target derives its session from a resolved window instead of the componentwise CANFAIL state."
     },
     {
       "id": "terminal.key-reset",

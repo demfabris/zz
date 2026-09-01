@@ -2202,13 +2202,14 @@ impl MuxState {
         if target.is_some_and(is_marked_target) {
             return Ok(self.windows[&self.marked_window()?].session);
         }
-        self.resolve_named_session(target, current)
+        self.resolve_named_session(target, current, TargetSlot::Classified)
     }
 
     fn resolve_named_session(
         &self,
         target: Option<&str>,
         current: Option<SessionId>,
+        slot: TargetSlot,
     ) -> Result<SessionId, ServerError> {
         let Some(target) = target.filter(|target| !target.is_empty()) else {
             return current
@@ -2216,9 +2217,13 @@ impl MuxState {
                 .or_else(|| self.sessions.keys().next().copied())
                 .ok_or_else(|| ServerError::SessionNotFound("current session".to_owned()));
         };
-        let (target, exact) = target
-            .strip_prefix('=')
-            .map_or((target, false), |target| (target, true));
+        let (target, exact) = if slot == TargetSlot::PaneFallback {
+            (target, false)
+        } else {
+            target
+                .strip_prefix('=')
+                .map_or((target, false), |target| (target, true))
+        };
         if target.starts_with('$') {
             let id = target
                 .parse::<SessionId>()
@@ -2297,7 +2302,12 @@ impl MuxState {
                 .window_for_pane(pane)
                 .ok_or_else(|| ServerError::PaneNotFound(target.to_owned()));
         }
-        match self.resolve_window_core(target, current_session, current_window) {
+        match self.resolve_window_core(
+            target,
+            current_session,
+            current_window,
+            TargetSlot::Classified,
+        ) {
             Ok(window) => Ok(window),
             Err(error) => {
                 let Some(target) = target else {
@@ -2324,8 +2334,9 @@ impl MuxState {
         target: Option<&str>,
         current_session: Option<SessionId>,
         current_window: Option<WindowId>,
+        slot: TargetSlot,
     ) -> Result<WindowId, ServerError> {
-        self.resolve_window_target_core(target, current_session, current_window, false)?
+        self.resolve_window_target_core(target, current_session, current_window, false, slot)?
             .window
             .ok_or_else(|| ServerError::WindowNotFound(target.unwrap_or_default().to_owned()))
     }
@@ -2341,8 +2352,13 @@ impl MuxState {
             let state = &self.windows[&window];
             return Ok((state.session, Some(state.index)));
         }
-        let resolved =
-            self.resolve_window_target_core(target, current_session, current_window, true)?;
+        let resolved = self.resolve_window_target_core(
+            target,
+            current_session,
+            current_window,
+            true,
+            TargetSlot::Classified,
+        )?;
         Ok((resolved.session, resolved.index))
     }
 
@@ -2352,6 +2368,7 @@ impl MuxState {
         current_session: Option<SessionId>,
         current_window: Option<WindowId>,
         index_mode: bool,
+        slot: TargetSlot,
     ) -> Result<WindowTargetResolution, ServerError> {
         let current_session = current_session
             .filter(|session| self.sessions.contains_key(session))
@@ -2363,7 +2380,10 @@ impl MuxState {
             let window = current_window.filter(|window| self.windows.contains_key(window));
             let session = window
                 .map(|window| self.windows[&window].session)
-                .map_or_else(|| self.resolve_named_session(None, current_session), Ok)?;
+                .map_or_else(
+                    || self.resolve_named_session(None, current_session, slot),
+                    Ok,
+                )?;
             let window = window.unwrap_or(self.sessions[&session].active_window);
             return Ok(WindowTargetResolution {
                 session,
@@ -2372,7 +2392,7 @@ impl MuxState {
             });
         };
         if target.starts_with('$') && !target.contains([':', '.']) {
-            let session = self.resolve_named_session(Some(target), current_session)?;
+            let session = self.resolve_named_session(Some(target), current_session, slot)?;
             return Ok(WindowTargetResolution {
                 session,
                 window: Some(self.sessions[&session].active_window),
@@ -2396,8 +2416,8 @@ impl MuxState {
             .split_once(':')
             .map_or((None, target), |(session, window)| (Some(session), window));
         let session = match session_target {
-            Some("") | None => self.resolve_named_session(None, current_session)?,
-            Some(session) => self.resolve_named_session(Some(session), current_session)?,
+            Some("") | None => self.resolve_named_session(None, current_session, slot)?,
+            Some(session) => self.resolve_named_session(Some(session), current_session, slot)?,
         };
         if window_target.is_empty() {
             return Ok(WindowTargetResolution {
@@ -2406,22 +2426,22 @@ impl MuxState {
                 index: None,
             });
         }
-        let window_error = match self.resolve_window_in_session(window_target, session, index_mode)
-        {
-            Ok(window) => {
-                return Ok(WindowTargetResolution {
-                    session,
-                    window: window.window,
-                    index: Some(window.index),
-                });
-            }
-            Err(error) => error,
-        };
+        let window_error =
+            match self.resolve_window_in_session(window_target, session, index_mode, slot) {
+                Ok(window) => {
+                    return Ok(WindowTargetResolution {
+                        session,
+                        window: window.window,
+                        index: Some(window.index),
+                    });
+                }
+                Err(error) => error,
+            };
         if session_target.is_some() {
             return Err(window_error);
         }
-        let (fallback, _) = normalize_window_target(window_target);
-        if let Ok(session) = self.resolve_named_session(Some(fallback), current_session) {
+        let (fallback, _) = normalize_window_target(window_target, slot);
+        if let Ok(session) = self.resolve_named_session(Some(fallback), current_session, slot) {
             return Ok(WindowTargetResolution {
                 session,
                 window: Some(self.sessions[&session].active_window),
@@ -2436,12 +2456,13 @@ impl MuxState {
         target: &str,
         session: SessionId,
         index_mode: bool,
+        slot: TargetSlot,
     ) -> Result<WindowInSessionResolution, ServerError> {
         let state = self
             .sessions
             .get(&session)
             .ok_or_else(|| ServerError::SessionNotFound(session.to_string()))?;
-        let (target, exact) = normalize_window_target(target);
+        let (target, exact) = normalize_window_target(target, slot);
         let not_found = || ServerError::WindowNotFound(target.to_owned());
         if target.starts_with('@') {
             let window = target
@@ -2618,17 +2639,31 @@ impl MuxState {
 
         let Some((window_target, pane_target)) = target.split_once('.') else {
             if !target.contains(':') {
-                let window = self.resolve_window_core(None, current_session, current_window)?;
+                let window = self.resolve_window_core(
+                    None,
+                    current_session,
+                    current_window,
+                    TargetSlot::Classified,
+                )?;
                 if let Ok(pane) = self.resolve_pane_in_window(target, window, pane_at_index) {
                     return Ok(pane);
                 }
             }
-            let window =
-                match self.resolve_window_core(Some(target), current_session, current_window) {
-                    Ok(window) => window,
-                    Err(_) if !target.contains(':') => return Err(pane_error),
-                    Err(error) => return Err(error),
-                };
+            let (fallback, slot) = if target.contains(':') {
+                (target, TargetSlot::Classified)
+            } else {
+                (pane_target, TargetSlot::PaneFallback)
+            };
+            let window = match self.resolve_window_core(
+                Some(fallback),
+                current_session,
+                current_window,
+                slot,
+            ) {
+                Ok(window) => window,
+                Err(_) if !target.contains(':') => return Err(pane_error),
+                Err(error) => return Err(error),
+            };
             return self
                 .windows
                 .get(&window)
@@ -2636,9 +2671,19 @@ impl MuxState {
                 .ok_or_else(|| ServerError::WindowNotFound(target.to_owned()));
         };
         let window = if window_target.is_empty() {
-            self.resolve_window_core(None, current_session, current_window)?
+            self.resolve_window_core(
+                None,
+                current_session,
+                current_window,
+                TargetSlot::Classified,
+            )?
         } else {
-            self.resolve_window_core(Some(window_target), current_session, current_window)?
+            self.resolve_window_core(
+                Some(window_target),
+                current_session,
+                current_window,
+                TargetSlot::Classified,
+            )?
         };
         if pane_target.is_empty() {
             return Ok(self.windows[&window].active_pane);
@@ -3730,7 +3775,21 @@ fn validate_window_index_run(base_index: u32, count: usize) -> Result<(), Server
     Ok(())
 }
 
-fn normalize_window_target(target: &str) -> (&str, bool) {
+/// Which slot of the pin's `cmd_find_target` a token reached. Only the
+/// session and window slots strip a leading `=` into an exact-match flag and
+/// map the window alias table; a colon-less token for a pane target lands in
+/// the pane slot, so the window and session lookups that run after a pane miss
+/// search for the token exactly as written (cmd-find.c).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TargetSlot {
+    Classified,
+    PaneFallback,
+}
+
+fn normalize_window_target(target: &str, slot: TargetSlot) -> (&str, bool) {
+    if slot == TargetSlot::PaneFallback {
+        return (target, false);
+    }
     let (target, exact) = target
         .strip_prefix('=')
         .map_or((target, false), |target| (target, true));

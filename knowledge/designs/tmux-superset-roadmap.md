@@ -1281,8 +1281,10 @@ probe evidence. Imported tmux commands still keep their tmux semantics.
 - Speaking tmux's private socket protocol.
 - Fleet broadcast as a special command; compose `fleet list -F` with a shell loop.
 
-`server-access` and multi-user socket ACLs are parked outside the practical alias target, but no
-permanent product decision has been recorded for them.
+`server-access` and multi-user socket ACLs are a recorded permanent exclusion: `protocol.socket-acl`
+in `compat/tmux-gaps.json` carries decision `never` with status `accepted`, so the daemon socket
+stays single-user at mode 0600, `server-access` stays recognized and unimplemented, and no peer
+authorization model is added.
 
 # Decision log
 

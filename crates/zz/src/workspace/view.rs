@@ -3734,6 +3734,7 @@ mod tests {
             items: vec![Some(zz_protocol::MenuItem {
                 name: "Quit item".to_owned(),
                 key: Some("q".to_owned()),
+                annotation: Some("q".to_owned()),
                 enabled: true,
             })],
             selected: Some(0),

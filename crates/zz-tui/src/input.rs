@@ -1940,17 +1940,20 @@ mod tests {
                 Some(MenuItem {
                     name: "Quit item".to_owned(),
                     key: Some("q".to_owned()),
+                    annotation: Some("q".to_owned()),
                     enabled: true,
                 }),
                 None,
                 Some(MenuItem {
                     name: "Disabled".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: false,
                 }),
                 Some(MenuItem {
                     name: "Last".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: true,
                 }),
             ],

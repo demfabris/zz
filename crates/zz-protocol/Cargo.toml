@@ -12,6 +12,7 @@ postcard.workspace = true
 serde.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
+unicode-width = "0.2.2"
 zz-terminal = { path = "../zz-terminal", default-features = false }
 
 [dev-dependencies]

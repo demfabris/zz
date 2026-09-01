@@ -1100,7 +1100,7 @@ impl Renderer {
                         format!("{},dim", state.style)
                     };
                     let content = item
-                        .key
+                        .annotation
                         .as_deref()
                         .filter(|key| !key.is_empty())
                         .map_or_else(
@@ -2582,12 +2582,14 @@ mod tests {
                 Some(zz_protocol::MenuItem {
                     name: "界 item".to_owned(),
                     key: Some("q".to_owned()),
+                    annotation: Some("q".to_owned()),
                     enabled: true,
                 }),
                 None,
                 Some(zz_protocol::MenuItem {
                     name: "Disabled".to_owned(),
                     key: None,
+                    annotation: None,
                     enabled: false,
                 }),
             ],

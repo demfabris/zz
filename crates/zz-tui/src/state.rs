@@ -849,6 +849,7 @@ mod tests {
             items: vec![Some(MenuItem {
                 name: "First".to_owned(),
                 key: Some("f".to_owned()),
+                annotation: Some("f".to_owned()),
                 enabled: true,
             })],
             selected,

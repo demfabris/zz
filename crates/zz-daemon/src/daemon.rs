@@ -35,11 +35,11 @@ use zz_protocol::{
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
     ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientExitAction,
     ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello, ClientId,
-    ClientInstanceId, ClientKind, ClientMessageKind, CommandInvocation, CommandPromptAction,
-    CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest,
-    CommandResolution, CommandResponse, ConfigOverrideEntry, ConfirmAction, ConfirmState,
-    ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState, Event, EventPayload,
-    GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
+    ClientInstanceId, ClientKind, ClientMessageKind, ClientPath, CommandInvocation,
+    CommandPromptAction, CommandPromptKind, CommandPromptMode, CommandPromptState,
+    CommandPromptType, CommandRequest, CommandResolution, CommandResponse, ConfigOverrideEntry,
+    ConfirmAction, ConfirmState, ControlSourceFileEvent, DisplayPanesAction, DisplayPanesState,
+    Event, EventPayload, GuiResponse, InputMessage, MAX_AGENT_SEND_BYTES, MAX_BROWSER_KEY_REPEAT,
     MAX_CHOOSE_BUFFER_QUERY_BYTES, MAX_CHOOSE_ITEM_KEY_BYTES, MAX_CHOOSE_TREE_QUERY_BYTES,
     MAX_ENCODED_FRAME_BYTES, MAX_PANE_INDICATOR_LABEL_BYTES, MAX_STARTUP_CONFIG_CAUSE_BYTES,
     MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES,
@@ -26725,10 +26725,10 @@ fn client_size_fact(capabilities: &[String]) -> Option<(u16, u16)> {
     })
 }
 
-fn client_working_directory_fact(working_directory: Option<&Path>) -> Option<PathBuf> {
+fn client_working_directory_fact(working_directory: Option<&ClientPath>) -> Option<PathBuf> {
     working_directory
+        .and_then(ClientPath::to_path_buf)
         .filter(|working_directory| working_directory.is_absolute())
-        .map(Path::to_owned)
 }
 
 fn client_environment_fact(entries: &[String]) -> Arc<BTreeMap<String, String>> {
@@ -32656,7 +32656,7 @@ fn handle_connection<S: TransportStream>(
         }
         inner.client_pids.insert(client, hello.process_id);
         if let Some(working_directory) =
-            client_working_directory_fact(hello.working_directory.as_deref())
+            client_working_directory_fact(hello.working_directory.as_ref())
         {
             inner
                 .client_working_directories
@@ -56979,14 +56979,36 @@ set-option -g @alias-mixed-next yes
         assert_eq!(client_size_fact(&["client-size-v1:120".to_owned()]), None);
         assert_eq!(client_size_fact(&["client-terminal-v1".to_owned()]), None);
         assert_eq!(
-            client_working_directory_fact(Some(Path::new("/tmp/client cwd"))),
+            client_working_directory_fact(
+                ClientPath::from_path(Path::new("/tmp/client cwd")).as_ref()
+            ),
             Some(PathBuf::from("/tmp/client cwd"))
         );
         assert_eq!(
-            client_working_directory_fact(Some(Path::new("relative/client-cwd"))),
+            client_working_directory_fact(
+                ClientPath::from_path(Path::new("relative/client-cwd")).as_ref()
+            ),
             None
         );
         assert_eq!(client_working_directory_fact(None), None);
+        #[cfg(unix)]
+        {
+            use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
+
+            let bytes = PathBuf::from(OsString::from_vec(
+                [b"/tmp/client-".as_slice(), &[0xff], b"-cwd".as_slice()].concat(),
+            ));
+            assert_eq!(bytes.to_str(), None);
+            assert_eq!(
+                client_working_directory_fact(ClientPath::from_path(&bytes).as_ref()),
+                Some(bytes)
+            );
+            let relative = PathBuf::from(OsString::from_vec(vec![0xff, b'/', b'x']));
+            assert_eq!(
+                client_working_directory_fact(ClientPath::from_path(&relative).as_ref()),
+                None
+            );
+        }
         #[cfg(unix)]
         assert_eq!(
             resolve_source_path("configs/*.conf", Some(Path::new("/tmp/client cwd"))),

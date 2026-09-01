@@ -314,9 +314,11 @@ fn validate_control_message(message: &ProtocolMessage) -> Result<(), ProtocolErr
                  {MAX_SERVER_CAPABILITY_BYTES} bytes"
             )));
         }
-        if hello.working_directory.as_ref().is_some_and(|path| {
-            path.as_os_str().as_encoded_bytes().len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES
-        }) {
+        if hello
+            .working_directory
+            .as_ref()
+            .is_some_and(|path| path.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES)
+        {
             return Err(ProtocolError::InvalidClientHello(format!(
                 "working directory must be at most {MAX_CLIENT_WORKING_DIRECTORY_BYTES} bytes"
             )));
@@ -2665,7 +2667,9 @@ mod tests {
                 capabilities: Vec::new(),
                 color_scheme: None,
                 origin: None,
-                working_directory: Some(std::path::PathBuf::from("x".repeat(length))),
+                working_directory: crate::ClientPath::from_path(&std::path::PathBuf::from(
+                    "x".repeat(length),
+                )),
                 environment: Vec::new(),
                 process_id: 13,
             })
@@ -2935,7 +2939,9 @@ mod tests {
             capabilities: Vec::new(),
             color_scheme: None,
             origin: None,
-            working_directory: Some(std::path::PathBuf::from("/tmp/client-fixture")),
+            working_directory: crate::ClientPath::from_path(std::path::Path::new(
+                "/tmp/client-fixture",
+            )),
             environment: Vec::new(),
             process_id: 13,
         });

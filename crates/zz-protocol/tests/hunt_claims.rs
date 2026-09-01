@@ -248,6 +248,52 @@ fn mux_option_key_has_seventeen_daemon_owned_keys() {
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::Prefix2));
 }
 
+#[cfg(unix)]
+#[test]
+fn client_hello_carries_a_non_utf8_working_directory_verbatim() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt, path::PathBuf};
+
+    use zz_protocol::{ClientPath, MAX_CLIENT_WORKING_DIRECTORY_BYTES};
+
+    let fixture = PathBuf::from(OsString::from_vec(
+        [b"/tmp/zz-".as_slice(), &[0xff], b"-dir".as_slice()].concat(),
+    ));
+    assert_eq!(fixture.to_str(), None);
+    let hello = ProtocolMessage::ClientHello(ClientHello {
+        protocol_version: PROTOCOL_VERSION,
+        client_instance_id: ClientInstanceId(4),
+        kind: ClientKind::Command,
+        device_name: None,
+        capabilities: Vec::new(),
+        color_scheme: None,
+        origin: None,
+        working_directory: ClientPath::from_path(&fixture),
+        environment: Vec::new(),
+        process_id: 11,
+    });
+    let frame = encode_protocol_message(&hello).expect("encode non-UTF-8 hello");
+    let ProtocolMessage::ClientHello(decoded) =
+        zz_protocol::decode_protocol_frame(&frame).expect("decode non-UTF-8 hello")
+    else {
+        panic!("hello did not round-trip");
+    };
+    assert_eq!(
+        decoded
+            .working_directory
+            .as_ref()
+            .and_then(ClientPath::to_path_buf),
+        Some(fixture)
+    );
+
+    let oversized = PathBuf::from(OsString::from_vec(vec![
+        0xff;
+        MAX_CLIENT_WORKING_DIRECTORY_BYTES
+            + 1
+    ]));
+    let oversized = ClientPath::from_path(&oversized).expect("unix represents any byte path");
+    assert!(oversized.len() > MAX_CLIENT_WORKING_DIRECTORY_BYTES);
+}
+
 #[test]
 fn dark_interactive_hello_encodes_version_instance_and_process_id_as_varints() {
     let frame = encode_protocol_message(&ProtocolMessage::ClientHello(ClientHello {

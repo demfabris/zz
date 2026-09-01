@@ -33,7 +33,7 @@ pub use message::{
     ChooseBufferSearchState, ChooseBufferState, ChooseTreeAction, ChooseTreeItem, ChooseTreeKind,
     ChooseTreePaneKind, ChooseTreeSearchState, ChooseTreeState, ChooseTreeTarget, ClientExitAction,
     ClientFileOperation, ClientFileRequest, ClientFileResponse, ClientHello, ClientKind,
-    ClientMessageKind, CommandInvocation, CommandPromptAction, CommandPromptKind,
+    ClientMessageKind, ClientPath, CommandInvocation, CommandPromptAction, CommandPromptKind,
     CommandPromptMode, CommandPromptState, CommandPromptType, CommandRequest, CommandResponse,
     ConfigOverrideEntry, ConfirmAction, ConfirmState, ControlSourceFileEvent,
     DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND,

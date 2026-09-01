@@ -26,8 +26,8 @@ if [ -s "$work/errors" ]; then
 fi
 
 lines="$(wc -l <"$work/observed" | tr -d ' ')"
-if [ "$lines" != 6 ]; then
-    echo "client-exit-actions-$side: expected 6 observations, got $lines"
+if [ "$lines" != 9 ]; then
+    echo "client-exit-actions-$side: expected 9 observations, got $lines"
     cat "$work/observed"
     exit 0
 fi

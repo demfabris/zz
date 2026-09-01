@@ -483,10 +483,6 @@ use CommandValueKind::{
 
 static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     (
-        "attach-session",
-        "[-dErx] [-c working-directory] [-f flags] [-t target-session]",
-    ),
-    (
         "break-pane",
         "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",
     ),
@@ -1253,7 +1249,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-D", "with -A, detach other clients"),
             CommandOptionSpec::flag("-E", "do not apply update-environment when creating"),
             CommandOptionSpec::flag("-P", "print information about the new session"),
-            CommandOptionSpec::unsupported_flag("-X"),
+            CommandOptionSpec::flag(
+                "-X",
+                "with -A, detach other clients and hang up their parents",
+            ),
             CommandOptionSpec::value("-s", FreeForm, "session name"),
             CommandOptionSpec::value("-n", FreeForm, "initial window name"),
             CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
@@ -1309,7 +1308,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "attach-session",
         aliases: &["attach"],
         description: "Attach to a session",
-        usage: "[-dEr] [-c working-directory] [-f flags] [-t target-session]",
+        usage: "[-dErx] [-c working-directory] [-f flags] [-t target-session]",
         options: &[
             CommandOptionSpec::flag("-d", "detach other clients"),
             CommandOptionSpec::flag("-E", "do not update the session environment"),
@@ -1317,7 +1316,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-c", FreeForm, "working directory for the session"),
             CommandOptionSpec::value("-t", Pane, "target session, window, or pane"),
             CommandOptionSpec::value("-f", FreeForm, "client flags"),
-            CommandOptionSpec::unsupported_flag("-x"),
+            CommandOptionSpec::flag("-x", "detach other clients and hang up their parents"),
         ],
         positionals: &[],
         variadic: None,
@@ -2818,8 +2817,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (441, 62));
-        assert_eq!(usage_overrides.len(), 23);
+        assert_eq!((supported, unsupported), (443, 60));
+        assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES
@@ -3826,7 +3825,7 @@ mod tests {
         );
         assert_eq!(
             spec.usage,
-            "[-dEr] [-c working-directory] [-f flags] [-t target-session]"
+            "[-dErx] [-c working-directory] [-f flags] [-t target-session]"
         );
         assert!(
             spec.options

@@ -78,6 +78,7 @@ fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretati
         [MuxEffect::Attach {
             session,
             detach_others: false,
+            detach_others_hangup: false,
             read_only: false,
             flags: Some("ignore-size,!active-pane".to_owned()),
             update_environment: true,

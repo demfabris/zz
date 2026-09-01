@@ -110,6 +110,7 @@ fn attaching_commands_accept_client_flag_values() {
         [MuxEffect::Attach {
             session,
             detach_others: false,
+            detach_others_hangup: false,
             read_only: false,
             flags: Some("ignore-size".to_owned()),
             update_environment: true,

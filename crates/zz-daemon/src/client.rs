@@ -779,6 +779,12 @@ impl InteractiveClient {
         Ok(request_id)
     }
 
+    pub fn request_home_directories(&self, users: Vec<String>) -> Result<u64, DaemonError> {
+        let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        self.send(&ProtocolMessage::HomeDirectoryRequest { request_id, users })?;
+        Ok(request_id)
+    }
+
     pub fn request_resync(&self) -> Result<(), DaemonError> {
         self.send(&ProtocolMessage::Resync)
     }

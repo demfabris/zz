@@ -304,9 +304,11 @@ stripped quoted comments, empty variable expansion, and typed command blocks. Ba
 prefers a nonempty parser-context `HOME`, then falls back through the current user's passwd entry.
 Named users resolve through passwd lookup, failed lookup produces a located syntax error, and the
 username ceiling is 1,022 bytes. Startup, source, alias, callback, and parse-only engine paths see the
-daemon environment. Direct Control input still parses before daemon execution and remains under
-`control-mode.local-parser-environment`; non-UTF-8 passwd paths remain under
-`config.tilde-home-path-encoding`.
+daemon environment. Direct Control input still parses in the client process, but protocol v92 gives
+it the same answers: a line containing `~` makes one batched `HomeDirectoryRequest` round trip and
+re-parses with the daemon's replies, so the server-global `HOME` and the daemon host's passwd
+database decide. The request consumes no command number and adds no frame. Non-UTF-8 passwd paths
+remain under `config.tilde-home-path-encoding`.
 
 # Syntax and tokenization rules
 

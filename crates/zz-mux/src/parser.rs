@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use zz_protocol::{CommandInvocation, SourceSpan};
 
@@ -690,6 +690,51 @@ impl ConfigContext for LiteralVariableContext {
     }
 }
 
+struct RecordingHomeContext {
+    names: BTreeSet<String>,
+}
+
+impl ConfigContext for RecordingHomeContext {
+    fn variable(&mut self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn condition(&mut self, _condition: &str) -> bool {
+        false
+    }
+
+    fn user_home(&mut self, name: Option<&str>) -> Option<String> {
+        self.names.insert(name.unwrap_or_default().to_owned());
+        Some(String::new())
+    }
+
+    fn expand_variables(&self) -> bool {
+        false
+    }
+}
+
+struct ResolvedHomeContext<'a> {
+    homes: &'a BTreeMap<String, String>,
+}
+
+impl ConfigContext for ResolvedHomeContext<'_> {
+    fn variable(&mut self, _name: &str) -> Option<String> {
+        None
+    }
+
+    fn condition(&mut self, _condition: &str) -> bool {
+        false
+    }
+
+    fn user_home(&mut self, name: Option<&str>) -> Option<String> {
+        self.homes.get(name.unwrap_or_default()).cloned()
+    }
+
+    fn expand_variables(&self) -> bool {
+        false
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Quote {
     #[default]
@@ -816,6 +861,28 @@ pub(crate) fn parse_config_without_variable_expansion(
     input: &str,
 ) -> ParsedConfig {
     parse_config_with(source, input, &mut LiteralVariableContext)
+}
+
+/// Every user name whose home `input` needs, with the empty name standing for a
+/// bare `~`. The pass answers each lookup with an empty home so the walk records
+/// the whole line instead of stopping at the first unresolved tilde.
+pub fn config_home_directory_names(source: impl Into<String>, input: &str) -> BTreeSet<String> {
+    let mut context = RecordingHomeContext {
+        names: BTreeSet::new(),
+    };
+    parse_config_with(source, input, &mut context);
+    context.names
+}
+
+/// Parse without variable expansion, resolving every `~` from `homes` instead of
+/// this process's own passwd entry. A name missing from `homes` is a failed
+/// lookup and becomes the pin's located syntax error.
+pub fn parse_config_with_home_directories(
+    source: impl Into<String>,
+    input: &str,
+    homes: &BTreeMap<String, String>,
+) -> ParsedConfig {
+    parse_config_with(source, input, &mut ResolvedHomeContext { homes })
 }
 
 pub(crate) fn parse_config_with<C: ConfigContext>(
@@ -1376,8 +1443,11 @@ fn expand_tilde<C: ConfigContext>(
     home.push_into(word, builder.input_kind);
 }
 
+/// The home directory this host's passwd database gives `name`, or the
+/// current user when `name` is `None`.
 #[cfg(unix)]
-fn user_home(name: Option<&str>) -> Option<String> {
+#[must_use]
+pub fn user_home(name: Option<&str>) -> Option<String> {
     use nix::unistd::{Uid, User};
 
     let user = match name {
@@ -1390,7 +1460,8 @@ fn user_home(name: Option<&str>) -> Option<String> {
 }
 
 #[cfg(not(unix))]
-fn user_home(name: Option<&str>) -> Option<String> {
+#[must_use]
+pub fn user_home(name: Option<&str>) -> Option<String> {
     if name.is_some() {
         return None;
     }
@@ -1795,6 +1866,51 @@ mod tests {
         assert_eq!(command.args[10], "prefix~/not-expanded");
         assert_eq!(command.args[11], "prefix~/not-expanded");
         assert_eq!(command.args[12], "/users/alice/bin");
+    }
+
+    #[test]
+    fn records_every_tilde_name_a_line_needs_without_stopping_at_the_first() {
+        let names = config_home_directory_names(
+            "<control>",
+            r#"run-shell ~/a ~alice/b '~/literal' ~ ~bob "$KEEP~/quoted""#,
+        );
+        assert_eq!(
+            names.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["", "alice", "bob"]
+        );
+        assert!(config_home_directory_names("<control>", "run-shell '~/literal'").is_empty());
+        assert!(config_home_directory_names("<control>", "# ~/comment").is_empty());
+    }
+
+    #[test]
+    fn resolves_tildes_from_supplied_homes_and_keeps_variables_literal() {
+        let homes = BTreeMap::from([
+            (String::new(), "/server/home".to_owned()),
+            ("alice".to_owned(), "/users/alice".to_owned()),
+        ]);
+        let parsed = parse_config_with_home_directories(
+            "<control>",
+            "run-shell ~ ~/bin ~alice/bin $LITERAL",
+            &homes,
+        );
+        assert!(parsed.diagnostics.is_empty());
+        assert_eq!(
+            parsed.commands[0].args,
+            [
+                "/server/home",
+                "/server/home/bin",
+                "/users/alice/bin",
+                "$LITERAL"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_home_missing_from_the_batch_is_the_pinned_syntax_error() {
+        let homes = BTreeMap::from([(String::new(), "/server/home".to_owned())]);
+        let parsed = parse_config_with_home_directories("<control>", "run-shell ~nobody", &homes);
+        assert!(parsed.commands.is_empty());
+        assert_eq!(parsed.diagnostics[0].message, "syntax error");
     }
 
     #[test]

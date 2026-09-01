@@ -5293,6 +5293,24 @@ impl Shared {
         commands
     }
 
+    fn resolve_home_directories(&self, users: &[String]) -> Vec<Option<String>> {
+        let inner = self.inner.lock();
+        users
+            .iter()
+            .map(|user| {
+                if user.is_empty() {
+                    inner
+                        .engine
+                        .global_environment_variable("HOME")
+                        .filter(|home| !home.is_empty())
+                        .or_else(|| zz_mux::user_home(None))
+                } else {
+                    zz_mux::user_home(Some(user))
+                }
+            })
+            .collect()
+    }
+
     fn prepare_command_list_with_engine(
         engine: &MuxEngine,
         commands: Vec<CommandInvocation>,
@@ -32771,6 +32789,13 @@ fn handle_connection<S: TransportStream>(
             ProtocolMessage::ClientFileResponse(response) => {
                 shared.complete_client_file(client, response);
             }
+            ProtocolMessage::HomeDirectoryRequest { request_id, users } => {
+                let homes = shared.resolve_home_directories(&users);
+                let _ = outbound.enqueue_reliable(&ProtocolMessage::HomeDirectoryResponse {
+                    request_id,
+                    homes,
+                });
+            }
             ProtocolMessage::PrepareCommandList {
                 request_id,
                 commands,
@@ -35154,6 +35179,50 @@ mod tests {
         ));
         assert!(read_global_option(&shared, "@startup-present").is_empty());
         assert_eq!(read_global_option(&shared, "@startup-continued"), "yes");
+    }
+
+    #[test]
+    fn control_home_lookup_reads_the_server_home_then_the_daemon_passwd_entry() {
+        let shared = Arc::new(Shared::new(1));
+        let passwd = zz_mux::user_home(None).expect("daemon host passwd home");
+
+        assert_eq!(
+            shared.resolve_home_directories(&[String::new()]),
+            [Some(passwd.clone())]
+        );
+
+        shared
+            .inner
+            .lock()
+            .engine
+            .seed_global_environment([("HOME", "")]);
+        assert_eq!(
+            shared.resolve_home_directories(&[String::new()]),
+            [Some(passwd.clone())]
+        );
+
+        shared
+            .inner
+            .lock()
+            .engine
+            .seed_global_environment([("HOME", "/server/home")]);
+        assert_eq!(
+            shared.resolve_home_directories(&[String::new()]),
+            [Some("/server/home".to_owned())]
+        );
+
+        assert_eq!(
+            shared.resolve_home_directories(&[
+                "root".to_owned(),
+                "zz-no-such-user".to_owned(),
+                String::new(),
+            ]),
+            [
+                zz_mux::user_home(Some("root")),
+                None,
+                Some("/server/home".to_owned()),
+            ]
+        );
     }
 
     #[test]

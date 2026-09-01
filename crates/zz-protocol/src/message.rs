@@ -14,7 +14,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 91;
+pub const PROTOCOL_VERSION: u16 = 92;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -43,6 +43,13 @@ pub const MAX_CLIENT_WORKING_DIRECTORY_BYTES: usize = 16 * 1024;
 pub const MAX_CLIENT_ENVIRONMENT_ENTRIES: usize = 4096;
 pub const MAX_CLIENT_ENVIRONMENT_ENTRY_BYTES: usize = 16_367;
 pub const MAX_CLIENT_ENVIRONMENT_BYTES: usize = 4 * 1024 * 1024;
+/// Most `~` user names one Control line may ask the daemon to resolve at once,
+/// and the longest name in that batch: the config parser already refuses a name
+/// past 1,022 encoded bytes.
+pub const MAX_HOME_DIRECTORY_USERS: usize = 1024;
+pub const MAX_HOME_DIRECTORY_USER_BYTES: usize = 1024;
+/// Longest home directory the daemon may report for one of those names.
+pub const MAX_HOME_DIRECTORY_BYTES: usize = 16 * 1024;
 /// Longest absolute path the daemon may hand a client to open for
 /// `load-buffer` or `save-buffer`.
 pub const MAX_CLIENT_FILE_PATH_BYTES: usize = 16 * 1024;
@@ -2814,6 +2821,68 @@ pub enum ProtocolMessage {
     ClientFileRequest(ClientFileRequest),
     /// The answer to exactly one [`ProtocolMessage::ClientFileRequest`].
     ClientFileResponse(ClientFileResponse),
+    /// Ask the daemon to resolve the `~` user names one Control line needs, the
+    /// way the pin's own parser reads them from the server's environment and the
+    /// server host's passwd database. The empty name is a bare `~`.
+    HomeDirectoryRequest {
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_home_directory_users")]
+        users: Vec<String>,
+    },
+    /// The answer to exactly one [`ProtocolMessage::HomeDirectoryRequest`], one
+    /// entry per requested name in the order asked. `None` is a failed lookup.
+    HomeDirectoryResponse {
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_home_directories")]
+        homes: Vec<Option<String>>,
+    },
+}
+
+fn deserialize_home_directory_users<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let users = Vec::<String>::deserialize(deserializer)?;
+    if users.len() > MAX_HOME_DIRECTORY_USERS {
+        return Err(D::Error::invalid_length(
+            users.len(),
+            &"a home directory batch within the wire entry limit",
+        ));
+    }
+    if let Some(user) = users
+        .iter()
+        .find(|user| user.len() > MAX_HOME_DIRECTORY_USER_BYTES)
+    {
+        return Err(D::Error::invalid_length(
+            user.len(),
+            &"a user name within the wire byte limit",
+        ));
+    }
+    Ok(users)
+}
+
+fn deserialize_home_directories<'de, D>(deserializer: D) -> Result<Vec<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let homes = Vec::<Option<String>>::deserialize(deserializer)?;
+    if homes.len() > MAX_HOME_DIRECTORY_USERS {
+        return Err(D::Error::invalid_length(
+            homes.len(),
+            &"a home directory batch within the wire entry limit",
+        ));
+    }
+    if let Some(home) = homes
+        .iter()
+        .flatten()
+        .find(|home| home.len() > MAX_HOME_DIRECTORY_BYTES)
+    {
+        return Err(D::Error::invalid_length(
+            home.len(),
+            &"a home directory within the wire byte limit",
+        ));
+    }
+    Ok(homes)
 }
 
 /// What the daemon wants the client to do with the file it named.
@@ -3971,7 +4040,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 91);
+        assert_eq!(super::PROTOCOL_VERSION, 92);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

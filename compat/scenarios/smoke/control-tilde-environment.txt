@@ -1,0 +1,9 @@
+corpus: none
+# One attached Control transcript pins direct-input tilde expansion against a
+# probe server whose global HOME (/server/home) differs from the Control
+# process's own (/client/home): bare and named lookups, the located syntax error
+# for a missing user, the empty and unset server-HOME fallbacks, and contiguous
+# command numbering across the batch, so the daemon lookup stays invisible.
+stage: fixtures/control-tilde-environment.sh ~/control-tilde-environment.sh
+run-shell 'sh ~/control-tilde-environment.sh'
+out: show-environment -g CONTROL_TILDE_ENVIRONMENT

@@ -100,6 +100,15 @@ pub(crate) fn send_tokens(sessions: &[Arc<TerminalSession>], tokens: &[KeyToken]
                     sent = true;
                 }
             }
+            KeyToken::Raw(byte) => {
+                let bytes = Arc::<[u8]>::from([*byte].as_slice());
+                for session in sessions {
+                    if !session.send_raw_input(Arc::clone(&bytes)) {
+                        return false;
+                    }
+                    sent = true;
+                }
+            }
             KeyToken::Named(name) => {
                 if let Some(input) = named_key(name) {
                     let mut input = Some(input);

@@ -859,10 +859,12 @@ pub enum MuxEffect {
     CopyModeRepeat {
         pane: PaneId,
         count: u32,
+        target_client: Option<String>,
     },
     TerminalView {
         pane: PaneId,
         action: TerminalViewAction,
+        target_client: Option<String>,
     },
     TerminalUi {
         pane: PaneId,
@@ -7005,6 +7007,7 @@ impl MuxEngine {
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("send-keys", args)?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let target_client = options.value("-c").map(str::to_owned);
         let repeat = if let Some(value) = options.value("-N") {
             let target = ExecutionContext::for_pane(&self.state, pane)
                 .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
@@ -7023,6 +7026,7 @@ impl MuxEngine {
             let mut execution = Execution::effect(MuxEffect::CopyModeRepeat {
                 pane,
                 count: repeat,
+                target_client: target_client.clone(),
             });
             if options.has("-R") {
                 execution.effects.push(MuxEffect::ResetPane { pane });
@@ -7031,7 +7035,15 @@ impl MuxEngine {
         }
         if options.has("-X") {
             let Some(command) = positional.first() else {
-                return Ok(Execution::default());
+                return Ok(if options.value("-N").is_some() {
+                    Execution::effect(MuxEffect::CopyModeRepeat {
+                        pane,
+                        count: repeat,
+                        target_client,
+                    })
+                } else {
+                    Execution::default()
+                });
             };
             let Some(action) = copy_mode_action(
                 command,
@@ -7043,6 +7055,7 @@ impl MuxEngine {
                 return Ok(Execution::effect(MuxEffect::CopyModeRepeat {
                     pane,
                     count: 1,
+                    target_client,
                 }));
             };
             let action = match action.count_policy() {
@@ -7053,7 +7066,11 @@ impl MuxEngine {
                     count: repeat,
                 },
             };
-            return Ok(Execution::effect(MuxEffect::TerminalView { pane, action }));
+            return Ok(Execution::effect(MuxEffect::TerminalView {
+                pane,
+                action,
+                target_client,
+            }));
         }
         let reset = options.has("-R");
         if reset && positional.is_empty() {
@@ -7062,8 +7079,8 @@ impl MuxEngine {
         let keys = if options.has("-H") {
             positional
                 .iter()
-                .map(|value| hex_key_token(value))
-                .collect::<Result<Vec<_>, _>>()?
+                .filter_map(|value| hex_key_token(value))
+                .collect()
         } else if options.has("-l") {
             vec![KeyToken::Literal(positional.concat())]
         } else {
@@ -7082,8 +7099,9 @@ impl MuxEngine {
                 .collect()
         };
         if keys.is_empty()
-            && positional.iter().any(|value| value == "BSpace")
-            && self.server_options.backspace == "C-\x7f"
+            && (options.has("-H")
+                || (positional.iter().any(|value| value == "BSpace")
+                    && self.server_options.backspace == "C-\x7f"))
         {
             return Ok(if reset {
                 Execution::effect(MuxEffect::ResetPane { pane })
@@ -7140,6 +7158,7 @@ impl MuxEngine {
             return Ok(Execution::effect(MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+                target_client: None,
             }));
         }
         if options.has("-M") {
@@ -7157,11 +7176,13 @@ impl MuxEngine {
             } else {
                 TerminalViewAction::EnterCopyMode
             },
+            target_client: None,
         }];
         if options.has("-u") {
             effects.push(MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageUp),
+                target_client: None,
             });
         }
         if options.has("-d") {
@@ -7172,6 +7193,7 @@ impl MuxEngine {
                 } else {
                     CopyModeAction::PageDown
                 }),
+                target_client: None,
             });
         }
         Ok(Execution {
@@ -7316,6 +7338,7 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::TerminalView {
             pane,
             action: TerminalViewAction::ClearHistory,
+            target_client: None,
         }))
     }
 
@@ -14244,27 +14267,23 @@ fn key_token(value: &str) -> KeyToken {
 }
 
 /// tmux's `send-keys -H` is strtol(16) clamped to one byte, written raw to the
-/// pane. `KeyToken::Literal` carries UTF-8 text, so only the ASCII range maps
-/// to the same bytes tmux writes; high bytes are refused rather than silently
-/// re-encoded.
-fn hex_key_token(value: &str) -> Result<KeyToken, ServerError> {
+/// pane as `KEYC_LITERAL|n`. `cmd_send_keys_inject_string` drops the argument
+/// without an error whenever the string is empty, is not entirely hexadecimal,
+/// or falls outside 0..=0xff, so a bad code is a silent skip and never a
+/// command failure. Bytes above 0x7f cannot ride `KeyToken::Literal`, whose
+/// UTF-8 text would re-encode them, so they take the raw byte token instead.
+fn hex_key_token(value: &str) -> Option<KeyToken> {
     let digits = value
         .strip_prefix("0x")
         .or_else(|| value.strip_prefix("0X"))
         .unwrap_or(value);
-    let code = u32::from_str_radix(digits, 16).map_err(|_| {
-        ServerError::InvalidCommand(format!("send-keys -H needs a character code: {value}"))
-    })?;
+    let code = u32::from_str_radix(digits, 16).ok()?;
     match code {
-        0x00..=0x7f => Ok(KeyToken::Literal(
+        0x00..=0x7f => Some(KeyToken::Literal(
             char::from_u32(code).expect("ascii range").to_string(),
         )),
-        0x80..=0xff => Err(ServerError::UnsupportedCommand(format!(
-            "send-keys -H {value} (raw bytes above 7f)"
-        ))),
-        _ => Err(ServerError::InvalidCommand(format!(
-            "send-keys -H needs a character code: {value}"
-        ))),
+        0x80..=0xff => Some(KeyToken::Raw(u8::try_from(code).expect("byte range"))),
+        _ => None,
     }
 }
 
@@ -14352,6 +14371,16 @@ pub fn send_keys_is_read_only_safe(args: &[String]) -> Result<bool, ServerError>
     Ok(probe
         .as_ref()
         .is_none_or(copy_mode_action_is_read_only_safe))
+}
+
+/// The `-c` target client `send-keys` selects. cmd-send-keys.c carries
+/// `CMD_CLIENT_CFLAG|CMD_CLIENT_CANFAIL`, so the read-only guard follows this
+/// client rather than the invoker, and a target that matches nothing leaves the
+/// guard with no client at all.
+pub fn send_keys_target_client(args: &[String]) -> Result<Option<String>, ServerError> {
+    let spec = command_spec("send-keys").expect("send-keys has catalog metadata");
+    let (options, _) = parse_options_for_spec(args, spec)?;
+    Ok(options.value("-c").map(str::to_owned))
 }
 
 /// The action a bare `-X <command>` maps to, with the one mandatory argument
@@ -22852,6 +22881,7 @@ mod tests {
                 [MuxEffect::CopyModeRepeat {
                     pane: terminal,
                     count: 1,
+                    target_client: None,
                 }],
                 "{action} accepted {flag}"
             );
@@ -22878,6 +22908,7 @@ mod tests {
                 [MuxEffect::CopyModeRepeat {
                     pane: terminal,
                     count: 1,
+                    target_client: None,
                 }]
             );
         }
@@ -23086,6 +23117,7 @@ mod tests {
                 action: TerminalViewAction::CopyMode(CopyModeAction::SearchAgain {
                     reverse: false,
                 }),
+                target_client: None,
             }]
         );
     }
@@ -23414,6 +23446,7 @@ mod tests {
                         cancel: false,
                     },
                 )),
+                target_client: None,
             }]
         );
 

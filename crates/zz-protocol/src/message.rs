@@ -18,7 +18,7 @@ use crate::{ClientId, ClientInstanceId, MuxSnapshot, PaneId, SessionId, SplitId,
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 92;
+pub const PROTOCOL_VERSION: u16 = 93;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
 pub const CLIENT_NESTED_CAPABILITY: &str = "client-nested-v1";
@@ -1490,6 +1490,10 @@ impl ServerError {
 pub enum KeyToken {
     Literal(String),
     Named(String),
+    /// One raw byte written straight to the pane, the way tmux emits
+    /// `KEYC_LITERAL` for `send-keys -H`. Bytes above 0x7f cannot ride
+    /// `Literal`, whose UTF-8 text would re-encode them.
+    Raw(u8),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -4052,7 +4056,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 92);
+        assert_eq!(super::PROTOCOL_VERSION, 93);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),

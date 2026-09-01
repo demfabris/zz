@@ -2001,7 +2001,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "send-keys",
         aliases: &["send"],
         description: "Send keys or a copy-mode command",
-        usage: "[-FHlRX] [-N repeat-count] [-t target-pane] [key ...]",
+        usage: "[-FHlRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]",
         options: &[
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::value("-N", FreeForm, "repeat count"),
@@ -2009,7 +2009,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-H", "keys are hexadecimal character codes"),
             CommandOptionSpec::flag("-F", "compatibility no-op"),
             CommandOptionSpec::flag("-l", "literal text"),
-            CommandOptionSpec::unsupported_value("-c"),
+            CommandOptionSpec::value("-c", FreeForm, "target client"),
             CommandOptionSpec::unsupported_flag("-K"),
             CommandOptionSpec::unsupported_flag("-M"),
             CommandOptionSpec::flag("-R", "reset the pane terminal state"),
@@ -2817,7 +2817,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (452, 51));
+        assert_eq!((supported, unsupported), (453, 50));
         assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,

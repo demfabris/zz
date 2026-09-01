@@ -19,9 +19,9 @@ Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
 Tracked gap groups: **84**. Classified items: **573**.
 
-- Status: open: 42, blocked: 11, accepted: 31.
-- Decision: adopt: 47, native: 24, park: 6, never: 7.
-- Priority: later: 53, none: 31.
+- Status: open: 42, blocked: 9, accepted: 33.
+- Decision: adopt: 47, native: 26, park: 4, never: 7.
+- Priority: later: 51, none: 33.
 - Closed history entries: 127.
 - Surface: command: 9, flag: 66, native-command: 21, option: 75, format: 71, hook: 2, key: 110, binding: 51, native-key: 58, semantic: 100, presentation: 8, protocol: 2.
 
@@ -62,7 +62,6 @@ structure as proof.
 | `keys.copy-mode-prompt-defaults` | Add prompt-backed emacs copy-mode defaults | adopt | open | medium | daemon | daily, remote, scripts | prompt.command-fidelity |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
 | `options.pane-chrome` | Consume pane chrome options | adopt | open | medium | client | daily, gui | none |
-| `options.theme-palette` | Map tmux theme palette options | park | blocked | medium | client | gui | none |
 | `pane.break-geometry` | Complete floating break-pane placement | adopt | open | medium | mux | scripts, daily | pane.floating-model |
 | `pane.spawn-flags` | Complete split-window placement flags | adopt | open | medium | mux | scripts, daily | none |
 | `rendering.geometry-residue` | Close bounded geometry reporting gaps | adopt | open | medium | client | scripts, gui | none |
@@ -100,7 +99,6 @@ structure as proof.
 | `pane.selection-state` | Model pane selection controls | adopt | open | hard | daemon | daily, scripts | none |
 | `prompt.command-fidelity` | Complete command-prompt semantics | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
 | `terminal.key-control` | Complete send-keys injection and mode behavior | adopt | open | hard | daemon | scripts, daily | none |
-| `options.lock-program` | Defer tmux lock process execution | park | blocked | hardest | client | remote, admin | clients.interactive-refresh |
 | `pane.floating-model` | Defer tmux floating panes | park | blocked | hardest | mux | daily, scripts, gui | none |
 | `protocol.binary-streams` | Design one bounded command stream | park | blocked | hardest | protocol | scripts, remote | none |
 | `protocol.socket-acl` | Defer multi-user socket ACLs | park | blocked | hardest | daemon | admin, remote | none |
@@ -134,8 +132,10 @@ structure as proof.
 | `list-keys.deterministic-sort-ties` | Keep list-keys sorting total and deterministic | never | accepted | none | mux | scripts | none |
 | `messages.tty-model` | Model tmux message and TTY reports | never | accepted | none | daemon | admin, remote | none |
 | `mouse.bound-context` | Carry bound mouse event context | native | accepted | none | protocol | daily, scripts, gui | none |
+| `options.lock-program` | Defer tmux lock process execution | native | accepted | none | client | remote, admin | none |
 | `options.native-mode-styles` | Keep native mode styling | native | accepted | none | client | daily, gui | none |
 | `options.native-overlay-styles` | Keep native overlay styling | native | accepted | none | client | daily, gui | none |
+| `options.theme-palette` | Map tmux theme palette options | native | accepted | none | client | gui | none |
 | `presentation.native-status` | Keep native status and lifecycle presentation | native | accepted | none | client | daily, gui, remote | none |
 | `prompt.pane-rendered` | Defer pane-rendered prompts | native | accepted | none | client | daily | none |
 | `protocol.socket-interop` | Do not speak tmux private protocol | never | accepted | none | protocol | admin | none |
@@ -1273,20 +1273,22 @@ The pin's comparator truncates 64-bit key differences into int, returns equality
 
 ### `options.lock-program`: Defer tmux lock process execution
 
-Spawning lock -np over a native GUI has no useful meaning.
+The pin's `lock-after-time` arms a server timer per client and `lock-command`, default `lock -np`, is spawned onto that client's tty, which works because tmux's server owns the terminal. zz's daemon publishes frames and its clients draw them, so it cannot run a program on a client's terminal, and a GPUI window running `lock -np` has no meaning. `lock-server`, `lock-session`, and `lock-client` already parse with the pin's clientless error shapes and fire `after-lock-server`, while both options stay store-only. A zz lock, when it is wanted, is a client-rendered surface plus a daemon idle timer, not a spawned tty process. Reopen when that native lock surface is specified, including ownership, cancellation, and what a raw-terminal client shows.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `hardest`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: remote, admin
 - Items: `option:lock-after-time`, `option:lock-command`, `semantic:lock-program-execution`
-- Depends on: `clients.interactive-refresh`
+- Depends on: none
 - Evidence:
-  - `resource:knowledge/tmux/divergences.md`
+  - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-mux/src/tmux_options.rs`
+  - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `A terminal-client design defines lock process ownership, timers, cancellation, and GUI behavior.`
+  - ``lock-server`, `lock-session`, and `lock-client` keep their pin-exact parsing, error shapes, and hook behavior, and no lock program is spawned onto a client terminal.`
+  - ``lock-after-time` and `lock-command` stay store-only, with any future lock arriving as a client-rendered surface.`
 
 ### `options.native-mode-styles`: Keep native mode styling
 
@@ -1379,20 +1381,24 @@ These values need terminal negotiation, input, width, or process consumers.
 
 ### `options.theme-palette`: Map tmux theme palette options
 
-Storage is easy, but native clients need one coherent palette mapping.
+The pin's `theme` choice plus the twenty `dark-theme-*` and `light-theme-*` colour options fill ten named style slots, `themeblack` through `thememagenta`, that any style string can reference, with a fixed ANSI index per slot as the fallback. zz already resolves all ten names: `parse_tmux_colour` maps them to `TmuxColour::Theme`, the GPUI client resolves each into a zz theme token, and the daemon and raw TUI resolve them through the pin's own fallback indices into the terminal palette. What stays unmapped is the twenty-one options that would override those slots, because zz's palette authority is its own theme and light or dark selection follows the client rather than a server option. Reopen when a real configuration workload names the mapping it wants from those option values into zz theme tokens.
 
-- Decision: `park`
-- Status: `blocked`
-- Priority and ease: `later` / `medium`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: gui
 - Items: `option:dark-theme-black`, `option:dark-theme-blue`, `option:dark-theme-cyan`, `option:dark-theme-dark-grey`, `option:dark-theme-green`, `option:dark-theme-light-grey`, `option:dark-theme-magenta`, `option:dark-theme-red`, `option:dark-theme-white`, `option:dark-theme-yellow`, `option:light-theme-black`, `option:light-theme-blue`, `option:light-theme-cyan`, `option:light-theme-dark-grey`, `option:light-theme-green`, `option:light-theme-light-grey`, `option:light-theme-magenta`, `option:light-theme-red`, `option:light-theme-white`, `option:light-theme-yellow`, `option:theme`
 - Depends on: none
 - Evidence:
-  - `resource:knowledge/tmux/divergences.md`
+  - `resource:crates/zz-protocol/src/style.rs`
   - `resource:crates/zz-mux/src/tmux_options.rs`
+  - `resource:crates/zz-tui/src/render.rs`
+  - `resource:crates/zz/src/theme.rs`
+  - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
-  - `A real configuration workload justifies a documented mapping into zz theme tokens.`
+  - `Style strings keep resolving the ten pinned theme colour names through zz's theme in the GUI and through the pin's fallback indices in the daemon and raw TUI.`
+  - `The twenty-one theme options stay store-only, with client light or dark selection owned by the client rather than by the `theme` option.`
 
 ### `pane.break-geometry`: Complete floating break-pane placement
 

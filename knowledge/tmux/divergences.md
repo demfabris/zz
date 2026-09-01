@@ -1100,6 +1100,12 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
 - `prompt.pane-rendered` (native): `command-prompt -P` paints into pane cells, while zz's prompts
   are client surfaces and its copy-mode numeric prefix already uses the native per-client repeat
   shape.
+- `options.lock-program` (native): the pin spawns `lock -np` onto a client's tty because its server
+  owns that terminal; zz's daemon publishes frames, so a zz lock is a client-rendered surface and
+  the two options stay store-only.
+- `options.theme-palette` (native): zz already resolves the pin's ten `theme*` style colour names,
+  into zz theme tokens in the GUI and through the pin's own fallback indices in the daemon and raw
+  TUI, while the twenty-one options that would override those slots stay store-only.
 
 # Related
 

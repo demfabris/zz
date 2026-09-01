@@ -5,7 +5,7 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 last_updated_by: Codex
 ---
 
@@ -1065,6 +1065,22 @@ described above and the separately tracked long key-modifier spelling overaccept
 | Session groups | `new-session -t`. | Cataloged, rejected. |
 | `StatusLine.customized` | No equivalent — tmux has no wire and no explicit-write ledger. | zz-native v71 field: true while any explicit `status`, `status-*`, or `status-format` write is in force for the recipient's scope (even when the value equals the default); scalar and whole-array unsets clear their mark, an indexed `status-format[N]` unset keeps it. It gates only the TUI's `Ctrl-\ detach` hint. GUI visibility instead follows whether the native status model is empty, so `customized` has no GUI appearance effect. |
 | Presentation | Status line, prompts, choosers drawn as terminal escapes. | The TUI renders the daemon's personalized `status-format[]` rows through the shared `zz-client` compositor that reproduces `format-draw.c` alignment sections, `fill=`, list focus/truncation, blank-row base style, and hit ranges. It places that authoritative block at `status-position`, replaces the selected `message_line` row with messages or a prompt, and routes window-range clicks. The GUI never paints those rows as tmux-authored cells: its always-native surface uses `status.left`/`status.right`, snapshot-backed window controls, and only the row list-alignment directive. Its top or bottom placement follows the app chrome mode, visibility does not depend on `customized`, and `status-position` has no GUI placement authority. Prompts and choosers stay native on both where implemented. Raw zz-tui handles command prompts, confirmations, menus, popups, choose trees, choose buffers, and display-panes. `display-menu.behavior-fidelity` and `display-popup.behavior-fidelity` own the broader behavior classes outside those presentation closures. |
+
+## Park dispositions (2026-09-01)
+
+The frozen campaign scope carried fifteen groups whose decision was `park`: work deferred by
+agreement rather than blocked on a measurement. A park disposition changes no behavior. It records
+which side of the model each difference falls on and retires the group, so nothing sits in a queue
+nobody intends to drain. `accepted` plus `native` means zz's own surface serves the intent;
+`accepted` plus `never` means the capability is deliberately outside zz. Live status stays in
+`compat/tmux-gaps.json`; the one-line rationale is here.
+
+- `capture.rich-transports` (native): `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` read tmux's grid and
+  input-parser internals, while zz's capture surface is the terminal worker's retained UTF-8 text
+  snapshot plus the zz-native output verbs; the six forms stay loudly refused.
+- `clients.interactive-refresh` (native): the pin keeps mode and redraw ownership on the server,
+  while zz's clients render themselves and copy or view mode lives on the per-client terminal view,
+  so `switch-mode` and the interactive redraw and pan family have no zz counterpart.
 
 # Related
 

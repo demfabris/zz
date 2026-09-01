@@ -264,8 +264,13 @@ digit bindings and the nine emacs `M-1` through `M-9` bindings retain zz's per-c
 `copy-mode-repeat` command shape instead of tmux's pane-cell numeric prompt, and a bare digit typed
 after either extends the count in either table. Prefix-table and user-created `bind-key -r` bindings
 still carry and use their repeat bit. The remaining open shared-binding command-shape group contains
-16 cursor-word, search, goto-line, and jump bindings; thirteen of them differ from the pin only by
-the `-P` pane-cell prompt flag that `prompt.pane-rendered` accepted as unsupported.
+16 cursor-word, search, goto-line, and jump bindings. Fourteen of them (vi `/`, `?`, `:`, `f`,
+`F`, `t`, `T` and emacs `g`, `C-r`, `C-s`, `f`, `F`, `t`, `T`) render through `command-prompt -P`
+on the pin, the pane-cell prompt flag that `prompt.pane-rendered` accepted as unsupported; only
+the two goto-line keys (vi `:` and emacs `g`) store a command identical to the pin's apart from
+`-P`, while the search and jump keys store native copy-mode-search-prompt and jump-capture
+command shapes whose shared blocker is that same `-P` prompt. The remaining two, vi `#` and `*`,
+need `send-keys -F` with `#{copy_cursor_word}`.
 See [copy mode](/tmux/copy-mode.md).
 
 # Shifted key spellings

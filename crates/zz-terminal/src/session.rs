@@ -7849,9 +7849,6 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32) {
     reveal_copy_cursor(mode);
 }
 
-/// The pin's `window_copy_cmd_scroll_to`: move the view so the cursor's line
-/// lands on `row`, keeping the cursor on the same line, or do nothing when the
-/// retained revision cannot reach that far.
 /// The pin's `window_copy_goto_line` with line numbers off: the argument is a
 /// scrollback offset counted from the bottom, clamped to the retained history,
 /// and the cursor keeps the screen row it was on.
@@ -7869,6 +7866,9 @@ fn goto_copy_line(mode: &mut CopyModeState, line: u32) {
     mode.cursor = mode.revision.clamp_point(mode.cursor);
 }
 
+/// The pin's `window_copy_cmd_scroll_to`: move the view so the cursor's line
+/// lands on `row`, keeping the cursor on the same line, or do nothing when the
+/// retained revision cannot reach that far.
 fn scroll_copy_view_to_screen_row(mode: &mut CopyModeState, row: u32) {
     let Some(target) = mode.cursor.y.checked_sub(row) else {
         return;

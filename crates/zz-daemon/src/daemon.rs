@@ -325,8 +325,22 @@ fn terminal_environment_for_session(
     session: SessionId,
 ) -> Result<Vec<(String, Option<String>)>, ServerError> {
     let mut environment = engine.environment_for_session(session)?;
-    environment.retain(|(name, _)| !name.is_empty() && name != "TERM");
+    environment.retain(|(name, _)| {
+        !name.is_empty()
+            && !matches!(
+                name.as_str(),
+                "TERM" | "TERM_PROGRAM" | "TERM_PROGRAM_VERSION" | "COLORTERM"
+            )
+    });
     Ok(environment)
+}
+
+/// What a job the pin runs on the server reports itself as. `environ_for_session`
+/// stamps the multiplexer's own identity over whatever the overlays carry.
+fn job_terminal_program_version() -> &'static str {
+    zz_protocol::CommandSpec::TMUX_VERSION_OUTPUT
+        .strip_prefix("tmux ")
+        .expect("tmux version output prefix")
 }
 
 fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
@@ -12404,22 +12418,13 @@ impl Shared {
             let default_command = inner.engine.default_command_for_session(session)?;
             let command = popup_command_shape(default_command, &parsed.command);
             let mut env = terminal_environment_for_session(&inner.engine, session)?;
-            for assignment in &parsed.environment {
-                let (name, value) = assignment.split_once('=').ok_or_else(|| {
-                    ServerError::InvalidCommand(format!(
-                        "display-popup invalid environment: {assignment}"
-                    ))
-                })?;
-                if name.is_empty() {
-                    return Err(ServerError::InvalidCommand(format!(
-                        "display-popup invalid environment: {assignment}"
-                    ))
-                    .into());
-                }
-                env.retain(|(existing, _)| existing != name);
-                env.push((name.to_owned(), Some(value.to_owned())));
-            }
             env.extend([
+                ("TERM_PROGRAM".to_owned(), Some("tmux".to_owned())),
+                (
+                    "TERM_PROGRAM_VERSION".to_owned(),
+                    Some(job_terminal_program_version().to_owned()),
+                ),
+                ("COLORTERM".to_owned(), Some("truecolor".to_owned())),
                 ("ZZ_PANE".to_owned(), Some(pane.to_string())),
                 (
                     "ZZ_SOCKET".to_owned(),
@@ -12430,12 +12435,22 @@ impl Shared {
                     "TMUX".to_owned(),
                     Some(tmux_environment(&self.socket_path, Some(session))),
                 ),
-                ("TMUX_PANE".to_owned(), Some(pane.to_string())),
-                (
-                    "PWD".to_owned(),
-                    Some(working_directory.to_string_lossy().into_owned()),
-                ),
             ]);
+            for assignment in &parsed.environment {
+                let Some((name, value)) = assignment.split_once('=') else {
+                    continue;
+                };
+                if name.is_empty() {
+                    continue;
+                }
+                env.retain(|(existing, _)| existing != name);
+                env.push((name.to_owned(), Some(value.to_owned())));
+            }
+            env.retain(|(name, _)| name != "PWD");
+            env.push((
+                "PWD".to_owned(),
+                Some(working_directory.to_string_lossy().into_owned()),
+            ));
             let style = parsed.style.clone().unwrap_or(defaults.style);
             let border_style = parsed.border_style.clone().unwrap_or(defaults.border_style);
             let (close_on_exit, close_on_exit_zero, close_on_any_key) =

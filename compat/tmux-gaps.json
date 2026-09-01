@@ -1324,34 +1324,6 @@
       "reason": "Pinned tmux session_destroy emits window-unlinked before repeatedly removing RB_ROOT from each session's winlink tree, so the order depends on insertion and rebalance history. zz retains only index-sorted session windows and cannot reconstruct that order from the final map."
     },
     {
-      "id": "jobs.environment",
-      "title": "Normalize remaining job environments",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "daily",
-        "scripts",
-        "remote"
-      ],
-      "owner": "daemon",
-      "items": [
-        "semantic:display-popup-job-environment"
-      ],
-      "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-daemon/src/daemon.rs",
-        "scenario:compat/scenarios/smoke/jobs-command-environment.txt",
-        "scenario:compat/scenarios/jobs-environment.txt"
-      ],
-      "acceptance": [
-        "Copy-pipe and popup jobs construct their environments from the pinned producer-specific scopes."
-      ],
-      "depends_on": [],
-      "reason": "Command and status shell jobs are proved separately, and copy-pipe now builds the pinned producer scope: the global overlay plus the copy session's overlay, hidden and child-unset entries dropped, TERM from default-terminal with TERM_PROGRAM, TERM_PROGRAM_VERSION and COLORTERM, TMUX carrying the copy session id, and the server's own working directory because the pin passes a null cwd to job_run. display-popup stays open: its scope adds -e assignments, a -d or target-client cwd, and the session default-shell, and no differential drives a popup job yet."
-    },
-    {
       "id": "keys.copy-mode-binding-fidelity",
       "title": "Match shared copy-mode binding commands",
       "decision": "adopt",
@@ -3801,6 +3773,19 @@
         "resource:knowledge/tmux/divergences.md"
       ],
       "resolution": "Shell-form run-shell and if-shell now construct each child from an empty environment, then apply server-global values followed by resolved session values. Hidden and unset entries disappear, and an explicit missing target becomes sessionless. During startup they preserve modeled TERM-family values; afterward they force TERM from default-terminal, TERM_PROGRAM=tmux, TERM_PROGRAM_VERSION=3.8-zz, COLORTERM=truecolor, and TMUX with the resolved session id or -1. Status #() follows the same clean construction with global-only state and a TMUX suffix of -1. Visible modeled TMUX_PANE survives but is not synthesized. The private tmux launcher is prepended to modeled PATH, stale private values are rejected, and current zz transport and reentry values are injected only where needed. Focused daemon tests cover overlay precedence, hidden and unset values, startup and post-startup identity, missing targets, status scope, and the private launcher. The three-step differential gives eight assertions per engine, and the attached fixture proves global-only status state. Delayed callback timing, copy-pipe and popup environments, and status cwd remain active separately. No mux or wire protocol changed."
+    },
+    {
+      "id": "jobs.environment",
+      "title": "Normalize remaining job environments",
+      "closed_on": "2026-08-31",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-terminal/src/session.rs",
+        "scenario:compat/scenarios/jobs-environment.txt",
+        "scenario:compat/scenarios/smoke/jobs-display-popup-environment.txt",
+        "resource:knowledge/tmux/divergences.md"
+      ],
+      "resolution": "display-popup now spawns its PTY from the pinned producer scope, the way job_run builds one from environ_for_session plus the -e environment. The child starts from the global overlay and the target pane session's overlay with hidden and child-unset entries dropped, then the multiplexer identity \u2014 TERM from default-terminal, TERM_PROGRAM=tmux, TERM_PROGRAM_VERSION=3.8-zz, COLORTERM=truecolor \u2014 then TMUX carrying that session's id, and only then the -e assignments, so a repeated -e wins by its last occurrence and an -e can override TMUX, TERM or a hidden name; an -e with no '=' or an empty name is dropped in silence, as environ_put drops it. The working directory owns PWD last, so -e PWD loses to a -d or target-client cwd. TMUX_PANE is no longer synthesized: a popup is a job, not a pane, and only a modeled TMUX_PANE reaches the child. The terminal worker now stamps its identity before the spawn environment rather than after, and the session scope drops the TERM family so a pane's own zz identity is unchanged. The two-popup differential runs four checks over twenty assertions per engine. Copy-pipe closed earlier under the same group; no mux or wire protocol changed."
     },
     {
       "id": "jobs.run-shell-immediate-background-environment",

@@ -1928,10 +1928,10 @@
     {
       "id": "options.lock-program",
       "title": "Defer tmux lock process execution",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "hardest",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "remote",
         "admin"
@@ -1943,16 +1943,16 @@
         "semantic:lock-program-execution"
       ],
       "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "A terminal-client design defines lock process ownership, timers, cancellation, and GUI behavior."
+        "`lock-server`, `lock-session`, and `lock-client` keep their pin-exact parsing, error shapes, and hook behavior, and no lock program is spawned onto a client terminal.",
+        "`lock-after-time` and `lock-command` stay store-only, with any future lock arriving as a client-rendered surface."
       ],
-      "depends_on": [
-        "clients.interactive-refresh"
-      ],
-      "reason": "Spawning lock -np over a native GUI has no useful meaning."
+      "depends_on": [],
+      "reason": "The pin's `lock-after-time` arms a server timer per client and `lock-command`, default `lock -np`, is spawned onto that client's tty, which works because tmux's server owns the terminal. zz's daemon publishes frames and its clients draw them, so it cannot run a program on a client's terminal, and a GPUI window running `lock -np` has no meaning. `lock-server`, `lock-session`, and `lock-client` already parse with the pin's clientless error shapes and fire `after-lock-server`, while both options stay store-only. A zz lock, when it is wanted, is a client-rendered surface plus a daemon idle timer, not a spawned tty process. Reopen when that native lock surface is specified, including ownership, cancellation, and what a raw-terminal client shows."
     },
     {
       "id": "options.native-mode-styles",
@@ -2137,10 +2137,10 @@
     {
       "id": "options.theme-palette",
       "title": "Map tmux theme palette options",
-      "decision": "park",
-      "status": "blocked",
-      "priority": "later",
-      "ease": "medium",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "gui"
       ],
@@ -2169,14 +2169,18 @@
         "option:theme"
       ],
       "evidence": [
-        "resource:knowledge/tmux/divergences.md",
-        "resource:crates/zz-mux/src/tmux_options.rs"
+        "resource:crates/zz-protocol/src/style.rs",
+        "resource:crates/zz-mux/src/tmux_options.rs",
+        "resource:crates/zz-tui/src/render.rs",
+        "resource:crates/zz/src/theme.rs",
+        "resource:knowledge/tmux/divergences.md"
       ],
       "acceptance": [
-        "A real configuration workload justifies a documented mapping into zz theme tokens."
+        "Style strings keep resolving the ten pinned theme colour names through zz's theme in the GUI and through the pin's fallback indices in the daemon and raw TUI.",
+        "The twenty-one theme options stay store-only, with client light or dark selection owned by the client rather than by the `theme` option."
       ],
       "depends_on": [],
-      "reason": "Storage is easy, but native clients need one coherent palette mapping."
+      "reason": "The pin's `theme` choice plus the twenty `dark-theme-*` and `light-theme-*` colour options fill ten named style slots, `themeblack` through `thememagenta`, that any style string can reference, with a fixed ANSI index per slot as the fallback. zz already resolves all ten names: `parse_tmux_colour` maps them to `TmuxColour::Theme`, the GPUI client resolves each into a zz theme token, and the daemon and raw TUI resolve them through the pin's own fallback indices into the terminal palette. What stays unmapped is the twenty-one options that would override those slots, because zz's palette authority is its own theme and light or dark selection follows the client rather than a server option. Reopen when a real configuration workload names the mapping it wants from those option values into zz theme tokens."
     },
     {
       "id": "pane.break-geometry",

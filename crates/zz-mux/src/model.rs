@@ -2199,6 +2199,17 @@ impl MuxState {
         target: Option<&str>,
         current: Option<SessionId>,
     ) -> Result<SessionId, ServerError> {
+        if target.is_some_and(is_marked_target) {
+            return Ok(self.windows[&self.marked_window()?].session);
+        }
+        self.resolve_named_session(target, current)
+    }
+
+    fn resolve_named_session(
+        &self,
+        target: Option<&str>,
+        current: Option<SessionId>,
+    ) -> Result<SessionId, ServerError> {
         let Some(target) = target.filter(|target| !target.is_empty()) else {
             return current
                 .filter(|session| self.sessions.contains_key(session))
@@ -2274,6 +2285,9 @@ impl MuxState {
         current_window: Option<WindowId>,
         pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
     ) -> Result<WindowId, ServerError> {
+        if target.is_some_and(is_marked_target) {
+            return self.marked_window();
+        }
         if let Some(target) = target
             && target.starts_with('%')
         {
@@ -2322,6 +2336,11 @@ impl MuxState {
         current_session: Option<SessionId>,
         current_window: Option<WindowId>,
     ) -> Result<(SessionId, Option<u32>), ServerError> {
+        if target.is_some_and(is_marked_target) {
+            let window = self.marked_window()?;
+            let state = &self.windows[&window];
+            return Ok((state.session, Some(state.index)));
+        }
         let resolved =
             self.resolve_window_target_core(target, current_session, current_window, true)?;
         Ok((resolved.session, resolved.index))
@@ -2344,7 +2363,7 @@ impl MuxState {
             let window = current_window.filter(|window| self.windows.contains_key(window));
             let session = window
                 .map(|window| self.windows[&window].session)
-                .map_or_else(|| self.resolve_session(None, current_session), Ok)?;
+                .map_or_else(|| self.resolve_named_session(None, current_session), Ok)?;
             let window = window.unwrap_or(self.sessions[&session].active_window);
             return Ok(WindowTargetResolution {
                 session,
@@ -2353,7 +2372,7 @@ impl MuxState {
             });
         };
         if target.starts_with('$') && !target.contains([':', '.']) {
-            let session = self.resolve_session(Some(target), current_session)?;
+            let session = self.resolve_named_session(Some(target), current_session)?;
             return Ok(WindowTargetResolution {
                 session,
                 window: Some(self.sessions[&session].active_window),
@@ -2377,8 +2396,8 @@ impl MuxState {
             .split_once(':')
             .map_or((None, target), |(session, window)| (Some(session), window));
         let session = match session_target {
-            Some("") | None => self.resolve_session(None, current_session)?,
-            Some(session) => self.resolve_session(Some(session), current_session)?,
+            Some("") | None => self.resolve_named_session(None, current_session)?,
+            Some(session) => self.resolve_named_session(Some(session), current_session)?,
         };
         if window_target.is_empty() {
             return Ok(WindowTargetResolution {
@@ -2402,7 +2421,7 @@ impl MuxState {
             return Err(window_error);
         }
         let (fallback, _) = normalize_window_target(window_target);
-        if let Ok(session) = self.resolve_session(Some(fallback), current_session) {
+        if let Ok(session) = self.resolve_named_session(Some(fallback), current_session) {
             return Ok(WindowTargetResolution {
                 session,
                 window: Some(self.sessions[&session].active_window),
@@ -2561,6 +2580,9 @@ impl MuxState {
         current_pane: Option<PaneId>,
         pane_at_index: &impl Fn(WindowId, u32) -> Option<PaneId>,
     ) -> Result<PaneId, ServerError> {
+        if target.is_some_and(is_marked_target) {
+            return self.marked_pane().ok_or_else(no_marked_target);
+        }
         let Some(target) = target.filter(|target| !target.is_empty()) else {
             if let Some(pane) = current_pane
                 && self.window_for_pane(pane).is_some()
@@ -2647,6 +2669,14 @@ impl MuxState {
         if target == "!" {
             return state.last_panes.first().copied().ok_or_else(not_found);
         }
+        if let Some((_, direction)) = PANE_DIRECTION_TARGETS
+            .iter()
+            .find(|(name, _)| *name == target)
+        {
+            return self
+                .pane_in_direction(state.active_pane, *direction)?
+                .ok_or_else(not_found);
+        }
         if let Some((forward, offset)) = parse_offset(target) {
             let current = state
                 .pane_order
@@ -2665,8 +2695,46 @@ impl MuxState {
             };
             return Ok(state.pane_order[position]);
         }
-        let index = target.parse::<u32>().map_err(|_| not_found())?;
-        pane_at_index(window, index).ok_or_else(not_found)
+        if let Ok(index) = target.parse::<u32>()
+            && let Some(pane) = pane_at_index(window, index)
+        {
+            return Ok(pane);
+        }
+        self.pane_at_compass_point(window, target)
+            .ok_or_else(not_found)
+    }
+
+    /// The pin's `window_find_string` plus `window_get_active_at`: a compass
+    /// word names one window cell and the covering tiled pane answers, its
+    /// right and bottom borders included. Tiled cells never overlap, so the
+    /// pin's z-index walk and this layout walk pick the same pane; a zoomed
+    /// window shows only its active pane, which then covers every cell.
+    fn pane_at_compass_point(&self, window: WindowId, target: &str) -> Option<PaneId> {
+        let state = self.windows.get(&window)?;
+        let compass = PANE_COMPASS_TARGETS
+            .into_iter()
+            .find(|name| target.eq_ignore_ascii_case(name))?;
+        let (columns, rows) = state.layout.extent();
+        let (last_column, last_row) = (columns.saturating_sub(1), rows.saturating_sub(1));
+        let (x, y) = match compass {
+            "top" => (columns / 2, 0),
+            "bottom" => (columns / 2, last_row),
+            "left" => (0, rows / 2),
+            "right" => (last_column, rows / 2),
+            "top-left" => (0, 0),
+            "top-right" => (last_column, 0),
+            "bottom-left" => (0, last_row),
+            _ => (last_column, last_row),
+        };
+        if let Some(zoomed) = state.zoomed_pane {
+            return Some(zoomed);
+        }
+        state.layout.panes_in_order().into_iter().find(|pane| {
+            state.layout.pane_geometry(*pane).is_some_and(|geometry| {
+                (geometry.xoff..=geometry.xoff.saturating_add(geometry.sx)).contains(&x)
+                    && (geometry.yoff..=geometry.yoff.saturating_add(geometry.sy)).contains(&y)
+            })
+        })
     }
 
     #[must_use]
@@ -3338,6 +3406,12 @@ impl MuxState {
             .filter(|pane| self.window_for_pane(*pane).is_some())
     }
 
+    fn marked_window(&self) -> Result<WindowId, ServerError> {
+        self.marked_pane()
+            .and_then(|pane| self.window_for_pane(pane))
+            .ok_or_else(no_marked_target)
+    }
+
     /// The pin's `-m`: mark the target unless it already holds the mark, in
     /// which case `server_is_marked` makes the request a clear instead.
     pub(crate) fn toggle_marked_pane(&mut self, pane: PaneId) -> Result<(), ServerError> {
@@ -3670,6 +3744,44 @@ fn normalize_window_target(target: &str) -> (&str, bool) {
     };
     (target, exact)
 }
+
+/// The pin's server-global mark alias: a plain `~` or `{marked}` fills the
+/// whole find state from `marked_pane` before any session, window, or pane
+/// splitting happens (cmd-find.c `cmd_find_target`).
+pub(crate) const NO_MARKED_TARGET: &str = "no marked target";
+
+pub(crate) fn is_marked_target(target: &str) -> bool {
+    matches!(target, "~" | "{marked}")
+}
+
+fn no_marked_target() -> ServerError {
+    ServerError::InvalidCommand(NO_MARKED_TARGET.to_owned())
+}
+
+/// The pin's `{up-of}`, `{down-of}`, `{left-of}`, and `{right-of}`: a
+/// directional search from the window's own active pane, not from the
+/// resolved target (cmd-find.c `cmd_find_get_pane_with_window`).
+const PANE_DIRECTION_TARGETS: [(&str, PaneDirection); 4] = [
+    ("{up-of}", PaneDirection::Up),
+    ("{down-of}", PaneDirection::Down),
+    ("{left-of}", PaneDirection::Left),
+    ("{right-of}", PaneDirection::Right),
+];
+
+/// The pin's `window_find_string` compass words, each a point in window cells
+/// that `window_get_active_at` then resolves (window.c). Comparison is
+/// `strcasecmp`, and the point is the window centre on the axis a word does
+/// not name.
+const PANE_COMPASS_TARGETS: [&str; 8] = [
+    "top",
+    "bottom",
+    "left",
+    "right",
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+];
 
 fn normalize_pane_target(target: &str) -> &str {
     match target {

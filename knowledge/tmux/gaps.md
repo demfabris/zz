@@ -54,7 +54,6 @@ structure as proof.
 | `choosers.command-flags` | Complete chooser command controls | adopt | open | medium | daemon | daily, scripts | none |
 | `clients.path-encoding` | Preserve non-UTF-8 client facts | adopt | open | medium | protocol | scripts | none |
 | `display-message.format-listing` | List display-message format variables | adopt | open | medium | daemon | scripts, admin | formats.mouse-context, formats.pane-process, formats.pane-runtime, formats.terminal-cells, formats.terminal-runtime, formats.window-runtime |
-| `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | medium | mux | scripts | none |
 | `formats.window-runtime` | Expose remaining window formats | adopt | open | medium | daemon | scripts, remote | none |
 | `history.hyperlink-reset` | Reset hyperlink history | adopt | blocked | medium | terminal | daily | none |
 | `keys.copy-mode-unsupported-default-actions` | Implement missing stock copy-mode actions | adopt | open | medium | terminal | daily, remote | copy-mode.action-fidelity |
@@ -76,6 +75,7 @@ structure as proof.
 | `copy-mode.command-fidelity` | Complete copy-mode command fidelity | adopt | open | hard | client | daily, remote | clients.interactive-refresh |
 | `display-menu.behavior-fidelity` | Match remaining display-menu behavior | adopt | open | hard | daemon | daily, remote, scripts | none |
 | `display-message.mouse-target-context` | Resolve display-message mouse targets | adopt | blocked | hard | mux | scripts, gui | mouse.bound-context |
+| `display-message.pane-target-grammar` | Complete display-message pane target grammar | adopt | open | hard | mux | scripts | none |
 | `display-message.verbose-trace` | Trace display-message format expansion | adopt | open | hard | mux | scripts, admin | none |
 | `display-panes.command-template` | Execute display-panes selection templates | park | blocked | hard | daemon | daily, scripts | none |
 | `display-panes.queue-semantics` | Wait for display-panes overlays | adopt | open | hard | daemon | scripts, daily | clients.interactive-refresh |
@@ -517,11 +517,11 @@ The mux has no command-queue mouse record, so bare = currently reaches the ordin
 
 ### `display-message.pane-target-grammar`: Complete display-message pane target grammar
 
-The closed target-client slice proves exact session, window, and pane names plus numeric pane misses. zz's shared pane resolver still models only part of tmux's relative and special target vocabulary. The marked aliases now have their prerequisite: pane.selection-state is closed and supplies marked-pane identity.
+Everything the shared resolver can answer without a client now matches, proved by the pane-target-grammar differential: relative pane offsets and their wrap, the window-slot offsets and start, end, and last aliases behind a colon, the `{up-of}`, `{down-of}`, `{left-of}`, and `{right-of}` searches from the window's own active pane, the eight case-insensitive `window_find_string` compass words in both bare and braced spellings, the `~` and `{marked}` whole-target aliases in the session, window, and pane slots, and the componentwise CANFAIL residue (`nope`, `%999`, `9.9`, and `{marked}.0` retain nothing while `:nope` and the wrapping `+99` fall forward to the session's current window and active pane). What stays open is the client slot. Measured on the pin from an unattached CLI client, `display-message -p -t @`, `-t {active}`, and `-t {current}` each answer `no current client` on stderr and exit 1 rather than failing quietly under CANFAIL, because cmd-find.c resolves them from `cmdq_get_client(item)->session->curw->window->active`. zz's mux resolver takes no client handle: `MuxState::resolve_pane` and `resolve_window` receive only a current window and pane, the invoking client's attached context reaches commands through `ExecutionContext::attached_client_context`, and the client roster plus every existing `no current client` diagnostic live in zz-daemon. Closing this needs either a client-aware resolver signature across roughly fifty call sites in zz-mux and zz-daemon or daemon-side pre-resolution of the three client aliases, so the clause is scoped to that decision rather than to grammar work.
 
 - Decision: `adopt`
 - Status: `open`
-- Priority and ease: `later` / `medium`
+- Priority and ease: `later` / `hard`
 - Owner: `mux`
 - User impact: scripts
 - Items: `semantic:display-message-relative-special-targets`
@@ -529,6 +529,7 @@ The closed target-client slice proves exact session, window, and pane names plus
 - Evidence:
   - `resource:crates/zz-mux/src/model.rs`
   - `resource:crates/zz-mux/src/command.rs`
+  - `file:compat/scenarios/pane-target-grammar.txt`
   - `resource:knowledge/tmux/tmux-compat.md`
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:

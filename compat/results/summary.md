@@ -68,6 +68,7 @@
 | pane-spawn-options | 25 | yes | 0 | yes | yes | yes |
 | pane-spawn-style-title-v2 | 18 | yes | 0 | yes | yes | yes |
 | panes | 9 | yes | 0 | yes | yes | yes |
+| pane-target-grammar | 70 | yes | 0 | yes | yes | yes |
 | prefix2 | 15 | yes | 0 | yes | yes | yes |
 | presets-mirrored | 6 | yes | 0 | yes | yes | yes |
 | presets | 7 | yes | 0 | yes | yes | yes |

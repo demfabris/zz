@@ -41,7 +41,7 @@ use crate::{
         SessionOptions, WindowOption, WindowOptions,
     },
     layout::PANE_MAXIMUM,
-    model::{DEFAULT_WINDOW_EXTENT, fnmatch},
+    model::{DEFAULT_WINDOW_EXTENT, NO_MARKED_TARGET, fnmatch, is_marked_target},
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
         exact_tmux_option, match_tmux_option, parse_tmux_option, tmux_option_format_is_flag,
@@ -7448,6 +7448,9 @@ impl MuxEngine {
                     | ServerError::WindowNotFound(_)
                     | ServerError::PaneNotFound(_),
                 ) => Ok(self.resolve_display_message_partial_context(context, target)),
+                Err(ServerError::InvalidCommand(message)) if message == NO_MARKED_TARGET => {
+                    Ok(None)
+                }
                 Err(error) => Err(error),
             },
             None if self.state.sessions.is_empty() => Ok(None),
@@ -7457,6 +7460,12 @@ impl MuxEngine {
         }
     }
 
+    /// The pin's `CMD_FIND_CANFAIL` residue: a missed target keeps whatever
+    /// `cmd_find_target` filled in before it gave up, and `format_defaults`
+    /// then completes a retained session with its current window and active
+    /// pane. A colon-less window component that names neither a window nor a
+    /// session clears the session too, so nothing is retained; the marked
+    /// alias is one of those, because the pin only reads it as a whole target.
     fn resolve_display_message_partial_context(
         &self,
         context: &ExecutionContext,
@@ -7483,6 +7492,9 @@ impl MuxEngine {
             }
         } else {
             let (window_target, _) = target.split_once('.')?;
+            if is_marked_target(window_target) {
+                return None;
+            }
             self.resolve_window(
                 (!window_target.is_empty()).then_some(window_target),
                 context.session,
@@ -37339,6 +37351,166 @@ mod tests {
                 .output,
             "bg=red"
         );
+    }
+
+    #[test]
+    fn marked_target_alias_is_a_whole_target_and_names_its_own_miss() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        let first = context.pane.expect("first pane");
+        engine
+            .execute(&mut context, &command("split-window", &["-d"]))
+            .expect("split");
+        let window = context.window.expect("window");
+        let second = engine.state.windows[&window]
+            .pane_order()
+            .iter()
+            .copied()
+            .find(|pane| *pane != first)
+            .expect("second pane");
+
+        for target in ["{marked}", "~"] {
+            assert!(matches!(
+                engine.execute(&mut context, &command("kill-pane", &["-t", target])),
+                Err(ServerError::InvalidCommand(message)) if message == "no marked target"
+            ));
+            assert!(matches!(
+                engine.execute(&mut context, &command("select-window", &["-t", target])),
+                Err(ServerError::InvalidCommand(message)) if message == "no marked target"
+            ));
+            assert_eq!(
+                engine
+                    .execute(
+                        &mut context,
+                        &command(
+                            "display-message",
+                            &[
+                                "-p",
+                                "-t",
+                                target,
+                                "#{session_name}:#{window_index}.#{pane_index}"
+                            ],
+                        ),
+                    )
+                    .expect("marked miss falls through display-message")
+                    .output,
+                ":."
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-m", "-t", &second.to_string()]),
+            )
+            .expect("mark second");
+        for target in ["{marked}", "~"] {
+            assert_eq!(
+                engine.resolve_pane(Some(target), context.window, context.pane),
+                Ok(second),
+                "pane slot for {target}"
+            );
+            assert_eq!(
+                engine.resolve_window(Some(target), context.session, context.window),
+                Ok(window),
+                "window slot for {target}"
+            );
+            assert_eq!(
+                engine
+                    .state
+                    .resolve_session(Some(target), context.session)
+                    .expect("session slot"),
+                engine.state.windows[&window].session
+            );
+        }
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &[
+                            "-p",
+                            "-t",
+                            "{marked}.0",
+                            "#{session_name}:#{window_index}.#{pane_index}"
+                        ],
+                    ),
+                )
+                .expect("a split component is an ordinary name")
+                .output,
+            ":."
+        );
+    }
+
+    #[test]
+    fn pane_targets_read_the_pins_direction_and_compass_aliases() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .expect("session");
+        engine
+            .execute(&mut context, &command("split-window", &["-d", "-h"]))
+            .expect("horizontal split");
+        let window = context.window.expect("window");
+        let first = context.pane.expect("first pane").to_string();
+        engine
+            .execute(
+                &mut context,
+                &command("split-window", &["-d", "-v", "-t", &first]),
+            )
+            .expect("vertical split");
+        let order = engine.state.windows[&window].pane_order().to_vec();
+        let (top_left, bottom_left, right) = (order[0], order[1], order[2]);
+        assert_eq!(engine.state.windows[&window].active_pane, top_left);
+
+        for (target, expected) in [
+            ("top", top_left),
+            ("bottom", bottom_left),
+            ("left", top_left),
+            ("right", right),
+            ("top-left", top_left),
+            ("top-right", right),
+            ("bottom-left", bottom_left),
+            ("bottom-right", right),
+            ("TOP-RIGHT", right),
+            ("{top}", top_left),
+            ("{bottom}", bottom_left),
+            ("{left}", top_left),
+            ("{right}", right),
+            ("{top-left}", top_left),
+            ("{top-right}", right),
+            ("{bottom-left}", bottom_left),
+            ("{bottom-right}", right),
+            ("{up-of}", bottom_left),
+            ("{down-of}", bottom_left),
+            ("{left-of}", right),
+            ("{right-of}", right),
+        ] {
+            assert_eq!(
+                engine.resolve_pane(Some(target), context.window, context.pane),
+                Ok(expected),
+                "target {target}"
+            );
+        }
+
+        engine
+            .execute(
+                &mut context,
+                &command("resize-pane", &["-Z", "-t", &top_left.to_string()]),
+            )
+            .expect("zoom");
+        for target in ["bottom", "bottom-right", "{right}"] {
+            assert_eq!(
+                engine.resolve_pane(Some(target), context.window, context.pane),
+                Ok(top_left),
+                "zoomed target {target}"
+            );
+        }
     }
 
     #[test]

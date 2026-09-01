@@ -5,10 +5,10 @@ use std::{
 
 use zz_protocol::{
     AgentCommand, AgentPaneWire, BrowserCommand, ChooseBufferSearchState, ChooseBufferState,
-    ChooseTreeSearchState, ChooseTreeState, ClientMessageKind, CommandPromptState, CommandResponse,
-    ConfirmState, DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot,
-    MenuState, MuxOptions, MuxSnapshot, PaneId, PopupState, ProtocolMessage, ServerHello,
-    SessionId, StatusLine, TerminalUiCommand,
+    ChooseTreeSearchState, ChooseTreeState, ClientExitAction, ClientMessageKind,
+    CommandPromptState, CommandResponse, ConfirmState, DisplayPanesState, Event, EventPayload,
+    KeyBindingSnapshot, KeyTableSnapshot, MenuState, MuxOptions, MuxSnapshot, PaneId, PopupState,
+    ProtocolMessage, ServerHello, SessionId, StatusLine, TerminalUiCommand,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, PackedCell, TerminalAppearance, TerminalDictionary,
@@ -131,6 +131,7 @@ pub enum CoreEvent {
     Detached {
         session: SessionId,
         by: Option<String>,
+        action: ClientExitAction,
     },
     ServerStopping,
     CommandResponse(CommandResponse),
@@ -658,6 +659,7 @@ impl ClientCore {
                 session,
                 by,
                 reason,
+                action,
             } => {
                 if self.attached_session == Some(session) {
                     self.attached_session = None;
@@ -672,7 +674,11 @@ impl ClientCore {
                     debug_assert!(reason.is_server_stopping());
                     CoreDetachReason::ServerStopping
                 });
-                self.events.push_back(CoreEvent::Detached { session, by });
+                self.events.push_back(CoreEvent::Detached {
+                    session,
+                    by,
+                    action,
+                });
             }
             EventPayload::ServerStopping => self.events.push_back(CoreEvent::ServerStopping),
             EventPayload::Bell { pane } => self.events.push_back(CoreEvent::Bell { pane }),
@@ -1138,7 +1144,11 @@ mod tests {
         core.handle_message(event(EventPayload::detached_session_destroyed(session)));
         assert_eq!(
             drain(&mut core),
-            vec![CoreEvent::Detached { session, by: None }]
+            vec![CoreEvent::Detached {
+                session,
+                by: None,
+                action: ClientExitAction::Exit
+            }]
         );
         assert!(core.last_detach_was_session_destroyed());
         assert!(!core.last_detach_was_server_stopping());

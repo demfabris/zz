@@ -151,33 +151,6 @@
       "reason": "The requested flag is retained and reported, but zz still has one window-global active pane while pinned tmux can select a pane per client and window."
     },
     {
-      "id": "clients.detach-exec",
-      "title": "Execute a command after detaching a client",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "hard",
-      "impact": [
-        "scripts",
-        "remote"
-      ],
-      "owner": "protocol",
-      "items": [
-        "flag:detach-client:-E",
-        "semantic:client-exit-exec"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/designs/tmux-superset-roadmap.md",
-        "file:compat/attached-client.sh"
-      ],
-      "acceptance": [
-        "detach-client -E selects victims with bare, -t, -a, and -s exactly as ordinary detach, then replaces each attached client with the requested shell command in that client's execution environment."
-      ],
-      "depends_on": [],
-      "reason": "The daemon can select and detach clients, but it has no typed client-exit action that asks the presentation process to exec a shell command."
-    },
-    {
       "id": "clients.event-resize-context",
       "title": "Defer client-resized until geometry settles",
       "decision": "adopt",
@@ -248,20 +221,21 @@
       "owner": "protocol",
       "items": [
         "flag:attach-session:-x",
-        "flag:detach-client:-P",
         "flag:new-session:-X",
         "semantic:client-exit-parent-hup"
       ],
       "evidence": [
         "resource:crates/zz-protocol/src/catalog.rs",
-        "resource:knowledge/designs/tmux-superset-roadmap.md",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "scenario:compat/scenarios/smoke/client-exit-actions.txt",
         "file:compat/attached-client.sh"
       ],
       "acceptance": [
         "attach-session -x and attaching new-session -X evict peer clients with the parent-HUP exit action, detach-client -P applies it to the selected victims, and ordinary requested and stolen detach notices remain unchanged."
       ],
       "depends_on": [],
-      "reason": "The existing detached event can distinguish requested and evicted clients, but the wire and TUI have no exit action that sends SIGHUP to the client process parent."
+      "reason": "detach-client -P is closed: protocol v91 ClientExitAction::ParentHangup rides the Detached event, the raw-terminal client prints the pin's SIGHUP notice and then signals its parent when the parent is not init, and the differential matched the pin on notice shape, parent signal, and wait status. attach-session -x and new-session -X still need the same action on the eviction path, which runs through MuxEffect::Attach rather than the detach request."
     },
     {
       "id": "clients.path-encoding",
@@ -2935,6 +2909,19 @@
         "scenario:compat/scenarios/source-file-format.txt"
       ],
       "resolution": "Protocol v72 carries a bounded cwd only for local endpoints; top-level command-client source-file resolves after -F and before globbing. Exact attached session-cwd selection later closed under clients.attach-session-cwd."
+    },
+    {
+      "id": "clients.detach-exec",
+      "title": "Execute a command after detaching a client",
+      "closed_on": "2026-09-01",
+      "evidence": [
+        "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-protocol/src/message.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-tui/src/app.rs",
+        "scenario:compat/scenarios/smoke/client-exit-actions.txt"
+      ],
+      "resolution": "detach-client -E now takes a shell command and reaches the presentation process as the protocol v91 ClientExitAction::Exec carried on the Detached event. Victim selection is unchanged, so bare, -t, -a, and -s pick exactly the clients ordinary detach picks, and each victim is replaced instead of detached. The shell is the victim session's default-shell with the pin's _PATH_BSHELL fallback for an unusable value, and the raw-terminal client restores the terminal, then execs `shell -c command` with argv0 from the shell's basename and SHELL exported, printing no detach notice and hanging up no parent, the way client.c runs MSG_EXEC before the exit message. An empty -E is server_client_exec's early return: the victim is neither replaced nor detached. -E wins over -P. The differential attaches a real pty client to both binaries and compares the return code, the exit notice shape, whether the parent saw SIGHUP, the client process's wait status, and the surviving client count for every case; all six observations matched, including exec statuses 7 and 5. The GUI client has no process to replace and reports the command instead."
     },
     {
       "id": "clients.detach-targeting",

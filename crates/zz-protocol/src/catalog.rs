@@ -509,10 +509,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("copy-mode", "[-dekHMqSu] [-s src-pane] [-t target-pane]"),
     (
-        "detach-client",
-        "[-aP] [-E shell-command] [-s target-session] [-t target-client]",
-    ),
-    (
         "display-message",
         "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
     ),
@@ -1339,13 +1335,13 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "detach-client",
         aliases: &["detach"],
         description: "Detach the current client",
-        usage: "[-a] [-s target-session] [-t target-client]",
+        usage: "[-aP] [-E shell-command] [-s target-session] [-t target-client]",
         options: &[
             CommandOptionSpec::flag("-a", "detach every other client"),
             CommandOptionSpec::value("-s", Session, "detach every client on the session"),
             CommandOptionSpec::value("-t", FreeForm, "target client"),
-            CommandOptionSpec::unsupported_value("-E"),
-            CommandOptionSpec::unsupported_flag("-P"),
+            CommandOptionSpec::value("-E", FreeForm, "replace the client with a shell command"),
+            CommandOptionSpec::flag("-P", "send SIGHUP to the client's parent process"),
         ],
         positionals: &[],
         variadic: None,
@@ -2822,8 +2818,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 280), ("optional", 8), ("required", 215)])
         );
-        assert_eq!((supported, unsupported), (439, 64));
-        assert_eq!(usage_overrides.len(), 24);
+        assert_eq!((supported, unsupported), (441, 62));
+        assert_eq!(usage_overrides.len(), 23);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

@@ -987,6 +987,11 @@ pub enum MuxEffect {
 pub struct DetachRequest {
     pub target_client: Option<String>,
     pub scope: DetachScope,
+    /// `detach-client -E`: replace each victim with this shell command instead
+    /// of detaching it.
+    pub exec: Option<String>,
+    /// `detach-client -P`: use the parent-hangup exit action.
+    pub parent_hangup: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4536,6 +4541,8 @@ impl MuxEngine {
         Ok(Execution::effect(MuxEffect::Detach(DetachRequest {
             target_client: options.value("-t").map(str::to_owned),
             scope,
+            exec: options.value("-E").map(str::to_owned),
+            parent_hangup: options.has("-P"),
         })))
     }
 

@@ -2057,37 +2057,6 @@
       "reason": "The pin's `theme` choice plus the twenty `dark-theme-*` and `light-theme-*` colour options fill ten named style slots, `themeblack` through `thememagenta`, that any style string can reference, with a fixed ANSI index per slot as the fallback. zz already resolves all ten names: `parse_tmux_colour` maps them to `TmuxColour::Theme`, the GPUI client resolves each into a zz theme token, and the daemon and raw TUI resolve them through the pin's own fallback indices into the terminal palette. What stays unmapped is the twenty-one options that would override those slots, because zz's palette authority is its own theme and light or dark selection follows the client rather than a server option. Reopen when a real configuration workload names the mapping it wants from those option values into zz theme tokens."
     },
     {
-      "id": "pane.break-geometry",
-      "title": "Complete floating break-pane placement",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "later",
-      "ease": "medium",
-      "impact": [
-        "scripts",
-        "daily"
-      ],
-      "owner": "mux",
-      "items": [
-        "flag:break-pane:-W",
-        "flag:break-pane:-X",
-        "flag:break-pane:-Y",
-        "flag:break-pane:-x",
-        "flag:break-pane:-y"
-      ],
-      "evidence": [
-        "resource:crates/zz-protocol/src/catalog.rs",
-        "scenario:compat/scenarios/break-pane.txt"
-      ],
-      "acceptance": [
-        "Differential geometry tests cover target window creation, name, size, and placement coordinates."
-      ],
-      "depends_on": [
-        "pane.floating-model"
-      ],
-      "reason": "Pinned -W enters the floating-pane path, where -x, -y, -X, and -Y size and place the floating pane. These flags do not describe ordinary tiled destination-window geometry and cannot ship before pane.floating-model."
-    },
-    {
       "id": "pane.command-completion",
       "title": "Complete two-phase pane command completion",
       "decision": "adopt",
@@ -2120,7 +2089,7 @@
     },
     {
       "id": "pane.floating-model",
-      "title": "Keep floating panes out of the mux model",
+      "title": "Keep floating panes and their placement flags out of the mux model",
       "decision": "native",
       "status": "accepted",
       "priority": "none",
@@ -2133,6 +2102,11 @@
       "owner": "mux",
       "items": [
         "command:new-pane",
+        "flag:break-pane:-W",
+        "flag:break-pane:-X",
+        "flag:break-pane:-Y",
+        "flag:break-pane:-x",
+        "flag:break-pane:-y",
         "flag:move-pane:-D",
         "flag:move-pane:-L",
         "flag:move-pane:-P",
@@ -2148,15 +2122,17 @@
       "evidence": [
         "resource:crates/zz-mux/src/command.rs",
         "resource:crates/zz-protocol/src/catalog.rs",
+        "resource:crates/zz-mux/src/formats.rs",
+        "scenario:compat/scenarios/break-pane.txt",
         "resource:knowledge/tmux/divergences.md",
         "resource:knowledge/designs/tmux-superset-roadmap.md"
       ],
       "acceptance": [
-        "Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` placement flags stay loudly unsupported.",
+        "Native floating surfaces stay presentation objects, `new-pane` stays reserved and unimplemented, and the floating `move-pane` and `break-pane` placement flags stay loudly unsupported.",
         "`pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior."
       ],
       "depends_on": [],
-      "reason": "In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays."
+      "reason": "In the pin a floating pane is a mux object: `new-pane` creates one by default, `move-pane` places it with `-P`, `-X`, `-Y`, `-z`, and the directional forms, `pane_floating_flag` reports it, and `move-pane` answers `pane is not floating` for a tiled target. zz's floating things are presentation objects that clients draw, its panes are leaves of a layout tree, and `move-pane` stays an alias of `join-pane` that deliberately moves tiled panes where the pin refuses. `new-pane` keeps the tmux name reserved and unimplemented, which is why the phase-1 picker verb was renamed off it. The five `break-pane` placement flags joined this group on 2026-09-01 after being measured on a throwaway server, because the earlier contract assumed they described a destination window and they do not. `break-pane -W -s <pane>` creates no window at all: cmd_break_pane_float removes the source pane's tile, marks its layout cell LAYOUT_CELL_FLOATING, moves it to the head of the window's z-index, and leaves it in the same window, so the window count is unchanged and the remaining tiled pane grows to the full extent. `-x` and `-y` size that floating cell and `-X` and `-Y` place it, all through layout_floating_args_parse: on an 80x24 window a bare `-W` measures 40x6 at 4,2 from the `w->sx / 2` and `w->sy / 4` defaults and the cascading `last_new_pane_x`/`last_new_pane_y` origin, `-x 20 -y 6 -X 10 -Y 3` measures 18x4 at 11,4 because pane border lines take two cells off each size and add one to each offset, and `-x 50% -y 25%` measures 38x4 with the cascade continuing to 8,4. A bad value answers `failed to float pane: position invalid`, a second `-W` on the same pane answers `pane is already floating`, and `-W` on a zoomed window answers `can't float a pane while window is zoomed`. Every one of those facts is about a mux floating-pane object with a z-index and a floating layout cell, which is exactly what this group declines to model, so the five flags stay loudly unsupported alongside the `move-pane` placement flags rather than describing tiled destination-window geometry. Reopen only when a separate mux floating-pane model is approved on its own terms rather than by reusing native overlays."
     },
     {
       "id": "presentation.native-status",

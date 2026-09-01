@@ -1212,7 +1212,11 @@ fn send_keys_dash_n_without_keys_arms_the_copy_mode_repeat() {
         .unwrap();
     assert_eq!(
         armed.effects,
-        [MuxEffect::CopyModeRepeat { pane, count: 5 }]
+        [MuxEffect::CopyModeRepeat {
+            pane,
+            count: 5,
+            target_client: None
+        }]
     );
 }
 
@@ -1276,11 +1280,10 @@ fn send_keys_dash_h_takes_hexadecimal_character_codes() {
         sent.effects
     );
 
-    let error = engine
+    let quiet = engine
         .execute(&mut context, &command("send-keys", &["-H", "zz"]))
-        .unwrap_err();
-    assert!(matches!(error, ServerError::InvalidCommand(message)
-            if message == "send-keys -H needs a character code: zz"));
+        .unwrap();
+    assert_eq!(quiet.effects, []);
 }
 
 #[test]
@@ -1333,10 +1336,12 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::EnterCopyMode,
+                target_client: None,
             },
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
+                target_client: None,
             },
         ]
     );
@@ -1348,6 +1353,7 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
         [MuxEffect::TerminalView {
             pane,
             action: TerminalViewAction::EnterCopyModeScrollExit,
+            target_client: None,
         }]
     );
     let immediate_scroll_exit = engine
@@ -1359,10 +1365,12 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::EnterCopyModeScrollExit,
+                target_client: None,
             },
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageDownScrollExit),
+                target_client: None,
             },
         ]
     );
@@ -1376,6 +1384,7 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
     let cancel = [MuxEffect::TerminalView {
         pane,
         action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+        target_client: None,
     }];
     assert_eq!(quit.effects, cancel);
     assert_eq!(quit_with_dead_flag.effects, cancel);
@@ -1393,6 +1402,7 @@ fn copy_mode_stock_flags_preserve_tmux_branch_order_and_scroll_exit() {
         [MuxEffect::TerminalView {
             pane,
             action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+            target_client: None,
         }]
     );
 }
@@ -1417,6 +1427,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
         [MuxEffect::TerminalView {
             pane,
             action: TerminalViewAction::EnterCopyMode,
+            target_client: None,
         }]
     );
     assert_eq!(
@@ -1424,6 +1435,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
         [MuxEffect::TerminalView {
             pane,
             action: TerminalViewAction::EnterCopyModeScrollExit,
+            target_client: None,
         }]
     );
     assert_eq!(
@@ -1434,6 +1446,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
                 scroll_exit: false,
                 hide_position: true,
             },
+            target_client: None,
         }]
     );
     for flags in [&["-eH"][..], &["-He"][..], &["-e", "-H"][..]] {
@@ -1445,6 +1458,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
                     scroll_exit: true,
                     hide_position: true,
                 },
+                target_client: None,
             }],
             "copy-mode {flags:?} composes both flags"
         );
@@ -1459,10 +1473,12 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
                     scroll_exit: false,
                     hide_position: true,
                 },
+                target_client: None,
             },
             MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::PageDown),
+                target_client: None,
             },
         ]
     );
@@ -1471,6 +1487,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
         [MuxEffect::TerminalView {
             pane,
             action: TerminalViewAction::CopyMode(CopyModeAction::Cancel),
+            target_client: None,
         }]
     );
 }
@@ -2200,6 +2217,97 @@ fn resize_pane_direction_flags_accept_bare_attached_and_separated_amounts() {
     }
 }
 
+// cmd-send-keys.c hands the client it resolved from -c to window_pane_key,
+// key_bindings_dispatch and wme->mode->command, so the flag has to reach the
+// effects the daemon executes rather than being parsed and dropped.
+#[test]
+fn send_keys_carries_its_target_client_onto_the_mode_effects() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+
+    let counted = engine
+        .execute(
+            &mut context,
+            &command("send-keys", &["-c", "/dev/pts/9", "-N", "5"]),
+        )
+        .unwrap();
+    assert_eq!(
+        counted.effects,
+        [MuxEffect::CopyModeRepeat {
+            pane,
+            count: 5,
+            target_client: Some("/dev/pts/9".to_owned()),
+        }]
+    );
+
+    let action = engine
+        .execute(
+            &mut context,
+            &command("send-keys", &["-c", "/dev/pts/9", "-X", "cursor-up"]),
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            action.effects.as_slice(),
+            [MuxEffect::TerminalView { target_client: Some(name), .. }] if name == "/dev/pts/9"
+        ),
+        "{:?}",
+        action.effects
+    );
+
+    let plain = engine
+        .execute(&mut context, &command("send-keys", &["-X", "cursor-up"]))
+        .unwrap();
+    assert!(
+        matches!(
+            plain.effects.as_slice(),
+            [MuxEffect::TerminalView {
+                target_client: None,
+                ..
+            }]
+        ),
+        "{:?}",
+        plain.effects
+    );
+}
+
+// Measured on pinned tmux d77c9dc6 on 2026-09-01 with a real attached client:
+// a pane entering copy mode reports #{copy_cursor_y} 22, `send-keys -N 4 -X`
+// with no action then a plain `-X cursor-up` leaves it at 12, and a following
+// cursor-up moves one row. window_copy_command returns at count == 0 before
+// the `wme->prefix = 1` line, so the empty -X keeps the count it was given and
+// a bare `-X` with no count leaves the pending count alone.
+#[test]
+fn send_keys_empty_copy_command_keeps_the_count_it_was_given() {
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(&mut context, &command("new-session", &["-s", "work"]))
+        .unwrap();
+    let pane = context.pane.unwrap();
+
+    let counted = engine
+        .execute(&mut context, &command("send-keys", &["-N", "4", "-X"]))
+        .unwrap();
+    assert_eq!(
+        counted.effects,
+        [MuxEffect::CopyModeRepeat {
+            pane,
+            count: 4,
+            target_client: None,
+        }]
+    );
+
+    let bare = engine
+        .execute(&mut context, &command("send-keys", &["-X"]))
+        .unwrap();
+    assert_eq!(bare.effects, []);
+}
+
 #[test]
 fn send_keys_dash_h_is_bytewise_ascii_like_tmux() {
     let mut engine = MuxEngine::default();
@@ -2224,16 +2332,42 @@ fn send_keys_dash_h_is_bytewise_ascii_like_tmux() {
         }]
     );
 
-    let error = engine
-        .execute(&mut context, &command("send-keys", &["-H", "e9"]))
-        .unwrap_err();
-    assert!(matches!(&error, ServerError::UnsupportedCommand(message)
-        if message == "send-keys -H e9 (raw bytes above 7f)"));
-    let error = engine
-        .execute(&mut context, &command("send-keys", &["-H", "1F600"]))
-        .unwrap_err();
-    assert!(matches!(&error, ServerError::InvalidCommand(message)
-        if message == "send-keys -H needs a character code: 1F600"));
+    let sent = engine
+        .execute(&mut context, &command("send-keys", &["-H", "80", "ff"]))
+        .unwrap();
+    assert_eq!(
+        sent.effects,
+        [MuxEffect::SendKeys {
+            pane,
+            keys: vec![KeyToken::Raw(0x80), KeyToken::Raw(0xff)],
+            repeat: 1,
+        }]
+    );
+
+    for bad in ["1F600", "zz", ""] {
+        let quiet = engine
+            .execute(&mut context, &command("send-keys", &["-H", bad]))
+            .unwrap();
+        assert_eq!(quiet.effects, [], "send-keys -H {bad}");
+    }
+
+    let mixed = engine
+        .execute(
+            &mut context,
+            &command("send-keys", &["-H", "41", "zz", "43"]),
+        )
+        .unwrap();
+    assert_eq!(
+        mixed.effects,
+        [MuxEffect::SendKeys {
+            pane,
+            keys: vec![
+                KeyToken::Literal("A".to_owned()),
+                KeyToken::Literal("C".to_owned()),
+            ],
+            repeat: 1,
+        }]
+    );
 }
 
 #[test]
@@ -2353,6 +2487,7 @@ fn selection_mode_takes_the_pins_names_abbreviations_and_silent_no_op() {
             [MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(CopyModeAction::SelectionMode(unit)),
+                target_client: None,
             }],
             "{argument:?}"
         );
@@ -2366,7 +2501,11 @@ fn selection_mode_takes_the_pins_names_abbreviations_and_silent_no_op() {
             .unwrap();
         assert_eq!(
             execution.effects,
-            [MuxEffect::CopyModeRepeat { pane, count: 1 }],
+            [MuxEffect::CopyModeRepeat {
+                pane,
+                count: 1,
+                target_client: None
+            }],
             "{arguments:?}"
         );
     }
@@ -2392,6 +2531,7 @@ fn stop_selection_is_typed_apart_from_clear_selection() {
             [MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(action),
+                target_client: None,
             }],
             "{name}"
         );
@@ -2432,6 +2572,7 @@ fn the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions() {
             [MuxEffect::TerminalView {
                 pane,
                 action: TerminalViewAction::CopyMode(action.clone()),
+                target_client: None,
             }],
             "{name}"
         );
@@ -2451,6 +2592,7 @@ fn the_scroll_exit_family_maps_to_typed_latch_and_forced_exit_actions() {
             [MuxEffect::TerminalView {
                 pane,
                 action: expected,
+                target_client: None,
             }],
             "counted {name}"
         );

@@ -545,6 +545,7 @@ impl BrowserFrameProvider for TuiBrowserProvider {
                                 session.browser.send_key(input);
                             }
                         }
+                        KeyToken::Raw(_) => {}
                     }
                 }
             }
@@ -561,6 +562,7 @@ impl BrowserFrameProvider for TuiBrowserProvider {
                                     session.browser.send_key(input);
                                 }
                             }
+                            KeyToken::Raw(_) => {}
                         }
                     }
                 }

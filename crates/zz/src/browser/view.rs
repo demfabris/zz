@@ -900,6 +900,7 @@ impl BrowserView {
                                 });
                             }
                         }
+                        KeyToken::Raw(_) => {}
                     }
                 }
             }
@@ -919,6 +920,7 @@ impl BrowserView {
                                     });
                                 }
                             }
+                            KeyToken::Raw(_) => {}
                         }
                     }
                 }

@@ -28,7 +28,7 @@ use zz_mux::{
     TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command, command_block_body,
     copy_mode_action_is_read_only_safe, expand_format_values, expand_status, format_command,
     format_true, hook_format_variables, if_shell_truthy, parse_tmux_colour,
-    send_keys_is_read_only_safe, validate_static_command_chain,
+    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
 };
 use zz_protocol::{
     AgentCommand, BrowserCommand, COMMAND_ARGS_PARSE_BEHAVES, ChooseBufferAction, ChooseBufferItem,
@@ -5257,7 +5257,9 @@ impl Shared {
         } else {
             resolve_and_prepare_command(&inner.engine, command)?.0
         };
-        let blocked = inner.client_flags.contains(client) && !command_is_read_only_safe(&command);
+        let guarded = read_only_guard_client(&inner, client, &command);
+        let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
+            && !command_is_read_only_safe(&command);
         Ok((command, blocked))
     }
 
@@ -7150,20 +7152,42 @@ impl Shared {
                                 .push(DeferredTerminalCommand::ResetScreen { terminals });
                         }
                     }
-                    MuxEffect::CopyModeRepeat { pane, count } => {
-                        if inner
-                            .copy_sessions
-                            .get(&client)
-                            .is_some_and(|session| session.pane == *pane)
-                        {
+                    MuxEffect::CopyModeRepeat {
+                        pane,
+                        count,
+                        target_client,
+                    } => {
+                        let selected =
+                            selected_effect_client(&inner, client, target_client.as_deref());
+                        let owners: Vec<ClientId> = match selected {
+                            Some(selected)
+                                if inner
+                                    .copy_sessions
+                                    .get(&selected)
+                                    .is_some_and(|session| session.pane == *pane) =>
+                            {
+                                vec![selected]
+                            }
+                            _ => inner
+                                .copy_sessions
+                                .iter()
+                                .filter(|(_, session)| session.pane == *pane)
+                                .map(|(owner, _)| *owner)
+                                .collect(),
+                        };
+                        for owner in owners {
                             inner
                                 .key_engines
-                                .entry(client)
+                                .entry(owner)
                                 .or_default()
                                 .set_repeat_count(*count);
                         }
                     }
-                    MuxEffect::TerminalView { pane, action } => {
+                    MuxEffect::TerminalView {
+                        pane,
+                        action,
+                        target_client,
+                    } => {
                         let command_output = inner
                             .command_outputs
                             .get(&client)
@@ -7188,12 +7212,17 @@ impl Shared {
                             )
                             .into());
                         }
-                        let targets: Vec<ClientId> = if caller_attached {
-                            vec![client]
-                        } else {
-                            attached_clients_for_pane(&inner, *pane)
+                        let selected =
+                            selected_effect_client(&inner, client, target_client.as_deref());
+                        let targets: Vec<ClientId> = match selected {
+                            Some(selected)
+                                if client_is_attached_to_pane(&inner, selected, *pane) =>
+                            {
+                                vec![selected]
+                            }
+                            _ => attached_clients_for_pane(&inner, *pane)
                                 .map(|clients| clients.iter().copied().collect())
-                                .unwrap_or_default()
+                                .unwrap_or_default(),
                         };
                         if targets.is_empty() {
                             return Err(ServerError::PaneNotAttached(*pane).into());
@@ -29298,6 +29327,22 @@ fn visible_agent_panes(
         .collect()
 }
 
+/// The client a `send-keys` effect acts for. `-c` resolves through the
+/// target-client selector the popup and menu commands already use; a target
+/// that matches nothing is the pin's `CMD_CLIENT_CANFAIL` miss, which leaves
+/// `tc` NULL and still runs the command against the pane's own mode entry.
+/// Without `-c` the invoking client stands in for the pin's current client.
+fn selected_effect_client(
+    inner: &ServerState,
+    client: ClientId,
+    target: Option<&str>,
+) -> Option<ClientId> {
+    match target {
+        Some(target) => find_attached_client_with_aliases(inner, target, true),
+        None => Some(client),
+    }
+}
+
 fn attached_clients_for_pane(inner: &ServerState, pane: PaneId) -> Option<&BTreeSet<ClientId>> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let session = inner.engine.state.windows.get(&window)?.session;
@@ -29695,6 +29740,26 @@ const READ_ONLY_SAFE_COMMANDS: &[&str] = &[
     "list-clients",
     "switch-client",
 ];
+
+/// The client whose read-only flag guards `command`. cmd-send-keys.c resolves
+/// `-c` through the target-client selector and then tests
+/// `tc != NULL && tc->flags & CLIENT_READONLY`, so the guard follows the
+/// selected client and a target that matches no attached client leaves the
+/// guard with no client to test at all. Every other command is guarded by its
+/// invoker.
+fn read_only_guard_client(
+    inner: &ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+) -> Option<ClientId> {
+    if canonical_command(&command.name) != "send-keys" {
+        return Some(client);
+    }
+    match send_keys_target_client(&command.args) {
+        Ok(Some(target)) => find_attached_client_with_aliases(inner, &target, true),
+        _ => Some(client),
+    }
+}
 
 fn command_is_read_only_safe(command: &CommandInvocation) -> bool {
     if MuxEngine::is_command_alias_group(command) {
@@ -89329,7 +89394,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .flatten()
             .filter_map(|key| match key {
                 zz_protocol::KeyToken::Literal(text) => Some(text),
-                zz_protocol::KeyToken::Named(_) => None,
+                zz_protocol::KeyToken::Named(_) | zz_protocol::KeyToken::Raw(_) => None,
             })
             .collect()
     }

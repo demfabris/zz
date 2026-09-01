@@ -1,0 +1,5 @@
+corpus: none
+stage: fixtures/send-keys-control.sh ~/send-keys-control.sh
+out: set-environment -gu SEND_KEYS_CONTROL
+run-shell 'sh ~/send-keys-control.sh'
+out: show-environment -g SEND_KEYS_CONTROL

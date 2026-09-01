@@ -1,0 +1,6 @@
+corpus: none
+stage: fixtures/send-keys-client-selection.sh ~/send-keys-client-selection.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: set-environment -gu SEND_KEYS_CLIENT_SELECTION
+run-shell 'sh ~/send-keys-client-selection.sh'
+out: show-environment -g SEND_KEYS_CLIENT_SELECTION
